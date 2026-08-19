@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!-- Interop is the only assembly allowed to touch Win32 (design D1/D8) -->
+    <RootNamespace>CosmicWin.Interop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Source-generator only (compile-time), no runtime third-party surface — design D8/Dependency Hygiene -->
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.321">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
