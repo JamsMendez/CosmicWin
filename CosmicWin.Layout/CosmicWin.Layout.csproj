@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Zero Win32 dependency by design (D1/D8) — no -windows TFM suffix needed -->
+    <RootNamespace>CosmicWin.Layout</RootNamespace>
+  </PropertyGroup>
+
+</Project>

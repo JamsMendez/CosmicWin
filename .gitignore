@@ -1,0 +1,14 @@
+# Reference repos (fancywm, cosmic-comp) — read-only study material, not product source
+/fancywm/
+/cosmic-epoch/
+
+# Local SDD tooling cache (machine-specific skill registry)
+/.atl/
+
+# .NET build output
+bin/
+obj/
+*.user
+
+# IDE
+.vs/
