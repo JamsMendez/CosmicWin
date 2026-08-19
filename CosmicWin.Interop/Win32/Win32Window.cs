@@ -1,22 +1,23 @@
 namespace CosmicWin.Interop.Win32;
 
 /// <summary>
-/// Minimal <see cref="IWindow"/> backed by <see cref="INativeWindowSource"/>, owned by
+/// <see cref="IWindow"/> backed by <see cref="INativeWindowSource"/>, owned by
 /// <see cref="Win32Workspace"/>.
 /// </summary>
 /// <remarks>
-/// Task 0.6 (WU2, out of this work unit's scope) adds a dedicated <c>Win32Window.cs</c> with
-/// PerMonitorV2 DPI correctness (WT-2) and <c>SetPosition</c> failure → untileable degradation
-/// (threat matrix: cross-process window manipulation). Until then this stays intentionally
-/// minimal: it satisfies WT-1 (tracking) only.
+/// WT-2: <see cref="SetPosition"/> forwards the requested real-pixel <see cref="Rectangle"/> to
+/// the native source completely unmodified — no additional DPI scaling is ever applied here.
+/// Once a process is declared PerMonitorV2-aware, <c>GetWindowRect</c>/<c>SetWindowPos</c>
+/// already operate in real pixels; computing DPI-correct target rectangles from a monitor's
+/// <see cref="IDisplay.Scaling"/> is the future Layout engine's job, not this class's.
 /// </remarks>
-internal sealed class TrackedWindow : IWindow
+internal sealed class Win32Window : IWindow
 {
     private readonly INativeWindowSource _nativeSource;
     private string _title;
     private Rectangle _bounds;
 
-    public TrackedWindow(nint handle, string title, Rectangle bounds, INativeWindowSource nativeSource)
+    public Win32Window(nint handle, string title, Rectangle bounds, INativeWindowSource nativeSource)
     {
         Handle = handle;
         _title = title;

@@ -16,7 +16,7 @@ namespace CosmicWin.Interop.Win32;
 public sealed class Win32Workspace : IWorkspace
 {
     private readonly INativeWindowSource _nativeSource;
-    private readonly Dictionary<nint, TrackedWindow> _windows = new();
+    private readonly Dictionary<nint, Win32Window> _windows = new();
     private IDisposable? _hookSubscription;
 
     public event EventHandler<WindowEventArgs>? WindowAdded;
@@ -111,7 +111,7 @@ public sealed class Win32Workspace : IWorkspace
             return;
         }
 
-        var window = new TrackedWindow(hwnd, info.Title, info.Bounds, _nativeSource);
+        var window = new Win32Window(hwnd, info.Title, info.Bounds, _nativeSource);
         _windows[hwnd] = window;
         WindowAdded?.Invoke(this, new WindowEventArgs(window));
     }
