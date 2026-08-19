@@ -38,10 +38,19 @@ public interface IWindow : IEquatable<IWindow>
     bool IsAlive { get; }
 
     /// <summary>
+    /// <c>true</c> while this window can still be repositioned. Becomes <c>false</c> once a
+    /// <see cref="SetPosition"/> call has failed — e.g. the window belongs to a
+    /// higher-integrity/protected process this caller cannot touch (design threat-matrix row
+    /// "Cross-process window manipulation"). Once <c>false</c>, callers (the tiling engine)
+    /// should treat the window as untileable rather than retrying.
+    /// </summary>
+    bool CanReposition { get; }
+
+    /// <summary>
     /// Repositions/resizes the window. Implementations MUST NOT throw for a window that refuses
     /// or fails the reposition (e.g. an elevated window this process cannot touch) — see design's
-    /// threat-matrix row "Cross-process window manipulation"; the caller degrades the window to
-    /// untileable instead (WU2 concern, not enforced by this interface).
+    /// threat-matrix row "Cross-process window manipulation". A failed reposition sets
+    /// <see cref="CanReposition"/> to <c>false</c> instead of throwing or being retried in a loop.
     /// </summary>
     void SetPosition(Rectangle bounds);
 }

@@ -11,19 +11,36 @@ namespace CosmicWin.Interop.Tests.Win32;
 internal sealed class FakeNativeWindowSource : INativeWindowSource
 {
     private readonly Dictionary<nint, NativeWindowInfo> _windows = new();
+    private readonly HashSet<nint> _failingPositionHandles = new();
+    private readonly Dictionary<nint, int> _setPositionAttempts = new();
     private NativeWindowEventCallback? _callback;
 
     public IReadOnlyList<nint> EnumerateTopLevelWindows() => _windows.Keys.ToArray();
 
     public bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info) => _windows.TryGetValue(hwnd, out info);
 
-    public void SetWindowPosition(nint hwnd, Rectangle bounds)
+    public bool SetWindowPosition(nint hwnd, Rectangle bounds)
     {
+        _setPositionAttempts[hwnd] = _setPositionAttempts.GetValueOrDefault(hwnd) + 1;
+
+        if (_failingPositionHandles.Contains(hwnd))
+        {
+            return false;
+        }
+
         if (_windows.TryGetValue(hwnd, out var info))
         {
             _windows[hwnd] = info with { Bounds = bounds };
         }
+
+        return true;
     }
+
+    /// <summary>Makes every subsequent <see cref="SetWindowPosition"/> call for this handle fail.</summary>
+    public void FailPositionFor(nint hwnd) => _failingPositionHandles.Add(hwnd);
+
+    /// <summary>Number of times <see cref="SetWindowPosition"/> was called for this handle.</summary>
+    public int SetPositionAttemptCount(nint hwnd) => _setPositionAttempts.GetValueOrDefault(hwnd);
 
     public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback)
     {

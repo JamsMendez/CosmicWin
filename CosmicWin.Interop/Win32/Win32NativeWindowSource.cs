@@ -54,11 +54,11 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return true;
     }
 
-    public void SetWindowPosition(nint hwnd, Rectangle bounds)
+    public bool SetWindowPosition(nint hwnd, Rectangle bounds)
     {
         HWND handle = new(hwnd);
 
-        PInvoke.SetWindowPos(
+        return PInvoke.SetWindowPos(
             handle,
             HWND.Null,
             bounds.Left,

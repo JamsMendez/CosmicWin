@@ -39,8 +39,11 @@ internal interface INativeWindowSource
     /// </summary>
     bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info);
 
-    /// <summary>Repositions/resizes the given window.</summary>
-    void SetWindowPosition(nint hwnd, Rectangle bounds);
+    /// <summary>
+    /// Repositions/resizes the given window. Returns <c>false</c> (rather than throwing) if the
+    /// native call fails — e.g. the target belongs to a higher-integrity/protected process.
+    /// </summary>
+    bool SetWindowPosition(nint hwnd, Rectangle bounds);
 
     /// <summary>
     /// Subscribes to create/destroy/move/resize notifications. Disposing the returned handle

@@ -11,6 +11,7 @@ internal sealed class FakeWindow : IWindow
 {
     private string _title;
     private Rectangle _bounds;
+    private bool _failNextSetPosition;
 
     public FakeWindow(IntPtr handle, string title, Rectangle bounds)
     {
@@ -18,6 +19,7 @@ internal sealed class FakeWindow : IWindow
         _title = title;
         _bounds = bounds;
         IsAlive = true;
+        CanReposition = true;
     }
 
     public IntPtr Handle { get; }
@@ -28,6 +30,8 @@ internal sealed class FakeWindow : IWindow
 
     public bool IsAlive { get; private set; }
 
+    public bool CanReposition { get; private set; }
+
     public void SetPosition(Rectangle bounds)
     {
         if (!IsAlive)
@@ -35,8 +39,23 @@ internal sealed class FakeWindow : IWindow
             throw new InvalidOperationException("Cannot reposition a dead window.");
         }
 
+        if (!CanReposition)
+        {
+            return;
+        }
+
+        if (_failNextSetPosition)
+        {
+            _failNextSetPosition = false;
+            CanReposition = false;
+            return;
+        }
+
         _bounds = bounds;
     }
+
+    /// <summary>Makes the next <see cref="SetPosition"/> call fail (threat matrix: cross-process window manipulation).</summary>
+    public void FailNextSetPosition() => _failNextSetPosition = true;
 
     public void Rename(string title) => _title = title;
 

@@ -34,14 +34,24 @@ internal sealed class Win32Window : IWindow
 
     public bool IsAlive { get; private set; }
 
+    public bool CanReposition { get; private set; } = true;
+
     public void SetPosition(Rectangle bounds)
     {
-        if (!IsAlive)
+        if (!IsAlive || !CanReposition)
         {
             return;
         }
 
-        _nativeSource.SetWindowPosition(Handle, bounds);
+        if (!_nativeSource.SetWindowPosition(Handle, bounds))
+        {
+            // Threat matrix: "Cross-process window manipulation" — a failed SetWindowPos (e.g.
+            // target belongs to a higher-integrity/protected process) degrades the window to
+            // non-repositionable instead of throwing or being retried in a loop.
+            CanReposition = false;
+            return;
+        }
+
         _bounds = bounds;
     }
 
