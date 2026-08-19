@@ -1,0 +1,16 @@
+EnumWindows
+GetWindowRect
+GetWindowTextW
+GetWindowTextLengthW
+IsWindow
+IsWindowVisible
+GetWindow
+SetWinEventHook
+UnhookWinEvent
+SetWindowPos
+EVENT_OBJECT_CREATE
+EVENT_OBJECT_DESTROY
+EVENT_OBJECT_LOCATIONCHANGE
+WINEVENT_OUTOFCONTEXT
+WINEVENT_SKIPOWNPROCESS
+OBJID_WINDOW

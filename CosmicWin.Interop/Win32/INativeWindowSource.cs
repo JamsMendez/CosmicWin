@@ -1,0 +1,50 @@
+namespace CosmicWin.Interop.Win32;
+
+/// <summary>
+/// Info snapshot for one native window, as read by <see cref="INativeWindowSource"/>.
+/// </summary>
+internal readonly record struct NativeWindowInfo(string Title, Rectangle Bounds);
+
+/// <summary>
+/// The kind of change delivered by <see cref="INativeWindowSource.SubscribeWindowEvents"/>.
+/// </summary>
+internal enum NativeWindowEventKind
+{
+    Created,
+    Destroyed,
+    BoundsChanged,
+}
+
+/// <summary>
+/// Callback invoked by a native window event source. Delivered on whatever thread the
+/// underlying hook uses — <see cref="Win32Workspace"/> does not assume a specific thread.
+/// </summary>
+internal delegate void NativeWindowEventCallback(NativeWindowEventKind kind, nint hwnd);
+
+/// <summary>
+/// Abstracts the native Win32 primitives <see cref="Win32Workspace"/> depends on for WT-1
+/// (enumerate + <c>SetWinEventHook</c> tracking + polling fallback), so the tracking algorithm
+/// — including the "hook misses an event, polling catches it" scenario — can be exercised
+/// without a real desktop session or window. <see cref="Win32NativeWindowSource"/> is the real,
+/// CsWin32-backed implementation; tests substitute a fake.
+/// </summary>
+internal interface INativeWindowSource
+{
+    /// <summary>Enumerates the currently open top-level windows worth tracking.</summary>
+    IReadOnlyList<nint> EnumerateTopLevelWindows();
+
+    /// <summary>
+    /// Reads the current title/bounds for <paramref name="hwnd"/>. Returns <c>false</c> if the
+    /// window no longer exists or is no longer trackable.
+    /// </summary>
+    bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info);
+
+    /// <summary>Repositions/resizes the given window.</summary>
+    void SetWindowPosition(nint hwnd, Rectangle bounds);
+
+    /// <summary>
+    /// Subscribes to create/destroy/move/resize notifications. Disposing the returned handle
+    /// unsubscribes.
+    /// </summary>
+    IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback);
+}
