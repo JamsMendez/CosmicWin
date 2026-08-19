@@ -37,4 +37,39 @@ public class Win32WindowTests
 
         Assert.Equal(Rectangle.FromSize(50, 50, 300, 400), window.Bounds);
     }
+
+    [Fact]
+    public void SetPosition_WhenNativeSourceFails_MarksWindowNonRepositionable_AndDoesNotThrow()
+    {
+        // Threat matrix: "Cross-process window manipulation" — e.g. SetWindowPos on a
+        // higher-integrity/protected process's window fails; the caller must degrade to
+        // untileable rather than crash.
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(3), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200));
+        native.FailPositionFor(new IntPtr(3));
+        var window = new Win32Window(new IntPtr(3), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200), native);
+
+        var exception = Record.Exception(() => window.SetPosition(Rectangle.FromSize(500, 500, 200, 200)));
+
+        Assert.Null(exception);
+        Assert.False(window.CanReposition);
+        Assert.True(window.IsAlive);
+        Assert.Equal(Rectangle.FromSize(0, 0, 200, 200), window.Bounds); // failed move never applied
+    }
+
+    [Fact]
+    public void SetPosition_AfterFailure_DoesNotRetryNativeCall_OnSubsequentAttempts()
+    {
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(4), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200));
+        native.FailPositionFor(new IntPtr(4));
+        var window = new Win32Window(new IntPtr(4), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200), native);
+
+        window.SetPosition(Rectangle.FromSize(500, 500, 200, 200));
+        Assert.Equal(1, native.SetPositionAttemptCount(new IntPtr(4)));
+
+        window.SetPosition(Rectangle.FromSize(600, 600, 200, 200));
+
+        Assert.Equal(1, native.SetPositionAttemptCount(new IntPtr(4))); // no retry loop
+    }
 }

@@ -37,4 +37,27 @@ public class IWindowContractTests
         Assert.Equal(string.Empty, window.Title);
         Assert.Equal(Rectangle.Empty, window.Bounds);
     }
+
+    [Fact]
+    public void CanReposition_StartsTrue_ForANewlyTrackedWindow()
+    {
+        var window = new FakeWindow(new IntPtr(8), "Notepad", Rectangle.FromSize(0, 0, 400, 300));
+
+        Assert.True(window.CanReposition);
+    }
+
+    [Fact]
+    public void SetPosition_Failure_MarksWindowNonRepositionable_WithoutThrowing()
+    {
+        // Threat matrix: "Cross-process window manipulation" — every IWindow implementation,
+        // not just Win32Window, must honor this: a failed reposition degrades the window
+        // rather than throwing or crashing the caller.
+        var window = new FakeWindow(new IntPtr(9), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200));
+        window.FailNextSetPosition();
+
+        var exception = Record.Exception(() => window.SetPosition(Rectangle.FromSize(500, 500, 200, 200)));
+
+        Assert.Null(exception);
+        Assert.False(window.CanReposition);
+    }
 }
