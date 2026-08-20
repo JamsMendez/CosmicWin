@@ -22,27 +22,26 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// <para>
 /// Confirmed via manual probe on this environment's Windows build: <c>notepad.exe</c> is a
 /// launcher stub — the <see cref="Process"/> returned by <see cref="Process.Start(ProcessStartInfo)"/>
-/// exits almost immediately, and the real, window-owning "Notepad" process appears under a
+/// exits almost immediately, and the real, window-owning "Notepad" process may appear under a
 /// <b>different</b> process id shortly after. Waiting on the launcher's own
 /// <see cref="Process.MainWindowHandle"/> never succeeds on such builds. This class instead
-/// snapshots existing "notepad"-named process ids before spawning, then polls for a NEW
-/// "notepad"-named process (any id not in that snapshot) that has produced a main window handle —
-/// this works whether or not the current Windows build uses the launcher-stub indirection.
+/// opens a uniquely named temporary file and only accepts a Notepad window whose title contains
+/// that unguessable marker, which correlates the window to this launch across launcher indirection.
 /// </para>
 /// <para>
-/// <see cref="IDisposable"/> guarantees the spawned window process is always killed, even if a
-/// test assertion fails — callers MUST use a <c>using</c> declaration/block (or `finally`) so a
-/// failing test never leaks a live Notepad process.
+/// <see cref="IDisposable"/> requests a normal close and never forcibly terminates the process.
 /// </para>
 /// </remarks>
 internal sealed class SpawnedNotepadWindow : IDisposable
 {
     private readonly Process _windowProcess;
+    private readonly string _filePath;
     private bool _disposed;
 
-    private SpawnedNotepadWindow(Process windowProcess, nint handle)
+    private SpawnedNotepadWindow(Process windowProcess, nint handle, string filePath)
     {
         _windowProcess = windowProcess;
+        _filePath = filePath;
         Handle = handle;
     }
 
@@ -53,12 +52,15 @@ internal sealed class SpawnedNotepadWindow : IDisposable
     public static SpawnedNotepadWindow Spawn(TimeSpan? timeout = null)
     {
         var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
-        var preExisting = new HashSet<int>(Process.GetProcessesByName("notepad").Select(p => p.Id));
+        var marker = $"cosmicwin-{Guid.NewGuid():N}";
+        var filePath = Path.Combine(Path.GetTempPath(), $"{marker}.txt");
+        File.WriteAllText(filePath, string.Empty);
 
-        using (var launcher = Process.Start(new ProcessStartInfo("notepad.exe") { UseShellExecute = true }))
+        using (var launcher = Process.Start(new ProcessStartInfo("notepad.exe", $"\"{filePath}\"") { UseShellExecute = true }))
         {
             if (launcher is null)
             {
+                File.Delete(filePath);
                 throw new InvalidOperationException("Failed to start notepad.exe.");
             }
         }
@@ -67,17 +69,11 @@ internal sealed class SpawnedNotepadWindow : IDisposable
         {
             foreach (var candidate in Process.GetProcessesByName("notepad"))
             {
-                if (preExisting.Contains(candidate.Id))
-                {
-                    candidate.Dispose();
-                    continue;
-                }
-
                 candidate.Refresh();
                 var handle = candidate.MainWindowHandle;
-                if (handle != 0)
+                if (handle != 0 && candidate.MainWindowTitle.Contains(marker, StringComparison.OrdinalIgnoreCase))
                 {
-                    return new SpawnedNotepadWindow(candidate, handle);
+                    return new SpawnedNotepadWindow(candidate, handle, filePath);
                 }
 
                 candidate.Dispose();
@@ -85,10 +81,9 @@ internal sealed class SpawnedNotepadWindow : IDisposable
 
             if (DateTime.UtcNow >= deadline)
             {
+                File.Delete(filePath);
                 throw new TimeoutException(
-                    "Timed out waiting for a new Notepad window to appear. If notepad.exe's " +
-                    "process/launch model changed on this Windows build, SpawnedNotepadWindow's " +
-                    "new-process-id matching strategy may need to be revisited.");
+                    "Timed out waiting for the Notepad window associated with this test launch.");
             }
 
             Thread.Sleep(50);
@@ -108,7 +103,7 @@ internal sealed class SpawnedNotepadWindow : IDisposable
         {
             if (!_windowProcess.HasExited)
             {
-                _windowProcess.Kill();
+                _windowProcess.CloseMainWindow();
                 _windowProcess.WaitForExit(5000);
             }
         }
@@ -119,6 +114,7 @@ internal sealed class SpawnedNotepadWindow : IDisposable
         finally
         {
             _windowProcess.Dispose();
+            File.Delete(_filePath);
         }
     }
 }
