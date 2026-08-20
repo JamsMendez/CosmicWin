@@ -86,4 +86,46 @@ public sealed class LayoutTree
 
         return group;
     }
+
+    /// <summary>
+    /// D3 <c>RemoveChild</c>: removes the child (and its size) at <paramref name="index"/> from
+    /// <paramref name="group"/>, proportionally redistributing its freed size among the remaining
+    /// siblings so that <c>Sizes.Sum() == GroupLength</c> continues to hold (design D1). Unlike
+    /// <see cref="AddChild(GroupNode,Node,int)"/> — whose rounding remainder lands on the newly
+    /// inserted child — removal has no "new" element to absorb overflow into, so the convention
+    /// here is that the LAST remaining sibling absorbs the rounding remainder.
+    /// </summary>
+    /// <returns>The removed node.</returns>
+    public static Node RemoveChild(GroupNode group, int index)
+    {
+        if (index < 0 || index >= group.Children.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        var removed = group.Children[index];
+        int removedSize = group.Sizes[index];
+
+        group.Children.RemoveAt(index);
+        group.Sizes.RemoveAt(index);
+
+        if (group.Sizes.Count > 0)
+        {
+            int remainingLength = group.Sizes.Sum();
+            int distributed = 0;
+
+            for (int i = 0; i < group.Sizes.Count - 1; i++)
+            {
+                int extra = remainingLength == 0
+                    ? removedSize / group.Sizes.Count
+                    : (int)Math.Round(group.Sizes[i] / (double)remainingLength * removedSize);
+                group.Sizes[i] += extra;
+                distributed += extra;
+            }
+
+            group.Sizes[^1] += removedSize - distributed;
+        }
+
+        return removed;
+    }
 }
