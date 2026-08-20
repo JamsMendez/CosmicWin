@@ -72,4 +72,30 @@ public class Win32WindowTests
 
         Assert.Equal(1, native.SetPositionAttemptCount(new IntPtr(4))); // no retry loop
     }
+
+    [Fact]
+    public void TryActivate_ForwardsToNativeSource_AndReturnsTrue_OnSuccess()
+    {
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(5), "Notepad", Rectangle.FromSize(0, 0, 100, 100));
+        var window = new Win32Window(new IntPtr(5), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native);
+
+        Assert.True(window.TryActivate());
+        Assert.Equal(1, native.ActivationAttemptCount(new IntPtr(5)));
+    }
+
+    [Fact]
+    public void TryActivate_WhenNativeSourceFails_ReturnsFalse_WithoutThrowing()
+    {
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(6), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200));
+        native.FailActivationFor(new IntPtr(6));
+        var window = new Win32Window(new IntPtr(6), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200), native);
+
+        bool activated = true;
+        var exception = Record.Exception(() => activated = window.TryActivate());
+
+        Assert.Null(exception);
+        Assert.False(activated);
+    }
 }

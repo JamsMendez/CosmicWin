@@ -13,6 +13,8 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     private readonly Dictionary<nint, NativeWindowInfo> _windows = new();
     private readonly HashSet<nint> _failingPositionHandles = new();
     private readonly Dictionary<nint, int> _setPositionAttempts = new();
+    private readonly HashSet<nint> _failingActivationHandles = new();
+    private readonly Dictionary<nint, int> _activationAttempts = new();
     private NativeWindowEventCallback? _callback;
 
     public IReadOnlyList<nint> EnumerateTopLevelWindows() => _windows.Keys.ToArray();
@@ -41,6 +43,18 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
 
     /// <summary>Number of times <see cref="SetWindowPosition"/> was called for this handle.</summary>
     public int SetPositionAttemptCount(nint hwnd) => _setPositionAttempts.GetValueOrDefault(hwnd);
+
+    public bool TryActivateWindow(nint hwnd)
+    {
+        _activationAttempts[hwnd] = _activationAttempts.GetValueOrDefault(hwnd) + 1;
+        return !_failingActivationHandles.Contains(hwnd);
+    }
+
+    /// <summary>Makes every subsequent <see cref="TryActivateWindow"/> call for this handle fail.</summary>
+    public void FailActivationFor(nint hwnd) => _failingActivationHandles.Add(hwnd);
+
+    /// <summary>Number of times <see cref="TryActivateWindow"/> was called for this handle.</summary>
+    public int ActivationAttemptCount(nint hwnd) => _activationAttempts.GetValueOrDefault(hwnd);
 
     public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback)
     {

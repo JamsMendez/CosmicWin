@@ -73,6 +73,8 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return new WinEventHookSubscription(callback);
     }
 
+    public bool TryActivateWindow(nint hwnd) => PInvoke.SetForegroundWindow(new HWND(hwnd));
+
     private static bool IsTrackable(HWND hwnd)
     {
         if (!PInvoke.IsWindowVisible(hwnd))

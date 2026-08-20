@@ -12,6 +12,7 @@ internal sealed class FakeWindow : IWindow
     private string _title;
     private Rectangle _bounds;
     private bool _failNextSetPosition;
+    private bool _failNextActivate;
 
     public FakeWindow(IntPtr handle, string title, Rectangle bounds)
     {
@@ -56,6 +57,25 @@ internal sealed class FakeWindow : IWindow
 
     /// <summary>Makes the next <see cref="SetPosition"/> call fail (threat matrix: cross-process window manipulation).</summary>
     public void FailNextSetPosition() => _failNextSetPosition = true;
+
+    public bool TryActivate()
+    {
+        if (!IsAlive)
+        {
+            return false;
+        }
+
+        if (_failNextActivate)
+        {
+            _failNextActivate = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Makes the next <see cref="TryActivate"/> call fail without throwing.</summary>
+    public void FailNextActivate() => _failNextActivate = true;
 
     public void Rename(string title) => _title = title;
 

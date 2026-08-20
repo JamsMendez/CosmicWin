@@ -53,4 +53,12 @@ public interface IWindow : IEquatable<IWindow>
     /// <see cref="CanReposition"/> to <c>false</c> instead of throwing or being retried in a loop.
     /// </summary>
     void SetPosition(Rectangle bounds);
+
+    /// <summary>
+    /// Brings this window to the foreground. Implementations MUST NOT throw when activation is
+    /// refused or fails (e.g. a higher-integrity/protected window, or one owned by a process that
+    /// currently blocks foreground changes) — returns <see langword="false"/> instead. Callers
+    /// (the App-layer executor) MUST NOT retry on a returned <see langword="false"/>.
+    /// </summary>
+    bool TryActivate();
 }

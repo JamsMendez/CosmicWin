@@ -18,3 +18,4 @@ EnumDisplayMonitors
 GetMonitorInfoW
 GetDpiForMonitor
 MONITORINFOF_PRIMARY
+SetForegroundWindow

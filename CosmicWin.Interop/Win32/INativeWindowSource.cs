@@ -50,4 +50,10 @@ internal interface INativeWindowSource
     /// unsubscribes.
     /// </summary>
     IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback);
+
+    /// <summary>
+    /// Brings the given window to the foreground. Returns <c>false</c> (rather than throwing) if
+    /// the native call fails — e.g. activation is refused for a higher-integrity/protected window.
+    /// </summary>
+    bool TryActivateWindow(nint hwnd);
 }

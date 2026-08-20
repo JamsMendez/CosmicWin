@@ -55,6 +55,8 @@ internal sealed class Win32Window : IWindow
         _bounds = bounds;
     }
 
+    public bool TryActivate() => IsAlive && _nativeSource.TryActivateWindow(Handle);
+
     internal void Refresh(string title, Rectangle bounds)
     {
         _title = title;

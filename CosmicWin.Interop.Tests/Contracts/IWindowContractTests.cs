@@ -60,4 +60,27 @@ public class IWindowContractTests
         Assert.Null(exception);
         Assert.False(window.CanReposition);
     }
+
+    [Fact]
+    public void TryActivate_ReturnsTrue_OnSuccess()
+    {
+        var window = new FakeWindow(new IntPtr(10), "Notepad", Rectangle.FromSize(0, 0, 400, 300));
+
+        Assert.True(window.TryActivate());
+    }
+
+    [Fact]
+    public void TryActivate_Failure_ReturnsFalse_WithoutThrowing()
+    {
+        // Threat matrix: activation of a higher-integrity/protected window can fail — every
+        // IWindow implementation must degrade to a returned false rather than throwing.
+        var window = new FakeWindow(new IntPtr(11), "ProtectedApp", Rectangle.FromSize(0, 0, 200, 200));
+        window.FailNextActivate();
+
+        bool activated = true;
+        var exception = Record.Exception(() => activated = window.TryActivate());
+
+        Assert.Null(exception);
+        Assert.False(activated);
+    }
 }
