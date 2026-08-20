@@ -62,6 +62,7 @@ public sealed class LayoutTree
         int usedSize = group.Sizes.Sum();
         int newSize = groupLength - usedSize;
 
+        child.Parent = group;
         group.Children.Insert(index, child);
         group.Sizes.Insert(index, newSize);
     }
@@ -79,6 +80,7 @@ public sealed class LayoutTree
         int groupLength = axis == SplitAxis.Horizontal ? regionWidth : regionHeight;
 
         var group = new GroupNode(axis) { GroupLength = groupLength };
+        leaf.Parent = group;
         group.Children.Add(leaf);
         group.Sizes.Add(groupLength);
 
@@ -108,6 +110,7 @@ public sealed class LayoutTree
 
         group.Children.RemoveAt(index);
         group.Sizes.RemoveAt(index);
+        removed.Parent = null;
 
         if (group.Sizes.Count > 0)
         {
@@ -128,4 +131,83 @@ public sealed class LayoutTree
 
         return removed;
     }
+
+    /// <summary>
+    /// LE-2 step 1-3, extracted for reuse: walks up from <paramref name="from"/> via <see
+    /// cref="Node.Parent"/>, looking for the nearest ancestor <see cref="GroupNode"/> whose <see
+    /// cref="GroupNode.Axis"/> matches <paramref name="direction"/>'s axis AND has a child at the
+    /// boundary <paramref name="direction"/> implies (index ± 1) from the child subtree
+    /// containing <paramref name="from"/> at that ancestor level. Returns <see
+    /// langword="null"/> if the walk reaches the tree root (a node with no <see
+    /// cref="Node.Parent"/>) without finding a match.
+    /// </summary>
+    /// <remarks>
+    /// Design D3/LE-6: this exact helper is reused, unmodified, by WU6's <c>ResizeNode</c> — the
+    /// returned <see cref="AncestorMatch.ChildIndex"/> identifies the "target" subtree for both
+    /// callers; <c>NextFocus</c> reads the sibling at <c>ChildIndex + step</c>, while
+    /// <c>ResizeNode</c> transfers a size ratio between <c>ChildIndex</c> and that same neighbor.
+    /// </remarks>
+    public static AncestorMatch? FindMatchingAncestor(Direction direction, Node from)
+    {
+        var axis = AxisOf(direction);
+        int step = StepOf(direction);
+
+        Node current = from;
+        while (current.Parent is GroupNode parent)
+        {
+            int index = parent.Children.IndexOf(current);
+            int candidate = index + step;
+
+            if (parent.Axis == axis && candidate >= 0 && candidate < parent.Children.Count)
+            {
+                return new AncestorMatch(parent, index);
+            }
+
+            current = parent;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// LE-2 "Directional focus — tree walk": moves focus from <paramref name="focused"/> in
+    /// <paramref name="direction"/> by delegating the ancestor search to <see
+    /// cref="FindMatchingAncestor"/>, then descending depth-first into the sibling at the
+    /// matching boundary to find its first leaf. Returns <see cref="FocusResult.NoMatch"/> (LE-2
+    /// step 4) rather than performing any geometric/nearest-window search when no match exists.
+    /// </summary>
+    public static FocusResult NextFocus(Direction direction, LeafNode focused)
+    {
+        var match = FindMatchingAncestor(direction, focused);
+        if (match is null)
+        {
+            return FocusResult.NoMatch;
+        }
+
+        int step = StepOf(direction);
+        var sibling = match.Value.Ancestor.Children[match.Value.ChildIndex + step];
+        return FocusResult.Found(FirstLeaf(sibling));
+    }
+
+    private static LeafNode FirstLeaf(Node node) => node switch
+    {
+        LeafNode leaf => leaf,
+        GroupNode { Children.Count: > 0 } group => FirstLeaf(group.Children[0]),
+        GroupNode => throw new InvalidOperationException("Cannot descend into an empty group."),
+        _ => throw new InvalidOperationException($"Unknown node type: {node.GetType()}")
+    };
+
+    private static SplitAxis AxisOf(Direction direction) => direction switch
+    {
+        Direction.Left or Direction.Right => SplitAxis.Horizontal,
+        Direction.Up or Direction.Down => SplitAxis.Vertical,
+        _ => throw new ArgumentOutOfRangeException(nameof(direction))
+    };
+
+    private static int StepOf(Direction direction) => direction switch
+    {
+        Direction.Right or Direction.Down => 1,
+        Direction.Left or Direction.Up => -1,
+        _ => throw new ArgumentOutOfRangeException(nameof(direction))
+    };
 }
