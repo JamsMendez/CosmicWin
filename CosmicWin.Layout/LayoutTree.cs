@@ -6,9 +6,28 @@ namespace CosmicWin.Layout;
 /// <c>RemoveChild</c>, <c>NextFocus</c>, <c>ToggleAxis</c>, <c>MoveNode</c>, <c>ResizeNode</c>,
 /// and <c>Arrange</c>.
 /// </summary>
-public sealed class LayoutTree
+public sealed class LayoutTree : ITilingEngine
 {
+    public const double DefaultResizeStep = 0.05;
+
+    public const double DefaultMinRatio = 0.10;
+
+    public LayoutTree(Node? root = null)
+    {
+        Root = root;
+    }
+
     public Node? Root { get; set; }
+
+    FocusResult ITilingEngine.NextFocus(Direction direction, LeafNode focused) =>
+        NextFocus(direction, focused);
+
+    bool ITilingEngine.MoveNode(Direction direction, Node focused) => MoveNode(direction, focused);
+
+    bool ITilingEngine.ToggleAxis(Node focused) => ToggleAxis(focused);
+
+    bool ITilingEngine.ResizeNode(Direction direction, Node focused, double step) =>
+        ResizeNode(direction, focused, step);
 
     /// <summary>
     /// LE-4 split-orientation heuristic: chosen from the aspect ratio of the region being split.
@@ -210,6 +229,172 @@ public sealed class LayoutTree
         Direction.Left or Direction.Up => -1,
         _ => throw new ArgumentOutOfRangeException(nameof(direction))
     };
+
+    /// <summary>
+    /// LE-5: swaps a node with its directional sibling in a matching-axis group, or nests it
+    /// with an adjacent sibling under a new group when the immediate axis does not match.
+    /// </summary>
+    public static bool MoveNode(Direction direction, Node focused)
+    {
+        if (focused.Parent is not GroupNode parent)
+        {
+            return false;
+        }
+
+        int focusedIndex = parent.Children.IndexOf(focused);
+        var requestedAxis = AxisOf(direction);
+        if (parent.Axis == requestedAxis)
+        {
+            int siblingIndex = focusedIndex + StepOf(direction);
+            if (siblingIndex < 0 || siblingIndex >= parent.Children.Count)
+            {
+                return false;
+            }
+
+            (parent.Children[focusedIndex], parent.Children[siblingIndex]) =
+                (parent.Children[siblingIndex], parent.Children[focusedIndex]);
+            (parent.Sizes[focusedIndex], parent.Sizes[siblingIndex]) =
+                (parent.Sizes[siblingIndex], parent.Sizes[focusedIndex]);
+            return true;
+        }
+
+        if (parent.Children.Count < 2)
+        {
+            return false;
+        }
+
+        int adjacentIndex = focusedIndex + 1 < parent.Children.Count
+            ? focusedIndex + 1
+            : focusedIndex - 1;
+        int insertionIndex = Math.Min(focusedIndex, adjacentIndex);
+        var first = parent.Children[insertionIndex];
+        var second = parent.Children[insertionIndex + 1];
+        int firstSize = parent.Sizes[insertionIndex];
+        int secondSize = parent.Sizes[insertionIndex + 1];
+        int combinedSize = firstSize + secondSize;
+
+        var nested = new GroupNode(requestedAxis)
+        {
+            GroupLength = combinedSize,
+            Parent = parent
+        };
+        nested.Children.Add(first);
+        nested.Children.Add(second);
+        nested.Sizes.Add(firstSize);
+        nested.Sizes.Add(secondSize);
+        first.Parent = nested;
+        second.Parent = nested;
+
+        parent.Children.RemoveRange(insertionIndex, 2);
+        parent.Sizes.RemoveRange(insertionIndex, 2);
+        parent.Children.Insert(insertionIndex, nested);
+        parent.Sizes.Insert(insertionIndex, combinedSize);
+        return true;
+    }
+
+    /// <summary>
+    /// LE-6: grows the focused subtree by transferring space from its directional neighbor in
+    /// the nearest matching-axis ancestor, without allowing that neighbor below the minimum.
+    /// </summary>
+    public static bool ResizeNode(
+        Direction direction,
+        Node focused,
+        double step = DefaultResizeStep,
+        double minRatio = DefaultMinRatio)
+    {
+        var match = FindMatchingAncestor(direction, focused);
+        if (match is null)
+        {
+            return false;
+        }
+
+        var ancestor = match.Value.Ancestor;
+        int targetIndex = match.Value.ChildIndex;
+        int neighborIndex = targetIndex + StepOf(direction);
+        int requestedTransfer = (int)Math.Round(
+            ancestor.GroupLength * step,
+            MidpointRounding.AwayFromZero);
+        int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
+        int available = ancestor.Sizes[neighborIndex] - minimumSize;
+        int transfer = Math.Min(requestedTransfer, available);
+        if (transfer <= 0)
+        {
+            return false;
+        }
+
+        ancestor.Sizes[targetIndex] += transfer;
+        ancestor.Sizes[neighborIndex] -= transfer;
+        return true;
+    }
+
+    /// <summary>
+    /// Produces deterministic leaf geometry without moving windows or calling platform APIs.
+    /// </summary>
+    public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea)
+    {
+        var result = new List<(WindowRef Window, Rect Bounds)>();
+        if (Root is null)
+        {
+            return result;
+        }
+
+        ArrangeNode(Root, workArea, result);
+        return result;
+    }
+
+    private static void ArrangeNode(
+        Node node,
+        Rect bounds,
+        List<(WindowRef Window, Rect Bounds)> result)
+    {
+        node.LastGeometry = bounds;
+        if (node is LeafNode leaf)
+        {
+            result.Add((leaf.Window, bounds));
+            return;
+        }
+
+        var group = (GroupNode)node;
+        if (group.Children.Count == 0)
+        {
+            group.GroupLength = 0;
+            return;
+        }
+
+        int newLength = group.Axis == SplitAxis.Horizontal ? bounds.Width : bounds.Height;
+        RescaleSizes(group, newLength);
+
+        int offset = 0;
+        for (int index = 0; index < group.Children.Count; index++)
+        {
+            int size = group.Sizes[index];
+            var childBounds = group.Axis == SplitAxis.Horizontal
+                ? new Rect(bounds.X + offset, bounds.Y, size, bounds.Height)
+                : new Rect(bounds.X, bounds.Y + offset, bounds.Width, size);
+            ArrangeNode(group.Children[index], childBounds, result);
+            offset += size;
+        }
+    }
+
+    private static void RescaleSizes(GroupNode group, int newLength)
+    {
+        int oldLength = group.Sizes.Sum();
+        int allocated = 0;
+        for (int index = 0; index < group.Sizes.Count - 1; index++)
+        {
+            int scaled = oldLength == 0
+                ? (int)Math.Round(newLength / (double)group.Sizes.Count, MidpointRounding.AwayFromZero)
+                : (int)Math.Round(
+                    group.Sizes[index] / (double)oldLength * newLength,
+                    MidpointRounding.AwayFromZero);
+            scaled = Math.Clamp(scaled, 0, newLength - allocated);
+            group.Sizes[index] = scaled;
+            allocated += scaled;
+        }
+
+        group.Sizes[^1] = newLength - allocated;
+        group.GroupLength = newLength;
+    }
 
     /// <summary>
     /// LE-3 "Orientation toggle": flips <paramref name="focused"/>'s immediate parent group's

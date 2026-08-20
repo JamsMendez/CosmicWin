@@ -11,6 +11,9 @@ namespace CosmicWin.Layout;
 /// </remarks>
 public abstract record Node
 {
+    /// <summary>The bounds assigned by the most recent arrangement pass.</summary>
+    public Rect LastGeometry { get; set; }
+
     /// <summary>
     /// The immediate containing <see cref="GroupNode"/>, or <see langword="null"/> for a tree
     /// root. Introduced in WU5 (LE-2) to support <c>NextFocus</c>'s ancestor tree-walk and its
