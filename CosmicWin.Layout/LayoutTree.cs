@@ -210,4 +210,28 @@ public sealed class LayoutTree
         Direction.Left or Direction.Up => -1,
         _ => throw new ArgumentOutOfRangeException(nameof(direction))
     };
+
+    /// <summary>
+    /// LE-3 "Orientation toggle": flips <paramref name="focused"/>'s immediate parent group's
+    /// <see cref="GroupNode.Axis"/> in place (Horizontal&#8596;Vertical). <see
+    /// cref="GroupNode.Children"/> order and <see cref="GroupNode.Sizes"/> ratios are left
+    /// untouched — the group's existing children and their proportions are unaffected by the
+    /// toggle, only the axis label they are interpreted against changes. Does not pre-select
+    /// orientation for any future split (LE-4's <see cref="ChooseSplitAxis"/> is unrelated).
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if <paramref name="focused"/> had an immediate parent group whose
+    /// axis was flipped; <see langword="false"/> (no-op) if <paramref name="focused"/> is a tree
+    /// root with no parent to flip.
+    /// </returns>
+    public static bool ToggleAxis(Node focused)
+    {
+        if (focused.Parent is not GroupNode parent)
+        {
+            return false;
+        }
+
+        parent.Axis = parent.Axis == SplitAxis.Horizontal ? SplitAxis.Vertical : SplitAxis.Horizontal;
+        return true;
+    }
 }

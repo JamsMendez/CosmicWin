@@ -13,6 +13,15 @@ namespace CosmicWin.Layout;
 /// </remarks>
 public sealed record GroupNode(SplitAxis Axis) : Node
 {
+    /// <summary>
+    /// The split axis, mutable (not <c>init</c>-only, overriding the record's default positional
+    /// property) so that <see cref="LayoutTree.ToggleAxis"/> (LE-3) can flip it in place rather
+    /// than replacing the group with a new instance — the group is referenced by other nodes'
+    /// <see cref="Node.Parent"/> pointers and by its own parent's <see cref="Children"/> list, so
+    /// an in-place flip is required to keep those references valid.
+    /// </summary>
+    public SplitAxis Axis { get; set; } = Axis;
+
     public List<Node> Children { get; } = [];
 
     public List<int> Sizes { get; } = [];
