@@ -1,5 +1,4 @@
 using CosmicWin.App.Input;
-using CosmicWin.Interop;
 using CosmicWin.Layout;
 
 namespace CosmicWin.App;
@@ -107,9 +106,10 @@ public sealed class ActionExecutor(
 
     /// <summary>
     /// Applies a tree mutation (Move/Toggle/Resize) and, only if it actually changed something,
-    /// re-arranges the whole tree via <see cref="ITilingEngine.Arrange"/> and positions every
-    /// live, tracked leaf's real window -- one <see cref="IWindow.SetPosition"/> per leaf,
-    /// respecting <see cref="IWindow.CanReposition"/>'s no-retry contract.
+    /// re-arranges and positions every live leaf via the shared <see cref="TreeArranger"/>
+    /// (verify-report #21 CRITICAL C2: <see cref="WorkspaceSessionAdapter"/> now applies the same
+    /// arrange-and-position step after a window is added or removed, using this same
+    /// <see cref="WorkArea"/> instance as its single source of truth).
     /// </summary>
     private void MutateAndArrange(Func<bool> mutate)
     {
@@ -118,14 +118,6 @@ public sealed class ActionExecutor(
             return;
         }
 
-        foreach (var (windowRef, bounds) in engine.Arrange(WorkArea))
-        {
-            if (!registry.TryGetWindow(windowRef.Handle, out var window) || window is not { IsAlive: true })
-            {
-                continue;
-            }
-
-            window.SetPosition(Rectangle.FromSize(bounds.X, bounds.Y, bounds.Width, bounds.Height));
-        }
+        TreeArranger.ArrangeAndPosition(engine, registry, WorkArea);
     }
 }

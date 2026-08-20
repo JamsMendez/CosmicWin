@@ -24,7 +24,7 @@ public sealed class CompositionRootTests
         registry.Register(window, leaf);
         var foreground = new StaticForegroundWindowSource(focusedHandle);
 
-        var (dispatcher, _) = CompositionRoot.Build(engine, registry, foreground);
+        var (dispatcher, _) = CompositionRoot.Build(engine, registry, foreground, workArea: default);
         return (engine, dispatcher);
     }
 
@@ -77,6 +77,28 @@ public sealed class CompositionRootTests
         Assert.Equal(1, engine.ResizeNodeCallCount);
         Assert.Equal(Direction.Down, engine.LastResizeDirection);
         Assert.Equal(0, engine.MoveNodeCallCount);
+    }
+
+    /// <summary>
+    /// Verify-report #21 CRITICAL C1: proves the composition pipeline actually assigns a
+    /// non-zero, display-derived work area to the executor -- previously nothing in production
+    /// ever did, so the default <c>Rect(0,0,0,0)</c> zeroed every window on the first
+    /// Move/Toggle/Resize chord. Uses a fake <see cref="IDisplay"/> (see <see
+    /// cref="WorkAreaResolverTests"/> for the resolver's own pure conversion tests); no live
+    /// desktop required, consistent with the rest of this file.
+    /// </summary>
+    [Fact]
+    public void Build_AssignsExecutorWorkArea_FromResolvedDisplayWorkArea_NonZero()
+    {
+        var display = new FakeDisplay(
+            new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1040), 1.0, isPrimary: true);
+        var resolvedWorkArea = WorkAreaResolver.Resolve(display);
+
+        var (_, executor) = CompositionRoot.Build(
+            new RecordingTilingEngine(), new WindowRegistry(), new StaticForegroundWindowSource(IntPtr.Zero), resolvedWorkArea);
+
+        Assert.NotEqual(default, executor.WorkArea);
+        Assert.Equal(new Rect(0, 0, 1920, 1040), executor.WorkArea);
     }
 
     private sealed class RecordingTilingEngine : ITilingEngine

@@ -4,26 +4,42 @@ using CosmicWin.Layout;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Task 2.20: bridges an <see cref="IWorkspace"/>'s add/remove events into the shared <see
-/// cref="LayoutTree"/> and <see cref="WindowRegistry"/>, converting <see cref="IWindow.Handle"/>
-/// to <see cref="WindowRef"/> at the Interop-&gt;Layout boundary (<c>CosmicWin.Layout</c> stays
-/// Win32-free). <see cref="ITilingEngine"/> has no <c>Insert</c>/<c>Remove(WindowRef)</c> -- only
-/// static <see cref="LayoutTree.AddChild(LeafNode,WindowRef,int,int)"/>/<see
-/// cref="LayoutTree.RemoveChild"/> plus mutable <see cref="Node.Parent"/> -- so this adapter owns
-/// root/parent bookkeeping directly. This adapter owns one flat root group; multi-monitor and
-/// nested-tree policy remain Phase 3 <c>TreeManager</c> scope.
+/// Task 2.20 (WU7D-corrected, R3-001-corrected): bridges an <see cref="IWorkspace"/>'s add/remove
+/// events into the shared <see cref="LayoutTree"/> and <see cref="WindowRegistry"/>, converting
+/// <see cref="IWindow.Handle"/> to <see cref="WindowRef"/> at the Interop-&gt;Layout boundary
+/// (<c>CosmicWin.Layout</c> stays Win32-free). <see cref="ITilingEngine"/> has no
+/// <c>Insert</c>/<c>Remove(WindowRef)</c> -- only static <see
+/// cref="LayoutTree.AddChild(LeafNode,WindowRef,int,int)"/>/<see cref="LayoutTree.RemoveChild"/>
+/// plus mutable <see cref="Node.Parent"/> -- so this adapter owns root/parent bookkeeping
+/// directly. This adapter owns one flat root group -- third and later windows append into the
+/// existing <see cref="GroupNode"/> root rather than being dropped; multi-monitor and nested-tree
+/// policy remain Phase 3 <c>TreeManager</c> scope.
 /// </summary>
+/// <remarks>
+/// Fixes verify-report #21 CRITICAL C2 and WARNING W1. C2: every add/remove now re-arranges the
+/// tree and positions each live leaf via the shared <see cref="TreeArranger"/> -- previously this
+/// adapter only mutated the tree and never called <see cref="ITilingEngine.Arrange"/> or <see
+/// cref="IWindow.SetPosition"/> at all. The constructor's <c>workArea</c> parameter is a
+/// delegate rather than a captured value so this adapter always reads the exact same work area <see
+/// cref="ActionExecutor.WorkArea"/> holds (single source of truth shared between both call
+/// sites, wired by <see cref="App.OnStartup"/>). W1: LE-4's split-region heuristic is now sourced
+/// from the existing leaf's last-arranged geometry (falling back to the work area before that
+/// leaf has ever been arranged), not from the newly-arriving window's own <see
+/// cref="IWindow.Bounds"/>.
+/// </remarks>
 public sealed class WorkspaceSessionAdapter : IDisposable
 {
     private readonly IWorkspace _workspace;
     private readonly LayoutTree _tree;
     private readonly WindowRegistry _registry;
+    private readonly Func<Rect> _workArea;
 
-    public WorkspaceSessionAdapter(IWorkspace workspace, LayoutTree tree, WindowRegistry registry)
+    public WorkspaceSessionAdapter(IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea)
     {
         _workspace = workspace;
         _tree = tree;
         _registry = registry;
+        _workArea = workArea;
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;
@@ -46,7 +62,12 @@ public sealed class WorkspaceSessionAdapter : IDisposable
                 break;
 
             case LeafNode existingLeaf:
-                var region = window.Bounds;
+                // W1 fix: LE-4 requires the region actually being split -- the existing leaf's
+                // last-arranged geometry, or the work area before it has ever been arranged --
+                // not the newly-arriving window's own Bounds.
+                var region = existingLeaf.LastGeometry is { Width: > 0, Height: > 0 } geometry
+                    ? geometry
+                    : _workArea();
                 var group = LayoutTree.AddChild(existingLeaf, windowRef, region.Width, region.Height);
                 _tree.Root = group;
                 // AddChild builds its own LeafNode internally -- register that exact instance.
@@ -63,6 +84,8 @@ public sealed class WorkspaceSessionAdapter : IDisposable
             default:
                 return;
         }
+
+        TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
     }
 
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
@@ -87,6 +110,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         }
 
         _registry.Remove(handle);
+        TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
     }
 
     public void Dispose()
