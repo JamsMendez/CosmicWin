@@ -1,0 +1,169 @@
+using System.Threading.Channels;
+using CosmicWin.App.Input;
+
+namespace CosmicWin.App.Tests.Input;
+
+public sealed class KeyboardHookTests
+{
+    [Fact]
+    public void Process_ExactChord_SuppressesAndWritesOnlyMappedAction()
+    {
+        var channel = Channel.CreateBounded<HotkeyAction>(1);
+        var processor = new KeyboardEventProcessor(ChordTable.Default);
+
+        var suppressed = processor.Process(KeyboardKey.L, true, ModifierKeys.Alt, channel.Writer);
+
+        Assert.True(suppressed);
+        Assert.True(channel.Reader.TryRead(out var action));
+        Assert.Equal(HotkeyActionKind.FocusRight, action.Kind);
+    }
+
+    [Theory]
+    [InlineData(KeyboardKey.Menu, ModifierKeys.None)]
+    [InlineData(KeyboardKey.Tab, ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.F4, ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.Space, ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.Escape, ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.Enter, ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.Delete, ModifierKeys.Control | ModifierKeys.Alt)]
+    public void Process_NativeOrReservedChord_PassesThroughWithoutWriting(
+        KeyboardKey key, ModifierKeys modifiers)
+    {
+        var channel = Channel.CreateBounded<HotkeyAction>(1);
+        var processor = new KeyboardEventProcessor(ChordTable.Default);
+
+        Assert.False(processor.Process(key, true, modifiers, channel.Writer));
+        Assert.False(channel.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task Process_SaturatedProductionDispatcher_DoesNotSuppressRejectedChord()
+    {
+        await using var dispatcher = new ActionDispatcher(new RecordingScheduler());
+        for (var i = 0; i < 32; i++)
+            Assert.True(dispatcher.Writer.TryWrite(new(HotkeyActionKind.FocusLeft)));
+        var processor = new KeyboardEventProcessor(ChordTable.Default);
+
+        var suppressed = processor.Process(KeyboardKey.L, true, ModifierKeys.Alt, dispatcher.Writer);
+
+        Assert.False(suppressed);
+        Assert.False(processor.Process(KeyboardKey.L, false, ModifierKeys.Alt, dispatcher.Writer));
+        dispatcher.Writer.Complete();
+        Assert.Equal(32, dispatcher.Reader.Count);
+    }
+
+    private sealed class RecordingScheduler : IActionScheduler
+    {
+        public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken) =>
+            ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public void Process_WarmedMatchedCallback_AllocatesNoManagedMemory()
+    {
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        var processor = new KeyboardEventProcessor(ChordTable.Default);
+        processor.Process(KeyboardKey.H, true, ModifierKeys.Alt, channel.Writer);
+        channel.Reader.TryRead(out _);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+
+        processor.Process(KeyboardKey.H, true, ModifierKeys.Alt, channel.Writer);
+
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
+    }
+
+    [Fact]
+    public void Process_KeyUp_IsSuppressedOnlyAfterAcceptedKeyDown()
+    {
+        var channel = Channel.CreateBounded<HotkeyAction>(1);
+        var processor = new KeyboardEventProcessor(ChordTable.Default);
+
+        Assert.True(processor.Process(KeyboardKey.H, true, ModifierKeys.Alt, channel.Writer));
+        Assert.True(processor.Process(KeyboardKey.H, false, ModifierKeys.Alt, channel.Writer));
+        Assert.False(processor.Process(KeyboardKey.H, false, ModifierKeys.Alt, channel.Writer));
+        Assert.Equal(1, channel.Reader.Count);
+    }
+
+    [Fact]
+    public void Watchdog_ReinstallsOnlyAfterFiveSecondsWithoutKeyboardActivity()
+    {
+        var platform = new FakeKeyboardHookPlatform();
+        var clock = new FakeClock();
+        var callerThread = Environment.CurrentManagedThreadId;
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        using var hook = new LowLevelKeyboardHook(
+            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(4000);
+        platform.RaiseActivity();
+        var pumps = platform.PumpCount;
+        clock.Advance(1000);
+
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps, TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, platform.InstallCount);
+        clock.Advance(4000);
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(ApartmentState.STA, platform.ApartmentState);
+        Assert.NotEqual(callerThread, platform.CallbackThreadId);
+        Assert.True(channel.Reader.TryRead(out var action));
+        Assert.Equal(HotkeyActionKind.FocusLeft, action.Kind);
+        Assert.True(platform.UninstallCount >= 1);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Dispose_InvokesNativeUnhookOnceAndExposesItsResult(bool nativeResult)
+    {
+        var platform = new FakeKeyboardHookPlatform { UninstallResult = nativeResult };
+        var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => 0);
+        hook.Start();
+
+        hook.Dispose();
+
+        Assert.Equal(1, platform.UninstallCount);
+        Assert.Equal(nativeResult, hook.UnhookSucceeded);
+    }
+
+    private sealed class FakeKeyboardHookPlatform : IKeyboardHookPlatform
+    {
+        public ManualResetEventSlim SecondInstall { get; } = new();
+        public ApartmentState ApartmentState { get; private set; }
+        public int CallbackThreadId { get; private set; }
+        public int InstallCount => _installs;
+        public int PumpCount => _pumps;
+        public int UninstallCount => _uninstallCount;
+        public bool UninstallResult { get; init; } = true;
+        private KeyboardHookCallback? _callback;
+        private int _installs;
+        private int _pumps;
+        private int _uninstallCount;
+
+        public void Install(KeyboardHookCallback callback)
+        {
+            _callback = callback;
+            ApartmentState = Thread.CurrentThread.GetApartmentState();
+            CallbackThreadId = Environment.CurrentManagedThreadId;
+            callback(KeyboardKey.H, true, ModifierKeys.Alt);
+            if (Interlocked.Increment(ref _installs) >= 2) SecondInstall.Set();
+        }
+
+        public bool Uninstall()
+        {
+            Interlocked.Increment(ref _uninstallCount);
+            return UninstallResult;
+        }
+
+        public void PumpMessages() => Interlocked.Increment(ref _pumps);
+        public void RaiseActivity() => _callback!(KeyboardKey.H, true, ModifierKeys.Alt);
+    }
+
+    private sealed class FakeClock
+    {
+        public long Value => Interlocked.Read(ref _value);
+        private long _value;
+        public void Advance(long milliseconds) => Interlocked.Add(ref _value, milliseconds);
+    }
+}

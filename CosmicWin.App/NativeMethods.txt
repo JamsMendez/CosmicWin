@@ -1,0 +1,14 @@
+SetWindowsHookEx
+UnhookWindowsHookEx
+CallNextHookEx
+PeekMessage
+TranslateMessage
+DispatchMessage
+GetAsyncKeyState
+KBDLLHOOKSTRUCT
+WINDOWS_HOOK_ID
+WM_KEYDOWN
+WM_KEYUP
+WM_SYSKEYDOWN
+WM_SYSKEYUP
+PEEK_MESSAGE_REMOVE_TYPE
