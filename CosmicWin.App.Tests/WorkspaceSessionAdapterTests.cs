@@ -59,6 +59,74 @@ public sealed class WorkspaceSessionAdapterTests
         Assert.Same(newLeaf, foundLeaf);
     }
 
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void WindowAdded_ThirdOrLaterWindow_AppendsAndRegistersExactLeaf_WithValidGroup(int windowCount)
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry);
+        var windows = Enumerable.Range(1, windowCount)
+            .Select(index => new RecordingWindow(
+                new IntPtr(index * 10),
+                Rectangle.FromSize(0, 0, 1920, 1080)))
+            .ToArray();
+
+        foreach (var window in windows)
+        {
+            workspace.RaiseWindowAdded(window);
+        }
+
+        var group = Assert.IsType<GroupNode>(tree.Root);
+        Assert.Equal(windowCount, group.Children.Count);
+        Assert.Equal(group.Children.Count, group.Sizes.Count);
+        Assert.Equal(group.GroupLength, group.Sizes.Sum());
+        Assert.All(group.Children, child => Assert.Same(group, child.Parent));
+        var insertedLeaf = Assert.IsType<LeafNode>(group.Children[^1]);
+        Assert.Equal(new WindowRef(windows[^1].Handle), insertedLeaf.Window);
+        Assert.True(registry.TryGetWindow(windows[^1].Handle, out var registeredWindow));
+        Assert.Same(windows[^1], registeredWindow);
+        Assert.True(registry.TryGetLeaf(windows[^1].Handle, out var registeredLeaf));
+        Assert.Same(insertedLeaf, registeredLeaf);
+    }
+
+    [Fact]
+    public void WindowRemoved_ThirdOrLaterWindow_UnregistersAndPreservesValidGroup()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry);
+        var windows = Enumerable.Range(1, 4)
+            .Select(index => new RecordingWindow(
+                new IntPtr(index * 10),
+                Rectangle.FromSize(0, 0, 1920, 1080)))
+            .ToArray();
+        foreach (var window in windows)
+        {
+            workspace.RaiseWindowAdded(window);
+        }
+        var removedLeaf = Assert.IsType<LeafNode>(
+            Assert.IsType<GroupNode>(tree.Root).Children[2]);
+
+        workspace.RaiseWindowRemoved(windows[2]);
+
+        var group = Assert.IsType<GroupNode>(tree.Root);
+        Assert.Equal(3, group.Children.Count);
+        Assert.Equal(group.Children.Count, group.Sizes.Count);
+        Assert.Equal(group.GroupLength, group.Sizes.Sum());
+        Assert.All(group.Children, child => Assert.Same(group, child.Parent));
+        Assert.DoesNotContain(removedLeaf, group.Children);
+        Assert.Null(removedLeaf.Parent);
+        Assert.False(registry.TryGetWindow(windows[2].Handle, out _));
+        Assert.False(registry.TryGetLeaf(windows[2].Handle, out _));
+        Assert.All(
+            windows.Where((_, index) => index != 2),
+            window => Assert.True(registry.TryGetLeaf(window.Handle, out _)));
+    }
+
     [Fact]
     public void WindowRemoved_WithSibling_WalksNodeParent_RemovesChildFromGroup_AndUnregisters()
     {

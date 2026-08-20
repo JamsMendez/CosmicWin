@@ -10,9 +10,8 @@ namespace CosmicWin.App;
 /// Win32-free). <see cref="ITilingEngine"/> has no <c>Insert</c>/<c>Remove(WindowRef)</c> -- only
 /// static <see cref="LayoutTree.AddChild(LeafNode,WindowRef,int,int)"/>/<see
 /// cref="LayoutTree.RemoveChild"/> plus mutable <see cref="Node.Parent"/> -- so this adapter owns
-/// root/parent bookkeeping directly. Scoped to a single flat tree; a root already a <see
-/// cref="GroupNode"/> when a third+ window arrives is Phase 3 <c>TreeManager</c> scope, left
-/// untouched here rather than guessed at.
+/// root/parent bookkeeping directly. This adapter owns one flat root group; multi-monitor and
+/// nested-tree policy remain Phase 3 <c>TreeManager</c> scope.
 /// </summary>
 public sealed class WorkspaceSessionAdapter : IDisposable
 {
@@ -55,8 +54,14 @@ public sealed class WorkspaceSessionAdapter : IDisposable
                 _registry.Register(window, insertedLeaf);
                 break;
 
+            case GroupNode existingGroup:
+                var newLeaf = new LeafNode(windowRef);
+                LayoutTree.AddChild(existingGroup, newLeaf, existingGroup.Children.Count);
+                _registry.Register(window, newLeaf);
+                break;
+
             default:
-                return; // 3rd+ window: out of this work unit's scope (see summary).
+                return;
         }
     }
 
