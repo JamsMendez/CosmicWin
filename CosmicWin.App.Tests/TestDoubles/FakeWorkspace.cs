@@ -12,10 +12,7 @@ internal sealed class FakeWorkspace : IWorkspace
     public event EventHandler<WindowEventArgs>? WindowAdded;
     public event EventHandler<WindowEventArgs>? WindowRemoved;
 
-    // Required by IWorkspace; this fake never raises it (no test needs bounds-change events).
-#pragma warning disable CS0067
     public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
-#pragma warning restore CS0067
 
     public bool IsOpen { get; private set; }
 
@@ -31,6 +28,9 @@ internal sealed class FakeWorkspace : IWorkspace
     public void RaiseWindowAdded(IWindow window) => WindowAdded?.Invoke(this, new WindowEventArgs(window));
 
     public void RaiseWindowRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+
+    /// <summary>Simulates the real <c>Win32Workspace</c> raising <see cref="WindowBoundsChanged"/> after an out-of-band move (verify-report #21 V18-W2).</summary>
+    public void RaiseWindowBoundsChanged(IWindow window) => WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
 
     public void Dispose()
     {

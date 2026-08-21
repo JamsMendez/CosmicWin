@@ -121,6 +121,57 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(firstSetCountBeforePause, first.SetPositionCallCount);
     }
 
+    // Verify-report #21 V18-W2: reproduces probe E's shape -- two windows tiled on the SECONDARY
+    // monitor, one dragged (out-of-band, not by hotkey) onto the PRIMARY monitor. Before the fix,
+    // no code path ever observed the drag, so the leaf stayed structurally rooted in the secondary
+    // tree while its real Bounds said primary -- the exact desync that later reproduces V17-W1's
+    // "tree mutates, nothing repositions" transcript on the next hotkey. This proves the drag alone
+    // re-homes the leaf into the tree matching its real position and reflows BOTH affected trees.
+    [Fact]
+    public void WindowBoundsChanged_WindowDraggedFromSecondaryToPrimary_ReHomesLeaf_AndReflowsBothTrees()
+    {
+        var s = TwoDisplays();
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var windowA = new RecordingWindow(new IntPtr(801), Rectangle.FromSize(2000, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(802), Rectangle.FromSize(2000, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+
+        windowB.SimulateExternalMove(Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(windowB);
+
+        s.Trees.TryGetTree(s.Primary, out var primaryTree);
+        s.Trees.TryGetTree(s.Secondary, out var secondaryTree);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(primaryTree!.Root).Window);
+        var secondaryGroup = Assert.IsType<GroupNode>(secondaryTree!.Root);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(Assert.Single(secondaryGroup.Children)).Window);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), windowB.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1920, 0, 1280, 720), windowA.LastSetPosition);
+    }
+
+    // Decision #64 ("full pause, no reconcile"): a drag while paused must not trigger a reflow, the
+    // same way OnWindowAdded and OnWindowRemoved already do not (V18-W2 fix design note).
+    [Fact]
+    public void WindowBoundsChanged_WhilePaused_DoesNotReHomeOrReflow()
+    {
+        var s = TwoDisplays();
+        var paused = false;
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused);
+        var windowA = new RecordingWindow(new IntPtr(901), Rectangle.FromSize(2000, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        var setCountBeforeDrag = windowA.SetPositionCallCount;
+
+        paused = true;
+        windowA.SimulateExternalMove(Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+
+        s.Trees.TryGetTree(s.Primary, out var primaryTree);
+        s.Trees.TryGetTree(s.Secondary, out var secondaryTree);
+        Assert.Null(primaryTree!.Root);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(secondaryTree!.Root).Window);
+        Assert.Equal(setCountBeforeDrag, windowA.SetPositionCallCount);
+    }
+
     [Fact]
     public void Dispose_UnsubscribesFromWorkspaceEvents_LaterAddIsIgnored()
     {

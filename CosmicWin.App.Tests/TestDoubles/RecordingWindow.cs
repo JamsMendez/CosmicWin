@@ -104,6 +104,14 @@ internal sealed class RecordingWindow : IWindow
     /// <summary>Makes the next <see cref="TryActivate"/> call fail without throwing.</summary>
     public void FailNextActivate() => _failNextActivate = true;
 
+    /// <summary>
+    /// Simulates an OUT-OF-BAND move (a mouse drag), the way the real OS reports it: <see
+    /// cref="Bounds"/> changes WITHOUT going through <see cref="SetPosition"/> and without
+    /// incrementing <see cref="SetPositionCallCount"/> -- this is what the WM did NOT do, not what
+    /// it did (verify-report #21 V18-W2).
+    /// </summary>
+    public void SimulateExternalMove(Rectangle bounds) => Bounds = bounds;
+
     public void Kill()
     {
         IsAlive = false;
