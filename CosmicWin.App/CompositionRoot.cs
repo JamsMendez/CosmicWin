@@ -43,9 +43,17 @@ public static class CompositionRoot
     /// -- extracting this joint out of the untestable WPF <see cref="App"/> class, matching the
     /// pattern <see cref="Build"/> already established for <paramref name="executor"/>'s work area.
     /// </summary>
+    /// <remarks>
+    /// V12-W1: <paramref name="isPaused"/> is a MANDATORY parameter -- it used to default to
+    /// never-paused, which meant a future edit could swap a <see cref="BuildPauseGatedSession"/>
+    /// call site for this method and simply omit the last argument, compiling cleanly and silently
+    /// restoring hotkeys-only pause (verify-report #21 mutation MR4). There is no longer a
+    /// never-paused default to fall back on: every caller, including every test, must state its
+    /// gate explicitly (production callers always via <see cref="BuildPauseGatedSession"/>).
+    /// </remarks>
     public static WorkspaceSessionAdapter BuildSessionAdapter(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,
-        ExceptionListStore exceptions, Func<bool>? isPaused = null) =>
+        ExceptionListStore exceptions, Func<bool> isPaused) =>
         new(workspace, tree, registry, () => executor.WorkArea, () => exceptions.Current, isPaused);
 
     /// <summary>
@@ -56,7 +64,10 @@ public static class CompositionRoot
     /// <see cref="BuildSessionAdapter"/>'s <c>isPaused</c> parameter was optional and typed as a
     /// lambda re-written at the untestable <see cref="App"/> call site, so an edit dropping the
     /// argument compiled cleanly and left the whole suite green. <paramref name="hook"/> is a
-    /// mandatory parameter here, so the call site has no isPaused argument left to silently drop.
+    /// mandatory parameter here, so the call site has no isPaused argument left to silently drop --
+    /// and per V12-W1, <see cref="BuildSessionAdapter"/>'s own <c>isPaused</c> parameter is now also
+    /// mandatory, so swapping this factory for that one at the <see cref="App"/> call site no longer
+    /// compiles either.
     /// </summary>
     public static WorkspaceSessionAdapter BuildPauseGatedSession(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,

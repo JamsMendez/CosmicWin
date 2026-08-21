@@ -123,7 +123,8 @@ public sealed class CompositionRootTests
         var exceptionStore = new ExceptionListStore(
             new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Spotify.exe")]));
 
-        using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+        using var adapter = CompositionRoot.BuildSessionAdapter(
+            workspace, tree, registry, executor, exceptionStore, isPaused: () => false);
 
         var spotify = new RecordingWindow(new IntPtr(700), Rectangle.FromSize(0, 0, 800, 600), processName: "Spotify.exe");
         workspace.RaiseWindowAdded(spotify);
@@ -150,7 +151,8 @@ public sealed class CompositionRootTests
         var exceptionStore = new ExceptionListStore(
             new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Spotify.exe")]));
 
-        using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+        using var adapter = CompositionRoot.BuildSessionAdapter(
+            workspace, tree, registry, executor, exceptionStore, isPaused: () => false);
 
         var normal = new RecordingWindow(new IntPtr(701), Rectangle.FromSize(0, 0, 1920, 1080), processName: "chrome.exe");
         workspace.RaiseWindowAdded(normal);
@@ -215,7 +217,8 @@ public sealed class CompositionRootTests
                 new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
                 new Rect(0, 0, 1920, 1080));
             var exceptionStore = new ExceptionListStore(ExceptionListFile.Load(path));
-            using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+            using var adapter = CompositionRoot.BuildSessionAdapter(
+                workspace, tree, registry, executor, exceptionStore, isPaused: () => false);
             using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
             var controller = CompositionRoot.BuildTrayMenuController(
                 hook, exceptionStore, () => ExceptionListFile.Load(path), () => { });

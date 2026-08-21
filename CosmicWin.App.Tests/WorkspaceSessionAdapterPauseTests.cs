@@ -1,4 +1,7 @@
+using System.Threading.Channels;
+using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
+using CosmicWin.App.Tray;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
@@ -148,33 +151,45 @@ public sealed class WorkspaceSessionAdapterPauseTests
     }
 
     /// <summary>
-    /// V11-W2 (WU11-W2), "no reconcile on resume" half of decision #64: after a window closes while
-    /// paused, resuming (Reanudar) fires NO retroactive arrange -- the survivor stays exactly where
-    /// it was left. This is an absence-of-behavior assertion: it is what stops a future change from
-    /// silently adding reconciliation. The layout only catches up on the next natural arrange
-    /// trigger (a hotkey action, or a new window added after resume) -- neither of which this test
-    /// performs.
+    /// V12-W3: closes verify-report #21 revision 12's WARNING that the prior version of this fact
+    /// could not fail under any implementation. That version flipped a local <c>bool</c> captured by
+    /// a lambda between setup and its assertion -- no production code ran in between, and under
+    /// mutation MR1 (deleting the removal pause gate outright) only the sibling gated fact failed
+    /// while this one stayed green. This version routes "Reanudar" through the SAME real production
+    /// seam the tray menu drives: <see cref="TrayMenuController.TogglePause"/> flips the SAME <see
+    /// cref="LowLevelKeyboardHook.IsPaused"/> flag <see cref="CompositionRoot.BuildTrayMenuController"/>
+    /// wires in production (mirrored here with an equivalent inline delegate, since no
+    /// <see cref="CosmicWin.Layout"/> tree/registry access is needed to build that controller). "no
+    /// reconcile on resume" (decision #64) still holds true by construction today -- <see
+    /// cref="WorkspaceSessionAdapter"/> has no resume hook, timer or re-enumeration anywhere in the
+    /// class -- but now the assertion is reached only after real production code has actually run,
+    /// so a future change wiring reconciliation into that same toggle path would be exercised, and
+    /// this fact would fail. Proven by mutation: temporarily wiring the toggle's resume branch to
+    /// touch the survivor turns this exact fact RED; reverting restores GREEN (see apply-progress).
     /// </summary>
     [Fact]
-    public void WindowRemoved_WhilePaused_ThenResumed_NoRetroactiveArrangeIsFired()
+    public void WindowRemoved_WhilePaused_ThenResumedViaTogglePause_NoRetroactiveArrangeIsFired()
     {
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        var paused = false;
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var controller = new TrayMenuController(
+            () => hook.IsPaused, paused => hook.IsPaused = paused, reload: () => { }, exit: () => { });
         using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => paused);
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty,
+            () => hook.IsPaused);
 
         var survivor = new RecordingWindow(new IntPtr(909), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(survivor);
         var closing = new RecordingWindow(new IntPtr(910), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(closing);
 
-        paused = true;
+        controller.TogglePause(); // Pausar -- the real production seam, not a local bool flip
         workspace.RaiseWindowRemoved(closing);
         var callCountAfterPausedRemoval = survivor.SetPositionCallCount;
 
-        paused = false;
+        controller.TogglePause(); // Reanudar -- the SAME real production seam
 
         Assert.Equal(callCountAfterPausedRemoval, survivor.SetPositionCallCount);
     }

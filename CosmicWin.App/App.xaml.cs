@@ -49,9 +49,10 @@ public partial class App : Application
 
         // Task 3.15/3.16 (WU11), settled full-pause semantics: gates new-window auto-tiling the
         // same way the hotkey path is gated, via the SAME hook instance the tray toggles.
-        // V11-W1: BuildPauseGatedSession takes _hook as a mandatory argument -- unlike
-        // BuildSessionAdapter's optional isPaused lambda, there is no argument here a future edit
-        // could silently drop and still compile.
+        // V11-W1: BuildPauseGatedSession takes _hook as a mandatory argument -- there is no argument
+        // here a future edit could silently drop and still compile. V12-W1: BuildSessionAdapter's own
+        // isPaused parameter is also mandatory now, so swapping the call below for that factory
+        // (dropping _hook) is a compile error too, not just an argument-drop on this one.
         _workspace = new Win32Workspace();
         _sessionAdapter = CompositionRoot.BuildPauseGatedSession(
             _workspace, tree, registry, executor, _exceptionStore, _hook);
