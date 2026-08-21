@@ -171,13 +171,22 @@ public sealed class WorkspaceSessionAdapterPauseTests
     /// cref="CompositionRoot.BuildTrayMenuController"/> itself -- the exact factory the tray's
     /// Reanudar menu item drives in production -- so a future production reconcile wired into that
     /// factory's own <c>setPaused</c> delegate is now exercised by this fact, not bypassed by it.
-    /// "No reconcile on resume" (decision #64) still holds true by construction today -- <see
-    /// cref="WorkspaceSessionAdapter"/> has no resume hook, timer or re-enumeration anywhere in the
-    /// class. Proven by mutation: temporarily adding a production-shaped
-    /// <c>WorkspaceSessionAdapter.Reconcile()</c> wired into <see
-    /// cref="CompositionRoot.BuildTrayMenuController"/>'s own <c>setPaused</c> delegate (not a
-    /// delegate this test supplies) turns this exact fact RED; reverting restores GREEN (see
-    /// apply-progress).
+    /// V14-W2 correction: this fact still hand-built the ADAPTER half of the production wiring with
+    /// <c>new WorkspaceSessionAdapter(...)</c>, which is <see
+    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s body retyped by hand -- verify-report #21
+    /// probe P3 showed a genuine production reconcile-on-resume wired at THAT factory (where the
+    /// hook and the adapter are actually coupled) escaped this fact entirely, with zero test edits
+    /// needed to ship it. This version obtains the adapter from <see
+    /// cref="CompositionRoot.BuildPauseGatedSession"/> itself, so BOTH halves of the fact now come
+    /// from production factories, not a mirror. "No reconcile on resume" (decision #64) still holds
+    /// true by construction today -- <see cref="WorkspaceSessionAdapter"/> has no resume hook, timer
+    /// or re-enumeration anywhere in the class. Proven by mutation, twice: (1) V13-W2's own proof --
+    /// temporarily adding a production-shaped <c>WorkspaceSessionAdapter.Reconcile()</c> wired into
+    /// <see cref="CompositionRoot.BuildTrayMenuController"/>'s own <c>setPaused</c> delegate turns
+    /// this exact fact RED; (2) V14-W2's proof -- temporarily wiring that SAME <c>Reconcile()</c>
+    /// into <see cref="CompositionRoot.BuildPauseGatedSession"/> itself (the factory this fact now
+    /// calls) ALSO turns it RED, with NO edit to this file at all -- three production-only edits are
+    /// enough. Reverting either probe restores GREEN (see apply-progress).
     /// </remarks>
     [Fact]
     public void WindowRemoved_WhilePaused_ThenResumedViaTogglePause_NoRetroactiveArrangeIsFired()
@@ -189,9 +198,11 @@ public sealed class WorkspaceSessionAdapterPauseTests
         var exceptions = new ExceptionListStore(ExceptionList.Empty);
         var controller = CompositionRoot.BuildTrayMenuController(
             hook, exceptions, loadExceptions: () => ExceptionList.Empty, exit: () => { });
-        using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty,
-            () => hook.IsPaused);
+        var (_, executor) = CompositionRoot.Build(
+            new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
+            new Rect(0, 0, 1920, 1080));
+        using var adapter = CompositionRoot.BuildPauseGatedSession(
+            workspace, tree, registry, executor, exceptions, hook);
 
         var survivor = new RecordingWindow(new IntPtr(909), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(survivor);
@@ -205,5 +216,33 @@ public sealed class WorkspaceSessionAdapterPauseTests
         controller.TogglePause(); // Reanudar -- the SAME real production seam
 
         Assert.Equal(callCountAfterPausedRemoval, survivor.SetPositionCallCount);
+    }
+
+    /// <summary>
+    /// V14-W2: minimal <see cref="ITilingEngine"/> double so <see
+    /// cref="WindowRemoved_WhilePaused_ThenResumedViaTogglePause_NoRetroactiveArrangeIsFired"/> can
+    /// obtain a real <see cref="ActionExecutor"/> (needed by <see
+    /// cref="CompositionRoot.BuildPauseGatedSession"/>) without depending on hotkey-dispatch
+    /// behavior this fact never exercises. Mirrors the identical double already used by
+    /// <c>CompositionRootTests.RecordingTilingEngine</c>.
+    /// </summary>
+    private sealed class RecordingTilingEngine : ITilingEngine
+    {
+        public FocusResult NextFocus(Direction direction, LeafNode focused) => FocusResult.NoMatch;
+
+        public bool MoveNode(Direction direction, Node focused) => false;
+
+        public bool ToggleAxis(Node focused) => false;
+
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep) => false;
+
+        public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) =>
+            Array.Empty<(WindowRef, Rect)>();
+    }
+
+    /// <summary>V14-W2: minimal <see cref="IForegroundWindowSource"/> double, same reason as <see cref="RecordingTilingEngine"/>.</summary>
+    private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource
+    {
+        public nint GetForegroundHandle() => handle;
     }
 }
