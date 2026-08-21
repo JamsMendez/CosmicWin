@@ -78,4 +78,104 @@ public sealed class WorkspaceSessionAdapterPauseTests
         var leaf = Assert.IsType<LeafNode>(tree.Root);
         Assert.Equal(new WindowRef(existing.Handle), leaf.Window);
     }
+
+    /// <summary>
+    /// V11-W2 (WU11-W2), settled decision #64 "full pause, no reconcile": while paused, closing a
+    /// tracked window still removes its node from the tree and unregisters it -- no dead handle is
+    /// left behind -- but <see cref="TreeArranger.ArrangeAndPosition"/> is NOT invoked, so the
+    /// surviving sibling is left exactly where it was, un-repositioned. The on-screen hole this
+    /// creates (the survivor keeps its stale, now-half-empty geometry) is accepted behavior for
+    /// TC-2, not a defect.
+    /// </summary>
+    [Fact]
+    public void WindowRemoved_WhilePaused_RemovesNodeFromTree_ButDoesNotRearrangeOrRepositionSurvivor()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var paused = false;
+        using var adapter = new WorkspaceSessionAdapter(
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => paused);
+
+        var survivor = new RecordingWindow(new IntPtr(905), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(survivor);
+        var closing = new RecordingWindow(new IntPtr(906), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(closing);
+        var callCountBeforeClose = survivor.SetPositionCallCount;
+
+        paused = true;
+        workspace.RaiseWindowRemoved(closing);
+
+        var group = Assert.IsType<GroupNode>(tree.Root);
+        var remainingLeaf = Assert.IsType<LeafNode>(Assert.Single(group.Children));
+        Assert.Equal(new WindowRef(survivor.Handle), remainingLeaf.Window);
+        Assert.False(registry.TryGetWindow(closing.Handle, out _));
+        Assert.False(registry.TryGetLeaf(closing.Handle, out _));
+        Assert.Equal(callCountBeforeClose, survivor.SetPositionCallCount);
+    }
+
+    /// <summary>
+    /// Regression guard (control case for V11-W2): the unpaused removal path is unchanged from
+    /// pre-existing behavior -- the node is removed AND the survivor is re-arranged and
+    /// repositioned to fill the full work area, exactly as
+    /// <see cref="WorkspaceSessionAdapterTests.WindowRemoved_WithSibling_ReArrangesTree_AndPositionsRemainingLeafToFullWorkArea"/>
+    /// already pins.
+    /// </summary>
+    [Fact]
+    public void WindowRemoved_NotPaused_RemovesNodeFromTree_AndRearrangesAndRepositionsSurvivor()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var paused = false;
+        using var adapter = new WorkspaceSessionAdapter(
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => paused);
+
+        var survivor = new RecordingWindow(new IntPtr(907), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(survivor);
+        var closing = new RecordingWindow(new IntPtr(908), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(closing);
+        var callCountBeforeClose = survivor.SetPositionCallCount;
+
+        workspace.RaiseWindowRemoved(closing);
+
+        var group = Assert.IsType<GroupNode>(tree.Root);
+        var remainingLeaf = Assert.IsType<LeafNode>(Assert.Single(group.Children));
+        Assert.Equal(new WindowRef(survivor.Handle), remainingLeaf.Window);
+        Assert.False(registry.TryGetWindow(closing.Handle, out _));
+        Assert.True(callCountBeforeClose < survivor.SetPositionCallCount);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), survivor.LastSetPosition);
+    }
+
+    /// <summary>
+    /// V11-W2 (WU11-W2), "no reconcile on resume" half of decision #64: after a window closes while
+    /// paused, resuming (Reanudar) fires NO retroactive arrange -- the survivor stays exactly where
+    /// it was left. This is an absence-of-behavior assertion: it is what stops a future change from
+    /// silently adding reconciliation. The layout only catches up on the next natural arrange
+    /// trigger (a hotkey action, or a new window added after resume) -- neither of which this test
+    /// performs.
+    /// </summary>
+    [Fact]
+    public void WindowRemoved_WhilePaused_ThenResumed_NoRetroactiveArrangeIsFired()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var paused = false;
+        using var adapter = new WorkspaceSessionAdapter(
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => paused);
+
+        var survivor = new RecordingWindow(new IntPtr(909), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(survivor);
+        var closing = new RecordingWindow(new IntPtr(910), Rectangle.FromSize(0, 0, 1920, 1080));
+        workspace.RaiseWindowAdded(closing);
+
+        paused = true;
+        workspace.RaiseWindowRemoved(closing);
+        var callCountAfterPausedRemoval = survivor.SetPositionCallCount;
+
+        paused = false;
+
+        Assert.Equal(callCountAfterPausedRemoval, survivor.SetPositionCallCount);
+    }
 }

@@ -142,6 +142,17 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         }
 
         _registry.Remove(handle);
+
+        // V11-W2 (WU11-W2): settled full-pause semantics, "full pause, no reconcile" (decision #64).
+        // Removing the node above always happens -- no dead handle is left in the tree while paused
+        // -- but the reflow that would reposition the surviving windows is skipped entirely, and NOT
+        // fired retroactively on resume (no resume hook exists anywhere in this adapter). The
+        // resulting tree/screen desync is accepted behavior for TC-2, not a defect.
+        if (_isPaused())
+        {
+            return;
+        }
+
         TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
     }
 
