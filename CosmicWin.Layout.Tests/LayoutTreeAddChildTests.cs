@@ -147,4 +147,36 @@ public class LayoutTreeAddChildTests
         Assert.Equal(1920, group.GroupLength);
         Assert.Equal(1920, group.Sizes.Sum());
     }
+
+    // Task 3.4 (MM-3 reparent) needs an overload that inserts an ALREADY-EXISTING Node instance
+    // (e.g. a LeafNode already registered in App's WindowRegistry when a monitor disconnects) --
+    // not the WindowRef overload above, which always builds a brand-new LeafNode and would orphan
+    // the caller's existing registry mapping (the exact bug WU7C part 2 hit and fixed elsewhere).
+    [Fact]
+    public void AddChild_LeafWithExistingNode_PreservesNodeReference_ForCrossTreeReparenting()
+    {
+        var existingLeaf = new LeafNode(new WindowRef(1));
+        var movedNode = new LeafNode(new WindowRef(2));
+
+        var group = LayoutTree.AddChild(existingLeaf, movedNode, regionWidth: 1920, regionHeight: 1080);
+
+        Assert.Same(movedNode, group.Children[1]);
+        Assert.Same(group, movedNode.Parent);
+        Assert.Equal(1920, group.Sizes.Sum());
+    }
+
+    [Fact]
+    public void AddChild_WindowRefOverload_DelegatesToNodeOverload_SameGeometryBehavior()
+    {
+        // Approval-style triangulation: the pre-existing WindowRef overload must keep behaving
+        // identically now that it delegates to the new Node overload (no regression).
+        var existingLeaf = new LeafNode(new WindowRef(10));
+
+        var group = LayoutTree.AddChild(existingLeaf, new WindowRef(20), regionWidth: 1000, regionHeight: 500);
+
+        Assert.Equal(SplitAxis.Horizontal, group.Axis);
+        var inserted = Assert.IsType<LeafNode>(group.Children[1]);
+        Assert.Equal(new WindowRef(20), inserted.Window);
+        Assert.Same(group, inserted.Parent);
+    }
 }

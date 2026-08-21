@@ -87,13 +87,14 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
-    /// Splits <paramref name="leaf"/> into a new <see cref="GroupNode"/> containing the
-    /// original leaf and a new leaf for <paramref name="newWindow"/>, choosing the group's axis
-    /// via <see cref="ChooseSplitAxis"/> (LE-4). Callers are responsible for replacing
-    /// <paramref name="leaf"/> with the returned group in its former position — parent
-    /// back-references are out of scope for this work unit (see WU5).
+    /// Splits <paramref name="leaf"/> into a new <see cref="GroupNode"/> containing the original
+    /// leaf and <paramref name="newNode"/>, choosing the group's axis via
+    /// <see cref="ChooseSplitAxis"/> (LE-4). Takes an existing <see cref="Node"/> (rather than a
+    /// <see cref="WindowRef"/>) so callers that already hold a registered node -- e.g.
+    /// <c>TreeManager</c>'s MM-3 reparent (task 3.4) -- can move it without orphaning an existing
+    /// <c>WindowRegistry</c> mapping.
     /// </summary>
-    public static GroupNode AddChild(LeafNode leaf, WindowRef newWindow, int regionWidth, int regionHeight)
+    public static GroupNode AddChild(LeafNode leaf, Node newNode, int regionWidth, int regionHeight)
     {
         var axis = ChooseSplitAxis(regionWidth, regionHeight);
         int groupLength = axis == SplitAxis.Horizontal ? regionWidth : regionHeight;
@@ -103,10 +104,18 @@ public sealed class LayoutTree : ITilingEngine
         group.Children.Add(leaf);
         group.Sizes.Add(groupLength);
 
-        AddChild(group, new LeafNode(newWindow), index: 1);
+        AddChild(group, newNode, index: 1);
 
         return group;
     }
+
+    /// <summary>
+    /// Convenience overload for the common "a brand-new window arrives" case: wraps
+    /// <paramref name="newWindow"/> in a fresh <see cref="LeafNode"/> and delegates to
+    /// <see cref="AddChild(LeafNode,Node,int,int)"/>.
+    /// </summary>
+    public static GroupNode AddChild(LeafNode leaf, WindowRef newWindow, int regionWidth, int regionHeight) =>
+        AddChild(leaf, new LeafNode(newWindow), regionWidth, regionHeight);
 
     /// <summary>
     /// D3 <c>RemoveChild</c>: removes the child (and its size) at <paramref name="index"/> from
