@@ -8,6 +8,14 @@ namespace CosmicWin.App.Input;
 public sealed class KeyboardEventProcessor(ChordTable chords)
 {
     private readonly bool[] _acceptedKeyDown = new bool[256];
+    private volatile bool _paused;
+
+    /// <summary>Task 3.15/3.16 (WU11), settled full-pause semantics: while <c>true</c>, no chord matches and nothing is written to the dispatcher channel. Written from the tray's UI thread, read from this hook's dedicated STA thread -- <c>volatile</c> mirrors the existing <see cref="LowLevelKeyboardHook"/> <c>_lastActivity</c> pattern.</summary>
+    public bool IsPaused
+    {
+        get => _paused;
+        set => _paused = value;
+    }
 
     public bool Process(
         KeyboardKey key, bool isKeyDown, ModifierKeys modifiers,
@@ -20,6 +28,7 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             _acceptedKeyDown[keyIndex] = false;
             return suppress;
         }
+        if (_paused) return false;
         if (!chords.TryMatch(modifiers, key, out var action)) return false;
         return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
     }
@@ -49,6 +58,13 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private long _lastActivity;
 
     public bool? UnhookSucceeded { get; private set; }
+
+    /// <summary>Task 3.15/3.16 (WU11): pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
+    public bool IsPaused
+    {
+        get => _processor.IsPaused;
+        set => _processor.IsPaused = value;
+    }
 
     public LowLevelKeyboardHook(ChannelWriter<HotkeyAction> writer)
         : this(writer, new WindowsKeyboardHookPlatform(), DefaultWatchdogInterval) { }

@@ -1,4 +1,5 @@
 using CosmicWin.App.Input;
+using CosmicWin.App.Tray;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
@@ -43,6 +44,26 @@ public static class CompositionRoot
     /// pattern <see cref="Build"/> already established for <paramref name="executor"/>'s work area.
     /// </summary>
     public static WorkspaceSessionAdapter BuildSessionAdapter(
-        IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor, ExceptionListStore exceptions) =>
-        new(workspace, tree, registry, () => executor.WorkArea, () => exceptions.Current);
+        IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,
+        ExceptionListStore exceptions, Func<bool>? isPaused = null) =>
+        new(workspace, tree, registry, () => executor.WorkArea, () => exceptions.Current, isPaused);
+
+    /// <summary>
+    /// Tasks 3.16/3.17/3.18/3.36/3.37 (WU11): wires a <see cref="TrayMenuController"/> against the
+    /// SAME <paramref name="hook"/> instance that gates hotkey processing AND (via <see
+    /// cref="BuildSessionAdapter"/>'s <c>isPaused</c> parameter) new-window auto-tiling -- settled
+    /// full-pause semantics (Engram decision #62). <paramref name="loadExceptions"/> mirrors
+    /// <c>workArea</c>/<c>exceptions</c>'s injected-delegate idiom (production wires <see
+    /// cref="ExceptionListFile.Load()"/>) so Reload is testable against an isolated file instead of
+    /// the real on-disk exception list -- closes verify-report #21 V10-W4. <paramref name="exit"/>
+    /// is Salir's trigger; the caller supplies it (WPF's <c>Application.Shutdown</c>) so this class
+    /// stays WPF-free otherwise.
+    /// </summary>
+    public static TrayMenuController BuildTrayMenuController(
+        LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions, Action exit) =>
+        new(
+            () => hook.IsPaused,
+            paused => hook.IsPaused = paused,
+            () => exceptions.Reload(loadExceptions()),
+            exit);
 }

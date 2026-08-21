@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
@@ -159,6 +160,84 @@ public sealed class CompositionRootTests
         Assert.Equal(1, normal.SetPositionCallCount);
         Assert.True(registry.TryGetWindow(normal.Handle, out var found));
         Assert.Same(normal, found);
+    }
+
+    /// <summary>Proves <see cref="CompositionRoot.BuildTrayMenuController"/> wires TogglePause against the REAL <see cref="LowLevelKeyboardHook.IsPaused"/> seam, not a local fake.</summary>
+    [Fact]
+    public void BuildTrayMenuController_TogglePause_FlipsRealHookIsPaused()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var controller = CompositionRoot.BuildTrayMenuController(hook, exceptionStore, () => ExceptionList.Empty, () => { });
+
+        Assert.False(controller.IsPaused);
+        var next = controller.TogglePause();
+
+        Assert.True(next);
+        Assert.True(hook.IsPaused);
+    }
+
+    /// <summary>Task 3.17/3.18 (WU11): Salir's trigger -- <see cref="CompositionRoot.BuildTrayMenuController"/> wires Exit onto the injected exit action exactly once.</summary>
+    [Fact]
+    public void BuildTrayMenuController_Exit_InvokesInjectedExitAction_ExactlyOnce()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var exitCount = 0;
+        var controller = CompositionRoot.BuildTrayMenuController(hook, exceptionStore, () => ExceptionList.Empty, () => exitCount++);
+
+        controller.Exit();
+
+        Assert.Equal(1, exitCount);
+    }
+
+    /// <summary>
+    /// Task 3.36/3.37 (WU11), closes verify-report #21 V10-W4: proves the tray Reload trigger is
+    /// real end-to-end, through <see cref="TrayMenuController"/> and the SAME <see
+    /// cref="ExceptionListStore"/> a real <see cref="WorkspaceSessionAdapter"/> reads from -- not
+    /// just <see cref="ExceptionListStore"/> in isolation. Mirrors spec WE-3's own scenario
+    /// ("Removing an exception restores tiling"). Uses an isolated temp file (matching the existing
+    /// <c>ExceptionListFileTests</c> precedent) so no test ever touches the real on-disk
+    /// <c>%LOCALAPPDATA%</c> exception list -- <paramref name="loadExceptions"/>-style injection is
+    /// what makes that isolation possible without changing the production wiring's behavior.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_ReReadsInjectedSource_AndSessionAdapterSeesUpdatedExclusion()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"cosmicwin-tray-reload-{Guid.NewGuid():N}.conf");
+        File.WriteAllText(path, "process:Spotify.exe\n");
+        try
+        {
+            var workspace = new FakeWorkspace();
+            var tree = new LayoutTree();
+            var registry = new WindowRegistry();
+            var (_, executor) = CompositionRoot.Build(
+                new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
+                new Rect(0, 0, 1920, 1080));
+            var exceptionStore = new ExceptionListStore(ExceptionListFile.Load(path));
+            using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+            using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+            var controller = CompositionRoot.BuildTrayMenuController(
+                hook, exceptionStore, () => ExceptionListFile.Load(path), () => { });
+
+            var before = new RecordingWindow(new IntPtr(910), Rectangle.FromSize(0, 0, 800, 600), processName: "Spotify.exe");
+            workspace.RaiseWindowAdded(before);
+            Assert.Null(tree.Root);
+
+            File.WriteAllText(path, string.Empty);
+            controller.Reload();
+
+            var after = new RecordingWindow(new IntPtr(911), Rectangle.FromSize(0, 0, 800, 600), processName: "Spotify.exe");
+            workspace.RaiseWindowAdded(after);
+
+            var leaf = Assert.IsType<LeafNode>(tree.Root);
+            Assert.Equal(new WindowRef(after.Handle), leaf.Window);
+            Assert.Equal(1, after.SetPositionCallCount);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     private sealed class RecordingTilingEngine : ITilingEngine

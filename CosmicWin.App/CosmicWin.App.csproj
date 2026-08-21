@@ -8,7 +8,15 @@
     <RootNamespace>CosmicWin.App</RootNamespace>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Task 3.16 (WU11): UseWindowsForms implicitly globals System.Drawing/System.Windows.Forms,
+         which collide with CosmicWin.Interop.Rectangle and WPF's System.Windows.Application across
+         the rest of this project. Scope both back down to an explicit `using` in Tray/TrayIconHost.cs. -->
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.321" PrivateAssets="all" />
   </ItemGroup>

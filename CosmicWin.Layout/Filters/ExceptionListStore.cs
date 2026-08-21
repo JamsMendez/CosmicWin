@@ -17,4 +17,7 @@ public sealed class ExceptionListStore
 
     /// <summary>Re-parses <paramref name="content"/> and replaces <see cref="Current"/> with the result.</summary>
     public void Reload(string content) => Current = ExceptionListLoader.Parse(content);
+
+    /// <summary>Task 3.37: replaces <see cref="Current"/> with an already-parsed list (e.g. from an on-disk file loader), for callers that read raw text themselves rather than handing it to this store.</summary>
+    public void Reload(ExceptionList replacement) => Current = replacement;
 }

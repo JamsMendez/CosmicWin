@@ -84,6 +84,49 @@ public sealed class KeyboardHookTests
         Assert.Equal(1, channel.Reader.Count);
     }
 
+    /// <summary>Task 3.15/3.16 (WU11), settled full-pause semantics: Pausar gates hotkey matching entirely -- a registered chord is neither suppressed nor written to the channel while paused.</summary>
+    [Fact]
+    public void Process_WhilePaused_NeverMatchesAnyChord_AndNeverWritesToChannel()
+    {
+        var channel = Channel.CreateBounded<HotkeyAction>(1);
+        var processor = new KeyboardEventProcessor(ChordTable.Default) { IsPaused = true };
+
+        var suppressed = processor.Process(KeyboardKey.H, true, ModifierKeys.Alt, channel.Writer);
+
+        Assert.False(suppressed);
+        Assert.False(channel.Reader.TryRead(out _));
+    }
+
+    /// <summary>Reanudar restores hotkeys identically to the never-paused baseline (spec TC-2 "Reanudar restores hotkeys").</summary>
+    [Fact]
+    public void Process_AfterUnpause_MatchesChordsAgainIdenticallyToBaseline()
+    {
+        var channel = Channel.CreateBounded<HotkeyAction>(1);
+        var processor = new KeyboardEventProcessor(ChordTable.Default) { IsPaused = true };
+        processor.Process(KeyboardKey.L, true, ModifierKeys.Alt, channel.Writer);
+
+        processor.IsPaused = false;
+        var suppressed = processor.Process(KeyboardKey.L, true, ModifierKeys.Alt, channel.Writer);
+
+        Assert.True(suppressed);
+        Assert.True(channel.Reader.TryRead(out var action));
+        Assert.Equal(HotkeyActionKind.FocusRight, action.Kind);
+    }
+
+    /// <summary>Smoke-level: <see cref="LowLevelKeyboardHook.IsPaused"/> is a pass-through onto the underlying processor -- the tray writes through the hook, never the processor directly.</summary>
+    [Fact]
+    public void IsPaused_OnLowLevelKeyboardHook_PassesThroughToUnderlyingProcessor()
+    {
+        var platform = new FakeKeyboardHookPlatform();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => 0);
+
+        Assert.False(hook.IsPaused);
+        hook.IsPaused = true;
+
+        Assert.True(hook.IsPaused);
+    }
+
     [Fact]
     public void Watchdog_ReinstallsOnlyAfterFiveSecondsWithoutKeyboardActivity()
     {

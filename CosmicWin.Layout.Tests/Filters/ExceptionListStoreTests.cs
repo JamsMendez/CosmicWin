@@ -61,4 +61,17 @@ public class ExceptionListStoreTests
         Assert.NotSame(afterFirstReload, store.Current);
         Assert.False(store.Current.Matches(SpotifyWindow()));
     }
+
+    /// <summary>Task 3.37 (WU11): the tray's Reload wiring supplies an already-parsed <see cref="ExceptionList"/> (e.g. from a file loader) rather than raw text -- an overload accepting one directly.</summary>
+    [Fact]
+    public void Reload_ExceptionListOverload_ReplacesCurrent_WithTheGivenInstance()
+    {
+        var store = new ExceptionListStore(ExceptionList.Empty);
+        var replacement = ExceptionListLoader.Parse("process:Spotify.exe");
+
+        store.Reload(replacement);
+
+        Assert.Same(replacement, store.Current);
+        Assert.True(store.Current.Matches(SpotifyWindow()));
+    }
 }

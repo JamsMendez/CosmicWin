@@ -35,15 +35,25 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     private readonly WindowRegistry _registry;
     private readonly Func<Rect> _workArea;
     private readonly Func<ExceptionList> _exceptions;
+    private readonly Func<bool> _isPaused;
 
-    /// <summary>Task 3.32: <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.</summary>
-    public WorkspaceSessionAdapter(IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea, Func<ExceptionList> exceptions)
+    /// <summary>
+    /// Task 3.32: <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.
+    /// Task 3.15/3.16 (WU11), settled full-pause semantics: <paramref name="isPaused"/> mirrors the
+    /// same idiom -- while it reports <c>true</c>, a newly-created window is NOT auto-tiled (same
+    /// creation-time-only, forward-only rule as exclusion). Optional and defaults to never-paused so
+    /// existing call sites that predate the tray (WU11) keep compiling unchanged.
+    /// </summary>
+    public WorkspaceSessionAdapter(
+        IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea,
+        Func<ExceptionList> exceptions, Func<bool>? isPaused = null)
     {
         _workspace = workspace;
         _tree = tree;
         _registry = registry;
         _workArea = workArea;
         _exceptions = exceptions;
+        _isPaused = isPaused ?? (() => false);
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;
@@ -54,6 +64,14 @@ public sealed class WorkspaceSessionAdapter : IDisposable
 
     private void OnWindowAdded(object? sender, WindowEventArgs e)
     {
+        // Task 3.15/3.16 (WU11): settled full-pause semantics -- a window opened while paused is
+        // NOT auto-tiled, and is not retroactively pulled in once Reanudar is clicked (same
+        // creation-time-only, forward-only rule the exclusion guard below already applies).
+        if (_isPaused())
+        {
+            return;
+        }
+
         var window = e.Window;
 
         // Task 3.32: spec WT-3/WE-1/WE-2, closes verify-report #21 N1. Creation-time only -- an
