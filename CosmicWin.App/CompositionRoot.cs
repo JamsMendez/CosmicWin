@@ -1,5 +1,7 @@
 using CosmicWin.App.Input;
+using CosmicWin.Interop;
 using CosmicWin.Layout;
+using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App;
 
@@ -32,4 +34,15 @@ public static class CompositionRoot
         var dispatcher = new ActionDispatcher(executor);
         return (dispatcher, executor);
     }
+
+    /// <summary>
+    /// Task V10-W2: wires a <see cref="WorkspaceSessionAdapter"/> against the SAME executor-held
+    /// work area <see cref="Build"/> assigned (single source of truth, unchanged from 2.27) and the
+    /// SAME <paramref name="exceptions"/> store <see cref="App.OnStartup"/> loaded from disk (WE-2)
+    /// -- extracting this joint out of the untestable WPF <see cref="App"/> class, matching the
+    /// pattern <see cref="Build"/> already established for <paramref name="executor"/>'s work area.
+    /// </summary>
+    public static WorkspaceSessionAdapter BuildSessionAdapter(
+        IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor, ExceptionListStore exceptions) =>
+        new(workspace, tree, registry, () => executor.WorkArea, () => exceptions.Current);
 }

@@ -2,6 +2,7 @@ using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
+using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App.Tests;
 
@@ -99,6 +100,65 @@ public sealed class CompositionRootTests
 
         Assert.NotEqual(default, executor.WorkArea);
         Assert.Equal(new Rect(0, 0, 1920, 1040), executor.WorkArea);
+    }
+
+    /// <summary>
+    /// V10-W2: the composition-root joint at <c>App.xaml.cs</c> that wires <c>() =>
+    /// _exceptionStore.Current</c> into <see cref="WorkspaceSessionAdapter"/> had zero coverage --
+    /// a mutation replacing that delegate with a constant <see cref="ExceptionList.Empty"/> passed
+    /// the entire suite, silently discarding the user's whole on-disk exception list. Extracted to
+    /// <see cref="CompositionRoot.BuildSessionAdapter"/> (same seam pattern as <c>workArea</c>) so
+    /// this joint is testable outside the untestable WPF <see cref="App"/> class.
+    /// </summary>
+    [Fact]
+    public void BuildSessionAdapter_ReadsExceptionStoreCurrent_ExcludingManuallyListedWindow()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var (_, executor) = CompositionRoot.Build(
+            new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
+            new Rect(0, 0, 1920, 1080));
+        var exceptionStore = new ExceptionListStore(
+            new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Spotify.exe")]));
+
+        using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+
+        var spotify = new RecordingWindow(new IntPtr(700), Rectangle.FromSize(0, 0, 800, 600), processName: "Spotify.exe");
+        workspace.RaiseWindowAdded(spotify);
+
+        Assert.Null(tree.Root);
+        Assert.False(registry.TryGetWindow(spotify.Handle, out _));
+    }
+
+    /// <summary>
+    /// Triangulation companion: a window NOT on the store's exception list must still be added and
+    /// arranged against the SAME executor work area <see cref="Build"/> assigned -- proving
+    /// <see cref="CompositionRoot.BuildSessionAdapter"/> genuinely reads <c>exceptions.Current</c>
+    /// each call (not merely returning a constant that happens to differ from the excluded case).
+    /// </summary>
+    [Fact]
+    public void BuildSessionAdapter_NormalWindow_NotOnExceptionList_StillAddedAndArranged()
+    {
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var (_, executor) = CompositionRoot.Build(
+            new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
+            new Rect(0, 0, 1920, 1080));
+        var exceptionStore = new ExceptionListStore(
+            new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Spotify.exe")]));
+
+        using var adapter = CompositionRoot.BuildSessionAdapter(workspace, tree, registry, executor, exceptionStore);
+
+        var normal = new RecordingWindow(new IntPtr(701), Rectangle.FromSize(0, 0, 1920, 1080), processName: "chrome.exe");
+        workspace.RaiseWindowAdded(normal);
+
+        var leaf = Assert.IsType<LeafNode>(tree.Root);
+        Assert.Equal(new WindowRef(normal.Handle), leaf.Window);
+        Assert.Equal(1, normal.SetPositionCallCount);
+        Assert.True(registry.TryGetWindow(normal.Handle, out var found));
+        Assert.Same(normal, found);
     }
 
     private sealed class RecordingTilingEngine : ITilingEngine

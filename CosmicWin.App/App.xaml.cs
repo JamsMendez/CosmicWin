@@ -45,7 +45,7 @@ public partial class App : Application
         _exceptionStore = new ExceptionListStore(ExceptionListFile.Load());
 
         _workspace = new Win32Workspace();
-        _sessionAdapter = new WorkspaceSessionAdapter(_workspace, tree, registry, () => executor.WorkArea, () => _exceptionStore.Current);
+        _sessionAdapter = CompositionRoot.BuildSessionAdapter(_workspace, tree, registry, executor, _exceptionStore);
         _workspace.Open();
 
         _hook = new LowLevelKeyboardHook(dispatcher.Writer);
