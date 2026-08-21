@@ -48,8 +48,15 @@ public static class CompositionRoot
     /// never-paused, which meant a future edit could swap a <see cref="BuildPauseGatedSession"/>
     /// call site for this method and simply omit the last argument, compiling cleanly and silently
     /// restoring hotkeys-only pause (verify-report #21 mutation MR4). There is no longer a
-    /// never-paused default to fall back on: every caller, including every test, must state its
-    /// gate explicitly (production callers always via <see cref="BuildPauseGatedSession"/>).
+    /// never-paused default to fall back on at THIS factory: every caller of
+    /// <see cref="BuildSessionAdapter"/> must state its gate explicitly (production callers always
+    /// via <see cref="BuildPauseGatedSession"/>). V13-W1 correction: this factory being mandatory
+    /// did NOT, by itself, make every caller state its gate -- the underlying <see
+    /// cref="WorkspaceSessionAdapter"/> constructor this factory delegates to still defaulted
+    /// <c>isPaused</c> to never-paused, so a caller that bypassed this factory entirely and
+    /// constructed the adapter directly still compiled with the gate silently omitted
+    /// (verify-report #21 probe P2). That terminal defaulting site is now also mandatory (V13-W1),
+    /// so the claim above is finally true at every layer, not just this one.
     /// </remarks>
     public static WorkspaceSessionAdapter BuildSessionAdapter(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,
@@ -67,7 +74,10 @@ public static class CompositionRoot
     /// mandatory parameter here, so the call site has no isPaused argument left to silently drop --
     /// and per V12-W1, <see cref="BuildSessionAdapter"/>'s own <c>isPaused</c> parameter is now also
     /// mandatory, so swapping this factory for that one at the <see cref="App"/> call site no longer
-    /// compiles either.
+    /// compiles either. Per V13-W1, <see cref="WorkspaceSessionAdapter"/>'s own constructor
+    /// <c>isPaused</c> parameter is now ALSO mandatory, so bypassing both factories and constructing
+    /// the adapter directly at the <see cref="App"/> call site no longer compiles either -- the
+    /// permissive default is gone at every layer of this chain.
     /// </summary>
     public static WorkspaceSessionAdapter BuildPauseGatedSession(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,

@@ -41,19 +41,31 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     /// Task 3.32: <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.
     /// Task 3.15/3.16 (WU11), settled full-pause semantics: <paramref name="isPaused"/> mirrors the
     /// same idiom -- while it reports <c>true</c>, a newly-created window is NOT auto-tiled (same
-    /// creation-time-only, forward-only rule as exclusion). Optional and defaults to never-paused so
-    /// existing call sites that predate the tray (WU11) keep compiling unchanged.
+    /// creation-time-only, forward-only rule as exclusion).
     /// </summary>
+    /// <remarks>
+    /// V13-W1: <paramref name="isPaused"/> is a MANDATORY parameter -- it used to default to
+    /// never-paused (<c>Func&lt;bool&gt;? isPaused = null</c>), which was the terminal defaulting
+    /// site behind two prior closures one layer up: V11-W1 made <see
+    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s <c>hook</c> mandatory, and V12-W1 made <see
+    /// cref="CompositionRoot.BuildSessionAdapter"/>'s <c>isPaused</c> mandatory -- but both still
+    /// delegated to THIS constructor, which kept forgiving omission. Inlining this constructor
+    /// directly at the <see cref="App"/> call site (bypassing both factories) compiled clean and
+    /// silently restored hotkeys-only pause for a third pass (verify-report #21 probe P2). There is
+    /// no permissive default left at any layer of this chain now: production callers always go
+    /// through <see cref="CompositionRoot.BuildPauseGatedSession"/>, and every direct construction
+    /// site in the test suite (production has none) states its gate explicitly.
+    /// </remarks>
     public WorkspaceSessionAdapter(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea,
-        Func<ExceptionList> exceptions, Func<bool>? isPaused = null)
+        Func<ExceptionList> exceptions, Func<bool> isPaused)
     {
         _workspace = workspace;
         _tree = tree;
         _registry = registry;
         _workArea = workArea;
         _exceptions = exceptions;
-        _isPaused = isPaused ?? (() => false);
+        _isPaused = isPaused;
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;

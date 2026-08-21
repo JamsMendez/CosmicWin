@@ -21,7 +21,7 @@ public sealed class WorkspaceSessionAdapterFilterTests
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
         using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var shellTray = new RecordingWindow(
             new IntPtr(500),
@@ -48,7 +48,7 @@ public sealed class WorkspaceSessionAdapterFilterTests
         var registry = new WindowRegistry();
         var exceptions = new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Spotify.exe")]);
         using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => exceptions);
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => exceptions, () => false);
 
         // Deliberately tileable (fake defaults) so only the manual exception excludes it.
         var spotify = new RecordingWindow(
@@ -71,7 +71,7 @@ public sealed class WorkspaceSessionAdapterFilterTests
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
         using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var normal = new RecordingWindow(new IntPtr(520), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(normal);
@@ -91,7 +91,7 @@ public sealed class WorkspaceSessionAdapterFilterTests
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
         using var adapter = new WorkspaceSessionAdapter(
-            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+            workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var shellTray = new RecordingWindow(
             new IntPtr(530),

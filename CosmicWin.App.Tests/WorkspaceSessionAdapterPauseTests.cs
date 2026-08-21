@@ -155,18 +155,30 @@ public sealed class WorkspaceSessionAdapterPauseTests
     /// could not fail under any implementation. That version flipped a local <c>bool</c> captured by
     /// a lambda between setup and its assertion -- no production code ran in between, and under
     /// mutation MR1 (deleting the removal pause gate outright) only the sibling gated fact failed
-    /// while this one stayed green. This version routes "Reanudar" through the SAME real production
-    /// seam the tray menu drives: <see cref="TrayMenuController.TogglePause"/> flips the SAME <see
-    /// cref="LowLevelKeyboardHook.IsPaused"/> flag <see cref="CompositionRoot.BuildTrayMenuController"/>
-    /// wires in production (mirrored here with an equivalent inline delegate, since no
-    /// <see cref="CosmicWin.Layout"/> tree/registry access is needed to build that controller). "no
-    /// reconcile on resume" (decision #64) still holds true by construction today -- <see
-    /// cref="WorkspaceSessionAdapter"/> has no resume hook, timer or re-enumeration anywhere in the
-    /// class -- but now the assertion is reached only after real production code has actually run,
-    /// so a future change wiring reconciliation into that same toggle path would be exercised, and
-    /// this fact would fail. Proven by mutation: temporarily wiring the toggle's resume branch to
-    /// touch the survivor turns this exact fact RED; reverting restores GREEN (see apply-progress).
+    /// while this one stayed green.
     /// </summary>
+    /// <remarks>
+    /// V13-W2: the V12-W3 rewrite routed "Reanudar" through <see
+    /// cref="TrayMenuController.TogglePause"/> against a real <see cref="LowLevelKeyboardHook"/>, but
+    /// built its own <see cref="TrayMenuController"/> instance with an inline delegate
+    /// "mirrored...to be an equivalent" of <see cref="CompositionRoot.BuildTrayMenuController"/>'s
+    /// own wiring, rather than obtaining the controller FROM that factory. That pinned the hand-
+    /// written mirror, not the real production seam: verify-report #21 probe P4 showed a genuine
+    /// production-shaped reconcile-on-resume, wired through <see
+    /// cref="CompositionRoot.BuildTrayMenuController"/>'s real <c>setPaused</c> delegate and invoked
+    /// from <see cref="App"/>, compiled clean and stayed green against the V12-W3 version of this
+    /// fact. This version obtains the controller directly from <see
+    /// cref="CompositionRoot.BuildTrayMenuController"/> itself -- the exact factory the tray's
+    /// Reanudar menu item drives in production -- so a future production reconcile wired into that
+    /// factory's own <c>setPaused</c> delegate is now exercised by this fact, not bypassed by it.
+    /// "No reconcile on resume" (decision #64) still holds true by construction today -- <see
+    /// cref="WorkspaceSessionAdapter"/> has no resume hook, timer or re-enumeration anywhere in the
+    /// class. Proven by mutation: temporarily adding a production-shaped
+    /// <c>WorkspaceSessionAdapter.Reconcile()</c> wired into <see
+    /// cref="CompositionRoot.BuildTrayMenuController"/>'s own <c>setPaused</c> delegate (not a
+    /// delegate this test supplies) turns this exact fact RED; reverting restores GREEN (see
+    /// apply-progress).
+    /// </remarks>
     [Fact]
     public void WindowRemoved_WhilePaused_ThenResumedViaTogglePause_NoRetroactiveArrangeIsFired()
     {
@@ -174,8 +186,9 @@ public sealed class WorkspaceSessionAdapterPauseTests
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
         using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
-        var controller = new TrayMenuController(
-            () => hook.IsPaused, paused => hook.IsPaused = paused, reload: () => { }, exit: () => { });
+        var exceptions = new ExceptionListStore(ExceptionList.Empty);
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptions, loadExceptions: () => ExceptionList.Empty, exit: () => { });
         using var adapter = new WorkspaceSessionAdapter(
             workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty,
             () => hook.IsPaused);

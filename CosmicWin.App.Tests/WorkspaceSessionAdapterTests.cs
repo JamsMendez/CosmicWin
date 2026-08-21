@@ -21,7 +21,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var window = new RecordingWindow(new IntPtr(1), Rectangle.FromSize(0, 0, 800, 600));
         workspace.RaiseWindowAdded(window);
@@ -41,7 +41,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var first = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(first);
@@ -70,7 +70,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
         var windows = Enumerable.Range(1, windowCount)
             .Select(index => new RecordingWindow(
                 new IntPtr(index * 10),
@@ -101,7 +101,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
         var windows = Enumerable.Range(1, 4)
             .Select(index => new RecordingWindow(
                 new IntPtr(index * 10),
@@ -136,7 +136,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var first = new RecordingWindow(new IntPtr(30), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(first);
@@ -159,7 +159,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var only = new RecordingWindow(new IntPtr(50), Rectangle.FromSize(0, 0, 800, 600));
         workspace.RaiseWindowAdded(only);
@@ -186,7 +186,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var first = new RecordingWindow(new IntPtr(80), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(first);
@@ -209,7 +209,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 1920, 1080), () => ExceptionList.Empty, () => false);
 
         var first = new RecordingWindow(new IntPtr(100), Rectangle.FromSize(0, 0, 1920, 1080));
         workspace.RaiseWindowAdded(first);
@@ -234,7 +234,7 @@ public sealed class WorkspaceSessionAdapterTests
         var workspace = new FakeWorkspace();
         var tree = new LayoutTree();
         var registry = new WindowRegistry();
-        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 400, 1000), () => ExceptionList.Empty);
+        using var adapter = new WorkspaceSessionAdapter(workspace, tree, registry, () => new Rect(0, 0, 400, 1000), () => ExceptionList.Empty, () => false);
 
         var first = new RecordingWindow(new IntPtr(120), Rectangle.FromSize(0, 0, 400, 1000));
         workspace.RaiseWindowAdded(first);

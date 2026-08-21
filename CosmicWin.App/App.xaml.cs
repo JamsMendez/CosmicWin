@@ -52,7 +52,9 @@ public partial class App : Application
         // V11-W1: BuildPauseGatedSession takes _hook as a mandatory argument -- there is no argument
         // here a future edit could silently drop and still compile. V12-W1: BuildSessionAdapter's own
         // isPaused parameter is also mandatory now, so swapping the call below for that factory
-        // (dropping _hook) is a compile error too, not just an argument-drop on this one.
+        // (dropping _hook) is a compile error too, not just an argument-drop on this one. V13-W1:
+        // WorkspaceSessionAdapter's own constructor isPaused parameter is ALSO mandatory now, so
+        // even inlining the constructor directly here (bypassing both factories) no longer compiles.
         _workspace = new Win32Workspace();
         _sessionAdapter = CompositionRoot.BuildPauseGatedSession(
             _workspace, tree, registry, executor, _exceptionStore, _hook);
