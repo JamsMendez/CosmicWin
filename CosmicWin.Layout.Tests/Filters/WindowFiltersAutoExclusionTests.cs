@@ -62,4 +62,16 @@ public class WindowFiltersAutoExclusionTests
 
         Assert.False(WindowFilters.IsAutoExcluded(descriptor));
     }
+
+    [Fact]
+    public void IsAutoExcluded_UnownedWindowLackingBothMaximizeAndMinimizeBox_ReturnsFalse()
+    {
+        // Pins WE-1's "owned windows lacking WS_MAXIMIZEBOX/WS_MINIMIZEBOX (dialogs)" restriction
+        // (verify-report #21 rev 9 V9-W2): an UNOWNED fixed-size top-level window that merely
+        // cannot be maximized or minimized is a legitimate window, not the dialog shape WE-1
+        // targets, and must NOT be auto-excluded — only OWNED windows lacking both boxes qualify.
+        var descriptor = Normal() with { Style = WindowStyleFlags.SystemMenu, IsOwned = false };
+
+        Assert.False(WindowFilters.IsAutoExcluded(descriptor));
+    }
 }

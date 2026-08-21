@@ -65,4 +65,32 @@ public class WindowFiltersExceptionTests
 
         Assert.False(WindowFilters.IsExcluded(descriptor, exceptions));
     }
+
+    [Fact]
+    public void IsExcluded_AutoExcludedWindow_ReturnsTrue_EvenWithEmptyExceptionList()
+    {
+        // Pins WE-1's own contribution to the composed IsExcluded entry point (verify-report #21
+        // rev 9 V9-W1): every other test in this file uses a deliberately tileable descriptor, so
+        // IsAutoExcluded is always false here and the WE-1 disjunct is never exercised. This case
+        // presents a ToolWindow-ex-style descriptor with an EMPTY exception list — only the WE-1
+        // half of the OR can produce true, proving WE-2 exceptions apply "in addition to" WE-1
+        // rather than replacing it.
+        var descriptor = TileableSpotifyWindow() with { ExStyle = WindowStyleFlags.ExToolWindow };
+        var exceptions = new ExceptionList([]);
+
+        Assert.True(WindowFilters.IsExcluded(descriptor, exceptions));
+    }
+
+    [Fact]
+    public void IsExcluded_ProcessNameInExceptionList_MatchesRegardlessOfCase()
+    {
+        // Pins ExceptionRule's documented case-insensitive matching (ExceptionRule.cs — every rule
+        // kind is declared case-insensitive) for a hand-edited config file (verify-report #21 rev 9
+        // V9-W3). Every other test in this file uses exact-case values; this rule value differs
+        // only in case from the real process name and must still match.
+        var descriptor = TileableSpotifyWindow();
+        var exceptions = new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "spotify.exe")]);
+
+        Assert.True(WindowFilters.IsExcluded(descriptor, exceptions));
+    }
 }
