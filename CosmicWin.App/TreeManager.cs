@@ -39,6 +39,28 @@ public sealed class TreeManager
     /// <summary><see langword="false"/> for an unknown/disconnected monitor handle.</summary>
     public bool TryGetTree(IDisplay display, out LayoutTree? tree) => _trees.TryGetValue(display.Handle, out tree);
 
+    /// <summary>The display currently treated as primary (see <see cref="SetPrimary"/>).</summary>
+    public IDisplay Primary => _displays[_primaryHandle];
+
+    /// <summary>WU17 (closes W3, MM-1): resolves which connected monitor <paramref name="windowBounds"/> belongs to (whose <see cref="IDisplay.Bounds"/> contains the window's center), falling back to <see cref="Primary"/> when none match (e.g. an off-screen rect), mirroring MM-3's reparent-into-primary fail-safe.</summary>
+    public IDisplay ResolveDisplay(Rectangle windowBounds)
+    {
+        var centerX = windowBounds.Left + windowBounds.Width / 2;
+        var centerY = windowBounds.Top + windowBounds.Height / 2;
+
+        foreach (var display in _displays.Values)
+        {
+            var bounds = display.Bounds;
+            if (centerX >= bounds.Left && centerX < bounds.Right &&
+                centerY >= bounds.Top && centerY < bounds.Bottom)
+            {
+                return display;
+            }
+        }
+
+        return Primary;
+    }
+
     /// <summary>
     /// MM-2: a newly-connected monitor gets a fresh, empty tree. No-op if the handle is already
     /// known (e.g. a duplicate connect notification) -- never replaces an existing tree, so an

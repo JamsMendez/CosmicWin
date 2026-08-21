@@ -89,20 +89,31 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         // Task 3.32: spec WT-3/WE-1/WE-2, closes verify-report #21 N1. Creation-time only -- an
         // already-tracked window newly excluded by a later Reload is NOT retroactively removed
         // (WU10 documented scope boundary).
-        var descriptor = WindowDescriptorBuilder.Build(window);
-        if (WindowFilters.IsExcluded(descriptor, _exceptions()))
+        if (IsExcluded(window, _exceptions()))
         {
             return;
         }
 
+        var workArea = _workArea();
+        InsertWindow(_tree, _registry, workArea, window);
+        TreeArranger.ArrangeAndPosition(_tree, _registry, workArea);
+    }
+
+    /// <summary>Task 3.32 exclusion check, extracted (WU17) so <see cref="MultiMonitorWorkspaceAdapter"/> can share it verbatim rather than re-implement it.</summary>
+    internal static bool IsExcluded(IWindow window, ExceptionList exceptions) =>
+        WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptions);
+
+    /// <summary>Add-side tree mutation (W1's split-region heuristic included), extracted (WU17) so <see cref="MultiMonitorWorkspaceAdapter"/> reuses the exact same, already-pinned logic for any resolved per-monitor <paramref name="tree"/>.</summary>
+    internal static void InsertWindow(LayoutTree tree, WindowRegistry registry, Rect workArea, IWindow window)
+    {
         var windowRef = new WindowRef(window.Handle);
 
-        switch (_tree.Root)
+        switch (tree.Root)
         {
             case null:
                 var root = new LeafNode(windowRef);
-                _tree.Root = root;
-                _registry.Register(window, root);
+                tree.Root = root;
+                registry.Register(window, root);
                 break;
 
             case LeafNode existingLeaf:
@@ -111,49 +122,28 @@ public sealed class WorkspaceSessionAdapter : IDisposable
                 // not the newly-arriving window's own Bounds.
                 var region = existingLeaf.LastGeometry is { Width: > 0, Height: > 0 } geometry
                     ? geometry
-                    : _workArea();
+                    : workArea;
                 var group = LayoutTree.AddChild(existingLeaf, windowRef, region.Width, region.Height);
-                _tree.Root = group;
+                tree.Root = group;
                 // AddChild builds its own LeafNode internally -- register that exact instance.
                 var insertedLeaf = (LeafNode)group.Children[^1];
-                _registry.Register(window, insertedLeaf);
+                registry.Register(window, insertedLeaf);
                 break;
 
             case GroupNode existingGroup:
                 var newLeaf = new LeafNode(windowRef);
                 LayoutTree.AddChild(existingGroup, newLeaf, existingGroup.Children.Count);
-                _registry.Register(window, newLeaf);
+                registry.Register(window, newLeaf);
                 break;
-
-            default:
-                return;
         }
-
-        TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
     }
 
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
     {
-        var handle = e.Window.Handle;
-        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        if (!RemoveWindow(_tree, _registry, e.Window.Handle))
         {
             return;
         }
-
-        if (leaf.Parent is { } parent)
-        {
-            var index = parent.Children.IndexOf(leaf);
-            if (index >= 0)
-            {
-                LayoutTree.RemoveChild(parent, index);
-            }
-        }
-        else if (ReferenceEquals(_tree.Root, leaf))
-        {
-            _tree.Root = null;
-        }
-
-        _registry.Remove(handle);
 
         // V11-W2 (WU11-W2): settled full-pause semantics, "full pause, no reconcile" (decision #64).
         // Removing the node above always happens -- no dead handle is left in the tree while paused
@@ -166,6 +156,31 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         }
 
         TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
+    }
+
+    /// <summary>Remove-side tree mutation, extracted (WU17) for <see cref="MultiMonitorWorkspaceAdapter"/> reuse. Returns <see langword="false"/> for a stale/unknown handle -- callers must skip their own reflow in that case.</summary>
+    internal static bool RemoveWindow(LayoutTree tree, WindowRegistry registry, nint handle)
+    {
+        if (!registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return false;
+        }
+
+        if (leaf.Parent is { } parent)
+        {
+            var index = parent.Children.IndexOf(leaf);
+            if (index >= 0)
+            {
+                LayoutTree.RemoveChild(parent, index);
+            }
+        }
+        else if (ReferenceEquals(tree.Root, leaf))
+        {
+            tree.Root = null;
+        }
+
+        registry.Remove(handle);
+        return true;
     }
 
     public void Dispose()

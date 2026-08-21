@@ -360,6 +360,36 @@ public sealed class TreeManagerTests
         Assert.Equal(FocusWalkStatus.NoMatch, manager.FocusAdjacentDisplay(primary, Direction.Right).Status);
     }
 
+    // WU17 (closes W3): exposes the constructor's primary handle so a caller (AppComposition) can
+    // retrieve the primary display's own tree/work area without duplicating that selection logic.
+    [Fact]
+    public void Primary_ReturnsTheDisplayPassedToConstructor()
+    {
+        var primary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var secondary = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { primary, secondary }, primary, new WindowRegistry());
+
+        Assert.Same(primary, manager.Primary);
+    }
+
+    // WU17 (closes W3, MM-1): a window's Bounds resolves to whichever display's Bounds contains
+    // its center, falling back to primary when none match (off-screen rect) -- the routing
+    // decision production add/remove needs.
+    [Theory]
+    [InlineData(2000, 100, false)] // inside secondary
+    [InlineData(100, 100, true)]   // inside primary
+    [InlineData(-5000, -5000, true)] // matches neither -- falls back to primary
+    public void ResolveDisplay_ResolvesToTheContainingDisplay_OrFallsBackToPrimary(int left, int top, bool expectPrimary)
+    {
+        var primary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var secondary = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { primary, secondary }, primary, new WindowRegistry());
+
+        var resolved = manager.ResolveDisplay(Rectangle.FromSize(left, top, 400, 300));
+
+        Assert.Same(expectPrimary ? primary : secondary, resolved);
+    }
+
     private static List<LeafNode> CollectLeaves(Node? node) => node switch
     {
         null => [],

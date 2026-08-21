@@ -31,12 +31,12 @@ public sealed class AppComposition : IDisposable
     private readonly ActionDispatcher _dispatcher;
     private readonly LowLevelKeyboardHook _hook;
     private readonly IWorkspace _workspace;
-    private readonly WorkspaceSessionAdapter _sessionAdapter;
+    private readonly MultiMonitorWorkspaceAdapter _sessionAdapter;
     private readonly IDisposable _tray;
 
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
-        WorkspaceSessionAdapter sessionAdapter, IDisposable tray)
+        MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -46,30 +46,32 @@ public sealed class AppComposition : IDisposable
     }
 
     /// <summary>
-    /// Wires every collaborator of the production entry point, in the exact order <c>App.OnStartup</c>
-    /// used to: <see cref="CompositionRoot.Build"/>, then the hook (needs the dispatcher's writer,
-    /// hence the factory rather than an already-built instance), then <see
-    /// cref="CompositionRoot.BuildPauseGatedSession"/> with that SAME hook, then <paramref
-    /// name="workspace"/>.Open(), then <paramref name="hook"/>.Start(), then the tray controller and
-    /// its host, then the dispatcher loop. Every collaborator is caller-supplied so this method has
-    /// no dependency on a live Win32 desktop and can be driven end to end by a plain unit test.
+    /// Wires every collaborator, in <c>App.OnStartup</c>'s exact order: <see
+    /// cref="CompositionRoot.Build"/> against <paramref name="treeManager"/>'s <see
+    /// cref="TreeManager.Primary"/> tree, then the hook, then <see
+    /// cref="MultiMonitorWorkspaceAdapter"/> -- WU17's real production caller of <paramref
+    /// name="treeManager"/> (closes carried finding W3) -- then <paramref name="workspace"/>.Open(),
+    /// <paramref name="hook"/>.Start(), the tray, then the dispatcher loop.
     /// </summary>
     public static AppComposition Wire(
         IWorkspace workspace,
-        LayoutTree tree,
+        TreeManager treeManager,
         WindowRegistry registry,
         IForegroundWindowSource foreground,
-        Rect workArea,
         ExceptionListStore exceptionStore,
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
         Action shutdown,
         Func<TrayMenuController, IDisposable> buildTray)
     {
-        var (dispatcher, executor) = CompositionRoot.Build(tree, registry, foreground, workArea);
+        var primary = treeManager.Primary;
+        treeManager.TryGetTree(primary, out var primaryTree);
+        var workArea = WorkAreaResolver.Resolve(primary);
+
+        var (dispatcher, executor) = CompositionRoot.Build(primaryTree!, registry, foreground, workArea);
         var hook = hookFactory(dispatcher.Writer);
-        var sessionAdapter = CompositionRoot.BuildPauseGatedSession(
-            workspace, tree, registry, executor, exceptionStore, hook);
+        var sessionAdapter = new MultiMonitorWorkspaceAdapter(
+            workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused);
         workspace.Open();
         hook.Start();
 
@@ -81,18 +83,18 @@ public sealed class AppComposition : IDisposable
         return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray);
     }
 
-    /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators. Called exactly once, from <c>App.OnStartup</c>.</summary>
+    /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/> (WU17). Called exactly once, from <c>App.OnStartup</c>.</summary>
     public static AppComposition WireProduction(Action shutdown)
     {
-        var tree = new LayoutTree();
         var registry = new WindowRegistry();
         var foreground = new Win32ForegroundWindowSource();
-        var workArea = WorkAreaResolver.Resolve(new Win32DisplayManager().Primary);
+        var displayManager = new Win32DisplayManager();
+        var treeManager = new TreeManager(displayManager.Displays, displayManager.Primary, registry);
         var exceptionStore = new ExceptionListStore(ExceptionListFile.Load());
         var workspace = new Win32Workspace();
 
         return Wire(
-            workspace, tree, registry, foreground, workArea, exceptionStore,
+            workspace, treeManager, registry, foreground, exceptionStore,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,

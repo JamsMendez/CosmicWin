@@ -29,22 +29,27 @@ public sealed class AppCompositionTests
 {
     private sealed record Harness(
         AppComposition Composition, TrayMenuController TrayController, LowLevelKeyboardHook Hook,
-        FakeWorkspace Workspace, LayoutTree Tree);
+        FakeWorkspace Workspace, LayoutTree Tree, TreeManager TreeManager, IDisplay Primary, IDisplay Secondary);
+
+    private static FakeDisplay Display(int handle, int left, int top, int width, int height, bool primary = false) =>
+        new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
+            Rectangle.FromSize(left, top, width, height), 1.0, primary);
 
     private static Harness WireHarness()
     {
         var workspace = new FakeWorkspace();
-        var tree = new LayoutTree();
+        var primary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var secondary = Display(2, 1920, 0, 1280, 720);
         var registry = new WindowRegistry();
+        var treeManager = new TreeManager(new IDisplay[] { primary, secondary }, primary, registry);
         var foreground = new StaticForegroundWindowSource(IntPtr.Zero);
-        var workArea = new Rect(0, 0, 1920, 1080);
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
         var platform = new FakeKeyboardHookPlatform();
         LowLevelKeyboardHook? capturedHook = null;
         TrayMenuController? capturedController = null;
 
         var composition = AppComposition.Wire(
-            workspace, tree, registry, foreground, workArea, exceptionStore,
+            workspace, treeManager, registry, foreground, exceptionStore,
             hookFactory: writer =>
             {
                 capturedHook = new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0);
@@ -58,7 +63,8 @@ public sealed class AppCompositionTests
                 return new DisposeCountingTray();
             });
 
-        return new Harness(composition, capturedController!, capturedHook!, workspace, tree);
+        treeManager.TryGetTree(primary, out var tree);
+        return new Harness(composition, capturedController!, capturedHook!, workspace, tree!, treeManager, primary, secondary);
     }
 
     /// <summary>Baseline sanity: unpaused, a newly-added window IS tracked and arranged -- proves <see cref="AppComposition.Wire"/> genuinely wires the adapter, not a no-op stub.</summary>
@@ -74,6 +80,27 @@ public sealed class AppCompositionTests
             var leaf = Assert.IsType<LeafNode>(harness.Tree.Root);
             Assert.Equal(new WindowRef(window.Handle), leaf.Window);
             Assert.Equal(1, window.SetPositionCallCount);
+        }
+    }
+
+    /// <summary>WU17 (closes W3): proves <see cref="AppComposition.Wire"/> genuinely routes through the given <see cref="TreeManager"/> -- a window on the secondary display lands in the secondary's own tree, not the primary's.</summary>
+    [Fact]
+    public void Wire_TwoDisplays_RoutesEachWindowToItsOwnMonitorTree()
+    {
+        var harness = WireHarness();
+        using (harness.Composition)
+        {
+            var onPrimary = new RecordingWindow(new IntPtr(2001), Rectangle.FromSize(100, 100, 400, 300));
+            var onSecondary = new RecordingWindow(new IntPtr(2002), Rectangle.FromSize(2000, 100, 400, 300));
+            harness.Workspace.RaiseWindowAdded(onPrimary);
+            harness.Workspace.RaiseWindowAdded(onSecondary);
+
+            harness.TreeManager.TryGetTree(harness.Primary, out var primaryTree);
+            harness.TreeManager.TryGetTree(harness.Secondary, out var secondaryTree);
+            var primaryLeaf = Assert.IsType<LeafNode>(primaryTree!.Root);
+            var secondaryLeaf = Assert.IsType<LeafNode>(secondaryTree!.Root);
+            Assert.Equal(new WindowRef(onPrimary.Handle), primaryLeaf.Window);
+            Assert.Equal(new WindowRef(onSecondary.Handle), secondaryLeaf.Window);
         }
     }
 
@@ -125,15 +152,16 @@ public sealed class AppCompositionTests
     public void Dispose_DisposesTrayAndWorkspace_ExactlyOnce()
     {
         var workspace = new DisposeCountingWorkspace();
-        var tree = new LayoutTree();
+        var primary = Display(1, 0, 0, 1920, 1080, primary: true);
         var registry = new WindowRegistry();
+        var treeManager = new TreeManager(new IDisplay[] { primary }, primary, registry);
         var foreground = new StaticForegroundWindowSource(IntPtr.Zero);
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
         var platform = new FakeKeyboardHookPlatform();
         DisposeCountingTray? capturedTray = null;
 
         var composition = AppComposition.Wire(
-            workspace, tree, registry, foreground, new Rect(0, 0, 1920, 1080), exceptionStore,
+            workspace, treeManager, registry, foreground, exceptionStore,
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
