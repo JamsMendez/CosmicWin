@@ -155,6 +155,51 @@ public sealed class TreeManagerTests
             () => manager.OnDisplayDisconnected(primary, new Rect(0, 0, 1920, 1080)));
     }
 
+    // Verify-report #21 rev 7 WARNING W1: SetPrimary(IDisplay) had zero test coverage. This is
+    // the natural "SetPrimary then disconnect" interaction the report flagged as missing --
+    // after SetPrimary reassigns which display is treated as primary, the FORMER primary is no
+    // longer protected and its windows reparent into the NEW primary's tree.
+    [Fact]
+    public void SetPrimary_ThenDisconnectFormerPrimary_ReparentsWindowsIntoNewPrimaryTree()
+    {
+        var originalPrimary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var newPrimary = Display(2, 1920, 0, 1280, 720);
+        var registry = new WindowRegistry();
+        var manager = new TreeManager(new IDisplay[] { originalPrimary, newPrimary }, originalPrimary, registry);
+        manager.TryGetTree(originalPrimary, out var originalPrimaryTree);
+        var window = new RecordingWindow(new IntPtr(500), Rectangle.FromSize(0, 0, 1920, 1080));
+        var leaf = new LeafNode(new WindowRef(window.Handle));
+        originalPrimaryTree!.Root = leaf;
+        registry.Register(window, leaf);
+
+        manager.SetPrimary(newPrimary);
+        manager.OnDisplayDisconnected(originalPrimary, new Rect(1920, 0, 1280, 720));
+
+        Assert.False(manager.TryGetTree(originalPrimary, out _));
+        Assert.True(manager.TryGetTree(newPrimary, out var newPrimaryTree));
+        var newPrimaryLeaves = CollectLeaves(newPrimaryTree!.Root);
+        Assert.Single(newPrimaryLeaves);
+        Assert.Same(leaf, newPrimaryLeaves[0]);
+        Assert.True(registry.TryGetLeaf(window.Handle, out var found));
+        Assert.Same(leaf, found);
+    }
+
+    // Triangulation for W1: the mirror direction of the same interaction. After SetPrimary
+    // reassigns primary, the NEW primary is now the protected display -- disconnecting it must
+    // throw, proving SetPrimary genuinely moved the protection, not just permitted the old one.
+    [Fact]
+    public void SetPrimary_ThenDisconnectNewPrimary_ThrowsInvalidOperationException()
+    {
+        var originalPrimary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var newPrimary = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { originalPrimary, newPrimary }, originalPrimary, new WindowRegistry());
+
+        manager.SetPrimary(newPrimary);
+
+        Assert.Throws<InvalidOperationException>(
+            () => manager.OnDisplayDisconnected(newPrimary, new Rect(0, 0, 1920, 1080)));
+    }
+
     // Task 3.5/3.6 (MM-4 scenario "Work-area change reflows locally"): only the changed
     // monitor's tree reflows; other monitors are unaffected (no window loss on either).
     [Fact]
@@ -200,15 +245,105 @@ public sealed class TreeManagerTests
 
     // MM-5 scenario "Focus falls through to adjacent monitor" no-op case: leftmost monitor,
     // Alt+H (Left) -- no monitor further left exists.
-    [Theory]
-    [InlineData(Direction.Left)] // no monitor further left of the primary
-    public void FocusAdjacentDisplay_NoMonitorInDirection_ReturnsNoMatch(Direction direction)
+    //
+    // Verify-report #21 rev 7 WARNING W2: this was previously a [Theory] with a SINGLE
+    // [InlineData(Direction.Left)], which delivers no more triangulation than a plain [Fact] --
+    // the horizontal two-display layout below only naturally produces a genuine NoMatch for
+    // Left when queried FROM the primary (Right from primary finds the secondary; Up/Down need
+    // a vertically-separated layout entirely). Converted to a [Fact] because a single case is
+    // genuinely sufficient for THIS layout/query-origin combination; real triangulation for the
+    // other three directions is provided below via dedicated Right/Up/Down NoMatch tests that
+    // each need a different layout or query origin to be a genuine (not vacuous) NoMatch.
+    [Fact]
+    public void FocusAdjacentDisplay_NoMonitorToLeft_ReturnsNoMatch()
     {
         var primary = Display(1, 0, 0, 1920, 1080, primary: true);
         var secondary = Display(2, 1920, 0, 1280, 720);
         var manager = new TreeManager(new IDisplay[] { primary, secondary }, primary, new WindowRegistry());
 
-        var result = manager.FocusAdjacentDisplay(primary, direction);
+        var result = manager.FocusAdjacentDisplay(primary, Direction.Left);
+
+        Assert.Equal(FocusWalkStatus.NoMatch, result.Status);
+    }
+
+    // Triangulation for W2 (Right): reuses the same horizontal layout as the Left no-match case
+    // above, but queries FROM the rightmost display -- no monitor exists further right of it.
+    [Fact]
+    public void FocusAdjacentDisplay_NoMonitorToRight_ReturnsNoMatch()
+    {
+        var primary = Display(1, 0, 0, 1920, 1080, primary: true);
+        var secondary = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { primary, secondary }, primary, new WindowRegistry());
+
+        var result = manager.FocusAdjacentDisplay(secondary, Direction.Right);
+
+        Assert.Equal(FocusWalkStatus.NoMatch, result.Status);
+    }
+
+    // Verify-report #21 rev 7 WARNING W2: Direction.Up was never exercised by any test at all
+    // (TreeManager.cs:184). Vertically stacked monitors are a normal configuration and MM-5 is
+    // direction-agnostic, so this uses a dedicated top/bottom layout (a horizontal layout cannot
+    // exercise Up/Down meaningfully). Queries FROM the bottom display -- the top display's tree
+    // resolves as the adjacent match.
+    [Fact]
+    public void FocusAdjacentDisplay_MonitorAboveExists_ReturnsFirstLeafOfThatMonitorsTree()
+    {
+        var top = Display(1, 0, 0, 1920, 1080, primary: true);
+        var bottom = Display(2, 0, 1080, 1920, 1080);
+        var manager = new TreeManager(new IDisplay[] { top, bottom }, top, new WindowRegistry());
+        manager.TryGetTree(top, out var topTree);
+        var leaf = new LeafNode(new WindowRef(new IntPtr(600)));
+        topTree!.Root = leaf;
+
+        var result = manager.FocusAdjacentDisplay(bottom, Direction.Up);
+
+        Assert.Equal(FocusWalkStatus.Found, result.Status);
+        Assert.Same(leaf, result.Leaf);
+    }
+
+    // Triangulation for W2 (Up no-match): queries FROM the top display -- no monitor exists
+    // above it in the same vertical layout.
+    [Fact]
+    public void FocusAdjacentDisplay_NoMonitorAbove_ReturnsNoMatch()
+    {
+        var top = Display(1, 0, 0, 1920, 1080, primary: true);
+        var bottom = Display(2, 0, 1080, 1920, 1080);
+        var manager = new TreeManager(new IDisplay[] { top, bottom }, top, new WindowRegistry());
+
+        var result = manager.FocusAdjacentDisplay(top, Direction.Up);
+
+        Assert.Equal(FocusWalkStatus.NoMatch, result.Status);
+    }
+
+    // Verify-report #21 rev 7 WARNING W2: Direction.Down was never exercised by any test at all
+    // (TreeManager.cs:185). Queries FROM the top display -- the bottom display's tree resolves
+    // as the adjacent match.
+    [Fact]
+    public void FocusAdjacentDisplay_MonitorBelowExists_ReturnsFirstLeafOfThatMonitorsTree()
+    {
+        var top = Display(1, 0, 0, 1920, 1080, primary: true);
+        var bottom = Display(2, 0, 1080, 1920, 1080);
+        var manager = new TreeManager(new IDisplay[] { top, bottom }, top, new WindowRegistry());
+        manager.TryGetTree(bottom, out var bottomTree);
+        var leaf = new LeafNode(new WindowRef(new IntPtr(700)));
+        bottomTree!.Root = leaf;
+
+        var result = manager.FocusAdjacentDisplay(top, Direction.Down);
+
+        Assert.Equal(FocusWalkStatus.Found, result.Status);
+        Assert.Same(leaf, result.Leaf);
+    }
+
+    // Triangulation for W2 (Down no-match): queries FROM the bottom display -- no monitor
+    // exists below it in the same vertical layout.
+    [Fact]
+    public void FocusAdjacentDisplay_NoMonitorBelow_ReturnsNoMatch()
+    {
+        var top = Display(1, 0, 0, 1920, 1080, primary: true);
+        var bottom = Display(2, 0, 1080, 1920, 1080);
+        var manager = new TreeManager(new IDisplay[] { top, bottom }, top, new WindowRegistry());
+
+        var result = manager.FocusAdjacentDisplay(bottom, Direction.Down);
 
         Assert.Equal(FocusWalkStatus.NoMatch, result.Status);
     }
