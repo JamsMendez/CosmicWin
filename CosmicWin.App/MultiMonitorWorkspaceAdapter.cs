@@ -1,4 +1,6 @@
+using System.Linq;
 using CosmicWin.Interop;
+using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App;
@@ -35,6 +37,13 @@ namespace CosmicWin.App;
 /// conservative reading available, since decision #64's "full pause, no reconcile" text speaks
 /// only to reflow and does not settle whether structural tree state may still shift under a paused
 /// user; this class does not let it.
+/// </remarks>
+/// <remarks>
+/// WU20 (closes V19-W1): a SAME-monitor drag no longer early-returns -- sibling ORDER can
+/// disagree with real screen order even though tree MEMBERSHIP stayed correct, and NextFocus is
+/// purely tree-ordinal (LE-2), so focus silently inverted. Reorders the parent group to match
+/// screen order (same precedent: tree follows window), then reflows that tree. Gated identically
+/// to <see cref="_isPaused"/> (decision #76).
 /// </remarks>
 public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 {
@@ -135,6 +144,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         var newDisplay = _treeManager.ResolveDisplay(window.Bounds);
         if (newDisplay.Handle == oldDisplay.Handle)
         {
+            ReorderWithinTree(oldDisplay, window);
             return;
         }
 
@@ -155,6 +165,52 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         TreeArranger.ArrangeAndPosition(oldTree, _registry, WorkAreaResolver.Resolve(oldDisplay));
         TreeArranger.ArrangeAndPosition(newTree, _registry, newWorkArea);
+    }
+
+    /// <summary>
+    /// V19-W1 closure: reorders the dragged leaf's parent group by leading edge (dragged: real
+    /// <see cref="IWindow.Bounds"/>; siblings: <see cref="Node.LastGeometry"/>), then reflows that
+    /// tree so geometry and focus agree with the new screen order. No-op for a single-window tree.
+    /// </summary>
+    private void ReorderWithinTree(IDisplay display, IWindow window)
+    {
+        if (!_registry.TryGetLeaf(window.Handle, out var leaf) || leaf is null ||
+            leaf.Parent is not GroupNode parent ||
+            !_treeManager.TryGetTree(display, out var tree) || tree is null)
+        {
+            return;
+        }
+
+        var entries = parent.Children
+            .Select((node, i) => (Node: node, Size: parent.Sizes[i]))
+            .OrderBy(entry => LeadingEdge(parent.Axis, entry.Node, leaf, window.Bounds))
+            .ToList();
+
+        if (entries.Select(entry => entry.Node).SequenceEqual(parent.Children))
+        {
+            return;
+        }
+
+        parent.Children.Clear();
+        parent.Sizes.Clear();
+        foreach (var (node, size) in entries)
+        {
+            parent.Children.Add(node);
+            parent.Sizes.Add(size);
+        }
+
+        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+    }
+
+    /// <summary>The dragged leaf uses its real current bounds; every other sibling uses its last-arranged geometry.</summary>
+    private static int LeadingEdge(SplitAxis axis, Node node, LeafNode dragged, Rectangle draggedBounds)
+    {
+        if (ReferenceEquals(node, dragged))
+        {
+            return axis == SplitAxis.Horizontal ? draggedBounds.Left : draggedBounds.Top;
+        }
+
+        return axis == SplitAxis.Horizontal ? node.LastGeometry.X : node.LastGeometry.Y;
     }
 
     public void Dispose()
