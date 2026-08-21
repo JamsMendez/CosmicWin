@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using CosmicWin.App.Input;
+using CosmicWin.App.Tests.TestDoubles;
 
 namespace CosmicWin.App.Tests.Input;
 
@@ -168,39 +169,6 @@ public sealed class KeyboardHookTests
 
         Assert.Equal(1, platform.UninstallCount);
         Assert.Equal(nativeResult, hook.UnhookSucceeded);
-    }
-
-    private sealed class FakeKeyboardHookPlatform : IKeyboardHookPlatform
-    {
-        public ManualResetEventSlim SecondInstall { get; } = new();
-        public ApartmentState ApartmentState { get; private set; }
-        public int CallbackThreadId { get; private set; }
-        public int InstallCount => _installs;
-        public int PumpCount => _pumps;
-        public int UninstallCount => _uninstallCount;
-        public bool UninstallResult { get; init; } = true;
-        private KeyboardHookCallback? _callback;
-        private int _installs;
-        private int _pumps;
-        private int _uninstallCount;
-
-        public void Install(KeyboardHookCallback callback)
-        {
-            _callback = callback;
-            ApartmentState = Thread.CurrentThread.GetApartmentState();
-            CallbackThreadId = Environment.CurrentManagedThreadId;
-            callback(KeyboardKey.H, true, ModifierKeys.Alt);
-            if (Interlocked.Increment(ref _installs) >= 2) SecondInstall.Set();
-        }
-
-        public bool Uninstall()
-        {
-            Interlocked.Increment(ref _uninstallCount);
-            return UninstallResult;
-        }
-
-        public void PumpMessages() => Interlocked.Increment(ref _pumps);
-        public void RaiseActivity() => _callback!(KeyboardKey.H, true, ModifierKeys.Alt);
     }
 
     private sealed class FakeClock

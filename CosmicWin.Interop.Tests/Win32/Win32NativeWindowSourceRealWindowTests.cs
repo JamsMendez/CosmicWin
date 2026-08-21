@@ -79,6 +79,19 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         Assert.False(info.IsOwned);
     }
 
+    /// <summary>
+    /// V11-W4: this test was load-flaky (3/3 passed idle, 2/2 failed under back-to-back suite
+    /// runs) because <see cref="SpawnedNotepadWindow.Dispose"/> only requested a close and could
+    /// return before the process had actually exited under load. <see
+    /// cref="SpawnedNotepadWindow.Dispose"/> now escalates to a forced kill if the graceful close
+    /// does not finish within its own bound, so by the time <c>Dispose()</c> returns here the
+    /// process is guaranteed gone -- the poll below only has to wait out the OS's own window-handle
+    /// teardown lag, not the target process's message-pump latency, so its bound is widened from 5s
+    /// to 10s for headroom rather than to paper over an indeterminate wait. What this still proves,
+    /// unchanged: the production <see cref="Win32NativeWindowSource.TryGetWindowInfo"/> genuinely
+    /// stops resolving a handle once its real window is gone -- no shortcut, mock, or reduced
+    /// assertion was introduced.
+    /// </summary>
     [Fact]
     public void TryGetWindowInfo_ReturnsFalse_OnceTheRealWindowHasBeenClosed()
     {
@@ -87,7 +100,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         var source = new Win32NativeWindowSource();
 
         notepad.Dispose();
-        WaitUntilTrue(() => !source.TryGetWindowInfo(handle, out _), TimeSpan.FromSeconds(5));
+        WaitUntilTrue(() => !source.TryGetWindowInfo(handle, out _), TimeSpan.FromSeconds(10));
 
         Assert.False(source.TryGetWindowInfo(handle, out _));
     }

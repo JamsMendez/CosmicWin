@@ -29,7 +29,15 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// that unguessable marker, which correlates the window to this launch across launcher indirection.
 /// </para>
 /// <para>
-/// <see cref="IDisposable"/> requests a normal close and never forcibly terminates the process.
+/// <see cref="IDisposable"/> requests a normal close and only escalates to <see
+/// cref="Process.Kill()"/> if that graceful close does not complete within its own bound (V11-W4:
+/// under back-to-back suite runs, <c>CloseMainWindow</c>'s WM_CLOSE can take longer than 5 seconds
+/// to be processed under load, leaving a process that exits "shortly after" instead of within the
+/// bound the original best-effort wait relied on -- observed directly during verify-report #21
+/// revision 11's audit). Escalating guarantees the process has actually exited by the time <see
+/// cref="Dispose"/> returns, instead of merely having requested that it exit, so a later test's own
+/// close-detection poll only has to wait out the OS's own handle-teardown lag rather than an
+/// unbounded amount of the target process's own message-pump latency.
 /// </para>
 /// </remarks>
 internal sealed class SpawnedNotepadWindow : IDisposable
@@ -104,7 +112,14 @@ internal sealed class SpawnedNotepadWindow : IDisposable
             if (!_windowProcess.HasExited)
             {
                 _windowProcess.CloseMainWindow();
-                _windowProcess.WaitForExit(5000);
+                if (!_windowProcess.WaitForExit(5000))
+                {
+                    // V11-W4: the graceful close did not finish within the bound -- escalate so
+                    // Dispose() never returns while the process is still alive, guaranteeing the
+                    // caller's own close-detection poll only has to wait out OS handle teardown.
+                    _windowProcess.Kill();
+                    _windowProcess.WaitForExit(5000);
+                }
             }
         }
         catch

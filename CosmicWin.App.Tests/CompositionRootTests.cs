@@ -240,6 +240,52 @@ public sealed class CompositionRootTests
         }
     }
 
+    /// <summary>
+    /// V11-W1: closes verify-report #21's mutation-surviving gap where deleting the <c>isPaused</c>
+    /// argument from <c>App.xaml.cs</c>'s <see cref="CompositionRoot.BuildSessionAdapter"/> call
+    /// compiled cleanly (the parameter is optional, defaulting to never-paused) and left the whole
+    /// suite green. <see cref="CompositionRoot.BuildPauseGatedSession"/> wires the SAME hook
+    /// instance's <see cref="LowLevelKeyboardHook.IsPaused"/> into the adapter's pause gate as a
+    /// mandatory constructor argument, so App.xaml.cs no longer has an isPaused argument it could
+    /// silently drop. This fact drives a REAL <see cref="LowLevelKeyboardHook"/> (via <see
+    /// cref="FakeKeyboardHookPlatform"/>, the same seam <c>KeyboardHookTests</c> uses) end to end
+    /// through its actual <see cref="KeyboardEventProcessor"/>, proving that a SINGLE write of
+    /// <c>hook.IsPaused</c> blocks BOTH a real chord match AND a <see
+    /// cref="WorkspaceSessionAdapter"/> <c>WindowAdded</c> auto-tile -- the shared-flag invariant
+    /// decision #62 requires and that no prior fact proved through this joint.
+    /// </summary>
+    [Fact]
+    public void BuildPauseGatedSession_SingleHookPauseWrite_BlocksBothChordMatchAndWindowAdded()
+    {
+        var platform = new FakeKeyboardHookPlatform();
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        using var hook = new LowLevelKeyboardHook(channel.Writer, platform, TimeSpan.FromSeconds(5), () => 0);
+        hook.Start();
+        // Draining the install-time H+Alt callback FakeKeyboardHookPlatform.Install fires eagerly,
+        // so the assertions below observe only activity raised after IsPaused is set.
+        channel.Reader.TryRead(out _);
+
+        var workspace = new FakeWorkspace();
+        var tree = new LayoutTree();
+        var registry = new WindowRegistry();
+        var (_, executor) = CompositionRoot.Build(
+            new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
+            new Rect(0, 0, 1920, 1080));
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+
+        using var adapter = CompositionRoot.BuildPauseGatedSession(
+            workspace, tree, registry, executor, exceptionStore, hook);
+
+        hook.IsPaused = true;
+
+        platform.RaiseActivity();
+        Assert.False(channel.Reader.TryRead(out _));
+
+        var window = new RecordingWindow(new IntPtr(950), Rectangle.FromSize(0, 0, 800, 600));
+        workspace.RaiseWindowAdded(window);
+        Assert.Null(tree.Root);
+    }
+
     private sealed class RecordingTilingEngine : ITilingEngine
     {
         public int MoveNodeCallCount { get; private set; }

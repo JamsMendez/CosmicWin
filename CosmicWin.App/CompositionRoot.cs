@@ -49,6 +49,21 @@ public static class CompositionRoot
         new(workspace, tree, registry, () => executor.WorkArea, () => exceptions.Current, isPaused);
 
     /// <summary>
+    /// V11-W1: wires <see cref="WorkspaceSessionAdapter"/>'s pause gate directly onto <paramref
+    /// name="hook"/>.<see cref="LowLevelKeyboardHook.IsPaused"/> -- the SAME hook instance the tray
+    /// controller's <c>TogglePause</c> writes and the keyboard processor's <c>Process</c> reads
+    /// (settled full-pause semantics, decision #62). Closes verify-report #21 V11-W1: previously
+    /// <see cref="BuildSessionAdapter"/>'s <c>isPaused</c> parameter was optional and typed as a
+    /// lambda re-written at the untestable <see cref="App"/> call site, so an edit dropping the
+    /// argument compiled cleanly and left the whole suite green. <paramref name="hook"/> is a
+    /// mandatory parameter here, so the call site has no isPaused argument left to silently drop.
+    /// </summary>
+    public static WorkspaceSessionAdapter BuildPauseGatedSession(
+        IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,
+        ExceptionListStore exceptions, LowLevelKeyboardHook hook) =>
+        BuildSessionAdapter(workspace, tree, registry, executor, exceptions, () => hook.IsPaused);
+
+    /// <summary>
     /// Tasks 3.16/3.17/3.18/3.36/3.37 (WU11): wires a <see cref="TrayMenuController"/> against the
     /// SAME <paramref name="hook"/> instance that gates hotkey processing AND (via <see
     /// cref="BuildSessionAdapter"/>'s <c>isPaused</c> parameter) new-window auto-tiling -- settled
