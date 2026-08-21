@@ -21,6 +21,15 @@ public sealed class ActionExecutor(
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
+    /// <summary>
+    /// WU18 (closes verify-report #21 V17-W1): when set, every mutation resolves and arranges
+    /// the FOCUSED window's OWN monitor tree/work area, instead of always the primary <paramref
+    /// name="engine"/>/<see cref="WorkArea"/> — restoring tree/screen agreement on secondary
+    /// monitors. Null preserves the pre-WU18, primary-only behavior, so tests that construct this
+    /// class directly without a monitor topology stay unaffected.
+    /// </summary>
+    public TreeManager? TreeManager { get; set; }
+
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
         if (TryResolveFocused(out var focused))
@@ -39,15 +48,15 @@ public sealed class ActionExecutor(
             case HotkeyActionKind.FocusRight: MoveFocus(Direction.Right, focused); break;
             case HotkeyActionKind.FocusUp: MoveFocus(Direction.Up, focused); break;
             case HotkeyActionKind.FocusDown: MoveFocus(Direction.Down, focused); break;
-            case HotkeyActionKind.MoveLeft: MutateAndArrange(() => engine.MoveNode(Direction.Left, focused)); break;
-            case HotkeyActionKind.MoveRight: MutateAndArrange(() => engine.MoveNode(Direction.Right, focused)); break;
-            case HotkeyActionKind.MoveUp: MutateAndArrange(() => engine.MoveNode(Direction.Up, focused)); break;
-            case HotkeyActionKind.MoveDown: MutateAndArrange(() => engine.MoveNode(Direction.Down, focused)); break;
-            case HotkeyActionKind.ToggleOrientation: MutateAndArrange(() => engine.ToggleAxis(focused)); break;
-            case HotkeyActionKind.ResizeLeft: MutateAndArrange(() => engine.ResizeNode(Direction.Left, focused)); break;
-            case HotkeyActionKind.ResizeRight: MutateAndArrange(() => engine.ResizeNode(Direction.Right, focused)); break;
-            case HotkeyActionKind.ResizeUp: MutateAndArrange(() => engine.ResizeNode(Direction.Up, focused)); break;
-            case HotkeyActionKind.ResizeDown: MutateAndArrange(() => engine.ResizeNode(Direction.Down, focused)); break;
+            case HotkeyActionKind.MoveLeft: MutateAndArrange(focused, e => e.MoveNode(Direction.Left, focused)); break;
+            case HotkeyActionKind.MoveRight: MutateAndArrange(focused, e => e.MoveNode(Direction.Right, focused)); break;
+            case HotkeyActionKind.MoveUp: MutateAndArrange(focused, e => e.MoveNode(Direction.Up, focused)); break;
+            case HotkeyActionKind.MoveDown: MutateAndArrange(focused, e => e.MoveNode(Direction.Down, focused)); break;
+            case HotkeyActionKind.ToggleOrientation: MutateAndArrange(focused, e => e.ToggleAxis(focused)); break;
+            case HotkeyActionKind.ResizeLeft: MutateAndArrange(focused, e => e.ResizeNode(Direction.Left, focused)); break;
+            case HotkeyActionKind.ResizeRight: MutateAndArrange(focused, e => e.ResizeNode(Direction.Right, focused)); break;
+            case HotkeyActionKind.ResizeUp: MutateAndArrange(focused, e => e.ResizeNode(Direction.Up, focused)); break;
+            case HotkeyActionKind.ResizeDown: MutateAndArrange(focused, e => e.ResizeNode(Direction.Down, focused)); break;
             case HotkeyActionKind.FocusIn:
             case HotkeyActionKind.FocusOut:
                 // Deferred: Phase 1's ITilingEngine exposes no nested-group descend/ascend
@@ -91,7 +100,8 @@ public sealed class ActionExecutor(
     /// </summary>
     private void MoveFocus(Direction direction, LeafNode focused)
     {
-        var result = engine.NextFocus(direction, focused);
+        var (localEngine, _) = ResolveEngineAndWorkArea(focused);
+        var result = localEngine.NextFocus(direction, focused);
         if (result.Status != FocusWalkStatus.Found || result.Leaf is null)
         {
             return;
@@ -108,16 +118,40 @@ public sealed class ActionExecutor(
     /// Applies a tree mutation (Move/Toggle/Resize) and, only if it actually changed something,
     /// re-arranges and positions every live leaf via the shared <see cref="TreeArranger"/>
     /// (verify-report #21 CRITICAL C2: <see cref="WorkspaceSessionAdapter"/> now applies the same
-    /// arrange-and-position step after a window is added or removed, using this same
-    /// <see cref="WorkArea"/> instance as its single source of truth).
+    /// arrange-and-position step after a window is added or removed) — on the SAME tree/work area
+    /// <paramref name="focused"/> was just mutated on (WU18, closes V17-W1).
     /// </summary>
-    private void MutateAndArrange(Func<bool> mutate)
+    private void MutateAndArrange(LeafNode focused, Func<ITilingEngine, bool> mutate)
     {
-        if (!mutate())
+        var (localEngine, workArea) = ResolveEngineAndWorkArea(focused);
+        if (!mutate(localEngine))
         {
             return;
         }
 
-        TreeArranger.ArrangeAndPosition(engine, registry, WorkArea);
+        TreeArranger.ArrangeAndPosition(localEngine, registry, workArea);
+    }
+
+    /// <summary>
+    /// WU18 (closes V17-W1): resolves <paramref name="focused"/>'s OWN monitor tree/work area via
+    /// <see cref="TreeManager"/> — <see cref="TreeManager.ResolveDisplay"/> is safe to reuse here
+    /// because a tracked window's real <c>Bounds</c> still reflects whichever monitor it is
+    /// physically on, even mid-desync. Falls back to the primary <paramref name="engine"/>/<see
+    /// cref="WorkArea"/> when <see cref="TreeManager"/> is unset, the window is untracked, or its
+    /// resolved display no longer has a tree.
+    /// </summary>
+    private (ITilingEngine Engine, Rect WorkArea) ResolveEngineAndWorkArea(LeafNode focused)
+    {
+        if (TreeManager is { } treeManager &&
+            registry.TryGetWindow(focused.Window.Handle, out var window) && window is not null)
+        {
+            var display = treeManager.ResolveDisplay(window.Bounds);
+            if (treeManager.TryGetTree(display, out var tree) && tree is not null)
+            {
+                return (tree, WorkAreaResolver.Resolve(display));
+            }
+        }
+
+        return (engine, WorkArea);
     }
 }

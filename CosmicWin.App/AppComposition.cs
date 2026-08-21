@@ -48,10 +48,13 @@ public sealed class AppComposition : IDisposable
     /// <summary>
     /// Wires every collaborator, in <c>App.OnStartup</c>'s exact order: <see
     /// cref="CompositionRoot.Build"/> against <paramref name="treeManager"/>'s <see
-    /// cref="TreeManager.Primary"/> tree, then the hook, then <see
-    /// cref="MultiMonitorWorkspaceAdapter"/> -- WU17's real production caller of <paramref
-    /// name="treeManager"/> (closes carried finding W3) -- then <paramref name="workspace"/>.Open(),
-    /// <paramref name="hook"/>.Start(), the tray, then the dispatcher loop.
+    /// cref="TreeManager.Primary"/> tree, then <paramref name="treeManager"/> is ALSO assigned onto
+    /// the returned <see cref="ActionExecutor.TreeManager"/> (WU18, closes V17-W1: a hotkey
+    /// mutation on a secondary monitor's focused window now arranges that SAME secondary tree, not
+    /// always the primary one), then the hook, then <see cref="MultiMonitorWorkspaceAdapter"/> --
+    /// WU17's real production caller of <paramref name="treeManager"/> (closes carried finding W3)
+    /// -- then <paramref name="workspace"/>.Open(), <paramref name="hook"/>.Start(), the tray, then
+    /// the dispatcher loop.
     /// </summary>
     public static AppComposition Wire(
         IWorkspace workspace,
@@ -69,6 +72,7 @@ public sealed class AppComposition : IDisposable
         var workArea = WorkAreaResolver.Resolve(primary);
 
         var (dispatcher, executor) = CompositionRoot.Build(primaryTree!, registry, foreground, workArea);
+        executor.TreeManager = treeManager;
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused);

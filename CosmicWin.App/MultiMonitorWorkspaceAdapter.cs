@@ -13,11 +13,13 @@ namespace CosmicWin.App;
 /// isolation property).
 /// </summary>
 /// <remarks>
-/// Declared scope boundary (see sdd/cosmic-win/apply-progress), not hidden: <see
-/// cref="ActionExecutor"/> still operates on only the primary monitor's tree -- unchanged from
-/// today -- so MM-5 focus fallthrough and cross-monitor hotkey move/resize/toggle stay unwired.
-/// MM-2/MM-3/MM-4's live hotplug/DPI-change triggers also stay unwired: no such Win32 event source
-/// exists yet in <c>CosmicWin.Interop</c>.
+/// WU18 (closes V17-W1): <see cref="ActionExecutor"/> is now <see cref="TreeManager"/>-aware --
+/// a hotkey mutation on a secondary monitor's focused window arranges that SAME secondary tree on
+/// its own work area, so tree and screen no longer desync after Move/Resize/Toggle. Cross-monitor
+/// MOVEMENT (dragging a window from one monitor's tree to another's) remains out of scope, per
+/// design: <see cref="CosmicWin.Layout.LayoutTree.MoveNode"/> operates strictly inside
+/// <c>focused.Parent</c>. MM-5 focus fallthrough and MM-2/MM-3/MM-4's live hotplug/DPI-change
+/// triggers stay unwired: no such Win32 event source exists yet in <c>CosmicWin.Interop</c>.
 /// </remarks>
 public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 {

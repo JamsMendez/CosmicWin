@@ -166,6 +166,79 @@ public sealed class ActionExecutorTests
         Assert.Equal(0, windowA.TryActivateCallCount + windowB.TryActivateCallCount + windowC.TryActivateCallCount);
     }
 
+    // WU18 (closes verify-report #21 V17-W1): reproduces probe P16's exact runtime shape -- two
+    // windows on a SECONDARY (non-primary) monitor, one directional hotkey. Before the fix:
+    // LayoutTree.MoveNode swapped the tree order but ActionExecutor always arranged the PRIMARY
+    // tree/work area regardless of which tree it mutated, so zero SetPosition calls were issued
+    // and neither window moved on screen -- exactly P16's "orderAfter=[502,501], aPos unchanged"
+    // transcript. This proves the fix arranges the tree it actually mutated, on that tree's own
+    // monitor work area.
+    private static (
+        ActionExecutor Executor,
+        FakeForegroundWindowSource Foreground,
+        WindowRegistry Registry,
+        TreeManager TreeManager,
+        RecordingWindow WindowA,
+        RecordingWindow WindowB) BuildSecondaryMonitorPair()
+    {
+        var primary = new FakeDisplay(
+            new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
+        var secondary = new FakeDisplay(
+            new IntPtr(2), Rectangle.FromSize(1920, 0, 1280, 720), Rectangle.FromSize(1920, 0, 1280, 720), 1.0, false);
+        var registry = new WindowRegistry();
+        var treeManager = new TreeManager(new IDisplay[] { primary, secondary }, primary, registry);
+        treeManager.TryGetTree(secondary, out var secondaryTree);
+
+        var windowA = new RecordingWindow(new IntPtr(501), Rectangle.FromSize(1920, 0, 640, 720));
+        var windowB = new RecordingWindow(new IntPtr(502), Rectangle.FromSize(2560, 0, 640, 720));
+        var leafA = new LeafNode(new WindowRef(windowA.Handle));
+        var group = LayoutTree.AddChild(leafA, new WindowRef(windowB.Handle), 1280, 720);
+        secondaryTree!.Root = group;
+        var leafB = (LeafNode)group.Children[1];
+        registry.Register(windowA, leafA);
+        registry.Register(windowB, leafB);
+
+        var foreground = new FakeForegroundWindowSource { Handle = windowB.Handle };
+        ITilingEngine primaryEngine = new LayoutTree();
+        var executor = new ActionExecutor(primaryEngine, registry, foreground)
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            TreeManager = treeManager,
+        };
+
+        return (executor, foreground, registry, treeManager, windowA, windowB);
+    }
+
+    [Fact]
+    public async Task ScheduleAsync_MoveLeft_FocusOnSecondaryMonitor_ArrangesTheSecondaryTree_OnItsOwnWorkArea()
+    {
+        var (executor, _, _, _, windowA, windowB) = BuildSecondaryMonitorPair();
+
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveLeft), CancellationToken.None);
+
+        Assert.Equal(1, windowA.SetPositionCallCount);
+        Assert.Equal(1, windowB.SetPositionCallCount);
+        Assert.Equal(Rectangle.FromSize(1920, 0, 640, 720), windowB.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(2560, 0, 640, 720), windowA.LastSetPosition);
+    }
+
+    // WU18: the tree-order swap alone is not the user-visible property -- focus DIRECTION is.
+    // After a Move swaps the secondary tree's order, FocusLeft must activate the window that is
+    // NOW genuinely on screen to the left, not merely first in tree order.
+    [Fact]
+    public async Task ScheduleAsync_FocusLeft_AfterSecondaryMoveSwap_ActivatesTheWindowNowVisuallyOnTheLeft()
+    {
+        var (executor, foreground, _, _, windowA, windowB) = BuildSecondaryMonitorPair();
+        foreground.Handle = windowA.Handle;
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None);
+
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+
+        Assert.Equal(1, windowB.TryActivateCallCount);
+        Assert.Equal(0, windowA.TryActivateCallCount);
+        Assert.Equal(1920, windowB.LastSetPosition!.Value.Left);
+    }
+
     private sealed class FakeForegroundWindowSource : IForegroundWindowSource
     {
         public nint Handle { get; set; }
