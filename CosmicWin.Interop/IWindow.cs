@@ -61,4 +61,19 @@ public interface IWindow : IEquatable<IWindow>
     /// (the App-layer executor) MUST NOT retry on a returned <see langword="false"/>.
     /// </summary>
     bool TryActivate();
+
+    /// <summary>Raw <c>GetClassName</c> value, uninterpreted by Interop (design D1/D7/D8 — only Layout's <c>WindowFilters</c> assigns meaning). Empty once dead.</summary>
+    string ClassName { get; }
+
+    /// <summary>Owning process executable file name (e.g. <c>"Spotify.exe"</c>, matching spec WE-2's config format). Empty once dead or unqueryable.</summary>
+    string ProcessName { get; }
+
+    /// <summary>Raw <c>GWL_STYLE</c> bits, uninterpreted (see <see cref="ClassName"/>).</summary>
+    uint Style { get; }
+
+    /// <summary>Raw <c>GWL_EXSTYLE</c> bits, uninterpreted (see <see cref="Style"/>).</summary>
+    uint ExStyle { get; }
+
+    /// <summary><c>true</c> if this window has an owner window — the raw signal WE-1's owned-dialog clause needs.</summary>
+    bool IsOwned { get; }
 }

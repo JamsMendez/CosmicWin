@@ -10,15 +10,30 @@ namespace CosmicWin.App.Tests.TestDoubles;
 /// </summary>
 internal sealed class RecordingWindow : IWindow
 {
+    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing facts don't read as auto-excluded once filtering wires up (task 3.32).</summary>
+    private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
+
     private bool _failNextSetPosition;
     private bool _failNextActivate;
 
-    public RecordingWindow(nint handle, Rectangle bounds)
+    public RecordingWindow(
+        nint handle,
+        Rectangle bounds,
+        string className = "",
+        string processName = "",
+        uint style = TileableStyleDefault,
+        uint exStyle = 0u,
+        bool isOwned = false)
     {
         Handle = handle;
         Bounds = bounds;
         IsAlive = true;
         CanReposition = true;
+        ClassName = className;
+        ProcessName = processName;
+        Style = style;
+        ExStyle = exStyle;
+        IsOwned = isOwned;
     }
 
     public nint Handle { get; }
@@ -30,6 +45,16 @@ internal sealed class RecordingWindow : IWindow
     public bool IsAlive { get; private set; }
 
     public bool CanReposition { get; private set; }
+
+    public string ClassName { get; private set; }
+
+    public string ProcessName { get; private set; }
+
+    public uint Style { get; private set; }
+
+    public uint ExStyle { get; private set; }
+
+    public bool IsOwned { get; private set; }
 
     public int SetPositionCallCount { get; private set; }
 

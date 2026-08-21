@@ -98,4 +98,61 @@ public class Win32WindowTests
         Assert.Null(exception);
         Assert.False(activated);
     }
+
+    // Task 3.27: 5 pass-through facts pinning IWindow's new raw-descriptor surface (ClassName,
+    // ProcessName, Style, ExStyle, IsOwned), added so an App-layer adapter can build a Layout
+    // WindowDescriptor from an IWindow without CosmicWin.Layout ever referencing Win32 (design
+    // D1/D8/D7). Confirmed RED: named args `className:`/`processName:`/`style:`/`exStyle:`/
+    // `isOwned:` do not exist on Win32Window's constructor (no such parameter, compile error) and
+    // the properties do not exist on IWindow (CS1061) before task 3.28's GREEN.
+
+    [Fact]
+    public void ClassName_ReflectsConstructorValue()
+    {
+        var native = new FakeNativeWindowSource();
+        var window = new Win32Window(
+            new IntPtr(7), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native, className: "Notepad");
+
+        Assert.Equal("Notepad", window.ClassName);
+    }
+
+    [Fact]
+    public void ProcessName_ReflectsConstructorValue()
+    {
+        var native = new FakeNativeWindowSource();
+        var window = new Win32Window(
+            new IntPtr(8), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native, processName: "notepad.exe");
+
+        Assert.Equal("notepad.exe", window.ProcessName);
+    }
+
+    [Fact]
+    public void Style_ReflectsConstructorValue()
+    {
+        var native = new FakeNativeWindowSource();
+        var window = new Win32Window(
+            new IntPtr(9), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native, style: 0x00080000u);
+
+        Assert.Equal(0x00080000u, window.Style);
+    }
+
+    [Fact]
+    public void ExStyle_ReflectsConstructorValue()
+    {
+        var native = new FakeNativeWindowSource();
+        var window = new Win32Window(
+            new IntPtr(10), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native, exStyle: 0x00000080u);
+
+        Assert.Equal(0x00000080u, window.ExStyle);
+    }
+
+    [Fact]
+    public void IsOwned_ReflectsConstructorValue()
+    {
+        var native = new FakeNativeWindowSource();
+        var window = new Win32Window(
+            new IntPtr(11), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native, isOwned: true);
+
+        Assert.True(window.IsOwned);
+    }
 }

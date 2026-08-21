@@ -115,7 +115,9 @@ public sealed class Win32Workspace : IWorkspace
             return;
         }
 
-        var window = new Win32Window(hwnd, info.Title, info.Bounds, _nativeSource);
+        var window = new Win32Window(
+            hwnd, info.Title, info.Bounds, _nativeSource,
+            info.ClassName, info.ProcessName, info.Style, info.ExStyle, info.IsOwned);
         _windows[hwnd] = window;
         WindowAdded?.Invoke(this, new WindowEventArgs(window));
     }
@@ -147,7 +149,7 @@ public sealed class Win32Workspace : IWorkspace
         var boundsChanged = window.Bounds != info.Bounds;
         if (window.Title != info.Title || boundsChanged)
         {
-            window.Refresh(info.Title, info.Bounds);
+            window.Refresh(info.Title, info.Bounds, info.ClassName, info.ProcessName, info.Style, info.ExStyle, info.IsOwned);
         }
 
         if (boundsChanged)

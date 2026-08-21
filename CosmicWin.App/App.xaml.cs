@@ -2,6 +2,7 @@ using System.Windows;
 using CosmicWin.App.Input;
 using CosmicWin.Interop.Win32;
 using CosmicWin.Layout;
+using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App;
 
@@ -23,6 +24,7 @@ public partial class App : Application
     private LowLevelKeyboardHook? _hook;
     private Win32Workspace? _workspace;
     private WorkspaceSessionAdapter? _sessionAdapter;
+    private ExceptionListStore? _exceptionStore;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -36,8 +38,14 @@ public partial class App : Application
         var (dispatcher, executor) = CompositionRoot.Build(tree, registry, foreground, workArea);
         _dispatcher = dispatcher;
 
+        // Task 3.34: loads the manual exception list from disk at startup (WE-2). The stored
+        // reference is kept so a later reload trigger (the tray "Reload" item, tasks 3.15-3.16)
+        // has something to call Reload() on -- WE-3's mechanism is real and wired here; only the
+        // live re-invocation trigger remains open (documented WU10 scope boundary).
+        _exceptionStore = new ExceptionListStore(ExceptionListFile.Load());
+
         _workspace = new Win32Workspace();
-        _sessionAdapter = new WorkspaceSessionAdapter(_workspace, tree, registry, () => executor.WorkArea);
+        _sessionAdapter = new WorkspaceSessionAdapter(_workspace, tree, registry, () => executor.WorkArea, () => _exceptionStore.Current);
         _workspace.Open();
 
         _hook = new LowLevelKeyboardHook(dispatcher.Writer);

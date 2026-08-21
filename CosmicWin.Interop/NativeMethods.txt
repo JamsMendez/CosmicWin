@@ -19,3 +19,11 @@ GetMonitorInfoW
 GetDpiForMonitor
 MONITORINFOF_PRIMARY
 SetForegroundWindow
+GetClassNameW
+GetWindowThreadProcessId
+GetWindowLongW
+OpenProcess
+CloseHandle
+QueryFullProcessImageNameW
+PROCESS_ACCESS_RIGHTS
+PROCESS_NAME_FORMAT

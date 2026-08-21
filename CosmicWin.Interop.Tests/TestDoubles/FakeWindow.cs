@@ -9,18 +9,34 @@ namespace CosmicWin.Interop.Tests.TestDoubles;
 /// </summary>
 internal sealed class FakeWindow : IWindow
 {
+    /// <summary>Task 3.28 regression-safety default — see <c>RecordingWindow</c>'s identical constant for the rationale.</summary>
+    private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
+
     private string _title;
     private Rectangle _bounds;
     private bool _failNextSetPosition;
     private bool _failNextActivate;
 
-    public FakeWindow(IntPtr handle, string title, Rectangle bounds)
+    public FakeWindow(
+        IntPtr handle,
+        string title,
+        Rectangle bounds,
+        string className = "",
+        string processName = "",
+        uint style = TileableStyleDefault,
+        uint exStyle = 0u,
+        bool isOwned = false)
     {
         Handle = handle;
         _title = title;
         _bounds = bounds;
         IsAlive = true;
         CanReposition = true;
+        ClassName = className;
+        ProcessName = processName;
+        Style = style;
+        ExStyle = exStyle;
+        IsOwned = isOwned;
     }
 
     public IntPtr Handle { get; }
@@ -32,6 +48,16 @@ internal sealed class FakeWindow : IWindow
     public bool IsAlive { get; private set; }
 
     public bool CanReposition { get; private set; }
+
+    public string ClassName { get; private set; }
+
+    public string ProcessName { get; private set; }
+
+    public uint Style { get; private set; }
+
+    public uint ExStyle { get; private set; }
+
+    public bool IsOwned { get; private set; }
 
     public void SetPosition(Rectangle bounds)
     {

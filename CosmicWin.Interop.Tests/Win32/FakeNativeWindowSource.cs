@@ -63,13 +63,17 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     }
 
     /// <summary>Seeds a window as already open before <c>Open()</c> enumerates.</summary>
-    public void SeedExistingWindow(nint hwnd, string title, Rectangle bounds) =>
-        _windows[hwnd] = new NativeWindowInfo(title, bounds);
+    public void SeedExistingWindow(
+        nint hwnd, string title, Rectangle bounds,
+        string className = "", string processName = "", uint style = 0u, uint exStyle = 0u, bool isOwned = false) =>
+        _windows[hwnd] = new NativeWindowInfo(title, bounds, className, processName, style, exStyle, isOwned);
 
     /// <summary>Simulates the OS creating a window AND the hook delivering the event for it.</summary>
-    public void SimulateWindowCreatedWithEvent(nint hwnd, string title, Rectangle bounds)
+    public void SimulateWindowCreatedWithEvent(
+        nint hwnd, string title, Rectangle bounds,
+        string className = "", string processName = "", uint style = 0u, uint exStyle = 0u, bool isOwned = false)
     {
-        _windows[hwnd] = new NativeWindowInfo(title, bounds);
+        _windows[hwnd] = new NativeWindowInfo(title, bounds, className, processName, style, exStyle, isOwned);
         _callback?.Invoke(NativeWindowEventKind.Created, hwnd);
     }
 

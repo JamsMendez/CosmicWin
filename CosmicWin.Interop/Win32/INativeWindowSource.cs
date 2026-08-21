@@ -1,9 +1,14 @@
 namespace CosmicWin.Interop.Win32;
 
-/// <summary>
-/// Info snapshot for one native window, as read by <see cref="INativeWindowSource"/>.
-/// </summary>
-internal readonly record struct NativeWindowInfo(string Title, Rectangle Bounds);
+/// <summary>Info snapshot for one native window, as read by <see cref="INativeWindowSource"/>. Task 3.28's 5 new fields are trailing/default-valued so pre-existing positional call sites keep compiling.</summary>
+internal readonly record struct NativeWindowInfo(
+    string Title,
+    Rectangle Bounds,
+    string ClassName = "",
+    string ProcessName = "",
+    uint Style = 0u,
+    uint ExStyle = 0u,
+    bool IsOwned = false);
 
 /// <summary>
 /// The kind of change delivered by <see cref="INativeWindowSource.SubscribeWindowEvents"/>.

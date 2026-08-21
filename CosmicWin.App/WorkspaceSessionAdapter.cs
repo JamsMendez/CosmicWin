@@ -1,5 +1,6 @@
 using CosmicWin.Interop;
 using CosmicWin.Layout;
+using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App;
 
@@ -33,13 +34,16 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     private readonly LayoutTree _tree;
     private readonly WindowRegistry _registry;
     private readonly Func<Rect> _workArea;
+    private readonly Func<ExceptionList> _exceptions;
 
-    public WorkspaceSessionAdapter(IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea)
+    /// <summary>Task 3.32: <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.</summary>
+    public WorkspaceSessionAdapter(IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea, Func<ExceptionList> exceptions)
     {
         _workspace = workspace;
         _tree = tree;
         _registry = registry;
         _workArea = workArea;
+        _exceptions = exceptions;
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;
@@ -51,6 +55,16 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     private void OnWindowAdded(object? sender, WindowEventArgs e)
     {
         var window = e.Window;
+
+        // Task 3.32: spec WT-3/WE-1/WE-2, closes verify-report #21 N1. Creation-time only -- an
+        // already-tracked window newly excluded by a later Reload is NOT retroactively removed
+        // (WU10 documented scope boundary).
+        var descriptor = WindowDescriptorBuilder.Build(window);
+        if (WindowFilters.IsExcluded(descriptor, _exceptions()))
+        {
+            return;
+        }
+
         var windowRef = new WindowRef(window.Handle);
 
         switch (_tree.Root)

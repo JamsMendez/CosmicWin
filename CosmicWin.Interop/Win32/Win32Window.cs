@@ -13,17 +13,34 @@ namespace CosmicWin.Interop.Win32;
 /// </remarks>
 internal sealed class Win32Window : IWindow
 {
+    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing positional call sites read as tileable, not auto-excluded (task 3.32).</summary>
+    private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
+
     private readonly INativeWindowSource _nativeSource;
     private string _title;
     private Rectangle _bounds;
 
-    public Win32Window(nint handle, string title, Rectangle bounds, INativeWindowSource nativeSource)
+    public Win32Window(
+        nint handle,
+        string title,
+        Rectangle bounds,
+        INativeWindowSource nativeSource,
+        string className = "",
+        string processName = "",
+        uint style = TileableStyleDefault,
+        uint exStyle = 0u,
+        bool isOwned = false)
     {
         Handle = handle;
         _title = title;
         _bounds = bounds;
         _nativeSource = nativeSource;
         IsAlive = true;
+        ClassName = className;
+        ProcessName = processName;
+        Style = style;
+        ExStyle = exStyle;
+        IsOwned = isOwned;
     }
 
     public nint Handle { get; }
@@ -35,6 +52,16 @@ internal sealed class Win32Window : IWindow
     public bool IsAlive { get; private set; }
 
     public bool CanReposition { get; private set; } = true;
+
+    public string ClassName { get; private set; }
+
+    public string ProcessName { get; private set; }
+
+    public uint Style { get; private set; }
+
+    public uint ExStyle { get; private set; }
+
+    public bool IsOwned { get; private set; }
 
     public void SetPosition(Rectangle bounds)
     {
@@ -57,10 +84,15 @@ internal sealed class Win32Window : IWindow
 
     public bool TryActivate() => IsAlive && _nativeSource.TryActivateWindow(Handle);
 
-    internal void Refresh(string title, Rectangle bounds)
+    internal void Refresh(string title, Rectangle bounds, string className, string processName, uint style, uint exStyle, bool isOwned)
     {
         _title = title;
         _bounds = bounds;
+        ClassName = className;
+        ProcessName = processName;
+        Style = style;
+        ExStyle = exStyle;
+        IsOwned = isOwned;
     }
 
     internal void MarkDead() => IsAlive = false;

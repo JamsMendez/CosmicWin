@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.System.Threading;
 using Windows.Win32.UI.Accessibility;
 using Windows.Win32.UI.WindowsAndMessaging;
 
@@ -50,7 +51,14 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             return false;
         }
 
-        info = new NativeWindowInfo(ReadWindowTitle(handle), new Rectangle(rect.left, rect.top, rect.right, rect.bottom));
+        info = new NativeWindowInfo(
+            ReadWindowTitle(handle),
+            new Rectangle(rect.left, rect.top, rect.right, rect.bottom),
+            ReadClassName(handle),
+            ReadProcessName(handle),
+            ReadStyle(handle),
+            ReadExStyle(handle),
+            ReadIsOwned(handle));
         return true;
     }
 
@@ -105,6 +113,61 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         }
 
         return written > 0 ? new string(buffer[..written]) : string.Empty;
+    }
+
+    /// <summary>Raw GWL_STYLE/GWL_EXSTYLE reads (WindowFilters interprets the bits). 32-bit GetWindowLong, not the Ptr variant — not generatable for AnyCPU (PInvoke005); both values are always 32-bit anyway.</summary>
+    private static uint ReadStyle(HWND hwnd) => unchecked((uint)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_STYLE));
+
+    private static uint ReadExStyle(HWND hwnd) => unchecked((uint)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE));
+
+    /// <summary>The raw ownership signal WE-1's owned-dialog clause needs.</summary>
+    private static bool ReadIsOwned(HWND hwnd) => PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) != HWND.Null;
+
+    private static string ReadClassName(HWND hwnd)
+    {
+        Span<char> buffer = stackalloc char[256];
+        int written;
+        fixed (char* pBuffer = buffer)
+        {
+            written = PInvoke.GetClassName(hwnd, pBuffer, buffer.Length);
+        }
+
+        return written > 0 ? new string(buffer[..written]) : string.Empty;
+    }
+
+    /// <summary>Owning process's executable file name incl. <c>.exe</c> (NOT <c>Process.ProcessName</c>, which strips it). Degrades to empty rather than throwing on any failure.</summary>
+    private static string ReadProcessName(HWND hwnd)
+    {
+        try
+        {
+            uint processId = 0;
+            PInvoke.GetWindowThreadProcessId(hwnd, &processId);
+            if (processId == 0)
+            {
+                return string.Empty;
+            }
+
+            using var process = PInvoke.OpenProcess_SafeHandle(PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+            if (process.IsInvalid)
+            {
+                return string.Empty;
+            }
+
+            Span<char> buffer = stackalloc char[260];
+            uint size = (uint)buffer.Length;
+            bool ok = PInvoke.QueryFullProcessImageName(process, PROCESS_NAME_FORMAT.PROCESS_NAME_WIN32, buffer, ref size);
+
+            if (!ok || size == 0)
+            {
+                return string.Empty;
+            }
+
+            return Path.GetFileName(new string(buffer[..(int)size]));
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>
