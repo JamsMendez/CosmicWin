@@ -53,6 +53,32 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         Assert.Equal(target, info.Bounds);
     }
 
+    /// <summary>
+    /// V10-W1: <c>ReadStyle</c>/<c>ReadClassName</c>/<c>ReadProcessName</c>/<c>ReadIsOwned</c> had
+    /// zero automated coverage -- four mutations to those P/Invoke reads (including <c>ReadStyle</c>
+    /// returning <c>0</c>, which would make every real window fail the <c>WS_SYSMENU</c> check and
+    /// silently disable tiling entirely) survived the full suite. Uses the same spawned, self-owned
+    /// window as the other facts in this file -- never asserts against ambient desktop state.
+    /// </summary>
+    [Fact]
+    public void TryGetWindowInfo_ReturnsRealDescriptorFields_ForASpawnedWindow()
+    {
+        const uint WsSysMenu = 0x00080000;
+
+        using var notepad = SpawnedNotepadWindow.Spawn();
+        var source = new Win32NativeWindowSource();
+
+        var found = source.TryGetWindowInfo(notepad.Handle, out var info);
+
+        Assert.True(found);
+        Assert.False(string.IsNullOrWhiteSpace(info.ClassName));
+        Assert.False(string.IsNullOrWhiteSpace(info.ProcessName));
+        Assert.Contains("notepad", info.ProcessName, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(0u, info.Style);
+        Assert.Equal(WsSysMenu, info.Style & WsSysMenu);
+        Assert.False(info.IsOwned);
+    }
+
     [Fact]
     public void TryGetWindowInfo_ReturnsFalse_OnceTheRealWindowHasBeenClosed()
     {
