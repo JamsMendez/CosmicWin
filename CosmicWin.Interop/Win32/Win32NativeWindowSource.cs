@@ -53,9 +53,18 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             return false;
         }
 
+        // The DRAWN frame, not GetWindowRect's, so every layer above reasons about what the user
+        // can actually see. DWM declining (an old-style window with no extended frame) falls back
+        // to the raw rectangle, where the two are the same thing anyway.
+        var windowRect = new Rectangle(rect.left, rect.top, rect.right, rect.bottom);
+        if (!TryGetDrawnFrameBounds(hwnd, out var drawn))
+        {
+            drawn = windowRect;
+        }
+
         info = new NativeWindowInfo(
             ReadWindowTitle(handle),
-            new Rectangle(rect.left, rect.top, rect.right, rect.bottom),
+            drawn,
             ReadClassName(handle),
             ReadProcessName(handle),
             ReadStyle(handle),
@@ -64,17 +73,36 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return true;
     }
 
+    /// <summary>
+    /// Places the window so its DRAWN frame lands on <paramref name="bounds"/>. SetWindowPos speaks
+    /// GetWindowRect coordinates, which include the invisible resize border -- measured on this
+    /// build as 7px left/right/bottom and 0 top -- so asking for a tile verbatim leaves the visible
+    /// window inset on three sides and flush on the fourth. The current inset is read back per call
+    /// rather than assumed: it varies by window style, DPI and Windows version.
+    /// </summary>
     public bool SetWindowPosition(nint hwnd, Rectangle bounds)
     {
         HWND handle = new(hwnd);
+        var target = bounds;
+
+        if (PInvoke.GetWindowRect(handle, out RECT current) &&
+            TryGetDrawnFrameBounds(hwnd, out var drawn) &&
+            drawn.Width > 0 && drawn.Height > 0)
+        {
+            target = new Rectangle(
+                bounds.Left - (drawn.Left - current.left),
+                bounds.Top - (drawn.Top - current.top),
+                bounds.Right + (current.right - drawn.Right),
+                bounds.Bottom + (current.bottom - drawn.Bottom));
+        }
 
         return PInvoke.SetWindowPos(
             handle,
             HWND.Null,
-            bounds.Left,
-            bounds.Top,
-            bounds.Width,
-            bounds.Height,
+            target.Left,
+            target.Top,
+            target.Width,
+            target.Height,
             SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE);
     }
 
@@ -226,6 +254,32 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// fail-open, matching every other raw read in this class, since a diagnostic-read failure
     /// must never exclude a window that IS actually visible.
     /// </summary>
+    /// <summary>
+    /// What DWM actually PAINTS for this window, as opposed to what <c>GetWindowRect</c> reports.
+    /// The two differ by the invisible resize border, which on modern Windows is present on the
+    /// left, right and bottom and absent on the top -- so tiling on GetWindowRect coordinates alone
+    /// leaves visible gaps on three sides and none on the fourth. Returns <see langword="false"/>
+    /// (rather than throwing) when DWM declines, which callers must treat as "no inset known".
+    /// </summary>
+    internal static unsafe bool TryGetDrawnFrameBounds(nint hwnd, out Rectangle bounds)
+    {
+        RECT rect;
+        var hr = PInvoke.DwmGetWindowAttribute(
+            new HWND(hwnd),
+            DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+            &rect,
+            (uint)sizeof(RECT));
+
+        if (hr.Failed)
+        {
+            bounds = Rectangle.Empty;
+            return false;
+        }
+
+        bounds = new Rectangle(rect.left, rect.top, rect.right, rect.bottom);
+        return true;
+    }
+
     private static bool ReadIsCloaked(HWND hwnd)
     {
         int cloaked;

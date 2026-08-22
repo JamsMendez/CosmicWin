@@ -142,6 +142,11 @@ public sealed class AppComposition : IDisposable
         var exceptionStore = new ExceptionListStore(ExceptionListFile.Load());
         var workspace = new Win32Workspace();
 
+        // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
+        // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
+        // the knob in one visible place instead of baked into TreeArranger's default.
+        TreeArranger.Gap = TreeArranger.DefaultGap;
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),

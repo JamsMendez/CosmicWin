@@ -55,6 +55,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(500);
 
+
     private readonly List<SpawnedAlacrittyWindow> _spawned = [];
 
     /// <summary>WU29: every handle observed so far, used by <see cref="SpawnOwn"/> to verify the spawn host's one-window-per-process property before it is relied on.</summary>

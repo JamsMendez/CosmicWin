@@ -156,4 +156,34 @@ public sealed class Win32NativeWindowSourceRealWindowTests
             Thread.Sleep(50);
         }
     }
+
+    /// <summary>
+    /// Reported 2026-08-22: tiled windows looked inset on the left, right and bottom but flush
+    /// against the top. Measured cause: Win32's <c>GetWindowRect</c> includes the INVISIBLE resize
+    /// border, which on this build is 7px on three sides and 0 on the top --
+    /// <c>invisible inset: left=7 top=0 right=7 bottom=7</c>. Positioning on those coordinates
+    /// means the window the user actually SEES never lands where it was asked to.
+    /// <para>
+    /// Both halves of this seam now speak the DRAWN frame: ask for a rectangle and the drawn frame
+    /// is that rectangle, read it back and you get the same numbers. They have to agree, or
+    /// <c>Win32Workspace.UpdateBounds</c> would see a permanent 7px discrepancy between the cached
+    /// value and the live one and re-report a bounds change forever.
+    /// </para>
+    /// </summary>
+    [RequiresDesktopFact]
+    public void SetWindowPosition_PlacesTheDRAWNFrameExactlyWhereAsked_AndReadsBackTheSame()
+    {
+        using var spawned = SpawnedAlacrittyWindow.Spawn();
+        var source = new Win32NativeWindowSource();
+        var requested = Rectangle.FromSize(300, 250, 800, 500);
+
+        Assert.True(source.SetWindowPosition(spawned.Handle, requested));
+        Thread.Sleep(600);
+
+        Assert.True(Win32NativeWindowSource.TryGetDrawnFrameBounds(spawned.Handle, out var drawn));
+        Assert.Equal(requested, drawn);
+
+        Assert.True(source.TryGetWindowInfo(spawned.Handle, out var info));
+        Assert.Equal(requested, info.Bounds);
+    }
 }

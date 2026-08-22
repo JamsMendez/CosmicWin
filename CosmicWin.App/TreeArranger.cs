@@ -26,11 +26,45 @@ namespace CosmicWin.App;
 /// </remarks>
 internal static class TreeArranger
 {
-    public static void ArrangeAndPosition(ITilingEngine engine, WindowRegistry registry, Rect workArea)
+    /// <summary>Visible space between neighbouring windows, and between a window and the screen edge.</summary>
+    public const int DefaultGap = 8;
+
+    /// <summary>
+    /// The single spacing knob, defaulting to OFF. Reported 2026-08-22: windows had space on three
+    /// sides and none at the top, because Win32's invisible resize border is 7px on left/right/
+    /// bottom and 0 on top. Interop now lands a tile exactly where it is asked, so any space on
+    /// screen is deliberate -- this value, applied identically on all four sides.
+    /// <para>
+    /// Zero is the default on purpose. Spacing is presentation, while every geometry fact in the
+    /// suite is about the tiling ARITHMETIC -- defaulting this to <see cref="DefaultGap"/> silently
+    /// changed the expected rectangle of 27 of them at once. Production opts in explicitly, in
+    /// <see cref="AppComposition"/>, where the choice is visible.
+    /// </para>
+    /// </summary>
+    public static int Gap { get; set; }
+
+    public static void ArrangeAndPosition(ITilingEngine engine, WindowRegistry registry, Rect workArea) =>
+        ArrangeAndPosition(engine, registry, workArea, Gap);
+
+    /// <summary>
+    /// Explicit-spacing overload. Exists so a test can pin gap arithmetic WITHOUT assigning <see
+    /// cref="Gap"/>: xUnit runs test classes in parallel, so a class that mutated the static raced
+    /// every other class's geometry assertions -- observed as one unrelated fact failing in a full
+    /// run and passing in isolation.
+    /// </summary>
+    public static void ArrangeAndPosition(
+        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap)
     {
         var evictedAny = false;
 
-        foreach (var (windowRef, bounds) in engine.Arrange(workArea))
+        // HALF off the work area and HALF off every tile. Two adjacent windows then contribute half
+        // each, and an outer edge contributes the work-area half plus the tile's half, so BOTH
+        // distances come to exactly Gap. Taking a whole gap off each tile instead would make the
+        // screen edge twice as wide as the space between windows.
+        var half = Math.Max(0, gap) / 2;
+        var field = Deflate(workArea, half);
+
+        foreach (var (windowRef, bounds) in engine.Arrange(field))
         {
             if (!registry.TryGetWindow(windowRef.Handle, out var window) || window is not { IsAlive: true })
             {
@@ -39,7 +73,8 @@ internal static class TreeArranger
 
             if (window.CanReposition)
             {
-                window.SetPosition(Rectangle.FromSize(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+                var tile = Deflate(bounds, half);
+                window.SetPosition(Rectangle.FromSize(tile.X, tile.Y, tile.Width, tile.Height));
             }
 
             // Checked AFTER the attempt above: CanReposition may have just flipped false as a
@@ -58,7 +93,22 @@ internal static class TreeArranger
         {
             // Tree shape changed (at least one leaf evicted) -- reflow the survivors into the
             // vacated space. Terminates: each recursive pass strictly shrinks the live-leaf set.
-            ArrangeAndPosition(engine, registry, workArea);
+            ArrangeAndPosition(engine, registry, workArea, gap);
         }
+    }
+
+    /// <summary>
+    /// Shrinks <paramref name="rect"/> by <paramref name="inset"/> on every side, never past the
+    /// point of collapsing: a work area too small for the requested gap keeps its windows visible
+    /// rather than sizing them to nothing.
+    /// </summary>
+    private static Rect Deflate(Rect rect, int inset)
+    {
+        if (inset <= 0 || rect.Width <= inset * 2 || rect.Height <= inset * 2)
+        {
+            return rect;
+        }
+
+        return new Rect(rect.X + inset, rect.Y + inset, rect.Width - (inset * 2), rect.Height - (inset * 2));
     }
 }
