@@ -19,16 +19,24 @@ public sealed class Win32NativeWindowSourceActivationTests
     private static nint Foreground() => PInvoke.GetForegroundWindow();
 
     /// <summary>
-    /// Turns a refusal into a diagnosis instead of a mystery. Measured 2026-08-22: with a
-    /// full-screen NVIDIA overlay on the desktop these facts fail against a byte-identical
-    /// assembly, because a full-screen exclusive window is one of the documented conditions under
-    /// which Windows refuses SetForegroundWindow outright. Close any full-screen overlay
-    /// (GeForce/game bar) or unlock the session and re-run before suspecting the code.
+    /// Turns a refusal into a diagnosis instead of a mystery.
+    ///
+    /// Measured 2026-08-22 against a byte-identical assembly that had passed repeatedly minutes
+    /// earlier: the whole suite failed because Windows had the foreground LOCKED system-wide.
+    /// <c>SystemParametersInfo(SPI_GETFOREGROUNDLOCKTIMEOUT)</c> reported <c>int.MaxValue</c>, the
+    /// documented signature of an active <c>LockSetForegroundWindow</c>, and in that state nothing
+    /// can take the foreground -- not this suite, and not even a freshly launched application on its
+    /// own, which is the cheap way to tell the two apart.
+    ///
+    /// So before suspecting the code: launch any app and see whether IT gets focus. If it does not,
+    /// the desktop is locked and this suite can measure nothing. Log off, or reset the timeout, then
+    /// re-run.
     /// </summary>
     private static string ForegroundHint() =>
-        $"the OS foreground is 0x{Foreground():X}; if this suite fails wholesale, check for a " +
-        "full-screen overlay (NVIDIA/GeForce, game bar) or a locked session -- Windows refuses " +
-        "every foreground change while one is up, and the assembly under test is then irrelevant";
+        $"the OS foreground is 0x{Foreground():X}. If this suite failed wholesale, check whether " +
+        "Windows has the foreground locked: launch any application and see whether it takes focus " +
+        "by itself. If it does not, nothing here is measurable and the assembly under test is " +
+        "irrelevant -- see SPI_GETFOREGROUNDLOCKTIMEOUT";
 
     [RequiresDesktopFact]
     public void Activate_MovesTheRealOsForegroundToTheTarget_FromAnotherProcessesWindow()
