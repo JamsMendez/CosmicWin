@@ -4,6 +4,7 @@ using CosmicWin.App.Input;
 
 namespace CosmicWin.App.Tests.Input;
 
+[Collection(Desktop.RealDesktopCollection.Name)]
 public sealed class LowLevelKeyboardHookDesktopTests
 {
     [RequiresDesktopFact]

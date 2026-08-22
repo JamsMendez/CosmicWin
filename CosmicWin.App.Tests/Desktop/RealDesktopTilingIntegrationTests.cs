@@ -50,6 +50,7 @@ namespace CosmicWin.App.Tests.Desktop;
 /// <c>schtasks</c> in any way.</para>
 /// </remarks>
 [Trait("Category", "RequiresDesktop")]
+[Collection(Desktop.RealDesktopCollection.Name)]
 public sealed class RealDesktopTilingIntegrationTests : IDisposable
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(500);

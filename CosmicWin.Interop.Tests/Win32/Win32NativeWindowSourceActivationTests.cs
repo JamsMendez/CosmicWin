@@ -13,6 +13,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// activation, the OS itself reports the target as foreground.
 /// </summary>
 [Trait("Category", "RequiresDesktop")]
+[Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeWindowSourceActivationTests
 {
     private static nint Foreground() => PInvoke.GetForegroundWindow();

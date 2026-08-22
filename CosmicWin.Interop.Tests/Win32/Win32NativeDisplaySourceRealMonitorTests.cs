@@ -10,6 +10,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// <see cref="Win32NativeWindowSourceRealWindowTests"/> for the filter commands.
 /// </summary>
 [Trait("Category", "RequiresDesktop")]
+[Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeDisplaySourceRealMonitorTests
 {
     [Fact]

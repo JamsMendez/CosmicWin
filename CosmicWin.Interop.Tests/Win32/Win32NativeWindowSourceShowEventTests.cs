@@ -23,6 +23,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// handles.
 /// </remarks>
 [Trait("Category", "RequiresDesktop")]
+[Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeWindowSourceShowEventTests
 {
     [RequiresDesktopFact]

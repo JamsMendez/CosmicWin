@@ -5,6 +5,7 @@ using CosmicWin.Interop;
 namespace CosmicWin.App.Tests.Startup;
 
 /// <summary>Real <c>schtasks</c> round-trip (ES-2/ES-4); skips, never fakes elevation, unless both <c>COSMICWIN_RUN_DESKTOP_TESTS=1</c> is set AND the process is actually elevated.</summary>
+[Collection(Desktop.RealDesktopCollection.Name)]
 public sealed class TaskInstallerElevatedTests
 {
     [RequiresElevatedFact]

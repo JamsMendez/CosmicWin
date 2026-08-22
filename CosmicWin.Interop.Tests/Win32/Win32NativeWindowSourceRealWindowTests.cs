@@ -14,6 +14,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// suite explicitly with <c>dotnet test --filter Category=RequiresDesktop</c>.
 /// </summary>
 [Trait("Category", "RequiresDesktop")]
+[Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeWindowSourceRealWindowTests
 {
     [Fact]
