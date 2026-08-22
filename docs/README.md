@@ -1,0 +1,113 @@
+# CosmicWin — operating notes
+
+Things that are true about this repository and were previously only discoverable by reading source
+or by getting them wrong once. Behaviour lives in the code; this file is the map to it.
+
+## Keybindings
+
+Mirrors `CosmicWin.App/Input/ChordTable.cs` (`CreateDefault`). That file is the source of truth —
+if the two disagree, the file wins and this table is stale.
+
+| Chord | Action |
+| --- | --- |
+| `Alt` + `H`/`J`/`K`/`L` or arrows | Move focus |
+| `Alt+Shift` + direction | Move the window (or the whole group, after `Alt+[`) |
+| `Alt+Ctrl` + direction | Resize — grows toward a neighbour on that side, shrinks when there is none |
+| `Alt+[` | Ascend scope (act on the parent group) |
+| `Alt+]` | Descend scope |
+| `Alt+O` | Toggle the focused group's split axis |
+
+**An unregistered chord is indistinguishable from a broken feature.** The low-level hook only
+swallows chords it matches; everything else passes through to whatever has focus. `Ctrl+Shift` +
+direction is *not* bound, so pressing it does nothing and looks exactly like a bug. Move is
+`Alt+Shift`.
+
+`Alt+[` is not required to move a window out of its group — `MoveNode` walks up the tree on its own
+(cosmic-comp's `move_current_node`). Its remaining purpose is deliberately moving a whole group as
+one unit.
+
+## Running the app
+
+```powershell
+./scripts/run.ps1
+```
+
+`CosmicWin.App.exe` declares `requireAdministrator`, so launching it raises a UAC prompt that must
+be accepted by hand — no script can bypass that, and an unelevated shell cannot stop the running
+process afterwards either (`Access is denied`; exit it from the tray).
+
+The script exists for a second reason. A running instance holds a file lock on every assembly in the
+directory it started from, so launching straight out of `bin\Debug` makes the next build fail:
+
+```
+error MSB3027: Could not copy "CosmicWin.Layout.dll" ...
+The file is locked by: "CosmicWin.App.exe (24260)"
+```
+
+`run.ps1` builds, copies the output to `run/` (git-ignored), and launches *that*. The build tree
+stays unlocked, so `dotnet build` and `dotnet test` keep working while the app is open.
+
+## Running the tests
+
+```powershell
+$env:COSMICWIN_RUN_DESKTOP_TESTS = '1'
+$env:COSMICWIN_DESKTOP_TEST_TERMINAL = 'C:\path\to\Alacritty-v0.17.0.exe'
+dotnet test CosmicWin.Layout.Tests/CosmicWin.Layout.Tests.csproj
+dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj
+dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj
+```
+
+Both variables are required together, and **setting only the first produces a false red**: the
+real-desktop integration test throws from `SpawnedAlacrittyWindow.ResolveExecutablePath`, and five
+Interop tests skip silently while the run still reports "Passed". The terminal path is deliberately
+not hardcoded, so a committed test never carries one developer's absolute path. `notepad.exe` cannot
+substitute for it: on this Windows build it is a tabbed packaged app and a second launch opens a tab
+rather than a second top-level window.
+
+One test is expected to skip: `TaskInstallerElevatedTests` needs elevation.
+
+Run the projects one at a time. The desktop-gated tests spawn real windows and move the real
+foreground, so they are serialised within a project and do not tolerate a second project racing
+them. Close the app first — besides the file lock, a live window manager tiles and activates the
+windows those tests spawn.
+
+## Diagnostics
+
+Three test-shaped files assert nothing on purpose. They answer a question with measured data instead
+of a hypothesis, and each was written because a guess had already been wrong once.
+
+| File | Answers |
+| --- | --- |
+| `CosmicWin.App.Tests/Desktop/DesktopSnapshotDiagnostic.cs` | Which windows does the filter chain actually admit right now? (Found a minimized window holding a whole tile.) |
+| `CosmicWin.Layout.Tests/MoveSequenceDiagnostic.cs` | What does the tree look like after each move chord? (Found a degenerate single-child group stranding the window.) |
+| `CosmicWin.Interop.Tests/Win32/FrameBoundsDiagnostic.cs` | How far is the drawn frame from `GetWindowRect`? (Measured the 7px invisible border, 0 on top.) |
+
+Run one with the detailed logger, or its output is swallowed:
+
+```powershell
+dotnet test <project> --filter "FullyQualifiedName~DesktopSnapshotDiagnostic" --logger "console;verbosity=detailed"
+```
+
+## Reference implementation
+
+`cosmic-epoch/` is a vendored checkout of COSMIC, kept as the behavioural reference. Algorithms are
+ported from it, never copied. The parts that have actually been consulted:
+
+- `cosmic-comp/src/shell/layout/tiling/mod.rs` — `move_current_node` (the ancestor walk that makes a
+  move a reversible cycle), `resize`, and the insert heuristic that picks a split axis from the
+  focused tile's aspect ratio, which is what curls a run of new windows into a spiral.
+- `cosmic-comp/src/input/mod.rs` — how a resize keypress becomes an edge plus an inwards/outwards
+  intent.
+
+`Orientation` is inverted between the two projects: cosmic-comp's `Orientation::Vertical` measures
+width and means side-by-side, which is CosmicWin's `SplitAxis.Horizontal`. Translate deliberately.
+
+## Spacing
+
+`TreeArranger.Gap` is the single spacing knob and **defaults to zero**; `AppComposition` opts
+production in at `TreeArranger.DefaultGap` (8px). Zero is the default because every geometry fact in
+the suite asserts tiling arithmetic, not spacing — giving it a non-zero default changed the expected
+rectangle of 27 tests at once.
+
+Tests must never assign it. xUnit runs test classes in parallel, so mutating that static races every
+other class's geometry assertions; use the explicit-gap overload of `ArrangeAndPosition` instead.
