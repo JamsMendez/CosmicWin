@@ -42,28 +42,30 @@ public sealed class ActionExecutor(
 
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
-        if (TryResolveFocused(out var focused))
+        var foregroundHandle = foreground.GetForegroundHandle();
+        if (TryResolveFocused(foregroundHandle, out var focused))
         {
-            Dispatch(action.Kind, focused);
+            Dispatch(action.Kind, focused, foregroundHandle);
         }
         else if (FocusDirectionOf(action.Kind) is { } direction)
         {
             // The chord never reached the tree walk: recorded rather than dropped, so a silent
-            // focus chord on real hardware can be told apart from a failed one.
-            Trace(direction, 0, 0, FocusTraceOutcome.UnresolvedFocus);
+            // focus chord on real hardware can be told apart from a failed one -- and the
+            // foreground handle names the untracked window that was holding focus instead.
+            Trace(direction, foregroundHandle, 0, 0, FocusTraceOutcome.UnresolvedFocus);
         }
 
         return ValueTask.CompletedTask;
     }
 
-    private void Dispatch(HotkeyActionKind kind, LeafNode focused)
+    private void Dispatch(HotkeyActionKind kind, LeafNode focused, nint foregroundHandle)
     {
         switch (kind)
         {
-            case HotkeyActionKind.FocusLeft: MoveFocus(Direction.Left, focused); break;
-            case HotkeyActionKind.FocusRight: MoveFocus(Direction.Right, focused); break;
-            case HotkeyActionKind.FocusUp: MoveFocus(Direction.Up, focused); break;
-            case HotkeyActionKind.FocusDown: MoveFocus(Direction.Down, focused); break;
+            case HotkeyActionKind.FocusLeft: MoveFocus(Direction.Left, focused, foregroundHandle); break;
+            case HotkeyActionKind.FocusRight: MoveFocus(Direction.Right, focused, foregroundHandle); break;
+            case HotkeyActionKind.FocusUp: MoveFocus(Direction.Up, focused, foregroundHandle); break;
+            case HotkeyActionKind.FocusDown: MoveFocus(Direction.Down, focused, foregroundHandle); break;
             case HotkeyActionKind.MoveLeft: MutateAndArrange(focused, e => e.MoveNode(Direction.Left, focused)); break;
             case HotkeyActionKind.MoveRight: MutateAndArrange(focused, e => e.MoveNode(Direction.Right, focused)); break;
             case HotkeyActionKind.MoveUp: MutateAndArrange(focused, e => e.MoveNode(Direction.Up, focused)); break;
@@ -84,25 +86,35 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
-    /// Resolves the leaf currently treated as focused: the cached leaf if it is still tracked and
-    /// alive, otherwise a fresh OS foreground-window lookup mapped through <see
-    /// cref="WindowRegistry"/>. Returns <see langword="false"/> (no-op, never throws) when neither
-    /// resolves — e.g. the foreground window is untracked or the tree is empty.
+    /// Resolves the leaf currently treated as focused: the leaf the OS foreground actually maps to,
+    /// and only if that window is untracked, the last leaf CosmicWin successfully activated.
+    /// Returns <see langword="false"/> (no-op, never throws) when neither resolves — e.g. the
+    /// foreground window is untracked and nothing has been focused yet, or the tree is empty.
     /// </summary>
-    private bool TryResolveFocused(out LeafNode focused)
+    /// <remarks>
+    /// MR-2 root cause (Engram discovery #104): the cache used to be consulted FIRST and returned on
+    /// nothing more than "still tracked and alive", so it never re-synced with the desktop. Paired
+    /// with <see cref="MoveFocus"/> advancing it before knowing whether activation worked, a single
+    /// failed <c>SetForegroundWindow</c> desynced CosmicWin's focus model permanently — every later
+    /// chord then walked from a window the user was not on. The third supervised run's trace caught
+    /// it directly: activation to <c>0x99030A</c> failed at 12:46:32, and the next chord ten seconds
+    /// later still reported <c>focused=0x99030A</c>. The OS is the authority on focus; the cache
+    /// only covers the case where the OS answer is useless to us (an untracked foreground window,
+    /// e.g. a dialog or a non-tiled app), where dropping the chord entirely would be worse.
+    /// </remarks>
+    private bool TryResolveFocused(nint foregroundHandle, out LeafNode focused)
     {
+        if (foregroundHandle != 0 && registry.TryGetLeaf(foregroundHandle, out var leaf) && leaf is not null)
+        {
+            _focused = leaf;
+            focused = leaf;
+            return true;
+        }
+
         if (_focused is not null &&
             registry.TryGetWindow(_focused.Window.Handle, out var cached) && cached is { IsAlive: true })
         {
             focused = _focused;
-            return true;
-        }
-
-        var handle = foreground.GetForegroundHandle();
-        if (handle != 0 && registry.TryGetLeaf(handle, out var leaf) && leaf is not null)
-        {
-            _focused = leaf;
-            focused = leaf;
             return true;
         }
 
@@ -114,32 +126,40 @@ public sealed class ActionExecutor(
     /// LE-2 focus move: does not re-arrange (focus alone never changes tree geometry) — instead
     /// activates the newly focused window's real OS window ("focus activation").
     /// </summary>
-    private void MoveFocus(Direction direction, LeafNode focused)
+    private void MoveFocus(Direction direction, LeafNode focused, nint foregroundHandle)
     {
         var origin = focused.Window.Handle;
         var (localEngine, _) = ResolveEngineAndWorkArea(focused);
         var result = localEngine.NextFocus(direction, focused);
         if (result.Status != FocusWalkStatus.Found || result.Leaf is null)
         {
-            Trace(direction, origin, 0, FocusTraceOutcome.NoMatch);
+            Trace(direction, foregroundHandle, origin, 0, FocusTraceOutcome.NoMatch);
             return;
         }
 
-        _focused = result.Leaf;
         var target = result.Leaf.Window.Handle;
         if (!registry.TryGetWindow(target, out var window) || window is null)
         {
-            Trace(direction, origin, target, FocusTraceOutcome.UntrackedTarget);
+            Trace(direction, foregroundHandle, origin, target, FocusTraceOutcome.UntrackedTarget);
             return;
         }
 
+        // The cache advances only on a REAL activation (Engram discovery #104). Moving it first --
+        // as this method used to -- meant a rejected SetForegroundWindow still relocated CosmicWin's
+        // idea of focus, and nothing ever moved it back.
         var activated = window.TryActivate();
-        Trace(direction, origin, target,
+        if (activated)
+        {
+            _focused = result.Leaf;
+        }
+
+        Trace(direction, foregroundHandle, origin, target,
             activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed);
     }
 
-    private void Trace(Direction direction, nint focusedHandle, nint targetHandle, FocusTraceOutcome outcome) =>
-        FocusTrace?.Record(new FocusTraceEntry(direction, focusedHandle, targetHandle, outcome));
+    private void Trace(
+        Direction direction, nint foregroundHandle, nint focusedHandle, nint targetHandle, FocusTraceOutcome outcome) =>
+        FocusTrace?.Record(new FocusTraceEntry(direction, foregroundHandle, focusedHandle, targetHandle, outcome));
 
     /// <summary>The direction a FOCUS chord carries, or null for every other action kind.</summary>
     private static Direction? FocusDirectionOf(HotkeyActionKind kind) => kind switch

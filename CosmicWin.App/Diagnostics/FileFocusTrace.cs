@@ -50,5 +50,5 @@ public sealed class FileFocusTrace(string path, Func<DateTimeOffset>? clock = nu
 
     private string Format(FocusTraceEntry entry) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{_clock():yyyy-MM-ddTHH:mm:ss.fffZ} focus {entry.Direction} focused=0x{entry.FocusedHandle:X} target=0x{entry.TargetHandle:X} {entry.Outcome}");
+        $"{_clock():yyyy-MM-ddTHH:mm:ss.fffZ} focus {entry.Direction} foreground=0x{entry.ForegroundHandle:X} focused=0x{entry.FocusedHandle:X} target=0x{entry.TargetHandle:X} {entry.Outcome}");
 }

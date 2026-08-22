@@ -56,6 +56,7 @@ public sealed class ActionExecutorFocusTraceTests
 
         var entry = Assert.Single(trace.Entries);
         Assert.Equal(Direction.Right, entry.Direction);
+        Assert.Equal(new IntPtr(1), entry.ForegroundHandle);
         Assert.Equal(new IntPtr(1), entry.FocusedHandle);
         Assert.Equal(windowB.Handle, entry.TargetHandle);
         Assert.Equal(FocusTraceOutcome.Activated, entry.Outcome);
@@ -102,7 +103,7 @@ public sealed class ActionExecutorFocusTraceTests
     }
 
     [Fact]
-    public async Task FocusRight_WhenForegroundIsUntracked_RecordsUnresolvedFocus()
+    public async Task FocusRight_WhenForegroundIsUntracked_RecordsUnresolvedFocus_AndKeepsTheForegroundHandle()
     {
         var (executor, foreground, _, trace, _, _) = BuildTwoLeafRow();
         foreground.Handle = new IntPtr(404);
@@ -111,9 +112,32 @@ public sealed class ActionExecutorFocusTraceTests
 
         var entry = Assert.Single(trace.Entries);
         Assert.Equal(Direction.Right, entry.Direction);
+        // The untracked handle is the whole point: it names the window that actually held focus
+        // when CosmicWin gave up, which "nothing happened" alone never revealed.
+        Assert.Equal(new IntPtr(404), entry.ForegroundHandle);
         Assert.Equal(IntPtr.Zero, entry.FocusedHandle);
         Assert.Equal(IntPtr.Zero, entry.TargetHandle);
         Assert.Equal(FocusTraceOutcome.UnresolvedFocus, entry.Outcome);
+    }
+
+    /// <summary>
+    /// The field that makes an <c>Activated</c> line trustworthy (Engram discovery #104): when the
+    /// cache drove the walk because the real foreground was untracked, the entry must still report
+    /// the REAL foreground, so a trivial self-activation can never again read as a genuine move.
+    /// </summary>
+    [Fact]
+    public async Task FocusRight_WhenTheCacheDrivesTheWalk_StillRecordsTheRealOsForeground()
+    {
+        var (executor, foreground, _, trace, _, _) = BuildTwoLeafRow();
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
+        foreground.Handle = new IntPtr(404);
+
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+
+        var entry = trace.Entries[^1];
+        Assert.Equal(new IntPtr(404), entry.ForegroundHandle);
+        Assert.Equal(new IntPtr(2), entry.FocusedHandle);
+        Assert.Equal(new IntPtr(1), entry.TargetHandle);
     }
 
     [Fact]

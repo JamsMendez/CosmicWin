@@ -19,21 +19,23 @@ public sealed class FileFocusTraceTests : IDisposable
 
     private static FocusTraceEntry Entry(
         Direction direction = Direction.Right,
+        nint foreground = 1,
         nint focused = 1,
         nint target = 2,
         FocusTraceOutcome outcome = FocusTraceOutcome.Activated) =>
-        new(direction, focused, target, outcome);
+        new(direction, foreground, focused, target, outcome);
 
     [Fact]
     public void Record_WritesEveryFieldTheTwoMr2CandidatesDifferOn()
     {
         var trace = new FileFocusTrace(Path_, () => new DateTimeOffset(2026, 8, 22, 10, 11, 12, TimeSpan.Zero));
 
-        trace.Record(Entry(Direction.Left, 0x1A2B, 0x3C4D, FocusTraceOutcome.ActivateFailed));
+        trace.Record(Entry(Direction.Left, 0x5E6F, 0x1A2B, 0x3C4D, FocusTraceOutcome.ActivateFailed));
 
         var line = Assert.Single(File.ReadAllLines(Path_));
         Assert.Contains("2026-08-22T10:11:12", line);
         Assert.Contains("Left", line);
+        Assert.Contains("foreground=0x5E6F", line);
         Assert.Contains("focused=0x1A2B", line);
         Assert.Contains("target=0x3C4D", line);
         Assert.Contains("ActivateFailed", line);
