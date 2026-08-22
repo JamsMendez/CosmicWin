@@ -17,6 +17,16 @@ public sealed class Win32Workspace : IWorkspace
 {
     private readonly INativeWindowSource _nativeSource;
     private readonly Dictionary<nint, Win32Window> _windows = new();
+
+    /// <summary>
+    /// Windows the user is currently dragging or resizing by hand. Every bounds change between
+    /// MOVESIZESTART and MOVESIZEEND is an intermediate frame of one gesture, so reporting them
+    /// makes every listener answer the drag mid-flight -- measured as a window that flickers under
+    /// the cursor and refuses to move, because decision #80's snap-back re-applied its tile on each
+    /// one. The cached bounds are deliberately left stale for the duration, which is what lets the
+    /// drop fire exactly one event carrying the settled position.
+    /// </summary>
+    private readonly HashSet<nint> _beingDragged = [];
     private IDisposable? _hookSubscription;
 
     public event EventHandler<WindowEventArgs>? WindowAdded;
@@ -72,7 +82,12 @@ public sealed class Win32Workspace : IWorkspace
         {
             if (_windows.ContainsKey(hwnd))
             {
-                UpdateBounds(hwnd);
+                // The reconciliation pass answers a MISSED event, not a gesture in flight: reporting
+                // a half-finished drag here would reintroduce the fight the drag bracket removes.
+                if (!_beingDragged.Contains(hwnd))
+                {
+                    UpdateBounds(hwnd);
+                }
             }
             else
             {
@@ -98,7 +113,21 @@ public sealed class Win32Workspace : IWorkspace
                 RemoveWindow(hwnd);
                 break;
             case NativeWindowEventKind.BoundsChanged:
-                UpdateBounds(hwnd);
+                if (!_beingDragged.Contains(hwnd))
+                {
+                    UpdateBounds(hwnd);
+                }
+
+                break;
+            case NativeWindowEventKind.MoveSizeStarted:
+                _beingDragged.Add(hwnd);
+                break;
+            case NativeWindowEventKind.MoveSizeEnded:
+                if (_beingDragged.Remove(hwnd))
+                {
+                    UpdateBounds(hwnd);
+                }
+
                 break;
         }
     }
@@ -124,6 +153,11 @@ public sealed class Win32Workspace : IWorkspace
 
     private void RemoveWindow(nint hwnd)
     {
+        // Clear the drag flag first: a window destroyed mid-gesture never gets its MOVESIZEEND, and
+        // a stale entry would silently withhold bounds events from its handle for the rest of the
+        // session if the OS ever reused it.
+        _beingDragged.Remove(hwnd);
+
         if (!_windows.Remove(hwnd, out var window))
         {
             return;

@@ -18,6 +18,16 @@ internal enum NativeWindowEventKind
     Created,
     Destroyed,
     BoundsChanged,
+
+    /// <summary>
+    /// The user grabbed the window's title bar or a resize border (<c>EVENT_SYSTEM_MOVESIZESTART</c>).
+    /// Every <see cref="BoundsChanged"/> between this and <see cref="MoveSizeEnded"/> is an
+    /// intermediate frame of one gesture, not a settled position.
+    /// </summary>
+    MoveSizeStarted,
+
+    /// <summary>The user let go (<c>EVENT_SYSTEM_MOVESIZEEND</c>).</summary>
+    MoveSizeEnded,
 }
 
 /// <summary>

@@ -77,6 +77,14 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         _callback?.Invoke(NativeWindowEventKind.Created, hwnd);
     }
 
+    /// <summary>Simulates the user grabbing the window (EVENT_SYSTEM_MOVESIZESTART).</summary>
+    public void SimulateMoveSizeStart(nint hwnd) =>
+        _callback?.Invoke(NativeWindowEventKind.MoveSizeStarted, hwnd);
+
+    /// <summary>Simulates the user letting go (EVENT_SYSTEM_MOVESIZEEND).</summary>
+    public void SimulateMoveSizeEnd(nint hwnd) =>
+        _callback?.Invoke(NativeWindowEventKind.MoveSizeEnded, hwnd);
+
     /// <summary>Simulates the OS moving/resizing a window AND the hook delivering the event.</summary>
     public void SimulateWindowMovedWithEvent(nint hwnd, Rectangle newBounds)
     {

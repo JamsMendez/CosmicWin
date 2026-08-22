@@ -32,6 +32,8 @@ GetForegroundWindow
 GetCurrentThreadId
 DwmGetWindowAttribute
 EVENT_OBJECT_SHOW
+EVENT_SYSTEM_MOVESIZESTART
+EVENT_SYSTEM_MOVESIZEEND
 PeekMessage
 SendInput
 INPUT

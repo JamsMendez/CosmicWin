@@ -159,4 +159,54 @@ public class Win32WorkspaceTests
 
         Assert.Null(received);
     }
+
+    /// <summary>
+    /// Reported from real use 2026-08-22: dragging a tiled window showed a flickering ghost while
+    /// the window itself never moved, and dropping it changed nothing. The snap-back was correct
+    /// but relentless -- Windows raises EVENT_OBJECT_LOCATIONCHANGE for every intermediate frame of
+    /// a drag, so the tree re-applied the tile dozens of times per second and fought the gesture.
+    /// <para>
+    /// Decision #80's own wording is "snaps back on DROP", and there was no drop detection at all.
+    /// A drag is now bracketed by EVENT_SYSTEM_MOVESIZESTART/END, and everything between them is
+    /// one gesture: no bounds event escapes until the user lets go, and then exactly one does.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DuringADrag_IsWithheldUntilTheDrop()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "dragged", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var settled = new List<Rectangle>();
+        workspace.WindowBoundsChanged += (_, e) => settled.Add(e.Window.Bounds);
+        workspace.Open();
+
+        source.SimulateMoveSizeStart(new IntPtr(1));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(10, 10, 400, 300));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(50, 40, 400, 300));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(120, 90, 400, 300));
+
+        Assert.Empty(settled);
+
+        source.SimulateMoveSizeEnd(new IntPtr(1));
+
+        var reported = Assert.Single(settled);
+        Assert.Equal(Rectangle.FromSize(120, 90, 400, 300), reported);
+    }
+
+    /// <summary>A move the user did NOT drag -- an app repositioning itself -- is still reported at once.</summary>
+    [Fact]
+    public void WindowBoundsChanged_OutsideADrag_IsStillReportedImmediately()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "self-mover", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var settled = new List<Rectangle>();
+        workspace.WindowBoundsChanged += (_, e) => settled.Add(e.Window.Bounds);
+        workspace.Open();
+
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(7, 7, 400, 300));
+
+        Assert.Equal(Rectangle.FromSize(7, 7, 400, 300), Assert.Single(settled));
+    }
 }

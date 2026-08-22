@@ -315,6 +315,13 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     {
         private readonly WINEVENTPROC _thunk;
         private readonly HWINEVENTHOOK _hook;
+
+        /// <summary>
+        /// A SECOND registration is required, not a widened range: the object events above live at
+        /// 0x8000+ while MOVESIZESTART/END are 0x000A/0x000B, and one hook spanning both would ask
+        /// the OS to deliver every system event in between.
+        /// </summary>
+        private readonly HWINEVENTHOOK _moveSizeHook;
         private NativeWindowEventCallback? _callback;
 
         public WinEventHookSubscription(NativeWindowEventCallback callback)
@@ -334,6 +341,21 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             if (_hook.IsNull)
             {
                 throw new InvalidOperationException("SetWinEventHook failed.");
+            }
+
+            _moveSizeHook = PInvoke.SetWinEventHook(
+                PInvoke.EVENT_SYSTEM_MOVESIZESTART,
+                PInvoke.EVENT_SYSTEM_MOVESIZEEND,
+                HMODULE.Null,
+                _thunk,
+                idProcess: 0,
+                idThread: 0,
+                PInvoke.WINEVENT_OUTOFCONTEXT | PInvoke.WINEVENT_SKIPOWNPROCESS);
+
+            if (_moveSizeHook.IsNull)
+            {
+                PInvoke.UnhookWinEvent(_hook);
+                throw new InvalidOperationException("SetWinEventHook failed for the move/size range.");
             }
         }
 
@@ -376,6 +398,16 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
                     }
 
                     break;
+
+                // Brackets one hand-driven move/resize. Deliberately NOT gated on IsTrackable: the
+                // bracket must close for whatever it opened on, or a window that stops being
+                // trackable mid-gesture would leave the drag flag set forever.
+                case PInvoke.EVENT_SYSTEM_MOVESIZESTART:
+                    callback(NativeWindowEventKind.MoveSizeStarted, hwnd);
+                    break;
+                case PInvoke.EVENT_SYSTEM_MOVESIZEEND:
+                    callback(NativeWindowEventKind.MoveSizeEnded, hwnd);
+                    break;
             }
         }
 
@@ -385,6 +417,11 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             if (!_hook.IsNull)
             {
                 PInvoke.UnhookWinEvent(_hook);
+            }
+
+            if (!_moveSizeHook.IsNull)
+            {
+                PInvoke.UnhookWinEvent(_moveSizeHook);
             }
         }
     }
