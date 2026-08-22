@@ -18,6 +18,18 @@ public sealed class Win32NativeWindowSourceActivationTests
 {
     private static nint Foreground() => PInvoke.GetForegroundWindow();
 
+    /// <summary>
+    /// Turns a refusal into a diagnosis instead of a mystery. Measured 2026-08-22: with a
+    /// full-screen NVIDIA overlay on the desktop these facts fail against a byte-identical
+    /// assembly, because a full-screen exclusive window is one of the documented conditions under
+    /// which Windows refuses SetForegroundWindow outright. Close any full-screen overlay
+    /// (GeForce/game bar) or unlock the session and re-run before suspecting the code.
+    /// </summary>
+    private static string ForegroundHint() =>
+        $"the OS foreground is 0x{Foreground():X}; if this suite fails wholesale, check for a " +
+        "full-screen overlay (NVIDIA/GeForce, game bar) or a locked session -- Windows refuses " +
+        "every foreground change while one is up, and the assembly under test is then irrelevant";
+
     [RequiresDesktopFact]
     public void Activate_MovesTheRealOsForegroundToTheTarget_FromAnotherProcessesWindow()
     {
@@ -29,7 +41,7 @@ public sealed class Win32NativeWindowSourceActivationTests
         // work to do rather than short-circuiting on AlreadyForeground.
         var outcome = source.Activate(first.Handle);
 
-        Assert.NotEqual(ActivationOutcome.Failed, outcome);
+        Assert.True(outcome != ActivationOutcome.Failed, $"Activation was refused -- {ForegroundHint()}");
         Assert.NotEqual(ActivationOutcome.AlreadyForeground, outcome);
         Assert.Equal(first.Handle, Foreground());
     }
@@ -45,7 +57,7 @@ public sealed class Win32NativeWindowSourceActivationTests
         using var second = SpawnedAlacrittyWindow.Spawn();
         var source = new Win32NativeWindowSource();
 
-        Assert.NotEqual(ActivationOutcome.Failed, source.Activate(first.Handle));
+        Assert.True(source.Activate(first.Handle) != ActivationOutcome.Failed, $"Activation was refused -- {ForegroundHint()}");
         Assert.Equal(first.Handle, Foreground());
 
         Assert.NotEqual(ActivationOutcome.Failed, source.Activate(second.Handle));
@@ -65,7 +77,7 @@ public sealed class Win32NativeWindowSourceActivationTests
 
         var outcome = source.Activate(window.Handle);
 
-        Assert.Equal(ActivationOutcome.AlreadyForeground, outcome);
+        Assert.True(outcome == ActivationOutcome.AlreadyForeground, $"Expected AlreadyForeground -- {ForegroundHint()}");
     }
 
     /// <summary><c>TryActivateWindow</c> stays the boolean <see cref="INativeWindowSource"/> contract, now backed by the escalating implementation.</summary>
@@ -78,7 +90,7 @@ public sealed class Win32NativeWindowSourceActivationTests
 
         var activated = source.TryActivateWindow(first.Handle);
 
-        Assert.True(activated);
+        Assert.True(activated, $"Activation was refused -- {ForegroundHint()}");
         Assert.Equal(first.Handle, Foreground());
     }
 }

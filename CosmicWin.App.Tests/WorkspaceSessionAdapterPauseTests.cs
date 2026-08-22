@@ -109,8 +109,10 @@ public sealed class WorkspaceSessionAdapterPauseTests
         paused = true;
         workspace.RaiseWindowRemoved(closing);
 
-        var group = Assert.IsType<GroupNode>(tree.Root);
-        var remainingLeaf = Assert.IsType<LeafNode>(Assert.Single(group.Children));
+        // A group down to a single child is now collapsed on removal, so the survivor IS the
+        // root rather than sitting inside a one-child wrapper. The wrapper was incidental
+        // structure this fact never meant to pin; the survivor and its geometry are.
+        var remainingLeaf = Assert.IsType<LeafNode>(tree.Root);
         Assert.Equal(new WindowRef(survivor.Handle), remainingLeaf.Window);
         Assert.False(registry.TryGetWindow(closing.Handle, out _));
         Assert.False(registry.TryGetLeaf(closing.Handle, out _));
@@ -142,8 +144,10 @@ public sealed class WorkspaceSessionAdapterPauseTests
 
         workspace.RaiseWindowRemoved(closing);
 
-        var group = Assert.IsType<GroupNode>(tree.Root);
-        var remainingLeaf = Assert.IsType<LeafNode>(Assert.Single(group.Children));
+        // A group down to a single child is now collapsed on removal, so the survivor IS the
+        // root rather than sitting inside a one-child wrapper. The wrapper was incidental
+        // structure this fact never meant to pin; the survivor and its geometry are.
+        var remainingLeaf = Assert.IsType<LeafNode>(tree.Root);
         Assert.Equal(new WindowRef(survivor.Handle), remainingLeaf.Window);
         Assert.False(registry.TryGetWindow(closing.Handle, out _));
         Assert.True(callCountBeforeClose < survivor.SetPositionCallCount);

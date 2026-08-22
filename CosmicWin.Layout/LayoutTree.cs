@@ -50,6 +50,7 @@ public sealed class LayoutTree : ITilingEngine
             }
 
             RemoveChild(parent, index);
+            Prune(this, parent);
             return true;
         }
 
@@ -149,6 +150,69 @@ public sealed class LayoutTree : ITilingEngine
     /// </summary>
     public static GroupNode AddChild(LeafNode leaf, WindowRef newWindow, int regionWidth, int regionHeight) =>
         AddChild(leaf, new LeafNode(newWindow), regionWidth, regionHeight);
+
+    /// <summary>
+    /// Heals the tree above a group a node was just removed from, so closing a window gives its
+    /// space back instead of stranding it. Walks upward from <paramref name="from"/>:
+    /// <list type="bullet">
+    /// <item>a group left with NO children is detached from its parent (or clears the root), and the
+    /// walk continues, since that detachment may hollow out the level above it too;</item>
+    /// <item>a group left with ONE child collapses into that child, which inherits the group's exact
+    /// slot and size;</item>
+    /// <item>a group still holding two or more children is doing its job, and the walk stops.</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// The empty case is the visible defect (measured 2026-08-22): <see cref="Arrange"/> answers an
+    /// empty group by zeroing its length and returning, but the PARENT still reserves a slot and a
+    /// size for it, so that region is claimed and nothing is ever drawn there. A flat tree never
+    /// showed this — there was only the root group, whose own <see cref="RemoveChild"/>
+    /// redistributes — so it surfaced the moment new windows started splitting the focused tile.
+    /// The single-child case is the quiet half: it draws correctly but leaves a level that no longer
+    /// means anything, and both LE-2's tree walk and LE-5's moves count levels.
+    /// </remarks>
+    public static void Prune(LayoutTree tree, GroupNode? from)
+    {
+        for (var group = from; group is not null;)
+        {
+            var parent = group.Parent as GroupNode;
+            int slot = parent?.Children.IndexOf(group) ?? -1;
+
+            if (group.Children.Count == 0)
+            {
+                if (parent is not null && slot >= 0)
+                {
+                    RemoveChild(parent, slot);
+                }
+                else if (ReferenceEquals(tree.Root, group))
+                {
+                    tree.Root = null;
+                }
+
+                group = parent;
+                continue;
+            }
+
+            if (group.Children.Count == 1)
+            {
+                var survivor = group.Children[0];
+                if (parent is not null && slot >= 0)
+                {
+                    // The survivor takes the collapsed group's slot outright: Sizes is untouched,
+                    // so no sibling moves because of a close.
+                    survivor.Parent = parent;
+                    parent.Children[slot] = survivor;
+                }
+                else if (ReferenceEquals(tree.Root, group))
+                {
+                    survivor.Parent = null;
+                    tree.Root = survivor;
+                }
+            }
+
+            return;
+        }
+    }
 
     /// <summary>
     /// LE-4 as its own scenario states it: a new window SPLITS the tile it lands on, so the group

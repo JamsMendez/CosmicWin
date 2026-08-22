@@ -211,6 +211,9 @@ public sealed class WorkspaceSessionAdapter : IDisposable
             if (index >= 0)
             {
                 LayoutTree.RemoveChild(parent, index);
+                // Without this the closed window's space stays claimed by the hollow group above it
+                // (measured 2026-08-22): the leaf leaves, the reserved slot does not.
+                LayoutTree.Prune(tree, parent);
             }
         }
         else if (ReferenceEquals(tree.Root, leaf))

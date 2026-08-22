@@ -145,10 +145,11 @@ public sealed class WorkspaceSessionAdapterTests
 
         workspace.RaiseWindowRemoved(second);
 
-        var group = Assert.IsType<GroupNode>(tree.Root);
-        var remainingLeaf = Assert.IsType<LeafNode>(Assert.Single(group.Children));
+        // A group down to a single child is now collapsed on removal, so the survivor IS the
+        // root rather than sitting inside a one-child wrapper. The wrapper was incidental
+        // structure this fact never meant to pin; the survivor and its geometry are.
+        var remainingLeaf = Assert.IsType<LeafNode>(tree.Root);
         Assert.Equal(new WindowRef(first.Handle), remainingLeaf.Window);
-        Assert.Equal(group.GroupLength, group.Sizes.Sum());
         Assert.False(registry.TryGetWindow(second.Handle, out _));
         Assert.False(registry.TryGetLeaf(second.Handle, out _));
     }

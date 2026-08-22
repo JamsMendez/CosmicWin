@@ -72,8 +72,10 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         s.Workspace.RaiseWindowRemoved(second);
 
         s.Trees.TryGetTree(s.Secondary, out var secondaryTree);
-        var group = Assert.IsType<GroupNode>(secondaryTree!.Root);
-        Assert.Equal(new WindowRef(first.Handle), Assert.IsType<LeafNode>(Assert.Single(group.Children)).Window);
+        // A group down to a single child is now collapsed on removal, so the survivor IS the
+        // root rather than sitting inside a one-child wrapper. The wrapper was incidental
+        // structure this fact never meant to pin; the survivor and its geometry are.
+        Assert.Equal(new WindowRef(first.Handle), Assert.IsType<LeafNode>(secondaryTree!.Root).Window);
         Assert.Equal(Rectangle.FromSize(1920, 0, 1280, 720), first.LastSetPosition);
         Assert.Equal(primarySetCountAfterAdd, onPrimary.SetPositionCallCount); // primary untouched
     }
@@ -267,8 +269,10 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         s.Workspace.RaiseWindowBoundsChanged(windowA);
 
         s.Trees.TryGetTree(s.Primary, out var tree);
-        var group = Assert.IsType<GroupNode>(tree!.Root);
-        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(Assert.Single(group.Children)).Window);
+        // A group down to a single child is now collapsed on removal, so the survivor IS the
+        // root rather than sitting inside a one-child wrapper. The wrapper was incidental
+        // structure this fact never meant to pin; the survivor and its geometry are.
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(tree!.Root).Window);
         Assert.False(windowA.CanReposition);
         Assert.Equal(Rectangle.FromSize(1500, 100, 400, 300), windowA.Bounds); // keeps the drag, never snapped back
         Assert.Equal(3, windowA.SetPositionCallCount); // add(1) + B-add reflow(2) + failed snap-back attempt(3), then never again
