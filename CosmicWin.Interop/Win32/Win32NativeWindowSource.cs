@@ -5,6 +5,7 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.System.Threading;
 using Windows.Win32.UI.Accessibility;
+using Windows.Win32.UI.Input.KeyboardAndMouse;
 using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.Interop.Win32;
@@ -82,29 +83,70 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return new WinEventHookSubscription(callback);
     }
 
+    /// <summary>How long <see cref="Activate"/> waits for its input-attached worker before giving up.</summary>
+    private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMilliseconds(250);
+
     /// <summary>
-    /// MR-1 (2026-08-22 first real run): a low-level keyboard hook does not, by itself, confer
-    /// Windows' foreground-activation right -- <c>SetForegroundWindow</c> measured returning
-    /// <c>false</c> from this exact call site both in isolation and live (Alt+L/Alt+H doing
-    /// nothing, while Shift+Alt+direction's plain <c>SetWindowPos</c>-based move worked).
-    /// <c>AttachThreadInput</c> is the standard, Microsoft-documented workaround: temporarily
-    /// sharing input state with the real foreground window's thread grants this thread the same
-    /// "received the last input event" standing Windows' activation policy checks for, for the
-    /// duration of the call. This does NOT guarantee success -- <c>LockSetForegroundWindow</c>,
-    /// a full-screen exclusive app, or Windows' own foreground-lock heuristics can still refuse
-    /// it -- and that refusal is never swallowed: the caller still receives the exact boolean
-    /// <c>SetForegroundWindow</c> returns, exactly as before this fix.
+    /// MR-2 (Engram discovery #106). The fourth supervised run recorded 40 focus chords and every
+    /// activation failed: once the App layer stopped trusting its own optimistic focus cache, the
+    /// earlier bare-<c>AttachThreadInput</c> fix was revealed to have never worked at all. It ran on
+    /// <c>ActionDispatcher.RunAsync</c>'s thread-pool thread, and <c>AttachThreadInput</c> shares
+    /// INPUT queues -- a thread-pool thread has none, so there was nothing to attach to.
+    /// <para>
+    /// This is the escalation the vendored FancyWM reference (<c>FancyWM/Utilities/FocusHelper.cs</c>)
+    /// uses, algorithm only: try plainly, then from a dedicated thread that first CREATES a message
+    /// queue and attaches to the foreground thread's input, then -- only if that is still refused --
+    /// release Windows' foreground lock with two synthetic Alt taps and retry. The synthetic input
+    /// is deliberately the LAST rung: it is real <c>VK_MENU</c> traffic on the user's desktop and can
+    /// trip menu accelerators, so it is never paid for until the cheaper rungs have failed.
+    /// </para>
+    /// <para>
+    /// Every rung VERIFIES with <c>GetForegroundWindow</c> instead of trusting
+    /// <c>SetForegroundWindow</c>'s return value, because that value was measured claiming success
+    /// while nothing moved on screen.
+    /// </para>
     /// </summary>
-    public bool TryActivateWindow(nint hwnd)
+    public ActivationOutcome Activate(nint hwnd)
     {
         HWND target = new(hwnd);
-        HWND foreground = PInvoke.GetForegroundWindow();
-
-        if (foreground == target)
+        if (PInvoke.GetForegroundWindow() == target)
         {
-            return true;
+            return ActivationOutcome.AlreadyForeground;
         }
 
+        if (TrySetForeground(target))
+        {
+            return ActivationOutcome.Direct;
+        }
+
+        var outcome = ActivationOutcome.Failed;
+        var worker = new Thread(() => outcome = ActivateFromAttachedInput(target)) { IsBackground = true };
+        worker.Start();
+        return worker.Join(ActivationTimeout) ? outcome : ActivationOutcome.Failed;
+    }
+
+    /// <summary>
+    /// <see cref="INativeWindowSource"/>'s boolean contract, unchanged for callers, now backed by
+    /// <see cref="Activate"/>. True means the OS itself confirmed the target holds the foreground.
+    /// </summary>
+    public bool TryActivateWindow(nint hwnd) => Activate(hwnd) != ActivationOutcome.Failed;
+
+    /// <summary>Asks for the foreground and then CHECKS, rather than believing the return value.</summary>
+    private static bool TrySetForeground(HWND target)
+    {
+        PInvoke.SetForegroundWindow(target);
+        return PInvoke.GetForegroundWindow() == target;
+    }
+
+    /// <summary>
+    /// Runs on its own thread so it can own a message queue: <c>PeekMessage</c> creates one, which is
+    /// the precondition <c>AttachThreadInput</c> needs and the piece the previous fix was missing.
+    /// </summary>
+    private static ActivationOutcome ActivateFromAttachedInput(HWND target)
+    {
+        PInvoke.PeekMessage(out _, new HWND(-1), 0, 0, PEEK_MESSAGE_REMOVE_TYPE.PM_NOREMOVE);
+
+        HWND foreground = PInvoke.GetForegroundWindow();
         uint foregroundThreadId = foreground == HWND.Null ? 0 : PInvoke.GetWindowThreadProcessId(foreground, null);
         uint currentThreadId = PInvoke.GetCurrentThreadId();
         bool attached = foregroundThreadId != 0 && foregroundThreadId != currentThreadId
@@ -112,7 +154,13 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 
         try
         {
-            return PInvoke.SetForegroundWindow(target);
+            if (TrySetForeground(target))
+            {
+                return ActivationOutcome.AttachedInput;
+            }
+
+            SendAltTaps();
+            return TrySetForeground(target) ? ActivationOutcome.InputUnlocked : ActivationOutcome.Failed;
         }
         finally
         {
@@ -121,6 +169,26 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
                 PInvoke.AttachThreadInput(currentThreadId, foregroundThreadId, false);
             }
         }
+    }
+
+    /// <summary>
+    /// Two full Alt press/release pairs. Windows grants the foreground to whoever received the last
+    /// input event, so this makes THIS process that whoever. Alt specifically because a tiling chord
+    /// already holds it down, which makes these the least surprising synthetic keys available here.
+    /// </summary>
+    private static void SendAltTaps()
+    {
+        var inputs = new INPUT[4];
+        for (int i = 0; i < inputs.Length; i++)
+        {
+            inputs[i].type = INPUT_TYPE.INPUT_KEYBOARD;
+            inputs[i].Anonymous.ki.wVk = VIRTUAL_KEY.VK_MENU;
+            inputs[i].Anonymous.ki.dwFlags = (i % 2) == 0
+                ? KEYBD_EVENT_FLAGS.KEYEVENTF_EXTENDEDKEY
+                : KEYBD_EVENT_FLAGS.KEYEVENTF_EXTENDEDKEY | KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP;
+        }
+
+        PInvoke.SendInput(inputs, Marshal.SizeOf<INPUT>());
     }
 
     private static bool IsTrackable(HWND hwnd)
@@ -284,7 +352,14 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 
             switch (eventType)
             {
+                // EVENT_OBJECT_SHOW was already arriving inside the subscribed range with no case
+                // for it (Engram discovery #106). Trackability requires IsWindowVisible, and a
+                // top-level window is normally created HIDDEN and shown a moment later, so the
+                // CREATE arm dropped such a window and nothing looked again -- Win32Workspace.Poll()
+                // runs on no production path. Win32Workspace.TryAddWindow is idempotent, so the two
+                // arms reporting the same window costs nothing.
                 case PInvoke.EVENT_OBJECT_CREATE:
+                case PInvoke.EVENT_OBJECT_SHOW:
                     if (IsTrackable(hwnd))
                     {
                         callback(NativeWindowEventKind.Created, hwnd);

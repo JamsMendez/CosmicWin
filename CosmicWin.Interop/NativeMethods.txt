@@ -31,3 +31,13 @@ AttachThreadInput
 GetForegroundWindow
 GetCurrentThreadId
 DwmGetWindowAttribute
+EVENT_OBJECT_SHOW
+PeekMessage
+SendInput
+INPUT
+KEYBD_EVENT_FLAGS
+VIRTUAL_KEY
+INPUT_TYPE
+PEEK_MESSAGE_REMOVE_TYPE
+TranslateMessage
+DispatchMessage

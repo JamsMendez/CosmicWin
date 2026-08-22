@@ -117,40 +117,55 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         // Step 4: simulated FocusRight -- calls the SAME action path ActionDispatcher calls for a
         // dispatched chord (ActionExecutor.ScheduleAsync); never SendInput.
         //
-        // Engram observation #96 (measured 2026-08-22): from a plain background process,
-        // SetForegroundWindow returned False against two real Alacritty windows and
-        // GetForegroundWindow never moved -- Windows' foreground lock, not a defect in CosmicWin.
-        // This step therefore does NOT assert GetForegroundWindow() or TryActivate()'s boolean
-        // return; that outcome is governed by OS policy unrelated to CosmicWin's correctness and
-        // cannot be satisfied by any automated test in this harness. Real foreground activation
-        // remains maintainer-verified, not automated (Alt+L over two tiled windows, manual tray
-        // checklist). What this step DOES assert -- what is CosmicWin's own responsibility -- is
-        // WHICH window the real production focus path (ActionExecutor.MoveFocus -> the SAME
-        // registry-resolved IWindow -> IWindow.TryActivate -> INativeWindowSource.TryActivateWindow,
-        // still genuinely invoked below, not stubbed) ATTEMPTS to activate, and that it is the
-        // window physically to the right (LE-2's actual risk surface). "Currently focused" is
-        // seeded via a controllable IForegroundWindowSource instead of the real OS foreground,
-        // since the real foreground cannot be steered from this background test process either.
-        var (_, executor) = CompositionRoot.Build(
-            tree!, registry, new StaticForegroundWindowSource(window1.Handle), workArea);
+        // This step used to seed "currently focused" through a fixed IForegroundWindowSource and
+        // refuse to assert the real OS foreground at all, on the strength of Engram observation #96:
+        // SetForegroundWindow measured returning False from a background process, judged OS policy
+        // rather than a CosmicWin defect. That premise is now FALSE. Win32NativeWindowSource.Activate
+        // escalates (message-queue thread -> AttachThreadInput -> synthetic Alt taps -> retry) and
+        // verifies with GetForegroundWindow instead of trusting a return value, and
+        // Win32NativeWindowSourceActivationTests proves it genuinely moves the real foreground
+        // between two external windows and chains back and forth. So this step now uses the REAL
+        // foreground source and asserts the real outcome -- both WHICH window CosmicWin attempts to
+        // activate (LE-2's risk surface) and that the desktop actually followed.
+        var foregroundSource = new Win32ForegroundWindowSource();
+        Assert.True(
+            nativeSource.TryActivateWindow(window1.Handle),
+            "Could not put the leftmost window in the real foreground to start the focus walk from.");
+        Thread.Sleep(Settle);
+
+        var (_, executor) = CompositionRoot.Build(tree!, registry, foregroundSource, workArea);
         executor.TreeManager = treeManager;
         executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None)
             .GetAwaiter().GetResult();
         Thread.Sleep(Settle);
         Assert.Equal(window2.Handle, nativeSource.LastActivateAttempt);
+        Assert.Equal(window2.Handle, foregroundSource.GetForegroundHandle());
         Assert.True(
             Read(nativeSource, window2.Handle).Left > Read(nativeSource, window1.Handle).Left,
             "The activated window must be physically to the right, not merely the next tree sibling (LE-2's risk surface).");
 
-        // Step 5: simulated MoveRight (LE-5) -- the two windows exchange ON-SCREEN position exactly,
-        // not only tree order.
+        // Step 5: simulated MoveRight (LE-5) -- the two windows exchange ON-SCREEN order, and the
+        // three still tile the work area exactly.
+        //
+        // This step used to assert that the two windows land on each other's EXACT rectangles. That
+        // only ever held for an even division: LayoutTree.MoveNode swaps Sizes ALONGSIDE Children,
+        // so a moved node carries its own span with it. On this 3440-wide work area the three spans
+        // are 1147/1147/1146, and the exchange therefore leaves each window its own width rather
+        // than adopting its neighbour's. The assertion below states what LE-5 actually guarantees.
         var beforeW2 = Read(nativeSource, window2.Handle);
         var beforeW3 = Read(nativeSource, window3.Handle);
+        Assert.True(beforeW2.Left < beforeW3.Left, "Precondition: window2 starts to the left of window3.");
+
         executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None)
             .GetAwaiter().GetResult();
         Thread.Sleep(Settle);
-        Assert.Equal(beforeW3, Read(nativeSource, window2.Handle));
-        Assert.Equal(beforeW2, Read(nativeSource, window3.Handle));
+
+        var afterW2 = Read(nativeSource, window2.Handle);
+        var afterW3 = Read(nativeSource, window3.Handle);
+        Assert.True(afterW3.Left < afterW2.Left, "MoveRight must exchange the two windows' on-screen order.");
+        Assert.Equal(beforeW2.Width, afterW2.Width);
+        Assert.Equal(beforeW3.Width, afterW3.Width);
+        AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), afterW3, afterW2]);
 
         // Step 6: close one window -- the survivors reflow to fill the vacated space.
         spawned1.Dispose();
@@ -326,11 +341,6 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         }
     }
 
-    /// <summary>Seeds <see cref="ActionExecutor"/>'s "currently focused" fallback deterministically -- see step 4's comment for why the real OS foreground cannot be steered from this background test process.</summary>
-    private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource
-    {
-        public nint GetForegroundHandle() => handle;
-    }
 }
 
 internal sealed class RequiresDesktopFactAttribute : FactAttribute
