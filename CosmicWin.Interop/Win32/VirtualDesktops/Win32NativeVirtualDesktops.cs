@@ -29,6 +29,7 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
 {
     private IVirtualDesktopManagerInternal? _internalManager;
     private IVirtualDesktopManager? _documentedManager;
+    private IApplicationViewCollection? _views;
     private bool? _available;
 
     /// <summary>Why the last call failed. Never thrown, always readable, cleared on success.</summary>
@@ -128,35 +129,73 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         }
     }
 
+    /// <summary>
+    /// Moves a window between desktops through the INTERNAL manager.
+    /// </summary>
+    /// <remarks>
+    /// The documented <see cref="IVirtualDesktopManager.MoveWindowToDesktop"/> was tried first and
+    /// measured returning <c>E_ACCESSDENIED</c>: it moves only windows owned by the calling
+    /// process, and a window manager owns none of the windows it manages. Resolving the HWND to an
+    /// application view and going through <c>MoveViewToDesktop</c> is the only path that works, at
+    /// the cost of one more undocumented interface.
+    /// </remarks>
     public bool MoveWindowTo(nint windowHandle, Guid desktopId)
     {
-        if (_documentedManager is not { } manager)
+        if (_internalManager is not { } manager || _views is not { } views)
         {
+            LastError = "The shell's view collection was never resolved; moving windows is unavailable.";
             return false;
         }
 
         try
         {
-            var hr = manager.MoveWindowToDesktop(windowHandle, ref desktopId);
-            if (hr >= 0)
+            var hr = views.GetViewForHwnd(windowHandle, out var view);
+            if (hr < 0 || view is null)
             {
-                LastError = null;
-                return true;
+                LastError = $"GetViewForHwnd(0x{windowHandle:X}): HRESULT 0x{hr:X8}";
+                return false;
             }
 
-            // 0x80070005 is the documented-in-practice refusal: IVirtualDesktopManager moves only
-            // windows owned by the CALLING process. A window manager owns none of the windows it
-            // manages, so this path can never succeed for real -- see the note on MoveViewToDesktop.
-            LastError = hr == unchecked((int)0x80070005)
-                ? "MoveWindowToDesktop: E_ACCESSDENIED -- the documented API only moves windows owned by the calling process."
-                : $"MoveWindowToDesktop: HRESULT 0x{hr:X8}";
-            return false;
+            if (!TryFindDesktop(manager, desktopId, out var desktop))
+            {
+                LastError = $"MoveViewToDesktop: {desktopId} was not in the enumeration.";
+                return false;
+            }
+
+            manager.MoveViewToDesktop(view, desktop);
+            LastError = null;
+            return true;
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
-            LastError = $"MoveWindowToDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
+            LastError = $"MoveViewToDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
             return false;
         }
+    }
+
+    /// <summary>
+    /// Resolves a desktop id through the enumeration rather than <c>FindDesktop</c>, which is still
+    /// an unverified slot holder. One verified path beats a shorter unverified one.
+    /// </summary>
+    private static bool TryFindDesktop(IVirtualDesktopManagerInternal manager, Guid desktopId, out IVirtualDesktop desktop)
+    {
+        desktop = null!;
+        var iid = typeof(IVirtualDesktop).GUID;
+        manager.GetDesktops(out var desktops);
+        desktops.GetCount(out var count);
+
+        for (var index = 0; index < count; index++)
+        {
+            desktops.GetAt(index, ref iid, out var entry);
+            var candidate = (IVirtualDesktop)entry;
+            if (candidate.GetId() == desktopId)
+            {
+                desktop = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryResolveManagers()
@@ -191,6 +230,22 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
             _documentedManager = documentedType is null
                 ? null
                 : Activator.CreateInstance(documentedType) as IVirtualDesktopManager;
+
+            // The view collection is a SERVICE on the same shell object, queried by its own
+            // interface id. Its absence disables moving windows but leaves switching intact.
+            var viewsIid = typeof(IApplicationViewCollection).GUID;
+            var viewsService = viewsIid;
+            if (shell.QueryService(ref viewsService, ref viewsIid, out var viewsInstance) >= 0 && viewsInstance != IntPtr.Zero)
+            {
+                try
+                {
+                    _views = (IApplicationViewCollection)Marshal.GetObjectForIUnknown(viewsInstance);
+                }
+                finally
+                {
+                    Marshal.Release(viewsInstance);
+                }
+            }
 
             return _internalManager is not null;
         }

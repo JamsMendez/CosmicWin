@@ -117,9 +117,12 @@ internal interface IVirtualDesktopManagerInternal
 {
     int GetCount();
 
-    /// <summary>Slot holder. Never call — moving a window is not part of this spike.</summary>
-    [PreserveSig]
-    int MoveViewToDesktop(IntPtr view, IVirtualDesktop desktop);
+    /// <summary>
+    /// The ONLY way a window manager can move a window between desktops. The documented
+    /// <see cref="IVirtualDesktopManager.MoveWindowToDesktop"/> refuses windows the caller does not
+    /// own -- measured returning <c>E_ACCESSDENIED</c> -- and a window manager owns none of them.
+    /// </summary>
+    void MoveViewToDesktop(IApplicationView view, IVirtualDesktop desktop);
 
     /// <summary>Slot holder. Never call.</summary>
     [PreserveSig]
@@ -182,4 +185,52 @@ internal interface IVirtualDesktopManager
 
     [PreserveSig]
     int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
+}
+
+/// <summary>
+/// A window as the shell's view collection hands it back.
+/// </summary>
+/// <remarks>
+/// DELIBERATELY EMPTY. CosmicWin only ever passes this pointer straight to
+/// <see cref="IVirtualDesktopManagerInternal.MoveViewToDesktop"/> and never calls a method on it,
+/// so declaring its members would take on vtable risk for nothing — and its real vtable is long,
+/// undocumented and full of members whose meaning is a guess. An interface with no members has no
+/// slots to get wrong.
+/// </remarks>
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("372E1D3B-38D3-42E4-A15B-8AB2B178F513")]
+internal interface IApplicationView
+{
+}
+
+/// <summary>
+/// Resolves an HWND to the view object the internal desktop manager expects.
+/// </summary>
+/// <remarks>
+/// Undocumented, so the same rule applies as everywhere else here: declaration order IS the vtable.
+/// Only <see cref="GetViewForHwnd"/> is ever called, and the three members above it exist purely to
+/// hold its position at slot 3 — their signatures are simplified on purpose and must never be
+/// invoked. Every member BELOW it is omitted entirely, because a slot nobody addresses cannot be
+/// wrong.
+/// </remarks>
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("1841C6D7-4F9D-42C0-AF41-8747538F10E5")]
+internal interface IApplicationViewCollection
+{
+    /// <summary>Slot holder. Never call.</summary>
+    [PreserveSig]
+    int GetViews(out IObjectArray array);
+
+    /// <summary>Slot holder. Never call.</summary>
+    [PreserveSig]
+    int GetViewsByZOrder(out IObjectArray array);
+
+    /// <summary>Slot holder. Never call.</summary>
+    [PreserveSig]
+    int GetViewsByAppUserModelId(IntPtr id, out IObjectArray array);
+
+    [PreserveSig]
+    int GetViewForHwnd(IntPtr hwnd, out IApplicationView view);
 }
