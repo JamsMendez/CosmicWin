@@ -1,5 +1,6 @@
 using System.Xml;
 using CosmicWin.App.Startup;
+using CosmicWin.Interop;
 
 namespace CosmicWin.App.Tests.Startup;
 
@@ -51,7 +52,11 @@ public sealed class TaskInstallerTests
     [Fact]
     public void Uninstall_NonZeroExit_ThrowsAndNeverSwallows()
     {
-        var runner = new FakeProcessRunner { ExitCodeToReturn = 5 };
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 5,
+            ResultByVerb = new() { ["/Query"] = new ProcessRunResult(0, "TaskName: CosmicWin.Test", string.Empty) },
+        };
         var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
 
         var ex = Assert.Throws<InvalidOperationException>(installer.Uninstall);
@@ -91,7 +96,7 @@ public sealed class TaskInstallerTests
     // V25-W2 RED: schtasks /Delete against a task that was never installed exits 1 with this exact
     // stderr (measured against real schtasks in verify-report V25-W2). ES-4 requires removal
     // "cleanly, restoring stock behavior" -- there is nothing to restore here, so this is success,
-    // not a failure. Only THIS specific absence signature is swallowed.
+    // not a failure. A follow-up /Query confirms absence (V26-W1: stderr text is never read).
     [Fact]
     public void Uninstall_TaskAlreadyAbsent_IsIdempotent_DoesNotThrow()
     {
@@ -104,7 +109,7 @@ public sealed class TaskInstallerTests
 
         installer.Uninstall(); // Must not throw.
 
-        Assert.Equal(TaskInstaller.BuildUninstallArgs("CosmicWin.Test"), runner.LastArguments);
+        Assert.Equal(TaskInstaller.BuildQueryArgs("CosmicWin.Test"), runner.LastArguments);
     }
 
     // V25-W2 companion: a genuine failure (unrelated stderr, e.g. access denied) MUST still throw --
@@ -116,11 +121,59 @@ public sealed class TaskInstallerTests
         {
             ExitCodeToReturn = 5,
             StandardErrorToReturn = "ERROR: Access is denied.\r\n",
+            ResultByVerb = new() { ["/Query"] = new ProcessRunResult(0, "TaskName: CosmicWin.Test", string.Empty) },
         };
         var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
 
         var ex = Assert.Throws<InvalidOperationException>(installer.Uninstall);
         Assert.Contains("exit code 5", ex.Message);
+    }
+
+    // V26-W1 RED: the "task already absent" signature is an OS-localised FormatMessage string --
+    // proven language-dependent by direct FormatMessageW measurement in verify-report V26-W1. On
+    // Spanish Windows /Delete's stderr never contains the English fragment, so a stderr-only guard
+    // throws for an absent task. The locale-independent fix asks schtasks itself via /Query -- it
+    // never reads /Delete's stderr text at all, so this must succeed regardless of language.
+    [Fact]
+    public void Uninstall_TaskAlreadyAbsent_NonEnglishLocale_IsIdempotent_DoesNotThrow()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 1,
+            StandardErrorToReturn = "ERROR: El sistema no puede encontrar el archivo especificado.\r\n",
+            ResultByVerb = new() { ["/Query"] = new ProcessRunResult(1, string.Empty, "ERROR: El sistema no puede encontrar el archivo especificado.\r\n") },
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        installer.Uninstall(); // Must not throw -- no English text is ever consulted.
+    }
+
+    // V26-W2 RED: pins the discriminator itself, not just its outcome. Exit code 1 alone is
+    // ambiguous -- schtasks returns it both for "task not found" AND for unrelated genuine
+    // failures -- so a guard keyed on exit code alone (mutation M7 / the naive "ExitCode == 1"
+    // discriminator) would wrongly swallow this. Only a real /Query check, which here reports the
+    // task STILL EXISTS, can tell the two apart.
+    [Fact]
+    public void Uninstall_GenuineFailure_SameExitCodeAsAbsent_StillThrows()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 1,
+            StandardErrorToReturn = "ERROR: Access is denied.\r\n",
+            ResultByVerb = new() { ["/Query"] = new ProcessRunResult(0, "TaskName: CosmicWin.Test", string.Empty) },
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        var ex = Assert.Throws<InvalidOperationException>(installer.Uninstall);
+        Assert.Contains("exit code 1", ex.Message);
+    }
+
+    [Fact]
+    public void BuildQueryArgs_ReturnsExactFixedArgv()
+    {
+        var args = TaskInstaller.BuildQueryArgs("CosmicWin");
+
+        Assert.Equal(new[] { "/Query", "/TN", "CosmicWin" }, args);
     }
 
     // V25-C1 RED (unconditional, no trait gate, no elevation, no real task): the declared encoding

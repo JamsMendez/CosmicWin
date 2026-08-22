@@ -23,10 +23,6 @@ public sealed class TaskInstaller
     // verified-working route: confirmed against a real MSXML6 parse (see verify-report V25-C1).
     private static readonly UnicodeEncoding TaskXmlEncoding = new(bigEndian: false, byteOrderMark: true);
 
-    // V25-W2: the exact stderr schtasks prints when /Delete targets a task that does not exist --
-    // matched to make Uninstall idempotent (ES-4 "cleanly"), never to swallow a genuine failure.
-    private const string TaskNotFoundErrorFragment = "cannot find the file specified";
-
     private readonly string _taskName;
     private readonly string _exePath;
     private readonly string _xmlPath;
@@ -55,6 +51,10 @@ public sealed class TaskInstaller
     public static IReadOnlyList<string> BuildUninstallArgs(string taskName) =>
         new[] { "/Delete", "/TN", taskName, "/F" };
 
+    /// <summary>The exact, fixed argv <c>schtasks /Query</c> receives -- V26-W1's locale-independent existence check.</summary>
+    public static IReadOnlyList<string> BuildQueryArgs(string taskName) =>
+        new[] { "/Query", "/TN", taskName };
+
     /// <summary>ES-2: registers the Scheduled Task with highest privileges, trigger "at log on".</summary>
     public void Install()
     {
@@ -71,20 +71,32 @@ public sealed class TaskInstaller
 
     /// <summary>
     /// ES-4: removes the Scheduled Task cleanly via <c>schtasks /Delete /F</c>. Idempotent: a task
-    /// that was never installed (or already removed) is treated as success, matching ES-4's "cleanly,
-    /// restoring stock behavior" -- there is nothing to restore, so this is not an error. Any other
-    /// non-zero exit still throws; only the specific "task does not exist" case is swallowed.
+    /// that was never installed is treated as success -- ES-4's "cleanly, restoring stock behavior"
+    /// needs nothing restored when there is nothing left.
+    ///
+    /// V26-W1: existence, not /Delete's stderr, decides idempotency. schtasks' error text is a
+    /// per-language MUI resource and does not match on non-English Windows. When /Delete fails, a
+    /// follow-up <c>/Query</c> call asks schtasks itself whether the task remains; if it does not,
+    /// the failure is swallowed regardless of what /Delete's own text said. If it does, /Delete's
+    /// original error is thrown unchanged.
+    ///
+    /// Tradeoff: if /Query itself fails for an unrelated reason (e.g. the Task Scheduler service is
+    /// stopped), schtasks reports that with the same generic non-zero exit code as "not found", so
+    /// this check treats it as absence too rather than re-adding a locale-dependent text match.
     /// </summary>
     public void Uninstall()
     {
         var result = _runner.Run(SchTasksExe, BuildUninstallArgs(_taskName));
-        if (result.ExitCode != 0 && !IndicatesTaskAlreadyAbsent(result))
+        if (result.ExitCode == 0)
+        {
+            return;
+        }
+
+        var queryResult = _runner.Run(SchTasksExe, BuildQueryArgs(_taskName));
+        if (queryResult.ExitCode == 0)
         {
             throw new InvalidOperationException(
                 $"schtasks /Delete failed with exit code {result.ExitCode}: {result.StandardError}");
         }
     }
-
-    private static bool IndicatesTaskAlreadyAbsent(ProcessRunResult result) =>
-        result.StandardError.Contains(TaskNotFoundErrorFragment, StringComparison.OrdinalIgnoreCase);
 }
