@@ -209,4 +209,54 @@ public class Win32WorkspaceTests
 
         Assert.Equal(Rectangle.FromSize(7, 7, 400, 300), Assert.Single(settled));
     }
+
+    /// <summary>
+    /// Measured on real hardware 2026-08-22: switching virtual desktops rearranged the windows on
+    /// the desktop returned to. The chain was verifiable in code -- DWM CLOAKS every window on the
+    /// desktop being left, <c>IsTrackable</c> rejects a cloaked window, so the enumeration stops
+    /// listing it, and <see cref="Win32Workspace.Poll"/> read "absent from the enumeration" as
+    /// "destroyed". The whole tree was dismantled on the way out and rebuilt in enumeration order
+    /// on the way back.
+    /// <para>
+    /// Not enumerable is not the same as gone. A window that still answers <c>TryGetWindowInfo</c>
+    /// is alive; only its visibility changed, and reporting it as removed throws away a layout the
+    /// user expects to find waiting for them.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowThatStoppedBeingEnumerableButStillExists_IsNotReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "cloaked", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+        workspace.Poll();
+
+        Assert.Empty(removed);
+        Assert.Equal(2, workspace.Snapshot.Count);
+        Assert.True(workspace.Snapshot.Single(w => w.Handle == new IntPtr(2)).IsAlive);
+    }
+
+    /// <summary>The other half: a window that is genuinely gone must still be reported, or a closed window would haunt the tree forever.</summary>
+    [Fact]
+    public void Poll_AWindowThatNoLongerExists_IsStillReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "closes", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.SimulateWindowDestroyedSilently(new IntPtr(2));
+        workspace.Poll();
+
+        Assert.Equal(new IntPtr(2), Assert.Single(removed));
+    }
 }

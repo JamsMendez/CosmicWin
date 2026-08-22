@@ -17,7 +17,17 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     private readonly Dictionary<nint, int> _activationAttempts = new();
     private NativeWindowEventCallback? _callback;
 
-    public IReadOnlyList<nint> EnumerateTopLevelWindows() => _windows.Keys.ToArray();
+    private readonly HashSet<nint> _hiddenFromEnumeration = [];
+
+    /// <summary>
+    /// Simulates a window that still EXISTS but is no longer enumerable -- what DWM cloaking does
+    /// to every window on a virtual desktop the user switches away from. TryGetWindowInfo keeps
+    /// answering for it, because the window is alive; only the enumeration stops listing it.
+    /// </summary>
+    public void HideFromEnumeration(nint hwnd) => _hiddenFromEnumeration.Add(hwnd);
+
+    public IReadOnlyList<nint> EnumerateTopLevelWindows() =>
+        _windows.Keys.Where(handle => !_hiddenFromEnumeration.Contains(handle)).ToArray();
 
     public bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info) => _windows.TryGetValue(hwnd, out info);
 

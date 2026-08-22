@@ -34,6 +34,11 @@ public sealed class VirtualDesktopVTableTests(ITestOutputHelper output)
     [RequiresDesktopFact]
     public void TheDeclaredVTableStillAgreesWithItself_AcrossMoreThanOneDesktop()
     {
+        // Settle BEFORE the baseline, not only between steps. Every desktop-mutating fact in this
+        // collection leaves the shell mid-animation, and a baseline read from that state made this
+        // test fail twice in full runs while passing in isolation -- test coupling, not a defect.
+        Thread.Sleep(Settle);
+
         var before = VirtualDesktopProbe.Run();
         output.WriteLine($"before : supported={before.Supported} count={before.Count} current={before.CurrentDesktopId}");
 

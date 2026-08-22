@@ -72,7 +72,12 @@ public sealed class Win32Workspace : IWorkspace
 
         foreach (var hwnd in _windows.Keys.ToArray())
         {
-            if (!currentSet.Contains(hwnd))
+            // Absent from the enumeration is NOT the same as gone. IsTrackable rejects a cloaked
+            // window, and DWM cloaks every window on a virtual desktop the user switches away from
+            // -- so treating absence as destruction dismantled the whole layout on a desktop change
+            // and rebuilt it in enumeration order on the way back (measured 2026-08-22). A window
+            // that still answers TryGetWindowInfo is alive; only its visibility changed.
+            if (!currentSet.Contains(hwnd) && !_nativeSource.TryGetWindowInfo(hwnd, out _))
             {
                 RemoveWindow(hwnd);
             }
