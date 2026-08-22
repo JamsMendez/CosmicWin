@@ -32,7 +32,34 @@ public sealed class AppCompositionTests
         AppComposition Composition, TrayMenuController TrayController, LowLevelKeyboardHook Hook,
         FakeWorkspace Workspace, LayoutTree Tree, TreeManager TreeManager, IDisplay Primary, IDisplay Secondary,
         RecordingFocusTrace FocusTrace, MutableForegroundWindowSource Foreground,
-        FakeKeyboardHookPlatform Platform);
+        FakeKeyboardHookPlatform Platform, RecordingScheduler Scheduler);
+
+    /// <summary>
+    /// Captures the recurring reconciliation pass instead of running a real timer, so a test can
+    /// fire it deterministically and observe disposal.
+    /// </summary>
+    private sealed class RecordingScheduler
+    {
+        public TimeSpan? Interval { get; private set; }
+
+        public Action? Callback { get; private set; }
+
+        public int DisposeCallCount { get; private set; }
+
+        public IDisposable Schedule(TimeSpan interval, Action callback)
+        {
+            Interval = interval;
+            Callback = callback;
+            return new Stopper(this);
+        }
+
+        public void Fire() => Callback!();
+
+        private sealed class Stopper(RecordingScheduler owner) : IDisposable
+        {
+            public void Dispose() => owner.DisposeCallCount++;
+        }
+    }
 
     private static FakeDisplay Display(int handle, int left, int top, int width, int height, bool primary = false) =>
         new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
@@ -49,6 +76,7 @@ public sealed class AppCompositionTests
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
         var platform = new FakeKeyboardHookPlatform();
         var focusTrace = new RecordingFocusTrace();
+        var scheduler = new RecordingScheduler();
         LowLevelKeyboardHook? capturedHook = null;
         TrayMenuController? capturedController = null;
 
@@ -56,6 +84,7 @@ public sealed class AppCompositionTests
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: focusTrace,
             disableTaskTrigger: disableTaskTrigger ?? (() => { }),
+            scheduleReconcile: scheduler.Schedule,
             hookFactory: writer =>
             {
                 capturedHook = new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0);
@@ -72,7 +101,7 @@ public sealed class AppCompositionTests
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
             composition, capturedController!, capturedHook!, workspace, tree!, treeManager, primary, secondary,
-            focusTrace, foreground, platform);
+            focusTrace, foreground, platform, scheduler);
     }
 
     /// <summary>Baseline sanity: unpaused, a newly-added window IS tracked and arranged -- proves <see cref="AppComposition.Wire"/> genuinely wires the adapter, not a no-op stub.</summary>
@@ -241,6 +270,55 @@ public sealed class AppCompositionTests
         Assert.Equal(0, disableCount);
     }
 
+
+    /// <summary>
+    /// WT-1's second scenario -- "GIVEN SetWinEventHook fails to deliver a destroy event, WHEN the
+    /// next polling pass runs, THEN the stale window is detected as gone" -- had no production
+    /// driver at all: <c>Win32Workspace.Poll</c> existed, was unit-tested, and was called from
+    /// nowhere. The reconciliation logic was never the gap; scheduling it was. This is not
+    /// hypothetical: the hook demonstrably drops windows (an EVENT_OBJECT_CREATE arriving before the
+    /// window is visible was exactly how a newly opened terminal went untiled).
+    /// </summary>
+    [Fact]
+    public void Wire_SchedulesTheReconciliationPass_OnABoundedInterval()
+    {
+        var harness = WireHarness();
+        using (harness.Composition)
+        {
+            Assert.NotNull(harness.Scheduler.Interval);
+            Assert.True(harness.Scheduler.Interval > TimeSpan.Zero, "The interval must be positive.");
+            Assert.True(
+                harness.Scheduler.Interval <= TimeSpan.FromSeconds(30),
+                "WT-1 says a BOUNDED interval; a pass that rare is not a fallback.");
+        }
+    }
+
+    [Fact]
+    public void Wire_ReconciliationPass_DrivesTheWorkspacesOwnCatchUp()
+    {
+        var harness = WireHarness();
+        using (harness.Composition)
+        {
+            Assert.Equal(0, harness.Workspace.PollCallCount);
+
+            harness.Scheduler.Fire();
+            harness.Scheduler.Fire();
+
+            Assert.Equal(2, harness.Workspace.PollCallCount);
+        }
+    }
+
+    /// <summary>A recurring pass that outlives the composition would reconcile a torn-down tree.</summary>
+    [Fact]
+    public void Dispose_StopsTheReconciliationPass()
+    {
+        var harness = WireHarness();
+
+        harness.Composition.Dispose();
+
+        Assert.Equal(1, harness.Scheduler.DisposeCallCount);
+    }
+
     /// <summary>Approval test for <c>App.OnExit</c>'s exact disposal chain, now owned by <see cref="AppComposition.Dispose"/>: the injected workspace and tray both get disposed exactly once.</summary>
     [Fact]
     public void Dispose_DisposesTrayAndWorkspace_ExactlyOnce()
@@ -258,6 +336,7 @@ public sealed class AppCompositionTests
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new RecordingFocusTrace(),
             disableTaskTrigger: () => { },
+            scheduleReconcile: (_, _) => new DisposeCountingTray(),
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },

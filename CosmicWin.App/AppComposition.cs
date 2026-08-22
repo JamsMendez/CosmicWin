@@ -1,5 +1,6 @@
 using System.IO;
 using System.Threading.Channels;
+using System.Windows.Threading;
 using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Startup;
@@ -36,17 +37,27 @@ public sealed class AppComposition : IDisposable
     private readonly IWorkspace _workspace;
     private readonly MultiMonitorWorkspaceAdapter _sessionAdapter;
     private readonly IDisposable _tray;
+    private readonly IDisposable _reconcile;
 
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
-        MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray)
+        MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile)
     {
         _dispatcher = dispatcher;
         _hook = hook;
         _workspace = workspace;
         _sessionAdapter = sessionAdapter;
         _tray = tray;
+        _reconcile = reconcile;
     }
+
+    /// <summary>
+    /// WT-1's "polling fallback reconciliation pass on a bounded interval". Frequent enough that a
+    /// window the hook dropped is picked up before the user notices, cheap enough to ignore: a pass
+    /// only raises events for windows whose bounds or membership ACTUALLY changed, so a steady
+    /// desktop costs one enumeration and nothing else.
+    /// </summary>
+    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// Wires every collaborator, in <c>App.OnStartup</c>'s exact order: <see
@@ -69,6 +80,7 @@ public sealed class AppComposition : IDisposable
         ExceptionListStore exceptionStore,
         IFocusTrace focusTrace,
         Action disableTaskTrigger,
+        Func<TimeSpan, Action, IDisposable> scheduleReconcile,
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
         Action shutdown,
@@ -102,7 +114,12 @@ public sealed class AppComposition : IDisposable
 
         _ = dispatcher.RunAsync(CancellationToken.None);
 
-        return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray);
+        // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
+        // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
+        // disagreeing with the desktop, and nothing else ever looks again.
+        var reconcile = scheduleReconcile(ReconcileInterval, workspace.Poll);
+
+        return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray, reconcile);
     }
 
     /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/> (WU17). Called exactly once, from <c>App.OnStartup</c>.</summary>
@@ -119,10 +136,30 @@ public sealed class AppComposition : IDisposable
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
             disableTaskTrigger: DisableScheduledTaskTrigger,
+            scheduleReconcile: ScheduleOnUiThread,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
             buildTray: controller => new TrayIconHost(controller));
+    }
+
+    /// <summary>
+    /// Runs the reconciliation pass on the WPF UI thread -- the SAME thread that installs the
+    /// WinEvent hook and therefore receives its callbacks. Both mutate the same trees and registry,
+    /// so a pool-thread timer would race them; a <see cref="DispatcherTimer"/> serialises the two by
+    /// construction.
+    /// </summary>
+    private static IDisposable ScheduleOnUiThread(TimeSpan interval, Action callback)
+    {
+        var timer = new DispatcherTimer { Interval = interval };
+        timer.Tick += (_, _) => callback();
+        timer.Start();
+        return new TimerStopper(timer);
+    }
+
+    private sealed class TimerStopper(DispatcherTimer timer) : IDisposable
+    {
+        public void Dispose() => timer.Stop();
     }
 
     private const string TaskName = "CosmicWin";
@@ -184,9 +221,11 @@ public sealed class AppComposition : IDisposable
         }
     }
 
-    /// <summary>Mirrors <c>App.OnExit</c>'s exact disposal order: tray, hook, adapter, workspace, dispatcher.</summary>
+    /// <summary>Mirrors <c>App.OnExit</c>'s exact disposal order, after stopping WT-1's reconciliation pass: tray, hook, adapter, workspace, dispatcher.</summary>
     public void Dispose()
     {
+        // Stopped FIRST: a pass that fires mid-teardown would reconcile against a disposed workspace.
+        _reconcile.Dispose();
         _tray.Dispose();
         _hook.Dispose();
         _sessionAdapter.Dispose();

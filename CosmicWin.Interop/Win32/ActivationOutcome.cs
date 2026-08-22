@@ -2,8 +2,14 @@ namespace CosmicWin.Interop.Win32;
 
 /// <summary>
 /// Which rung of <see cref="Win32NativeWindowSource.Activate"/>'s escalation actually moved the OS
-/// foreground. Recorded rather than collapsed to a boolean so a later run can tell whether the
-/// synthetic-input rung is still earning its cost, or can be dropped.
+/// foreground. Recorded rather than collapsed to a boolean so a later run can tell which rung is
+/// doing the work.
+///
+/// MEASURED 2026-08-22 on the development machine (Windows 11 26200), activating between two real
+/// external windows: the reported rung was <see cref="InputUnlocked"/>. Both <see cref="Direct"/>
+/// and <see cref="AttachedInput"/> were refused, so the synthetic Alt taps are not a defensive
+/// extra -- they are the ONLY rung that works here, and removing them puts focus navigation back
+/// exactly where MR-2 left it. Re-measure before deleting any rung.
 /// </summary>
 /// <remarks>
 /// Every non-<see cref="Failed"/> value means the same verified thing: <c>GetForegroundWindow</c>

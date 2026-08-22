@@ -20,9 +20,14 @@ internal sealed class FakeWorkspace : IWorkspace
 
     public void Open() => IsOpen = true;
 
+    /// <summary>WT-1: how many times the reconciliation pass asked this workspace to catch up.</summary>
+    public int PollCallCount { get; private set; }
+
     public void Poll()
     {
-        // No native source to reconcile against in the fake.
+        // No native source to reconcile against in the fake -- the COUNT is the fact under test:
+        // production must actually drive this, which until WT-1 was wired it never did.
+        PollCallCount++;
     }
 
     public void RaiseWindowAdded(IWindow window) => WindowAdded?.Invoke(this, new WindowEventArgs(window));
