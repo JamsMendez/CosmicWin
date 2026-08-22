@@ -157,15 +157,29 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         var beforeW3 = Read(nativeSource, window3.Handle);
         Assert.True(beforeW2.Left < beforeW3.Left, "Precondition: window2 starts to the left of window3.");
 
+        // cosmic-comp parity (2026-08-22): with THREE siblings a move forks rather than swaps, so
+        // passing a neighbour takes two presses -- the first pairs the two windows up inside a new
+        // group, the second exchanges them within it. Both are asserted, because the pair-then-
+        // exchange cycle is the behaviour, and one press alone would look like a failed swap.
+        executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Thread.Sleep(Settle);
+
+        var pairedW2 = Read(nativeSource, window2.Handle);
+        var pairedW3 = Read(nativeSource, window3.Handle);
+        Assert.True(pairedW2.Left > beforeW2.Left, "The first MoveRight must still carry the window rightward.");
+        Assert.True(pairedW2.Left < pairedW3.Left, "After forking, the mover sits BEFORE the neighbour it reached.");
+        AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), pairedW2, pairedW3]);
+
         executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None)
             .GetAwaiter().GetResult();
         Thread.Sleep(Settle);
 
         var afterW2 = Read(nativeSource, window2.Handle);
         var afterW3 = Read(nativeSource, window3.Handle);
-        Assert.True(afterW3.Left < afterW2.Left, "MoveRight must exchange the two windows' on-screen order.");
-        Assert.Equal(beforeW2.Width, afterW2.Width);
-        Assert.Equal(beforeW3.Width, afterW3.Width);
+        Assert.True(afterW3.Left < afterW2.Left, "The second MoveRight must exchange the two windows' on-screen order.");
+        Assert.Equal(pairedW2.Width, afterW2.Width);
+        Assert.Equal(pairedW3.Width, afterW3.Width);
         AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), afterW3, afterW2]);
 
         // Step 6: close one window -- the survivors reflow to fill the vacated space.

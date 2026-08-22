@@ -85,11 +85,15 @@ public sealed class ActionExecutorFocusScopeTests
         await Press(executor, HotkeyActionKind.FocusOut);
         await Press(executor, HotkeyActionKind.MoveRight);
 
-        // Root order becomes [ A , D , (B/C) ]: the group now occupies the rightmost third.
+        // cosmic-comp parity (2026-08-22): the root has THREE children, so LE-5 forks instead of
+        // swapping -- the group pairs up with D inside a new group taking D's slot. A keeps the
+        // left half (450); the pair splits the right half, group at 450 and D at 675. What this
+        // fact actually pins is unchanged and still holds: the chord moved the WHOLE group, since
+        // B and C travelled together and land on the same Left.
         Assert.Equal(0, windowA.LastSetPosition!.Value.Left);
-        Assert.Equal(300, windowD.LastSetPosition!.Value.Left);
-        Assert.Equal(600, windowB.LastSetPosition!.Value.Left);
-        Assert.Equal(600, windowC.LastSetPosition!.Value.Left);
+        Assert.Equal(450, windowB.LastSetPosition!.Value.Left);
+        Assert.Equal(450, windowC.LastSetPosition!.Value.Left);
+        Assert.Equal(675, windowD.LastSetPosition!.Value.Left);
     }
 
     /// <summary>Ascending must be undoable, or the user is stranded one level up with no way back.</summary>
@@ -175,13 +179,14 @@ public sealed class ActionExecutorFocusScopeTests
 
         await Press(executor, HotkeyActionKind.MoveLeft);
 
-        // D swapped with the inner GROUP as a single sibling -- root order [ A , D , (B/C) ] --
-        // which is what a leaf-scoped LE-5 move does. Had the stale group scope survived, the move
-        // would have acted on the group instead and left D where it was.
+        // D forked with the inner GROUP as a single sibling (cosmic-comp parity, 2026-08-22: three
+        // root children fork rather than swap), which is what a LEAF-scoped LE-5 move does. Had the
+        // stale group scope survived, the move would have acted on the group instead and left D
+        // where it was -- D ending up at 675 rather than untouched is what proves the scope dropped.
         Assert.Equal(0, windowA.LastSetPosition!.Value.Left);
-        Assert.Equal(300, windowD.LastSetPosition!.Value.Left);
-        Assert.Equal(600, windowB.LastSetPosition!.Value.Left);
-        Assert.Equal(600, windowC.LastSetPosition!.Value.Left);
+        Assert.Equal(450, windowB.LastSetPosition!.Value.Left);
+        Assert.Equal(450, windowC.LastSetPosition!.Value.Left);
+        Assert.Equal(675, windowD.LastSetPosition!.Value.Left);
     }
 
     private sealed class FakeForegroundWindowSource : IForegroundWindowSource

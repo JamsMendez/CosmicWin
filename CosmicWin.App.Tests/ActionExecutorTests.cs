@@ -49,8 +49,16 @@ public sealed class ActionExecutorTests
         return (executor, foreground, registry, windowA, windowB, windowC);
     }
 
+    /// <summary>
+    /// REWRITTEN for cosmic-comp parity (2026-08-22): this asserted a straight A/B swap across a
+    /// three-leaf row. With three or more siblings LE-5 now forks -- the mover pairs up with its
+    /// neighbour inside a new group taking that neighbour's slot -- so A and B share the left half
+    /// at 225 each while C keeps 450. The executor contract under test is unchanged and still the
+    /// point of this fact: focus resolved from the foreground handle, and exactly ONE SetPosition
+    /// per live leaf.
+    /// </summary>
     [Fact]
-    public async Task ScheduleAsync_MoveRight_ResolvesFocusViaForegroundLookup_SwapsAndRepositionsEachLiveLeafOnce()
+    public async Task ScheduleAsync_MoveRight_ResolvesFocusViaForegroundLookup_ForksAndRepositionsEachLiveLeafOnce()
     {
         var (executor, _, _, windowA, windowB, windowC) = BuildThreeLeafRow();
 
@@ -59,9 +67,12 @@ public sealed class ActionExecutorTests
         Assert.Equal(1, windowA.SetPositionCallCount);
         Assert.Equal(1, windowB.SetPositionCallCount);
         Assert.Equal(1, windowC.SetPositionCallCount);
-        Assert.Equal(Rectangle.FromSize(300, 0, 300, 100), windowA.LastSetPosition);
-        Assert.Equal(Rectangle.FromSize(0, 0, 300, 100), windowB.LastSetPosition);
-        Assert.Equal(Rectangle.FromSize(600, 0, 300, 100), windowC.LastSetPosition);
+
+        // Right -> the mover lands BEFORE the neighbour it travelled into; a second press would
+        // exchange them inside that pair.
+        Assert.Equal(Rectangle.FromSize(0, 0, 225, 100), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(225, 0, 225, 100), windowB.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(450, 0, 450, 100), windowC.LastSetPosition);
     }
 
     [Fact]

@@ -37,6 +37,57 @@ public sealed class MoveSequenceDiagnostic(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// The maintainer's second scenario: six windows opened back to back, which LE-4's
+    /// aspect-ratio split heuristic curls into a spiral, then the LAST one pushed Right over and
+    /// over. Prints every state so the reported walk can be contrasted against the real one.
+    /// </summary>
+    [Fact]
+    public void ReplaySixWindowSpiralPushedRight()
+    {
+        foreach (var direction in new[] { Direction.Right, Direction.Left })
+        {
+            var (tree, last) = SpiralOfSix();
+            output.WriteLine($"=== 6-window spiral, F pushed {direction} ===");
+            output.WriteLine($"start : {Describe(tree.Root!)}");
+            output.WriteLine($"        {Widths(tree)}");
+
+            for (var press = 1; press <= 8; press++)
+            {
+                var moved = ((ITilingEngine)tree).MoveNode(direction, last);
+                output.WriteLine($"press{press,-2}: moved={moved,-5} {Describe(tree.Root!)}");
+            }
+
+            output.WriteLine(string.Empty);
+        }
+    }
+
+    /// <summary>Each new window splits the one opened before it -- the arrival path that curls.</summary>
+    private static (LayoutTree Tree, LeafNode Last) SpiralOfSix()
+    {
+        var first = new LeafNode(new WindowRef(1));
+        var tree = new LayoutTree(first);
+        var area = new Rect(0, 0, Width, Height);
+        LeafNode focused = first;
+
+        for (var handle = 2; handle <= 6; handle++)
+        {
+            tree.Arrange(area);
+            var region = focused.LastGeometry;
+            var wasRoot = ReferenceEquals(tree.Root, focused);
+            var split = LayoutTree.SplitLeafInPlace(focused, new WindowRef(handle), region.Width, region.Height);
+            if (wasRoot)
+            {
+                tree.Root = split;
+            }
+
+            focused = (LeafNode)split.Children[^1];
+        }
+
+        tree.Arrange(area);
+        return (tree, focused);
+    }
+
     /// <summary>A, then B splitting A, then C splitting B -- the real LE-4 arrival path.</summary>
     private static (LayoutTree Tree, LeafNode C) ThreeWindows()
     {

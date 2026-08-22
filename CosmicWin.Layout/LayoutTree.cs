@@ -550,19 +550,33 @@ public sealed class LayoutTree : ITilingEngine
             Detach(origin, originIndex);
         }
 
-        var nested = new GroupNode(level.Axis) { GroupLength = level.GroupLength, Parent = level };
-        foreach (var existing in level.Children)
+        // What stays behind. A wrapper around a SINGLE node is a level that means nothing, and both
+        // LE-2's tree walk and LE-5's moves count levels -- see Prune's own remarks. Left in, these
+        // accumulate one per move and strand the window: measured on the six-window spiral, where
+        // pushing the last window produced H[D H[V[E] F]] and then dead-ended two presses later.
+        Node retained;
+        if (level.Children.Count == 1)
         {
-            existing.Parent = nested;
-            nested.Children.Add(existing);
+            retained = level.Children[0];
         }
+        else
+        {
+            var nested = new GroupNode(level.Axis) { GroupLength = level.GroupLength };
+            foreach (var existing in level.Children)
+            {
+                existing.Parent = nested;
+                nested.Children.Add(existing);
+            }
 
-        nested.Sizes.AddRange(level.Sizes);
+            nested.Sizes.AddRange(level.Sizes);
+            retained = nested;
+        }
 
         level.Children.Clear();
         level.Sizes.Clear();
         level.Axis = axis;
-        level.Children.Add(nested);
+        retained.Parent = level;
+        level.Children.Add(retained);
         level.Sizes.Add(level.GroupLength);
         AddChild(level, focused, step < 0 ? 0 : 1);
     }
