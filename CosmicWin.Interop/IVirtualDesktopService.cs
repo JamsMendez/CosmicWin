@@ -43,4 +43,14 @@ public interface IVirtualDesktopService
     /// being dragged along with it are separate intents.
     /// </summary>
     bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex);
+
+    /// <summary>
+    /// Why the last operation did not do what was asked, or <see langword="null"/> if it did.
+    /// </summary>
+    /// <remarks>
+    /// Added after the first live run: every failure path here was swallowing its exception and
+    /// returning a bare <c>false</c>, so "Alt+N does nothing" carried no information at all. A
+    /// window manager that fails silently costs more to diagnose than it saves in noise.
+    /// </remarks>
+    string? LastError { get; }
 }

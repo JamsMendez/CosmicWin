@@ -25,6 +25,8 @@ public sealed class Win32VirtualDesktopServiceTests
 
         public bool IsAvailable { get; set; } = true;
 
+        public string? LastError => null;
+
         /// <summary>Simulates a shell that refuses to add desktops.</summary>
         public bool RefuseCreate { get; set; }
 

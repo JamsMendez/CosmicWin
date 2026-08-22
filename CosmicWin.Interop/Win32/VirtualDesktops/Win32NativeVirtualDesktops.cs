@@ -15,8 +15,14 @@ namespace CosmicWin.Interop.Win32.VirtualDesktops;
 /// elevated process.
 /// </para>
 /// <para>
-/// Moving a window deliberately does NOT go through that interface at all. It uses the documented
-/// <see cref="IVirtualDesktopManager"/>, which takes an HWND and is a contract Microsoft supports.
+/// <b>Moving a window through the documented <see cref="IVirtualDesktopManager"/> does not work for
+/// a window manager, and the first live run proved it.</b> That interface moves only windows owned
+/// by the CALLING process, returning <c>E_ACCESSDENIED</c> (0x80070005) otherwise — and a window
+/// manager owns none of the windows it manages. An earlier note here claimed this half of the
+/// feature needed no undocumented surface; that was wrong. The working path is
+/// <c>MoveViewToDesktop</c> on the internal manager, which needs an <c>IApplicationView</c> resolved
+/// from an HWND through <c>IApplicationViewCollection</c> — another undocumented interface, and
+/// therefore another vtable to verify before it may be called.
 /// </para>
 /// </remarks>
 internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
@@ -24,6 +30,9 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
     private IVirtualDesktopManagerInternal? _internalManager;
     private IVirtualDesktopManager? _documentedManager;
     private bool? _available;
+
+    /// <summary>Why the last call failed. Never thrown, always readable, cleared on success.</summary>
+    public string? LastError { get; private set; }
 
     public bool IsAvailable => _available ??= VirtualDesktopProbe.Run().Supported && TryResolveManagers();
 
@@ -80,7 +89,7 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
-            // Caller detects the refusal by the set not growing, so there is nothing to report here.
+            LastError = $"CreateDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
         }
     }
 
@@ -106,12 +115,16 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
                 if (desktop.GetId() == desktopId)
                 {
                     manager.SwitchDesktop(desktop);
+                    LastError = null;
                     return;
                 }
             }
+
+            LastError = $"SwitchDesktop: {desktopId} was not in the enumeration of {count}.";
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
+            LastError = $"SwitchDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
         }
     }
 
@@ -124,10 +137,24 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
 
         try
         {
-            return manager.MoveWindowToDesktop(windowHandle, ref desktopId) >= 0;
+            var hr = manager.MoveWindowToDesktop(windowHandle, ref desktopId);
+            if (hr >= 0)
+            {
+                LastError = null;
+                return true;
+            }
+
+            // 0x80070005 is the documented-in-practice refusal: IVirtualDesktopManager moves only
+            // windows owned by the CALLING process. A window manager owns none of the windows it
+            // manages, so this path can never succeed for real -- see the note on MoveViewToDesktop.
+            LastError = hr == unchecked((int)0x80070005)
+                ? "MoveWindowToDesktop: E_ACCESSDENIED -- the documented API only moves windows owned by the calling process."
+                : $"MoveWindowToDesktop: HRESULT 0x{hr:X8}";
+            return false;
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
+            LastError = $"MoveWindowToDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
             return false;
         }
     }
@@ -144,8 +171,10 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
 
             var service = ShellComGuids.VirtualDesktopManagerInternal;
             var iid = typeof(IVirtualDesktopManagerInternal).GUID;
-            if (shell.QueryService(ref service, ref iid, out var instance) < 0 || instance == IntPtr.Zero)
+            var hr = shell.QueryService(ref service, ref iid, out var instance);
+            if (hr < 0 || instance == IntPtr.Zero)
             {
+                LastError = $"QueryService(VirtualDesktopManagerInternal): 0x{hr:X8}";
                 return false;
             }
 
@@ -167,6 +196,7 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
+            LastError = $"resolve: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
             return false;
         }
     }

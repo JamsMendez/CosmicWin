@@ -86,7 +86,8 @@ public sealed class AppComposition : IDisposable
         Func<ExceptionList> loadExceptions,
         Action shutdown,
         Func<TrayMenuController, IDisposable> buildTray,
-        IVirtualDesktopService? virtualDesktops = null)
+        IVirtualDesktopService? virtualDesktops = null,
+        Diagnostics.IDesktopTrace? desktopTrace = null)
     {
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
@@ -96,6 +97,7 @@ public sealed class AppComposition : IDisposable
         executor.TreeManager = treeManager;
         executor.FocusTrace = focusTrace;
         executor.VirtualDesktops = virtualDesktops;
+        executor.DesktopTrace = desktopTrace;
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
@@ -161,7 +163,8 @@ public sealed class AppComposition : IDisposable
             buildTray: controller => new TrayIconHost(controller),
             // Gated internally: an unrecognised Windows build reports unsupported and the desktop
             // chords become inert, rather than calling through a vtable that may have moved.
-            virtualDesktops: new Win32VirtualDesktopService());
+            virtualDesktops: new Win32VirtualDesktopService(),
+            desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()));
     }
 
     /// <summary>

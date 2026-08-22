@@ -17,6 +17,8 @@ public sealed class DesktopChordTests
 
         public int CurrentIndex => 1;
 
+        public string? LastError => null;
+
         public List<int> Switched { get; } = [];
 
         public List<(nint Handle, int Index)> Moved { get; } = [];

@@ -35,6 +35,9 @@ public sealed class ActionExecutor(
     /// </summary>
     public CosmicWin.Interop.IVirtualDesktopService? VirtualDesktops { get; set; }
 
+    /// <summary>Where desktop chords report what they actually did. Null disables the trace.</summary>
+    public Diagnostics.IDesktopTrace? DesktopTrace { get; set; }
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -198,22 +201,32 @@ public sealed class ActionExecutor(
     /// </summary>
     private bool TryDispatchDesktop(HotkeyAction action, nint foregroundHandle)
     {
-        switch (action.Kind)
+        if (action.Kind is not (HotkeyActionKind.SwitchDesktop or HotkeyActionKind.MoveWindowToDesktop))
         {
-            case HotkeyActionKind.SwitchDesktop:
-                VirtualDesktops?.TrySwitchTo(action.Argument);
-                return true;
-
-            case HotkeyActionKind.MoveWindowToDesktop:
-                // The window the user is looking at, straight from the OS. Deliberately not the
-                // tracked leaf: sending an untracked window to another desktop is still a
-                // legitimate thing to ask for.
-                VirtualDesktops?.TryMoveWindowTo(foregroundHandle, action.Argument);
-                return true;
-
-            default:
-                return false;
+            return false;
         }
+
+        if (VirtualDesktops is not { } desktops)
+        {
+            DesktopTrace?.Record($"{action.Kind} {action.Argument} -- no service wired");
+            return true;
+        }
+
+        var countBefore = desktops.Count;
+        var indexBefore = desktops.CurrentIndex;
+
+        // The window the user is looking at, straight from the OS. Deliberately not the tracked
+        // leaf: sending an untracked window to another desktop is still a legitimate ask.
+        var ok = action.Kind == HotkeyActionKind.SwitchDesktop
+            ? desktops.TrySwitchTo(action.Argument)
+            : desktops.TryMoveWindowTo(foregroundHandle, action.Argument);
+
+        DesktopTrace?.Record(
+            $"{action.Kind} arg={action.Argument} ok={ok} supported={desktops.IsSupported} " +
+            $"count={countBefore}->{desktops.Count} index={indexBefore}->{desktops.CurrentIndex} " +
+            $"hwnd=0x{foregroundHandle:X} error={desktops.LastError ?? "(none)"}");
+
+        return true;
     }
 
     private void Trace(

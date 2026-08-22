@@ -9,6 +9,8 @@ internal interface INativeVirtualDesktops
 {
     bool IsAvailable { get; }
 
+    string? LastError { get; }
+
     IReadOnlyList<Guid> GetDesktopIds();
 
     Guid GetCurrentDesktopId();
@@ -53,6 +55,8 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
 
     public bool IsSupported => _native.IsAvailable;
 
+    public string? LastError { get; private set; }
+
     public int Count => _native.IsAvailable ? _native.GetDesktopIds().Count : 0;
 
     public int CurrentIndex
@@ -80,13 +84,39 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
         }
     }
 
-    public bool TrySwitchTo(int oneBasedIndex) =>
-        TryResolve(oneBasedIndex, out var desktopId) && Switch(desktopId);
+    public bool TrySwitchTo(int oneBasedIndex)
+    {
+        LastError = null;
+        if (!TryResolve(oneBasedIndex, out var desktopId))
+        {
+            LastError ??= _native.LastError;
+            return false;
+        }
 
-    public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex) =>
-        windowHandle != 0
-        && TryResolve(oneBasedIndex, out var desktopId)
-        && _native.MoveWindowTo(windowHandle, desktopId);
+        var switched = Switch(desktopId);
+        LastError = switched ? null : _native.LastError;
+        return switched;
+    }
+
+    public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex)
+    {
+        LastError = null;
+        if (windowHandle == 0)
+        {
+            LastError = "No foreground window to move.";
+            return false;
+        }
+
+        if (!TryResolve(oneBasedIndex, out var desktopId))
+        {
+            LastError ??= _native.LastError;
+            return false;
+        }
+
+        var moved = _native.MoveWindowTo(windowHandle, desktopId);
+        LastError = moved ? null : _native.LastError;
+        return moved;
+    }
 
     private bool Switch(Guid desktopId)
     {
@@ -97,7 +127,11 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
         }
 
         _native.SwitchTo(desktopId);
-        return true;
+
+        // Verified, not assumed. SwitchDesktop returns void, so the only honest way to know whether
+        // the user actually moved is to look -- the same lesson MR-2 taught about
+        // SetForegroundWindow claiming success while nothing happened on screen.
+        return _native.GetCurrentDesktopId() == desktopId;
     }
 
     /// <summary>
@@ -106,8 +140,15 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
     private bool TryResolve(int oneBasedIndex, out Guid desktopId)
     {
         desktopId = Guid.Empty;
-        if (!_native.IsAvailable || oneBasedIndex < 1 || oneBasedIndex > MaxIndex)
+        if (!_native.IsAvailable)
         {
+            LastError = $"Unsupported build. {_native.LastError}".TrimEnd();
+            return false;
+        }
+
+        if (oneBasedIndex < 1 || oneBasedIndex > MaxIndex)
+        {
+            LastError = $"Index {oneBasedIndex} is outside 1..{MaxIndex}.";
             return false;
         }
 
@@ -121,6 +162,7 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
             // against a wall, so stop and report failure rather than hammering it.
             if (grown.Count <= ids.Count)
             {
+                LastError = $"CreateDesktop did not grow the set (still {ids.Count}). {_native.LastError}".TrimEnd();
                 return false;
             }
 
@@ -129,6 +171,7 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
 
         if (ids.Count < oneBasedIndex)
         {
+            LastError = $"Only {ids.Count} desktop(s) exist after creating; wanted {oneBasedIndex}.";
             return false;
         }
 
