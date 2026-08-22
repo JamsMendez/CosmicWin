@@ -28,6 +28,13 @@ public sealed class ActionExecutor(
     /// </summary>
     private Node? _focusScope;
 
+    /// <summary>
+    /// Windows' virtual desktops, or <see langword="null"/> when the composition did not wire them
+    /// (every unit test that predates the feature). Settable rather than a constructor parameter for
+    /// the same reason <see cref="TreeManager"/> and <see cref="FocusTrace"/> are.
+    /// </summary>
+    public CosmicWin.Interop.IVirtualDesktopService? VirtualDesktops { get; set; }
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -62,6 +69,16 @@ public sealed class ActionExecutor(
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
         var foregroundHandle = foreground.GetForegroundHandle();
+
+        // Desktop chords are answered BEFORE focus is resolved. They are about which desktop the
+        // user is looking at, not about the tiling tree, and they must keep working when the
+        // foreground window is one CosmicWin does not track at all -- a dialog, an excluded app, or
+        // a desktop that happens to be empty.
+        if (TryDispatchDesktop(action, foregroundHandle))
+        {
+            return ValueTask.CompletedTask;
+        }
+
         if (TryResolveFocused(foregroundHandle, out var focused))
         {
             Dispatch(action.Kind, focused, foregroundHandle);
@@ -172,6 +189,31 @@ public sealed class ActionExecutor(
 
         Trace(direction, foregroundHandle, origin, target,
             activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed);
+    }
+
+    /// <summary>
+    /// Handles the virtual-desktop chords, returning whether this action was one. A no-op when no
+    /// service is wired or the build is unsupported -- the chord is then simply consumed, which is
+    /// what the user already sees for any action the tree cannot satisfy.
+    /// </summary>
+    private bool TryDispatchDesktop(HotkeyAction action, nint foregroundHandle)
+    {
+        switch (action.Kind)
+        {
+            case HotkeyActionKind.SwitchDesktop:
+                VirtualDesktops?.TrySwitchTo(action.Argument);
+                return true;
+
+            case HotkeyActionKind.MoveWindowToDesktop:
+                // The window the user is looking at, straight from the OS. Deliberately not the
+                // tracked leaf: sending an untracked window to another desktop is still a
+                // legitimate thing to ask for.
+                VirtualDesktops?.TryMoveWindowTo(foregroundHandle, action.Argument);
+                return true;
+
+            default:
+                return false;
+        }
     }
 
     private void Trace(

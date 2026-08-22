@@ -16,6 +16,9 @@ internal static class ShellComGuids
     public static readonly Guid ImmersiveShell = new("C2F03A33-21F5-47FA-B4BB-156362A2F239");
 
     public static readonly Guid VirtualDesktopManagerInternal = new("C5E0CDCA-7B6E-41B2-9FC4-D93975CC467B");
+
+    /// <summary>The DOCUMENTED manager, created directly with CoCreateInstance rather than queried.</summary>
+    public static readonly Guid VirtualDesktopManager = new("AA509086-5CA9-4C25-8F95-589D3C07B48A");
 }
 
 /// <summary>
@@ -99,11 +102,13 @@ internal interface IVirtualDesktop
 /// <see cref="IVirtualDesktop"/> for why the ORDER of these members is the whole contract.
 /// </summary>
 /// <remarks>
-/// Only the first five slots are modelled with real signatures — enough to read the desktop set and
-/// prove the layout holds. The mutating members (<c>SwitchDesktop</c>, <c>CreateDesktop</c>,
-/// <c>RemoveDesktop</c>, <c>MoveViewToDesktop</c>) are deliberately left as slot holders for now:
-/// this is a spike that establishes whether the ground is firm, and calling a mutator through an
-/// unverified vtable is exactly the risk being measured.
+/// Only the members CosmicWin actually calls carry real signatures: the read slots, plus
+/// <c>SwitchDesktop</c> and <c>CreateDesktop</c>, which earned theirs once
+/// <c>VirtualDesktopVTableTests</c> proved the layout holds across MORE THAN ONE desktop. Everything
+/// else stays a slot holder with a deliberately wrong signature — present to hold its position,
+/// impossible to invoke by accident. <c>RemoveDesktop</c> is among them on purpose: deleting a
+/// desktop drags its surviving windows to a fallback, which is not a decision to make through an
+/// interface Microsoft never promised.
 /// </remarks>
 [ComImport]
 [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -128,17 +133,18 @@ internal interface IVirtualDesktopManagerInternal
     [PreserveSig]
     int GetAdjacentDesktop(IVirtualDesktop from, int direction, out IVirtualDesktop desktop);
 
-    /// <summary>Slot holder. Never call until the layout is verified AND a switch is intended.</summary>
-    [PreserveSig]
-    int SwitchDesktop(IVirtualDesktop desktop);
+    /// <summary>
+    /// Verified against this machine by <c>VirtualDesktopVTableTests</c> before being given a real
+    /// signature: with a second desktop present, slots 0/3/4 still corroborated one another.
+    /// </summary>
+    void SwitchDesktop(IVirtualDesktop desktop);
 
     /// <summary>Slot holder. Never call.</summary>
     [PreserveSig]
     int SwitchDesktopAndMoveForegroundView(IVirtualDesktop desktop);
 
-    /// <summary>Slot holder. Never call until the layout is verified AND a create is intended.</summary>
-    [PreserveSig]
-    int CreateDesktop(out IVirtualDesktop desktop);
+    /// <summary>Appends a desktop at the END of the list -- which is what makes the positional model natural.</summary>
+    IVirtualDesktop CreateDesktop();
 
     /// <summary>Slot holder. Never call.</summary>
     [PreserveSig]
@@ -151,4 +157,29 @@ internal interface IVirtualDesktopManagerInternal
     /// <summary>Slot holder. Never call.</summary>
     [PreserveSig]
     int FindDesktop(ref Guid desktopId, out IVirtualDesktop desktop);
+}
+
+/// <summary>
+/// <c>IVirtualDesktopManager</c> (shobjidl_core.h) — DOCUMENTED and supported since Windows 10.
+/// </summary>
+/// <remarks>
+/// Worth stating plainly: moving a window between desktops needs none of the undocumented surface
+/// above. This interface takes an HWND directly, Microsoft documents it, and its shape is a
+/// contract rather than an observation. The internal manager is required only to CREATE and SWITCH,
+/// which this one deliberately cannot do -- its own remarks say applications "should avoid
+/// automatically switching the user from one virtual desktop to another".
+/// </remarks>
+[ComImport]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+[Guid("A5CD92FF-29BE-454C-8D04-D82879FB3F1B")]
+internal interface IVirtualDesktopManager
+{
+    [PreserveSig]
+    int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, out int onCurrentDesktop);
+
+    [PreserveSig]
+    int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
+
+    [PreserveSig]
+    int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
 }

@@ -17,11 +17,26 @@ public sealed class ChordTable
         return _registered[index];
     }
 
-    private void Register(ModifierKeys modifiers, KeyboardKey key, HotkeyActionKind kind)
+    private void Register(ModifierKeys modifiers, KeyboardKey key, HotkeyActionKind kind, int argument = 0)
     {
         var index = Index(modifiers, key);
-        _actions[index] = new(kind);
+        _actions[index] = new(kind, argument);
         _registered[index] = true;
+    }
+
+    /// <summary>
+    /// <c>Alt+1</c>..<c>Alt+9</c> select a virtual desktop by POSITION, and <c>Alt+Shift+N</c> sends
+    /// the focused window there. The number rides along as the action's argument, so the dispatcher
+    /// needs one case rather than nine.
+    /// </summary>
+    private void RegisterDesktopDigits()
+    {
+        for (var number = 1; number <= 9; number++)
+        {
+            var key = (KeyboardKey)((byte)KeyboardKey.D1 + number - 1);
+            Register(ModifierKeys.Alt, key, HotkeyActionKind.SwitchDesktop, number);
+            Register(ModifierKeys.Shift | ModifierKeys.Alt, key, HotkeyActionKind.MoveWindowToDesktop, number);
+        }
     }
 
     private static int Index(ModifierKeys modifiers, KeyboardKey key) =>
@@ -42,6 +57,7 @@ public sealed class ChordTable
         table.Register(ModifierKeys.Alt, KeyboardKey.CloseBracket, HotkeyActionKind.FocusIn);
         table.Register(ModifierKeys.Alt, KeyboardKey.OpenBracket, HotkeyActionKind.FocusOut);
         table.Register(ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation);
+        table.RegisterDesktopDigits();
         return table;
     }
 

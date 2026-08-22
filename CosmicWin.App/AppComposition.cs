@@ -7,6 +7,7 @@ using CosmicWin.App.Startup;
 using CosmicWin.App.Tray;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
+using CosmicWin.Interop.Win32.VirtualDesktops;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
@@ -84,7 +85,8 @@ public sealed class AppComposition : IDisposable
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
         Action shutdown,
-        Func<TrayMenuController, IDisposable> buildTray)
+        Func<TrayMenuController, IDisposable> buildTray,
+        IVirtualDesktopService? virtualDesktops = null)
     {
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
@@ -93,6 +95,7 @@ public sealed class AppComposition : IDisposable
         var (dispatcher, executor) = CompositionRoot.Build(primaryTree!, registry, foreground, workArea);
         executor.TreeManager = treeManager;
         executor.FocusTrace = focusTrace;
+        executor.VirtualDesktops = virtualDesktops;
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
@@ -155,7 +158,10 @@ public sealed class AppComposition : IDisposable
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
-            buildTray: controller => new TrayIconHost(controller));
+            buildTray: controller => new TrayIconHost(controller),
+            // Gated internally: an unrecognised Windows build reports unsupported and the desktop
+            // chords become inert, rather than calling through a vtable that may have moved.
+            virtualDesktops: new Win32VirtualDesktopService());
     }
 
     /// <summary>
