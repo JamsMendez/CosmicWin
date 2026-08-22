@@ -75,7 +75,7 @@ windows those tests spawn.
 
 ## Diagnostics
 
-Three test-shaped files assert nothing on purpose. They answer a question with measured data instead
+Four test-shaped files assert nothing on purpose. They answer a question with measured data instead
 of a hypothesis, and each was written because a guess had already been wrong once.
 
 | File | Answers |
@@ -83,6 +83,7 @@ of a hypothesis, and each was written because a guess had already been wrong onc
 | `CosmicWin.App.Tests/Desktop/DesktopSnapshotDiagnostic.cs` | Which windows does the filter chain actually admit right now? (Found a minimized window holding a whole tile.) |
 | `CosmicWin.Layout.Tests/MoveSequenceDiagnostic.cs` | What does the tree look like after each move chord? (Found a degenerate single-child group stranding the window.) |
 | `CosmicWin.Interop.Tests/Win32/FrameBoundsDiagnostic.cs` | How far is the drawn frame from `GetWindowRect`? (Measured the 7px invisible border, 0 on top.) |
+| `CosmicWin.Interop.Tests/Win32/VirtualDesktopProbeDiagnostic.cs` | Does this Windows build expose the virtual-desktop vtable we declare? |
 
 Run one with the detailed logger, or its output is swallowed:
 
