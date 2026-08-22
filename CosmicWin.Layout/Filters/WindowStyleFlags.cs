@@ -19,4 +19,11 @@ public static class WindowStyleFlags
 
     /// <summary>GWL_STYLE bit: <c>WS_SYSMENU</c>.</summary>
     public const uint SystemMenu = 0x00080000;
+
+    /// <summary>
+    /// GWL_STYLE bit: <c>WS_MINIMIZE</c> (a.k.a. <c>WS_ICONIC</c>). Set by Windows for as long as
+    /// a window is minimized and cleared on restore -- unlike every other bit here it is
+    /// TRANSIENT, which is why excluding on it has to be paired with re-admission on restore.
+    /// </summary>
+    public const uint Minimized = 0x20000000;
 }

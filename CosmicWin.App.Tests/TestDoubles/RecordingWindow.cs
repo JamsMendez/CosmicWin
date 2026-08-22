@@ -1,4 +1,5 @@
 using CosmicWin.Interop;
+using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App.Tests.TestDoubles;
 
@@ -111,6 +112,22 @@ internal sealed class RecordingWindow : IWindow
     /// it did (verify-report #21 V18-W2).
     /// </summary>
     public void SimulateExternalMove(Rectangle bounds) => Bounds = bounds;
+
+    /// <summary>
+    /// Sets/clears <c>WS_MINIMIZE</c> and parks the window at Win32's canonical minimized spot,
+    /// so a test can reproduce a real minimize/restore rather than only a move.
+    /// </summary>
+    public void SimulateMinimize()
+    {
+        Style |= WindowStyleFlags.Minimized;
+        Bounds = Rectangle.FromSize(-32000, -32000, 160, 28);
+    }
+
+    public void SimulateRestore(Rectangle bounds)
+    {
+        Style &= ~WindowStyleFlags.Minimized;
+        Bounds = bounds;
+    }
 
     public void Kill()
     {

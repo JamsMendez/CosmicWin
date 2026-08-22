@@ -153,6 +153,62 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(2, windowB.SetPositionCallCount);
     }
 
+    /// <summary>
+    /// Measured on real hardware 2026-08-22: a MINIMIZED window was admitted into the tree and held
+    /// a whole tile, so the one visible window only got half the screen. The filter now rejects
+    /// WS_MINIMIZE, but that alone only covers windows already minimized at startup -- exclusion is
+    /// evaluated in OnWindowAdded and never again. A window minimized WHILE tiled kept its tile.
+    /// Minimizing moves the window to (-32000,-32000), which raises the very bounds-changed event
+    /// this handler already listens to, so that is where the re-check belongs.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_TiledWindowIsMinimized_GivesItsTileBackToTheSurvivor()
+    {
+        var s = OneDisplay();
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
+        var stays = new RecordingWindow(new IntPtr(901), Rectangle.FromSize(0, 0, 400, 300));
+        var minimized = new RecordingWindow(new IntPtr(902), Rectangle.FromSize(0, 0, 400, 300));
+        s.Workspace.RaiseWindowAdded(stays);
+        s.Workspace.RaiseWindowAdded(minimized);
+
+        minimized.SimulateMinimize();
+        s.Workspace.RaiseWindowBoundsChanged(minimized);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var survivor = Assert.IsType<LeafNode>(tree!.Root);
+        Assert.Equal(new WindowRef(stays.Handle), survivor.Window);
+        Assert.False(s.Registry.TryGetLeaf(minimized.Handle, out _));
+    }
+
+    /// <summary>
+    /// The other half: WS_MINIMIZE is TRANSIENT, so excluding on it without ever re-admitting would
+    /// mean a window minimized once never tiles again until CosmicWin restarts. Restoring clears the
+    /// bit and raises the same bounds-changed event, which is the moment to let it back in.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_MinimizedWindowIsRestored_IsAdmittedIntoTheTree()
+    {
+        var s = OneDisplay();
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
+        var tiled = new RecordingWindow(new IntPtr(911), Rectangle.FromSize(0, 0, 400, 300));
+        var minimized = new RecordingWindow(new IntPtr(912), Rectangle.FromSize(0, 0, 400, 300));
+        minimized.SimulateMinimize();
+        s.Workspace.RaiseWindowAdded(tiled);
+        s.Workspace.RaiseWindowAdded(minimized);
+
+        // Precondition: it was refused on arrival, exactly as the real desktop snapshot showed.
+        Assert.False(s.Registry.TryGetLeaf(minimized.Handle, out _));
+
+        minimized.SimulateRestore(Rectangle.FromSize(0, 0, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(minimized);
+
+        Assert.True(s.Registry.TryGetLeaf(minimized.Handle, out var leaf));
+        Assert.NotNull(leaf);
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(2, group.Children.Count);
+    }
+
     // Decision #76 ("full pause, no reconcile"): a drag while paused must not trigger a snap-back,
     // the same way OnWindowAdded and OnWindowRemoved already do not.
     [Fact]

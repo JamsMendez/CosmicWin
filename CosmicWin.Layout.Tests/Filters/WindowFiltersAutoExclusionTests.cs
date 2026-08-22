@@ -74,4 +74,25 @@ public class WindowFiltersAutoExclusionTests
 
         Assert.False(WindowFilters.IsAutoExcluded(descriptor));
     }
+
+    /// <summary>
+    /// Measured on real hardware 2026-08-22. The maintainer launched CosmicWin with a minimized
+    /// Brave window on the desktop and the Windows Terminal took only HALF the screen: the filter
+    /// chain admitted the minimized window, so the tree held two leaves and handed an entire tile
+    /// to something that is not drawn anywhere. The diagnostic snapshot recorded it verbatim --
+    /// <c>ADMIT 0xC0856 proc=brave.exe rect=[L=-32000 T=-32000 W=160 H=28]</c>, which is Win32's
+    /// canonical parking spot for a minimized window.
+    /// <para>
+    /// Keyed off <c>WS_MINIMIZE</c> rather than those coordinates: the style bit is the documented
+    /// signal, while (-32000,-32000) is an implementation detail that also shows up on windows
+    /// deliberately parked off-screen.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_MinimizedWindow_ReturnsTrue()
+    {
+        var descriptor = Normal() with { Style = Normal().Style | WindowStyleFlags.Minimized };
+
+        Assert.True(WindowFilters.IsAutoExcluded(descriptor));
+    }
 }

@@ -161,16 +161,50 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
-        var handle = e.Window.Handle;
-        if (!_owners.TryGetValue(handle, out var display) ||
-            !_treeManager.TryGetTree(display, out var tree) || tree is null)
+        var window = e.Window;
+        var handle = window.Handle;
+
+        // WE-1 exclusion is otherwise decided once, in OnWindowAdded, and never revisited. That
+        // holds for every permanent trait it tests, but NOT for WS_MINIMIZE, which Windows sets and
+        // clears as the user minimises and restores. Both transitions move the window -- minimising
+        // parks it at (-32000,-32000) -- so both arrive here, which makes this the one place the
+        // verdict can be kept honest.
+        var excluded = WorkspaceSessionAdapter.IsExcluded(window, _exceptions());
+
+        if (!_owners.TryGetValue(handle, out var display))
         {
+            // Untracked and no longer excluded: it just became tileable (a restore). Route it
+            // through the ordinary add path rather than a second, drifting copy of it.
+            if (!excluded)
+            {
+                OnWindowAdded(sender, e);
+            }
+
+            return;
+        }
+
+        if (!_treeManager.TryGetTree(display, out var tree) || tree is null)
+        {
+            return;
+        }
+
+        if (excluded)
+        {
+            // Tracked but no longer tileable (a minimise). Measured 2026-08-22: left in the tree it
+            // keeps a full tile while drawing nothing, which is what made one visible window occupy
+            // only half the screen. Remove it and reflow the survivors into the space.
+            _owners.Remove(handle);
+            if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
+            {
+                TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+            }
+
             return;
         }
 
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
 
-        if (!e.Window.CanReposition)
+        if (!window.CanReposition)
         {
             _owners.Remove(handle);
         }

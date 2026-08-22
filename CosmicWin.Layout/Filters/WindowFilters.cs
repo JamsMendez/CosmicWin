@@ -23,6 +23,14 @@ public static class WindowFilters
             return true;
         }
 
+        // A minimized window occupies no screen space, so giving it a tile hands a share of the
+        // work area to something nothing is drawn into -- measured 2026-08-22 as "the terminal only
+        // expanded to half the screen", with a minimized browser holding the other half.
+        if ((descriptor.Style & WindowStyleFlags.Minimized) != 0)
+        {
+            return true;
+        }
+
         var lacksMaximizeBox = (descriptor.Style & WindowStyleFlags.MaximizeBox) == 0;
         var lacksMinimizeBox = (descriptor.Style & WindowStyleFlags.MinimizeBox) == 0;
         if (descriptor.IsOwned && lacksMaximizeBox && lacksMinimizeBox)
