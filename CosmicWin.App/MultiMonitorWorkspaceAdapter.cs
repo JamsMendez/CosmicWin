@@ -31,6 +31,16 @@ namespace CosmicWin.App;
 /// on-screen position -- removes WU19's cross-monitor re-home and WU20's reorder outright, rather
 /// than fixing them further. Gated by <see cref="_isPaused"/> exactly like decision #76.
 /// </remarks>
+/// <remarks>
+/// WU23 (closes CRITICAL V22-W1, decision #83): the "evict a window that refuses repositioning"
+/// guard WU22 wired into <see cref="OnWindowBoundsChanged"/> alone now lives inside the shared
+/// <see cref="TreeArranger.ArrangeAndPosition"/> choke point, so <see cref="OnWindowAdded"/> (which
+/// had no guard at all) is covered too -- <see cref="TreeArranger"/> has 8 total call sites across
+/// this class, <see cref="ActionExecutor"/>, <see cref="TreeManager"/> and <see
+/// cref="WorkspaceSessionAdapter"/>. This class keeps only a thin <c>_owners</c> cleanup line at
+/// each call site: <see cref="TreeArranger"/> owns tree/registry eviction, but has no access to
+/// this adapter's own private per-window display bookkeeping.
+/// </remarks>
 public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 {
     private readonly IWorkspace _workspace;
@@ -79,6 +89,15 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _owners[window.Handle] = display;
 
         TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+
+        // V22-W1: the choke point above evicts a window that fails ITS OWN first positioning
+        // attempt (e.g. a protected window that never accepts a reposition) from the tree and
+        // registry -- clean up this adapter's own per-window bookkeeping to match, since
+        // TreeArranger has no access to it.
+        if (!window.CanReposition)
+        {
+            _owners.Remove(window.Handle);
+        }
     }
 
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
@@ -114,16 +133,19 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// undoing the drag on screen, cross-monitor included (returns to its ORIGINAL slot).
     /// </summary>
     /// <remarks>
-    /// V21-W1 (decision #81): the snap-back attempt above can itself fail -- a window whose
-    /// <see cref="IWindow.SetPosition"/> refuses to move flips <see cref="IWindow.CanReposition"/>
-    /// to <c>false</c> permanently (one-way, never self-heals per its documented contract). Left
-    /// alone, that window keeps the drag forever while the tree still treats it as being in its
-    /// old slot -- desyncing tree order from screen order for good (the measured defect: a
-    /// dragged-past sibling becomes the wrong `FocusRight` target). Decided reading for a window
-    /// ALREADY in the tree that starts refusing repositioning: treat it exactly like a WE-1
-    /// exclusion -- evict it from the tree/registry (untileable, left floating where it is) and
-    /// reflow the remaining siblings into the space it vacated, mirroring the design threat-matrix
-    /// row "Cross-process window manipulation" (leaf marked untileable, never retried in a loop).
+    /// V21-W1 / V22-W1 (decisions #81/#83): the snap-back attempt above can itself fail -- a window
+    /// whose <see cref="IWindow.SetPosition"/> refuses to move flips <see
+    /// cref="IWindow.CanReposition"/> to <c>false</c> permanently (one-way, never self-heals per its
+    /// documented contract). Left alone, that window keeps the drag forever while the tree still
+    /// treats it as being in its old slot -- desyncing tree order from screen order for good (the
+    /// measured defect: a dragged-past sibling becomes the wrong `FocusRight` target). Decided
+    /// reading for a window ALREADY in the tree that starts refusing repositioning: treat it
+    /// exactly like a WE-1 exclusion -- evict it from the tree/registry (untileable, left floating
+    /// where it is) and reflow the remaining siblings into the space it vacated, mirroring the
+    /// design threat-matrix row "Cross-process window manipulation" (leaf marked untileable, never
+    /// retried in a loop). WU23: the actual eviction now happens INSIDE <see
+    /// cref="TreeArranger.ArrangeAndPosition"/> (the shared choke point, closes V22-W1) -- this
+    /// method only cleans up its own <c>_owners</c> entry afterward.
     /// </remarks>
     private void OnWindowBoundsChanged(object? sender, WindowEventArgs e)
     {
@@ -139,16 +161,11 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
-        var workArea = WorkAreaResolver.Resolve(display);
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
 
         if (!e.Window.CanReposition)
         {
             _owners.Remove(handle);
-            if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
-            {
-                TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
-            }
         }
     }
 

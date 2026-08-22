@@ -19,4 +19,12 @@ public interface ITilingEngine
     bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep);
 
     IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea);
+
+    /// <summary>
+    /// Removes <paramref name="focused"/> from wherever it currently sits in the tree (inside a
+    /// group, or as the bare root). Exposed on the engine -- not tied to any concrete tree type --
+    /// so the shared arrange choke point can evict an untileable leaf by construction (verify-report
+    /// #21 CRITICAL V22-W1) without depending on a specific implementation.
+    /// </summary>
+    bool Remove(Node focused);
 }

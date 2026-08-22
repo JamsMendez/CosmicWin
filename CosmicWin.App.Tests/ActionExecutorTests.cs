@@ -135,20 +135,27 @@ public sealed class ActionExecutorTests
         Assert.Equal(Rectangle.FromSize(495, 0, 405, 200), windowB.LastSetPosition);
     }
 
+    // V22-W1 (CRITICAL): TreeArranger.ArrangeAndPosition -- the shared choke point this call site
+    // ALSO goes through -- now evicts a leaf whose SetPosition fails and reflows the survivors,
+    // instead of leaving it stuck in the tree. Renamed/updated from the pre-fix
+    // "CallsOnceAndDoesNotRetry" version, which pinned the OLD (broken) no-eviction behavior.
     [Fact]
-    public async Task ScheduleAsync_ProtectedWindowFailsSetPosition_CallsOnceAndDoesNotRetry_OtherLeavesStillPositioned()
+    public async Task ScheduleAsync_ProtectedWindowFailsSetPosition_IsEvictedFromTree_SiblingsReflowIntoVacatedSpace()
     {
-        var (executor, _, _, windowA, windowB, windowC) = BuildThreeLeafRow();
+        var (executor, _, registry, windowA, windowB, windowC) = BuildThreeLeafRow();
         windowA.FailNextSetPosition();
 
         var exception = await Record.ExceptionAsync(
             () => executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None).AsTask());
 
         Assert.Null(exception);
-        Assert.Equal(1, windowA.SetPositionCallCount);
+        Assert.Equal(1, windowA.SetPositionCallCount); // exactly one failed attempt, never retried
         Assert.False(windowA.CanReposition);
-        Assert.Equal(1, windowB.SetPositionCallCount);
-        Assert.Equal(1, windowC.SetPositionCallCount);
+        Assert.False(registry.TryGetLeaf(windowA.Handle, out _)); // untracked, like a WE-1 exclusion
+        Assert.Equal(2, windowB.SetPositionCallCount); // initial slot + reflow into A's vacated space
+        Assert.Equal(2, windowC.SetPositionCallCount); // initial slot + reflow into A's vacated space
+        Assert.Equal(Rectangle.FromSize(0, 0, 450, 100), windowB.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(450, 0, 450, 100), windowC.LastSetPosition);
     }
 
     [Theory]

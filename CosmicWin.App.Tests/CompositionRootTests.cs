@@ -316,6 +316,8 @@ public sealed class CompositionRootTests
 
         public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) =>
             Array.Empty<(WindowRef, Rect)>();
+
+        public bool Remove(Node focused) => false;
     }
 
     private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource

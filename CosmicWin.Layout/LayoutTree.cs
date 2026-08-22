@@ -29,6 +29,39 @@ public sealed class LayoutTree : ITilingEngine
     bool ITilingEngine.ResizeNode(Direction direction, Node focused, double step) =>
         ResizeNode(direction, focused, step);
 
+    bool ITilingEngine.Remove(Node focused) => Remove(focused);
+
+    /// <summary>
+    /// Removes <paramref name="focused"/> from wherever it currently sits: inside a group
+    /// (redistributing the freed size via <see cref="RemoveChild"/>), or as the bare <see
+    /// cref="Root"/> (cleared to <see langword="null"/>). Mirrors the App layer's equivalent
+    /// registry-driven node removal, exposed here so the App-layer arrange choke point can evict an
+    /// untileable leaf through the <see cref="ITilingEngine"/> abstraction alone (verify-report #21
+    /// CRITICAL V22-W1) without this Win32-free assembly depending on App-layer types.
+    /// </summary>
+    public bool Remove(Node focused)
+    {
+        if (focused.Parent is GroupNode parent)
+        {
+            var index = parent.Children.IndexOf(focused);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            RemoveChild(parent, index);
+            return true;
+        }
+
+        if (ReferenceEquals(Root, focused))
+        {
+            Root = null;
+            return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// LE-4 split-orientation heuristic: chosen from the aspect ratio of the region being split.
     /// </summary>

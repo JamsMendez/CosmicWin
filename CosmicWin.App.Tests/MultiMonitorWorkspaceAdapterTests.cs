@@ -307,6 +307,52 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(0, windowA.TryActivateCallCount);
     }
 
+    // V22-W1 (CRITICAL, decision #83's shared-choke-point pattern): OnWindowAdded never checked
+    // CanReposition, so a protected window pinned at x=1500 stayed in the tree even after its own
+    // first positioning attempt failed -- a later sibling still tiled into the slot next to it,
+    // and FocusRight from the untileable window misdirected to that sibling. Fixed at the shared
+    // TreeArranger.ArrangeAndPosition choke point (all 8 call sites), not this one call site.
+    [Fact]
+    public void WindowAdded_WindowRefusesRepositionOnItsFirstArrange_IsEvictedFromTree_NeverCoexistsWithSibling()
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var windowA = new RecordingWindow(new IntPtr(3001), Rectangle.FromSize(1500, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(3002), Rectangle.FromSize(100, 100, 400, 300));
+
+        windowA.FailNextSetPosition();
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(tree!.Root).Window);
+        Assert.False(windowA.CanReposition);
+        Assert.Equal(Rectangle.FromSize(1500, 100, 400, 300), windowA.Bounds); // never moved
+        Assert.Equal(1, windowA.SetPositionCallCount); // exactly one failed attempt, never retried
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), windowB.LastSetPosition); // gets the FULL area
+        Assert.False(s.Registry.TryGetLeaf(windowA.Handle, out _)); // untracked, like a WE-1 exclusion
+    }
+
+    // V22-W1 companion: closes the measured focus inversion directly through the OnWindowAdded
+    // path -- A can never be resolved as focused once evicted, so FocusRight must no-op.
+    [Fact]
+    public async Task WindowAdded_WindowRefusesRepositionOnItsFirstArrange_ThenFocusRight_IsNoOp_NeverMisdirectsToWrongSibling()
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var windowA = new RecordingWindow(new IntPtr(3101), Rectangle.FromSize(1500, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(3102), Rectangle.FromSize(100, 100, 400, 300));
+        windowA.FailNextSetPosition();
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
+
+        Assert.Equal(0, windowB.TryActivateCallCount);
+        Assert.Equal(0, windowA.TryActivateCallCount);
+    }
+
     [Fact]
     public void Dispose_UnsubscribesFromWorkspaceEvents_LaterAddIsIgnored()
     {

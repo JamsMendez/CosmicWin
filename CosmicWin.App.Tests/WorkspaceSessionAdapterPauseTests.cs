@@ -238,6 +238,8 @@ public sealed class WorkspaceSessionAdapterPauseTests
 
         public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) =>
             Array.Empty<(WindowRef, Rect)>();
+
+        public bool Remove(Node focused) => false;
     }
 
     /// <summary>V14-W2: minimal <see cref="IForegroundWindowSource"/> double, same reason as <see cref="RecordingTilingEngine"/>.</summary>
