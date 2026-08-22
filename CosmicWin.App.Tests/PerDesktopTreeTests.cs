@@ -126,4 +126,41 @@ public sealed class PerDesktopTreeTests
         Assert.Equal(new WindowRef(visible.Handle), Assert.IsType<LeafNode>(tree!.Root).Window);
         Assert.Equal(1, visible.SetPositionCallCount);
     }
+
+    /// <summary>
+    /// Measured on real hardware 2026-08-22, and caused by this very feature: CosmicWin stopped
+    /// tiling entirely the moment per-desktop trees shipped.
+    /// <para>
+    /// The shell answers <c>Guid.Empty</c> for a window it will not place -- one mid-creation, or
+    /// minimized -- and that was taken literally, filing the window under the empty desktop while
+    /// the VISIBLE tree was keyed by the real one. Every arriving window went into a tree nobody
+    /// was looking at, so nothing was ever arranged.
+    /// </para>
+    /// <para>
+    /// Unknown must mean the CURRENT desktop. It is the only answer that can be right about a
+    /// window the user can see, and being wrong that way merely tiles a window in front of them --
+    /// where the empty-desktop reading made windows silently disappear from the layout.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AWindowWhoseDesktopTheShellWillNotName_IsTiledOnTheOneBeingViewed()
+    {
+        var display = Display();
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([display], display, registry) { CurrentDesktop = () => DesktopOne };
+        var workspace = new FakeWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            // Exactly what the shell does for a window it will not place.
+            ResolveWindowDesktop = _ => Guid.Empty,
+        };
+
+        var arriving = new RecordingWindow(new IntPtr(0x503), Rectangle.FromSize(0, 0, 400, 300));
+        workspace.RaiseWindowAdded(arriving);
+
+        Assert.True(trees.TryGetTree(DesktopOne, display, out var visible));
+        Assert.Equal(new WindowRef(arriving.Handle), Assert.IsType<LeafNode>(visible!.Root).Window);
+        Assert.Equal(1, arriving.SetPositionCallCount);
+    }
 }

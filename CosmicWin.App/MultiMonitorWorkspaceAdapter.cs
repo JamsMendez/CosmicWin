@@ -97,19 +97,33 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var display = _treeManager.ResolveDisplay(window.Bounds);
-        var desktop = ResolveWindowDesktop?.Invoke(window.Handle) ?? Guid.Empty;
-        if (!_treeManager.TryGetTree(desktop, display, out var tree) || tree is null)
+        if (!_treeManager.TryGetTree(display, out var visible) || visible is null)
         {
             return;
+        }
+
+        // UNKNOWN means the desktop being viewed, never the empty one. The shell answers Guid.Empty
+        // for a window it will not place -- mid-creation, or minimized -- and taking that literally
+        // filed every arriving window under a desktop nobody was looking at, so nothing was ever
+        // arranged and CosmicWin stopped tiling outright (measured 2026-08-22). Guessing "here" can
+        // only be wrong about a window the user cannot see anyway; guessing "nowhere" loses windows.
+        var named = ResolveWindowDesktop?.Invoke(window.Handle) ?? Guid.Empty;
+        var tree = visible;
+        if (named != Guid.Empty)
+        {
+            if (!_treeManager.TryGetTree(named, display, out var owning) || owning is null)
+            {
+                return;
+            }
+
+            tree = owning;
         }
 
         var workArea = WorkAreaResolver.Resolve(display);
 
         // LE-4 splits the FOCUSED tile, but only when the focused window is on the same tree. A
         // window arriving on a desktop the user is not viewing has no focused tile to split there.
-        var focused = _treeManager.TryGetTree(display, out var visible) && ReferenceEquals(visible, tree)
-            ? _focusedLeaf()
-            : null;
+        var focused = ReferenceEquals(visible, tree) ? _focusedLeaf() : null;
 
         WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;

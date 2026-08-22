@@ -46,8 +46,24 @@ public sealed class VirtualDesktopVTableTests(ITestOutputHelper output)
             before.Supported,
             $"Baseline probe already failed, so nothing below would mean anything: {before.Failure}");
 
-        ShellDesktopShortcuts.SendCreateDesktop();
-        Thread.Sleep(Settle);
+        // Verify the SETUP took effect before asserting on what it was supposed to prove. This step
+        // rides on synthetic Win+Ctrl+D, which the shell delivers through the foreground -- and the
+        // other real-desktop facts churn the foreground constantly. This test failed intermittently
+        // in full runs while passing in isolation, and the cause was never established; what IS
+        // certain is that a lost keystroke would surface as "the vtable disagrees", blaming the
+        // product for an input that never arrived.
+        var created = false;
+        for (var attempt = 0; attempt < 3 && !created; attempt++)
+        {
+            ShellDesktopShortcuts.SendCreateDesktop();
+            Thread.Sleep(Settle);
+            created = VirtualDesktopProbe.Run().Count == before.Count + 1;
+        }
+
+        Assert.True(
+            created,
+            "Setup failed, not the subject under test: synthetic Win+Ctrl+D never added a desktop " +
+            "after three attempts, so there was no second desktop to cross-check the vtable against.");
 
         VirtualDesktopProbeResult withExtra;
         try
