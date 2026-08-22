@@ -4,19 +4,60 @@ namespace CosmicWin.Layout.Tests;
 
 public class LayoutTreeMoveNodeTests
 {
+    /// <summary>
+    /// Two siblings: a plain swap, sizes carried along. cosmic-comp guards this the same way
+    /// (<c>len == 2</c>); with exactly two children a fork would be indistinguishable from a swap
+    /// anyway, so the cheaper operation wins.
+    /// </summary>
     [Fact]
-    public void MoveNode_MatchingAxis_SwapsNodesAndSizes()
+    public void MoveNode_MatchingAxisWithTwoSiblings_SwapsNodesAndSizes()
     {
-        var parent = Group(SplitAxis.Horizontal, 1000,
-            (1, 200), (2, 300), (3, 500));
-        var focused = parent.Children[1];
+        var parent = Group(SplitAxis.Horizontal, 1000, (1, 400), (2, 600));
+        var focused = parent.Children[0];
 
         var moved = LayoutTree.MoveNode(Direction.Right, focused);
 
         Assert.True(moved);
-        Assert.Equal([1, 3, 2], Windows(parent));
-        Assert.Equal([200, 500, 300], parent.Sizes);
+        Assert.Equal([2, 1], Windows(parent));
+        Assert.Equal([600, 400], parent.Sizes);
         Assert.Same(parent, focused.Parent);
+        Assert.Equal(parent.GroupLength, parent.Sizes.Sum());
+    }
+
+    /// <summary>
+    /// REWRITTEN for cosmic-comp parity (2026-08-22). This asserted a SWAP for a three-child group.
+    /// Measured against the real COSMIC, three-or-more siblings fork instead: the mover pairs up
+    /// with its neighbour inside a new group taking that neighbour's slot.
+    /// <para>
+    /// The difference is not cosmetic. A swap is an involution -- press the same direction twice
+    /// and you are back where you started, so a window can never travel past its neighbour, which
+    /// is exactly the dead end the maintainer hit after two presses. The fork turns the walk into a
+    /// reversible cycle, which is what COSMIC actually does.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void MoveNode_MatchingAxisWithThreeSiblings_ForksWithTheNeighbour()
+    {
+        var parent = Group(SplitAxis.Horizontal, 1000,
+            (1, 200), (2, 300), (3, 500));
+        var focused = parent.Children[1];
+        var neighbour = parent.Children[2];
+
+        var moved = LayoutTree.MoveNode(Direction.Right, focused);
+
+        Assert.True(moved);
+        Assert.Equal(2, parent.Children.Count);
+        Assert.Same(parent.Children[0], Assert.IsType<LeafNode>(parent.Children[0]));
+
+        var fork = Assert.IsType<GroupNode>(parent.Children[1]);
+        Assert.Equal(SplitAxis.Horizontal, fork.Axis);
+        Assert.Same(parent, fork.Parent);
+
+        // Right -> the mover lands BEFORE the neighbour it travelled into.
+        Assert.Equal([2, 3], Windows(fork));
+        Assert.Same(fork, focused.Parent);
+        Assert.Same(fork, neighbour.Parent);
+        Assert.Equal(fork.GroupLength, fork.Sizes.Sum());
         Assert.Equal(parent.GroupLength, parent.Sizes.Sum());
     }
 

@@ -472,11 +472,46 @@ public sealed class LayoutTree : ITilingEngine
                     return true;
                 }
 
-                // (3b) Original LE-5: swap with the plain sibling, carrying sizes along.
-                (level.Children[index], level.Children[neighbourIndex]) =
-                    (level.Children[neighbourIndex], level.Children[index]);
-                (level.Sizes[index], level.Sizes[neighbourIndex]) =
-                    (level.Sizes[neighbourIndex], level.Sizes[index]);
+                // (3b) Exactly two of us here: swap, carrying sizes along. This is the original
+                // LE-5 behaviour, and cosmic-comp guards it the same way -- `len == 2`.
+                if (level.Children.Count == 2)
+                {
+                    (level.Children[index], level.Children[neighbourIndex]) =
+                        (level.Children[neighbourIndex], level.Children[index]);
+                    (level.Sizes[index], level.Sizes[neighbourIndex]) =
+                        (level.Sizes[neighbourIndex], level.Sizes[index]);
+                    return true;
+                }
+
+                // (3c) Three or more siblings: cosmic-comp's "else we make a new fork" -- pair up
+                // with the neighbour inside a new group of the SAME axis, taking the neighbour's
+                // slot. Swapping instead looks equivalent on a flat row but is not: a swap is an
+                // involution, so pressing the same direction again just undoes it and the window
+                // can never travel past its neighbour. The fork is what makes the walk a reversible
+                // CYCLE -- measured against the real COSMIC on 2026-08-22, where a window pushed
+                // repeatedly keeps advancing instead of dead-ending after two presses.
+                var neighbourNode = level.Children[neighbourIndex];
+                Detach(origin, originIndex);
+
+                int slot = level.Children.IndexOf(neighbourNode);
+                if (slot < 0)
+                {
+                    return false;
+                }
+
+                var fork = new GroupNode(level.Axis)
+                {
+                    GroupLength = level.Sizes[slot],
+                    Parent = level,
+                };
+                neighbourNode.Parent = fork;
+                fork.Children.Add(neighbourNode);
+                fork.Sizes.Add(fork.GroupLength);
+                level.Children[slot] = fork;
+
+                // Left/Up puts the mover AFTER the neighbour it just reached, Right/Down before it,
+                // so the pair reads in the order the user travelled through them.
+                AddChild(fork, focused, step < 0 ? 1 : 0);
                 return true;
             }
 
