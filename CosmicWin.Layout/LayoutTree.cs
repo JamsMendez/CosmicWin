@@ -373,6 +373,15 @@ public sealed class LayoutTree : ITilingEngine
         _ => throw new ArgumentOutOfRangeException(nameof(direction))
     };
 
+    private static Direction Opposite(Direction direction) => direction switch
+    {
+        Direction.Left => Direction.Right,
+        Direction.Right => Direction.Left,
+        Direction.Up => Direction.Down,
+        Direction.Down => Direction.Up,
+        _ => throw new ArgumentOutOfRangeException(nameof(direction))
+    };
+
     private static int StepOf(Direction direction) => direction switch
     {
         Direction.Right or Direction.Down => 1,
@@ -616,7 +625,15 @@ public sealed class LayoutTree : ITilingEngine
         double step = DefaultResizeStep,
         double minRatio = DefaultMinRatio)
     {
+        // Grow into the neighbour on the pressed side when there is one...
         var match = FindMatchingAncestor(direction, focused);
+        var grows = match is not null;
+
+        // ...otherwise push the OPPOSITE boundary the same way, which shrinks the focused subtree.
+        // Without this the leading child of a group could only ever get bigger, which is exactly
+        // what was reported as "the decremental resize does not work": there was no shrink at all.
+        var effective = grows ? direction : Opposite(direction);
+        match ??= FindMatchingAncestor(effective, focused);
         if (match is null)
         {
             return false;
@@ -624,20 +641,24 @@ public sealed class LayoutTree : ITilingEngine
 
         var ancestor = match.Value.Ancestor;
         int targetIndex = match.Value.ChildIndex;
-        int neighborIndex = targetIndex + StepOf(direction);
+        int neighborIndex = targetIndex + StepOf(effective);
         int requestedTransfer = (int)Math.Round(
             ancestor.GroupLength * step,
             MidpointRounding.AwayFromZero);
         int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
-        int available = ancestor.Sizes[neighborIndex] - minimumSize;
+
+        // Whoever gives space up is the one that must not fall below the floor.
+        int donorIndex = grows ? neighborIndex : targetIndex;
+        int receiverIndex = grows ? targetIndex : neighborIndex;
+        int available = ancestor.Sizes[donorIndex] - minimumSize;
         int transfer = Math.Min(requestedTransfer, available);
         if (transfer <= 0)
         {
             return false;
         }
 
-        ancestor.Sizes[targetIndex] += transfer;
-        ancestor.Sizes[neighborIndex] -= transfer;
+        ancestor.Sizes[receiverIndex] += transfer;
+        ancestor.Sizes[donorIndex] -= transfer;
         return true;
     }
 

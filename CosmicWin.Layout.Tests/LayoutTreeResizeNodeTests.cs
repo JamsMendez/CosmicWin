@@ -100,20 +100,21 @@ public class LayoutTreeResizeNodeTests
     }
 
     /// <summary>
-    /// MR-3 investigation (2026-08-22): the leftmost child of a matching-axis group has no
-    /// neighbor at <c>index - 1</c> -- this is spec's own documented "No-op at group boundary"
-    /// scenario (LE-6 step 2), not a defect. Measured against the existing, already-passing
-    /// <see cref="ResizeNode_NegativeDirection_GrowsTargetFromOppositeNeighbor"/> (which proves
-    /// Direction.Left DOES grow correctly whenever a left neighbor exists) and a full manual
-    /// trace of <c>FindMatchingAncestor</c>/<c>ResizeNode</c>: no asymmetry was found between
-    /// the Left/Up and Right/Down branches. This pins the exact boundary case that best explains
-    /// the maintainer's report (Ctrl+Alt+H doing nothing on the leftmost of two tiled windows) as
-    /// correct, spec-compliant behavior -- not a fix, a regression pin for the finding.
+    /// REPLACES the MR-3 pin (2026-08-22). That fact asserted this exact scenario -- Ctrl+Alt+H on
+    /// the leftmost of two tiled windows -- was "correct, spec-compliant behavior, not a defect",
+    /// on the grounds that LE-6 step 2 documents a no-op at a group boundary. The investigation was
+    /// right about the code and wrong about the spec: LE-6 is an incomplete port of cosmic-comp,
+    /// which carries a shrink as a first-class intent, so the boundary no-op was never the whole
+    /// story. The maintainer re-reported it from real use twice before it was believed.
+    /// <para>
+    /// What survives is the part that IS a genuine boundary: a group whose axis does not match the
+    /// requested direction anywhere up the tree still has nothing to resize either way.
+    /// </para>
     /// </summary>
     [Theory]
-    [InlineData(Direction.Left, SplitAxis.Horizontal)]
-    [InlineData(Direction.Up, SplitAxis.Vertical)]
-    public void ResizeNode_FocusedIsLeadingChild_NoLeftOrUpNeighborToGrowFrom_IsNoOp(
+    [InlineData(Direction.Left, SplitAxis.Vertical)]
+    [InlineData(Direction.Up, SplitAxis.Horizontal)]
+    public void ResizeNode_NoMatchingAxisAnywhereUpTheTree_IsNoOpInEitherIntent(
         Direction direction,
         SplitAxis axis)
     {
@@ -121,6 +122,63 @@ public class LayoutTreeResizeNodeTests
 
         Assert.False(LayoutTree.ResizeNode(direction, group.Children[0]));
         Assert.Equal([500, 500], group.Sizes);
+    }
+
+    /// <summary>
+    /// Reported from real use 2026-08-22: "el resize decremental no funciona". It never did --
+    /// there was no shrink in the engine AT ALL. LE-6 only ever grew the focused subtree by taking
+    /// from a neighbour on the pressed side, so the leading child of a group, having no neighbour
+    /// that way, could only ever get bigger.
+    /// <para>
+    /// cosmic-comp separates the two intents: <c>ResizeDirection::{Inwards,Outwards}</c> chooses
+    /// shrink or grow, <c>ResizeEdge</c> chooses which boundary moves, and Inwards flips the edge
+    /// (<c>input/mod.rs:2271</c>). It reaches that through a resize MODE with an on-screen
+    /// indicator, which CosmicWin has no equivalent of. With four chords and no mode, the direction
+    /// names which way the BOUNDARY travels: grow into the neighbour on the pressed side when there
+    /// is one, otherwise push the opposite boundary the same way, which shrinks. Both operations
+    /// stay reachable and no existing grow changes meaning.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(Direction.Left, SplitAxis.Horizontal)]
+    [InlineData(Direction.Up, SplitAxis.Vertical)]
+    public void ResizeNode_LeadingChildPushedOutward_ShrinksItselfInsteadOfDoingNothing(
+        Direction direction,
+        SplitAxis axis)
+    {
+        var group = Group(axis, 1000, 500, 500);
+
+        Assert.True(LayoutTree.ResizeNode(direction, group.Children[0]));
+        Assert.Equal([450, 550], group.Sizes);
+        Assert.Equal(group.GroupLength, group.Sizes.Sum());
+    }
+
+    /// <summary>The mirror: the TRAILING child has no neighbour to the Right/Down, so it shrinks too.</summary>
+    [Theory]
+    [InlineData(Direction.Right, SplitAxis.Horizontal)]
+    [InlineData(Direction.Down, SplitAxis.Vertical)]
+    public void ResizeNode_TrailingChildPushedOutward_ShrinksItself(
+        Direction direction,
+        SplitAxis axis)
+    {
+        var group = Group(axis, 1000, 500, 500);
+
+        Assert.True(LayoutTree.ResizeNode(direction, group.Children[1]));
+        Assert.Equal([550, 450], group.Sizes);
+        Assert.Equal(group.GroupLength, group.Sizes.Sum());
+    }
+
+    /// <summary>
+    /// A shrink stops at the same floor a grow does, applied to the node giving space up rather
+    /// than the one receiving it -- otherwise repeated presses would squeeze a window to nothing.
+    /// </summary>
+    [Fact]
+    public void ResizeNode_ShrinkingFromMinimum_IsNoOp()
+    {
+        var group = Group(SplitAxis.Horizontal, 1000, 100, 900);
+
+        Assert.False(LayoutTree.ResizeNode(Direction.Left, group.Children[0]));
+        Assert.Equal([100, 900], group.Sizes);
     }
 
     private static GroupNode Group(SplitAxis axis, int length, params int[] sizes)
