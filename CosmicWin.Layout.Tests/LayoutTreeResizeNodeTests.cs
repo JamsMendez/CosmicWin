@@ -99,6 +99,30 @@ public class LayoutTreeResizeNodeTests
         Assert.Equal([500, 500], group.Sizes);
     }
 
+    /// <summary>
+    /// MR-3 investigation (2026-08-22): the leftmost child of a matching-axis group has no
+    /// neighbor at <c>index - 1</c> -- this is spec's own documented "No-op at group boundary"
+    /// scenario (LE-6 step 2), not a defect. Measured against the existing, already-passing
+    /// <see cref="ResizeNode_NegativeDirection_GrowsTargetFromOppositeNeighbor"/> (which proves
+    /// Direction.Left DOES grow correctly whenever a left neighbor exists) and a full manual
+    /// trace of <c>FindMatchingAncestor</c>/<c>ResizeNode</c>: no asymmetry was found between
+    /// the Left/Up and Right/Down branches. This pins the exact boundary case that best explains
+    /// the maintainer's report (Ctrl+Alt+H doing nothing on the leftmost of two tiled windows) as
+    /// correct, spec-compliant behavior -- not a fix, a regression pin for the finding.
+    /// </summary>
+    [Theory]
+    [InlineData(Direction.Left, SplitAxis.Horizontal)]
+    [InlineData(Direction.Up, SplitAxis.Vertical)]
+    public void ResizeNode_FocusedIsLeadingChild_NoLeftOrUpNeighborToGrowFrom_IsNoOp(
+        Direction direction,
+        SplitAxis axis)
+    {
+        var group = Group(axis, 1000, 500, 500);
+
+        Assert.False(LayoutTree.ResizeNode(direction, group.Children[0]));
+        Assert.Equal([500, 500], group.Sizes);
+    }
+
     private static GroupNode Group(SplitAxis axis, int length, params int[] sizes)
     {
         var group = new GroupNode(axis) { GroupLength = length };
