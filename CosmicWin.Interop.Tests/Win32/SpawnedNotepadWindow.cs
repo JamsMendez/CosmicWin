@@ -40,7 +40,13 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// unbounded amount of the target process's own message-pump latency.
 /// </para>
 /// </remarks>
-internal sealed class SpawnedNotepadWindow : IDisposable
+/// <summary>
+/// WU28: made <c>public</c> (was <c>internal</c>) so <c>CosmicWin.App.Tests</c> can reuse this
+/// exact hardened spawn/dispose harness for a real-desktop tiling integration test, via a new
+/// <c>CosmicWin.App.Tests</c>-&gt;<c>CosmicWin.Interop.Tests</c> <c>ProjectReference</c>, rather
+/// than re-implementing the same close/kill-on-timeout logic a second time.
+/// </summary>
+public sealed class SpawnedNotepadWindow : IDisposable
 {
     private readonly Process _windowProcess;
     private readonly string _filePath;
@@ -55,6 +61,9 @@ internal sealed class SpawnedNotepadWindow : IDisposable
 
     /// <summary>The real native handle of the spawned Notepad window.</summary>
     public nint Handle { get; }
+
+    /// <summary>The real OS process id that owns <see cref="Handle"/> (WU28 constraint 1/4: lets a caller verify this spawned window's PID against a protected-ancestry blacklist before ever touching it).</summary>
+    public int ProcessId => _windowProcess.Id;
 
     /// <summary>Spawns Notepad and blocks (bounded) until its real main window handle is known.</summary>
     public static SpawnedNotepadWindow Spawn(TimeSpan? timeout = null)

@@ -11,6 +11,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- WU28: WMI process-ancestry walk for the desktop test's fail-fast safety check; test-only. -->
+    <PackageReference Include="System.Management" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
@@ -19,5 +21,7 @@
     <ProjectReference Include="..\CosmicWin.App\CosmicWin.App.csproj" />
     <!-- Task 3.22: drives CosmicWin.Launcher.Program.Run directly with a fake IProcessRunner. -->
     <ProjectReference Include="..\CosmicWin.Launcher\CosmicWin.Launcher.csproj" />
+    <!-- WU28: reuses the existing hardened SpawnedNotepadWindow spawn/dispose harness. -->
+    <ProjectReference Include="..\CosmicWin.Interop.Tests\CosmicWin.Interop.Tests.csproj" />
   </ItemGroup>
 </Project>
