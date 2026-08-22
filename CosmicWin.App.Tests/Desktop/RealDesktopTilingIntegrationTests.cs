@@ -67,7 +67,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         // ever spawned -- this test refuses to run blind.
         var protectedPids = ResolveProtectedProcessTree();
 
-        var nativeSource = new Win32NativeWindowSource();
+        var nativeSource = new ActivationRecordingNativeWindowSource(new Win32NativeWindowSource());
         var displayManager = new Win32DisplayManager();
         var registry = new WindowRegistry();
         var treeManager = new TreeManager(displayManager.Displays, displayManager.Primary, registry);
@@ -116,15 +116,28 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         // Step 4: simulated FocusRight -- calls the SAME action path ActionDispatcher calls for a
         // dispatched chord (ActionExecutor.ScheduleAsync); never SendInput.
-        var (_, executor) = CompositionRoot.Build(tree!, registry, new Win32ForegroundWindowSource(), workArea);
+        //
+        // Engram observation #96 (measured 2026-08-22): from a plain background process,
+        // SetForegroundWindow returned False against two real Alacritty windows and
+        // GetForegroundWindow never moved -- Windows' foreground lock, not a defect in CosmicWin.
+        // This step therefore does NOT assert GetForegroundWindow() or TryActivate()'s boolean
+        // return; that outcome is governed by OS policy unrelated to CosmicWin's correctness and
+        // cannot be satisfied by any automated test in this harness. Real foreground activation
+        // remains maintainer-verified, not automated (Alt+L over two tiled windows, manual tray
+        // checklist). What this step DOES assert -- what is CosmicWin's own responsibility -- is
+        // WHICH window the real production focus path (ActionExecutor.MoveFocus -> the SAME
+        // registry-resolved IWindow -> IWindow.TryActivate -> INativeWindowSource.TryActivateWindow,
+        // still genuinely invoked below, not stubbed) ATTEMPTS to activate, and that it is the
+        // window physically to the right (LE-2's actual risk surface). "Currently focused" is
+        // seeded via a controllable IForegroundWindowSource instead of the real OS foreground,
+        // since the real foreground cannot be steered from this background test process either.
+        var (_, executor) = CompositionRoot.Build(
+            tree!, registry, new StaticForegroundWindowSource(window1.Handle), workArea);
         executor.TreeManager = treeManager;
-        Assert.True(window1.TryActivate());
-        Thread.Sleep(Settle);
-        Assert.Equal(window1.Handle, new Win32ForegroundWindowSource().GetForegroundHandle());
         executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None)
             .GetAwaiter().GetResult();
         Thread.Sleep(Settle);
-        Assert.Equal(window2.Handle, new Win32ForegroundWindowSource().GetForegroundHandle());
+        Assert.Equal(window2.Handle, nativeSource.LastActivateAttempt);
         Assert.True(
             Read(nativeSource, window2.Handle).Left > Read(nativeSource, window1.Handle).Left,
             "The activated window must be physically to the right, not merely the next tree sibling (LE-2's risk surface).");
@@ -156,7 +169,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     }
 
     /// <summary>Constraint 1/4: spawns via the existing hardened harness, then rejects (and disposes) any PID colliding with <paramref name="protectedPids"/> before it is ever wired into the tiling path.</summary>
-    private (SpawnedAlacrittyWindow Spawned, IWindow Window) SpawnOwn(HashSet<int> protectedPids, Win32NativeWindowSource nativeSource)
+    private (SpawnedAlacrittyWindow Spawned, IWindow Window) SpawnOwn(HashSet<int> protectedPids, INativeWindowSource nativeSource)
     {
         var spawned = SpawnedAlacrittyWindow.Spawn();
         if (protectedPids.Contains(spawned.ProcessId))
@@ -185,7 +198,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     }
 
     /// <summary>Independent, fresh re-read of a window's real bounds -- never the tiling engine's own cached state ("observable side effect", not final state).</summary>
-    private static Rectangle Read(Win32NativeWindowSource source, nint handle)
+    private static Rectangle Read(INativeWindowSource source, nint handle)
     {
         Assert.True(source.TryGetWindowInfo(handle, out var info), "Spawned window vanished mid-test.");
         return info.Bounds;
@@ -285,6 +298,38 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         public void RaiseAdded(IWindow window) => WindowAdded?.Invoke(this, new WindowEventArgs(window));
 
         public void RaiseRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+    }
+
+    /// <summary>
+    /// WU30 (Engram observation #96): delegates every member to <paramref name="inner"/> unmodified
+    /// -- the real Win32 call still fires, best-effort -- except <see cref="TryActivateWindow"/>,
+    /// which additionally RECORDS the targeted handle before delegating. This is what lets step 4
+    /// assert WHICH window CosmicWin's own focus path attempts to activate without depending on
+    /// Windows' foreground-lock policy, which governs only whether that attempt is actually granted.
+    /// </summary>
+    private sealed class ActivationRecordingNativeWindowSource(INativeWindowSource inner) : INativeWindowSource
+    {
+        public nint? LastActivateAttempt { get; private set; }
+
+        public IReadOnlyList<nint> EnumerateTopLevelWindows() => inner.EnumerateTopLevelWindows();
+
+        public bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info) => inner.TryGetWindowInfo(hwnd, out info);
+
+        public bool SetWindowPosition(nint hwnd, Rectangle bounds) => inner.SetWindowPosition(hwnd, bounds);
+
+        public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback) => inner.SubscribeWindowEvents(callback);
+
+        public bool TryActivateWindow(nint hwnd)
+        {
+            LastActivateAttempt = hwnd;
+            return inner.TryActivateWindow(hwnd);
+        }
+    }
+
+    /// <summary>Seeds <see cref="ActionExecutor"/>'s "currently focused" fallback deterministically -- see step 4's comment for why the real OS foreground cannot be steered from this background test process.</summary>
+    private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource
+    {
+        public nint GetForegroundHandle() => handle;
     }
 }
 
