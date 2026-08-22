@@ -27,3 +27,6 @@ CloseHandle
 QueryFullProcessImageNameW
 PROCESS_ACCESS_RIGHTS
 PROCESS_NAME_FORMAT
+AttachThreadInput
+GetForegroundWindow
+GetCurrentThreadId

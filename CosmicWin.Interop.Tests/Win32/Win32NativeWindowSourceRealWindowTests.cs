@@ -1,5 +1,7 @@
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
+using Windows.Win32;
+using Windows.Win32.Foundation;
 
 namespace CosmicWin.Interop.Tests.Win32;
 
@@ -103,6 +105,25 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         WaitUntilTrue(() => !source.TryGetWindowInfo(handle, out _), TimeSpan.FromSeconds(10));
 
         Assert.False(source.TryGetWindowInfo(handle, out _));
+    }
+
+    /// <summary>
+    /// MR-2 (2026-08-22 first real run): observation #96 measured plain <c>SetForegroundWindow</c>
+    /// returning <c>false</c> from a background process on this exact machine. This proves the
+    /// <c>AttachThreadInput</c> fix actually moves the real OS foreground -- not just that the call
+    /// returns a boolean -- against a genuinely external spawned window.
+    /// </summary>
+    [Fact]
+    public void TryActivateWindow_MovesTheRealForeground_EvenFromABackgroundProcess()
+    {
+        using var notepad = SpawnedNotepadWindow.Spawn();
+        var source = new Win32NativeWindowSource();
+
+        var activated = source.TryActivateWindow(notepad.Handle);
+
+        Assert.True(activated);
+        WaitUntilTrue(() => PInvoke.GetForegroundWindow() == new HWND(notepad.Handle), TimeSpan.FromSeconds(5));
+        Assert.Equal(new HWND(notepad.Handle), PInvoke.GetForegroundWindow());
     }
 
     private static void WaitUntilTrue(Func<bool> condition, TimeSpan timeout)

@@ -81,7 +81,46 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return new WinEventHookSubscription(callback);
     }
 
-    public bool TryActivateWindow(nint hwnd) => PInvoke.SetForegroundWindow(new HWND(hwnd));
+    /// <summary>
+    /// MR-1 (2026-08-22 first real run): a low-level keyboard hook does not, by itself, confer
+    /// Windows' foreground-activation right -- <c>SetForegroundWindow</c> measured returning
+    /// <c>false</c> from this exact call site both in isolation and live (Alt+L/Alt+H doing
+    /// nothing, while Shift+Alt+direction's plain <c>SetWindowPos</c>-based move worked).
+    /// <c>AttachThreadInput</c> is the standard, Microsoft-documented workaround: temporarily
+    /// sharing input state with the real foreground window's thread grants this thread the same
+    /// "received the last input event" standing Windows' activation policy checks for, for the
+    /// duration of the call. This does NOT guarantee success -- <c>LockSetForegroundWindow</c>,
+    /// a full-screen exclusive app, or Windows' own foreground-lock heuristics can still refuse
+    /// it -- and that refusal is never swallowed: the caller still receives the exact boolean
+    /// <c>SetForegroundWindow</c> returns, exactly as before this fix.
+    /// </summary>
+    public bool TryActivateWindow(nint hwnd)
+    {
+        HWND target = new(hwnd);
+        HWND foreground = PInvoke.GetForegroundWindow();
+
+        if (foreground == target)
+        {
+            return true;
+        }
+
+        uint foregroundThreadId = foreground == HWND.Null ? 0 : PInvoke.GetWindowThreadProcessId(foreground, null);
+        uint currentThreadId = PInvoke.GetCurrentThreadId();
+        bool attached = foregroundThreadId != 0 && foregroundThreadId != currentThreadId
+            && PInvoke.AttachThreadInput(currentThreadId, foregroundThreadId, true);
+
+        try
+        {
+            return PInvoke.SetForegroundWindow(target);
+        }
+        finally
+        {
+            if (attached)
+            {
+                PInvoke.AttachThreadInput(currentThreadId, foregroundThreadId, false);
+            }
+        }
+    }
 
     private static bool IsTrackable(HWND hwnd)
     {
