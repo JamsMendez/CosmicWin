@@ -1,3 +1,4 @@
+using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.Layout;
 
@@ -30,11 +31,26 @@ public sealed class ActionExecutor(
     /// </summary>
     public TreeManager? TreeManager { get; set; }
 
+    /// <summary>
+    /// MR-2 diagnosis (Engram discovery #101): when set, every FOCUS chord records what actually
+    /// happened along the focus path -- the leaf it started from, the tree-walk result, the target
+    /// handle and whether activation succeeded. Focus chords are the only ones traced; Move/Resize
+    /// are known to work and stay silent. Null keeps the executor entirely untraced, so every test
+    /// and call site that does not care is unaffected.
+    /// </summary>
+    public IFocusTrace? FocusTrace { get; set; }
+
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
         if (TryResolveFocused(out var focused))
         {
             Dispatch(action.Kind, focused);
+        }
+        else if (FocusDirectionOf(action.Kind) is { } direction)
+        {
+            // The chord never reached the tree walk: recorded rather than dropped, so a silent
+            // focus chord on real hardware can be told apart from a failed one.
+            Trace(direction, 0, 0, FocusTraceOutcome.UnresolvedFocus);
         }
 
         return ValueTask.CompletedTask;
@@ -100,19 +116,40 @@ public sealed class ActionExecutor(
     /// </summary>
     private void MoveFocus(Direction direction, LeafNode focused)
     {
+        var origin = focused.Window.Handle;
         var (localEngine, _) = ResolveEngineAndWorkArea(focused);
         var result = localEngine.NextFocus(direction, focused);
         if (result.Status != FocusWalkStatus.Found || result.Leaf is null)
         {
+            Trace(direction, origin, 0, FocusTraceOutcome.NoMatch);
             return;
         }
 
         _focused = result.Leaf;
-        if (registry.TryGetWindow(result.Leaf.Window.Handle, out var window) && window is not null)
+        var target = result.Leaf.Window.Handle;
+        if (!registry.TryGetWindow(target, out var window) || window is null)
         {
-            window.TryActivate();
+            Trace(direction, origin, target, FocusTraceOutcome.UntrackedTarget);
+            return;
         }
+
+        var activated = window.TryActivate();
+        Trace(direction, origin, target,
+            activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed);
     }
+
+    private void Trace(Direction direction, nint focusedHandle, nint targetHandle, FocusTraceOutcome outcome) =>
+        FocusTrace?.Record(new FocusTraceEntry(direction, focusedHandle, targetHandle, outcome));
+
+    /// <summary>The direction a FOCUS chord carries, or null for every other action kind.</summary>
+    private static Direction? FocusDirectionOf(HotkeyActionKind kind) => kind switch
+    {
+        HotkeyActionKind.FocusLeft => Direction.Left,
+        HotkeyActionKind.FocusRight => Direction.Right,
+        HotkeyActionKind.FocusUp => Direction.Up,
+        HotkeyActionKind.FocusDown => Direction.Down,
+        _ => null
+    };
 
     /// <summary>
     /// Applies a tree mutation (Move/Toggle/Resize) and, only if it actually changed something,

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.App.Tray;
@@ -29,7 +30,9 @@ public sealed class AppCompositionTests
 {
     private sealed record Harness(
         AppComposition Composition, TrayMenuController TrayController, LowLevelKeyboardHook Hook,
-        FakeWorkspace Workspace, LayoutTree Tree, TreeManager TreeManager, IDisplay Primary, IDisplay Secondary);
+        FakeWorkspace Workspace, LayoutTree Tree, TreeManager TreeManager, IDisplay Primary, IDisplay Secondary,
+        RecordingFocusTrace FocusTrace, MutableForegroundWindowSource Foreground,
+        FakeKeyboardHookPlatform Platform);
 
     private static FakeDisplay Display(int handle, int left, int top, int width, int height, bool primary = false) =>
         new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
@@ -42,14 +45,16 @@ public sealed class AppCompositionTests
         var secondary = Display(2, 1920, 0, 1280, 720);
         var registry = new WindowRegistry();
         var treeManager = new TreeManager(new IDisplay[] { primary, secondary }, primary, registry);
-        var foreground = new StaticForegroundWindowSource(IntPtr.Zero);
+        var foreground = new MutableForegroundWindowSource();
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
         var platform = new FakeKeyboardHookPlatform();
+        var focusTrace = new RecordingFocusTrace();
         LowLevelKeyboardHook? capturedHook = null;
         TrayMenuController? capturedController = null;
 
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
+            focusTrace: focusTrace,
             hookFactory: writer =>
             {
                 capturedHook = new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0);
@@ -64,7 +69,9 @@ public sealed class AppCompositionTests
             });
 
         treeManager.TryGetTree(primary, out var tree);
-        return new Harness(composition, capturedController!, capturedHook!, workspace, tree!, treeManager, primary, secondary);
+        return new Harness(
+            composition, capturedController!, capturedHook!, workspace, tree!, treeManager, primary, secondary,
+            focusTrace, foreground, platform);
     }
 
     /// <summary>Baseline sanity: unpaused, a newly-added window IS tracked and arranged -- proves <see cref="AppComposition.Wire"/> genuinely wires the adapter, not a no-op stub.</summary>
@@ -147,6 +154,52 @@ public sealed class AppCompositionTests
         }
     }
 
+    /// <summary>
+    /// MR-2 (Engram discovery #101): the focus diagnostic is worthless if it is not actually wired
+    /// into the composition the app really runs, so this drives the FULL production chain -- a real
+    /// <see cref="LowLevelKeyboardHook"/> raising <c>Alt+L</c>, the dispatcher loop, the executor's
+    /// tree walk, activation -- and asserts the recorded entry. Reading the LAST entry rather than
+    /// the only one is deliberate: <see cref="FakeKeyboardHookPlatform"/> fires an <c>Alt+H</c> at
+    /// install time, which legitimately records an earlier unresolved-focus entry.
+    /// </summary>
+    [Fact]
+    public async Task Wire_FocusChord_RecordsTheWalkAndActivationThroughTheComposedPipeline()
+    {
+        var harness = WireHarness();
+        using (harness.Composition)
+        {
+            var left = new RecordingWindow(new IntPtr(3001), Rectangle.FromSize(0, 0, 960, 1080));
+            var right = new RecordingWindow(new IntPtr(3002), Rectangle.FromSize(960, 0, 960, 1080));
+            harness.Workspace.RaiseWindowAdded(left);
+            harness.Workspace.RaiseWindowAdded(right);
+            harness.Foreground.Handle = left.Handle;
+
+            Assert.True(harness.Platform.Raise(KeyboardKey.L, isKeyDown: true, ModifierKeys.Alt));
+
+            var recorded = await WaitUntil(
+                () => harness.FocusTrace.Entries.Any(entry => entry.Outcome == FocusTraceOutcome.Activated),
+                TimeSpan.FromSeconds(2));
+
+            Assert.True(recorded);
+            var entry = harness.FocusTrace.Entries[^1];
+            Assert.Equal(Direction.Right, entry.Direction);
+            Assert.Equal(left.Handle, entry.FocusedHandle);
+            Assert.Equal(right.Handle, entry.TargetHandle);
+            Assert.Equal(FocusTraceOutcome.Activated, entry.Outcome);
+        }
+    }
+
+    private static async Task<bool> WaitUntil(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        return condition();
+    }
+
     /// <summary>Approval test for <c>App.OnExit</c>'s exact disposal chain, now owned by <see cref="AppComposition.Dispose"/>: the injected workspace and tray both get disposed exactly once.</summary>
     [Fact]
     public void Dispose_DisposesTrayAndWorkspace_ExactlyOnce()
@@ -162,6 +215,7 @@ public sealed class AppCompositionTests
 
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
+            focusTrace: new RecordingFocusTrace(),
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
@@ -201,5 +255,12 @@ public sealed class AppCompositionTests
     private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource
     {
         public nint GetForegroundHandle() => handle;
+    }
+
+    private sealed class MutableForegroundWindowSource : IForegroundWindowSource
+    {
+        public nint Handle { get; set; }
+
+        public nint GetForegroundHandle() => Handle;
     }
 }

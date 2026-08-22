@@ -1,5 +1,6 @@
 using System.IO;
 using System.Threading.Channels;
+using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Startup;
 using CosmicWin.App.Tray;
@@ -50,10 +51,12 @@ public sealed class AppComposition : IDisposable
     /// <summary>
     /// Wires every collaborator, in <c>App.OnStartup</c>'s exact order: <see
     /// cref="CompositionRoot.Build"/> against <paramref name="treeManager"/>'s <see
-    /// cref="TreeManager.Primary"/> tree, then <paramref name="treeManager"/> is ALSO assigned onto
-    /// the returned <see cref="ActionExecutor.TreeManager"/> (WU18, closes V17-W1: a hotkey
-    /// mutation on a secondary monitor's focused window now arranges that SAME secondary tree, not
-    /// always the primary one), then the hook, then <see cref="MultiMonitorWorkspaceAdapter"/> --
+    /// cref="TreeManager.Primary"/> tree, then <paramref name="treeManager"/> and <paramref
+    /// name="focusTrace"/> are ALSO assigned onto
+    /// the returned executor (WU18, closes V17-W1: a hotkey mutation on a secondary monitor's
+    /// focused window now arranges that SAME secondary tree, not always the primary one; <paramref
+    /// name="focusTrace"/> is mandatory rather than optional so the MR-2 diagnostic cannot be
+    /// silently dropped from the one composition site that has to carry it), then the hook, then <see cref="MultiMonitorWorkspaceAdapter"/> --
     /// WU17's real production caller of <paramref name="treeManager"/> (closes carried finding W3)
     /// -- then <paramref name="workspace"/>.Open(), <paramref name="hook"/>.Start(), the tray, then
     /// the dispatcher loop.
@@ -64,6 +67,7 @@ public sealed class AppComposition : IDisposable
         WindowRegistry registry,
         IForegroundWindowSource foreground,
         ExceptionListStore exceptionStore,
+        IFocusTrace focusTrace,
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
         Action shutdown,
@@ -75,6 +79,7 @@ public sealed class AppComposition : IDisposable
 
         var (dispatcher, executor) = CompositionRoot.Build(primaryTree!, registry, foreground, workArea);
         executor.TreeManager = treeManager;
+        executor.FocusTrace = focusTrace;
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused);
@@ -101,6 +106,7 @@ public sealed class AppComposition : IDisposable
 
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
+            focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
