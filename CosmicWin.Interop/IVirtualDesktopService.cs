@@ -32,6 +32,13 @@ public interface IVirtualDesktopService
     int CurrentIndex { get; }
 
     /// <summary>
+    /// The identity of the desktop being viewed, or <see cref="Guid.Empty"/> when unsupported.
+    /// Position is what a chord names; identity is what a layout is filed under, because positions
+    /// shift when a desktop is added or removed and a stored layout must not shift with them.
+    /// </summary>
+    Guid CurrentDesktopId { get; }
+
+    /// <summary>
     /// Switches to the desktop at <paramref name="oneBasedIndex"/>, creating desktops until it
     /// exists. Returns <see langword="false"/> if unsupported, out of range, or the shell refused.
     /// </summary>

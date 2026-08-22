@@ -110,6 +110,23 @@ width and means side-by-side, which is CosmicWin's `SplitAxis.Horizontal`. Trans
 Windows' own desktops, addressed by POSITION — `CreateDesktop` appends at the end and desktops carry
 no durable number, so "desktop 3" means "the third one". An emptied desktop is NOT auto-deleted.
 
+**A layout belongs to a desktop.** `TreeManager` holds one tree per (monitor, desktop) pair, and
+`CurrentDesktop` decides which one the rest of the app sees. A window is filed under the desktop it
+is actually on — which is not always the one being viewed — and a tree on a hidden desktop is never
+repositioned, because moving windows nobody can see applies geometry that may be stale by the time
+they are.
+
+Two separate causes had to be fixed for that to hold. `Win32Workspace.Poll` read "absent from the
+enumeration" as "destroyed", and DWM cloaks every window on the desktop being left, so the tree was
+dismantled on the way out and rebuilt in enumeration order on the way back. Fixing that made the
+tree SURVIVE; the per-desktop key is what stops every desktop's windows from being laid out
+together.
+
+`MoveWindowToDesktop` is documented but useless here: it moves only windows owned by the CALLING
+process and returns `E_ACCESSDENIED` otherwise, and a window manager owns none of the windows it
+manages. `GetWindowDesktopId` on the same interface DOES work cross-process — measured, because on
+this interface "documented" plainly does not imply "works for other processes".
+
 Microsoft publishes no API for creating or switching desktops, and that is deliberate:
 `IVirtualDesktopManager` has three methods, none of which can, and its own remarks say applications
 "should avoid automatically switching the user from one virtual desktop to another". Moving a window

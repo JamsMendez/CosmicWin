@@ -57,6 +57,16 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
 
     public string? LastError { get; private set; }
 
+    public Guid CurrentDesktopId => _native.IsAvailable ? _native.GetCurrentDesktopId() : Guid.Empty;
+
+    /// <summary>
+    /// Which desktop a window lives on, or <see cref="Guid.Empty"/> when the shell will not say.
+    /// Callers must treat empty as UNKNOWN and never as "the current one" -- filing a window under
+    /// the wrong desktop puts it in a layout the user will meet unexpectedly later.
+    /// </summary>
+    public Guid ResolveWindowDesktop(nint windowHandle) =>
+        Win32VirtualDesktopQueries.TryGetWindowDesktopId(windowHandle, out var id, out _) ? id : Guid.Empty;
+
     public int Count => _native.IsAvailable ? _native.GetDesktopIds().Count : 0;
 
     public int CurrentIndex

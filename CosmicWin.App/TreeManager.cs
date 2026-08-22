@@ -20,7 +20,20 @@ public sealed class TreeManager
 {
     private readonly WindowRegistry _registry;
     private readonly Dictionary<nint, IDisplay> _displays = new();
-    private readonly Dictionary<nint, LayoutTree> _trees = new();
+
+    /// <summary>
+    /// One tree per (monitor, virtual desktop). Nested rather than a composite key so every
+    /// existing monitor operation -- connect, disconnect, work-area change -- still addresses a
+    /// monitor directly and simply fans out across its desktops.
+    /// </summary>
+    /// <remarks>
+    /// The desktop dimension was added after switching desktops was measured rearranging the
+    /// windows on the desktop returned to. The eviction that caused it is fixed in
+    /// <c>Win32Workspace.Poll</c>, but that alone only makes the tree SURVIVE: with a single tree,
+    /// every desktop's windows are laid out together. A layout belongs to a desktop, so the model
+    /// has to say so.
+    /// </remarks>
+    private readonly Dictionary<nint, Dictionary<Guid, LayoutTree>> _trees = new();
     private nint _primaryHandle;
 
     public TreeManager(IReadOnlyList<IDisplay> displays, IDisplay primary, WindowRegistry registry)
@@ -30,14 +43,49 @@ public sealed class TreeManager
         foreach (var display in displays)
         {
             _displays[display.Handle] = display;
-            _trees[display.Handle] = new LayoutTree();
+            _trees[display.Handle] = new Dictionary<Guid, LayoutTree>();
         }
 
         _primaryHandle = primary.Handle;
     }
 
-    /// <summary><see langword="false"/> for an unknown/disconnected monitor handle.</summary>
-    public bool TryGetTree(IDisplay display, out LayoutTree? tree) => _trees.TryGetValue(display.Handle, out tree);
+    /// <summary>
+    /// Which virtual desktop the user is on. Unset means "there is only one", which is exactly how
+    /// every caller that predates virtual desktops behaves -- they address <see cref="Guid.Empty"/>
+    /// and never notice the extra dimension.
+    /// </summary>
+    public Func<Guid>? CurrentDesktop { get; set; }
+
+    /// <summary>The tree for <paramref name="display"/> on the desktop currently being viewed.</summary>
+    public bool TryGetTree(IDisplay display, out LayoutTree? tree) =>
+        TryGetTree(CurrentDesktop?.Invoke() ?? Guid.Empty, display, out tree);
+
+    /// <summary>
+    /// The tree for a SPECIFIC desktop, created on first use. Desktops appear while the app runs,
+    /// so they cannot be pre-created the way monitors are -- and a window may need filing under a
+    /// desktop the user is not currently looking at.
+    /// </summary>
+    /// <returns><see langword="false"/> only for an unknown/disconnected monitor handle.</returns>
+    public bool TryGetTree(Guid desktop, IDisplay display, out LayoutTree? tree)
+    {
+        tree = null;
+        if (!_trees.TryGetValue(display.Handle, out var byDesktop))
+        {
+            return false;
+        }
+
+        if (!byDesktop.TryGetValue(desktop, out tree))
+        {
+            tree = new LayoutTree();
+            byDesktop[desktop] = tree;
+        }
+
+        return true;
+    }
+
+    /// <summary>Every desktop's tree for one monitor, for operations that must not miss a hidden one.</summary>
+    private IEnumerable<LayoutTree> TreesOn(nint displayHandle) =>
+        _trees.TryGetValue(displayHandle, out var byDesktop) ? byDesktop.Values : [];
 
     /// <summary>The display currently treated as primary (see <see cref="SetPrimary"/>).</summary>
     public IDisplay Primary => _displays[_primaryHandle];
@@ -74,7 +122,7 @@ public sealed class TreeManager
         }
 
         _displays[display.Handle] = display;
-        _trees[display.Handle] = new LayoutTree();
+        _trees[display.Handle] = new Dictionary<Guid, LayoutTree>();
     }
 
     /// <summary>
@@ -89,7 +137,7 @@ public sealed class TreeManager
     /// </summary>
     public void OnDisplayDisconnected(IDisplay display, Rect primaryWorkArea)
     {
-        if (!_trees.TryGetValue(display.Handle, out var tree) || tree is null)
+        if (!_trees.TryGetValue(display.Handle, out var byDesktop))
         {
             return;
         }
@@ -101,13 +149,22 @@ public sealed class TreeManager
                 "OS-reassigned new primary first.");
         }
 
-        var primaryTree = _trees[_primaryHandle];
-        ReparentLeaves(tree, primaryTree, primaryWorkArea);
+        // Every desktop's windows come across, each into the SAME desktop on the primary. Taking
+        // only the visible one would silently strand the layouts the user cannot currently see.
+        foreach (var (desktop, tree) in byDesktop)
+        {
+            var primary = _displays[_primaryHandle];
+            TryGetTree(desktop, primary, out var primaryTree);
+            ReparentLeaves(tree, primaryTree!, primaryWorkArea);
+        }
 
         _displays.Remove(display.Handle);
         _trees.Remove(display.Handle);
 
-        TreeArranger.ArrangeAndPosition(primaryTree, _registry, primaryWorkArea);
+        if (TryGetTree(_displays[_primaryHandle], out var visible) && visible is not null)
+        {
+            TreeArranger.ArrangeAndPosition(visible, _registry, primaryWorkArea);
+        }
     }
 
     /// <summary>Updates which known display is treated as primary (see <see cref="OnDisplayDisconnected"/>).</summary>
@@ -160,7 +217,10 @@ public sealed class TreeManager
     /// </summary>
     public void OnDisplayChanged(IDisplay display, Rect workArea)
     {
-        if (!_trees.TryGetValue(display.Handle, out var tree) || tree is null)
+        // Only the VISIBLE desktop's tree is repositioned. The hidden ones will be arranged on the
+        // work area in force when the user returns to them, so laying them out now would move
+        // windows nobody can see, and to geometry that may be stale again by then.
+        if (!TryGetTree(display, out var tree) || tree is null)
         {
             return;
         }
@@ -176,8 +236,10 @@ public sealed class TreeManager
     /// </summary>
     public FocusResult FocusAdjacentDisplay(IDisplay current, Direction direction)
     {
+        // The VISIBLE tree on that monitor: focus can only fall through to a window the user can
+        // actually see, never to one parked on a desktop they are not looking at.
         var target = FindAdjacentDisplay(current, direction);
-        if (target is null || !_trees.TryGetValue(target.Handle, out var tree) || tree?.Root is null)
+        if (target is null || !TryGetTree(target, out var tree) || tree?.Root is null)
         {
             return FocusResult.NoMatch;
         }

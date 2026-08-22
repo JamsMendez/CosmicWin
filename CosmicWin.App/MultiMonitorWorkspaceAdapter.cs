@@ -51,6 +51,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly Func<LeafNode?> _focusedLeaf;
     private readonly Dictionary<nint, IDisplay> _owners = new();
 
+    /// <summary>
+    /// Which virtual desktop a window is on. Unset means "there is only one", which is how every
+    /// caller that predates virtual desktops behaves.
+    /// </summary>
+    /// <remarks>
+    /// A window must be filed under the desktop it is ACTUALLY on, which is not always the one
+    /// being viewed: a window can arrive on a desktop the user is not looking at. Getting this
+    /// wrong is invisible until the user switches and finds a layout that was never theirs.
+    /// </remarks>
+    public Func<nint, Guid>? ResolveWindowDesktop { get; set; }
+
     /// <param name="focusedLeaf">
     /// LE-4: the tile a newly arriving window splits. Mandatory rather than optional -- a dropped
     /// focus source does not fail, it silently reverts to appending every window to the end of the
@@ -86,16 +97,29 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var display = _treeManager.ResolveDisplay(window.Bounds);
-        if (!_treeManager.TryGetTree(display, out var tree) || tree is null)
+        var desktop = ResolveWindowDesktop?.Invoke(window.Handle) ?? Guid.Empty;
+        if (!_treeManager.TryGetTree(desktop, display, out var tree) || tree is null)
         {
             return;
         }
 
         var workArea = WorkAreaResolver.Resolve(display);
-        WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, _focusedLeaf());
+
+        // LE-4 splits the FOCUSED tile, but only when the focused window is on the same tree. A
+        // window arriving on a desktop the user is not viewing has no focused tile to split there.
+        var focused = _treeManager.TryGetTree(display, out var visible) && ReferenceEquals(visible, tree)
+            ? _focusedLeaf()
+            : null;
+
+        WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+        // Only the visible desktop is positioned. Arranging a hidden one would move windows nobody
+        // can see, and they are laid out on arrival there anyway.
+        if (ReferenceEquals(visible, tree))
+        {
+            TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+        }
 
         // V22-W1: the choke point above evicts a window that fails ITS OWN first positioning
         // attempt (e.g. a protected window that never accepts a reposition) from the tree and

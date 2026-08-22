@@ -19,6 +19,8 @@ public sealed class DesktopChordTests
 
         public string? LastError => null;
 
+        public Guid CurrentDesktopId => Guid.Empty;
+
         public List<int> Switched { get; } = [];
 
         public List<(nint Handle, int Index)> Moved { get; } = [];

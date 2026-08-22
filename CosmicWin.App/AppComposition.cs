@@ -87,7 +87,8 @@ public sealed class AppComposition : IDisposable
         Action shutdown,
         Func<TrayMenuController, IDisposable> buildTray,
         IVirtualDesktopService? virtualDesktops = null,
-        Diagnostics.IDesktopTrace? desktopTrace = null)
+        Diagnostics.IDesktopTrace? desktopTrace = null,
+        Func<nint, Guid>? resolveWindowDesktop = null)
     {
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
@@ -98,10 +99,20 @@ public sealed class AppComposition : IDisposable
         executor.FocusTrace = focusTrace;
         executor.VirtualDesktops = virtualDesktops;
         executor.DesktopTrace = desktopTrace;
+
+        // The dimension is inert until something answers these. Left unset -- as every test does --
+        // every tree is filed under Guid.Empty and the model behaves exactly as it did before.
+        if (virtualDesktops is not null)
+        {
+            treeManager.CurrentDesktop = () => virtualDesktops.CurrentDesktopId;
+        }
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
-            executor.ResolveFocusedLeaf);
+            executor.ResolveFocusedLeaf)
+        {
+            ResolveWindowDesktop = resolveWindowDesktop,
+        };
         workspace.Open();
         hook.Start();
 
@@ -123,9 +134,32 @@ public sealed class AppComposition : IDisposable
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
         // disagreeing with the desktop, and nothing else ever looks again.
+        // Which desktop the last reconciliation saw, so a change can be noticed. The shell offers
+        // no event for this, and asking on a timer is enough: the only thing that must happen on a
+        // switch is laying out the tree the user just arrived at.
+        var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
+
         var reconcile = scheduleReconcile(ReconcileInterval, () =>
         {
             workspace.Poll();
+
+            if (virtualDesktops is not null)
+            {
+                var nowOn = virtualDesktops.CurrentDesktopId;
+                if (nowOn != lastDesktop)
+                {
+                    lastDesktop = nowOn;
+
+                    // The arriving desktop's own layout, applied to the work area in force NOW.
+                    // Its windows were left exactly where they were when the user walked away, so
+                    // without this they would still be wearing the previous desktop's geometry.
+                    if (treeManager.TryGetTree(treeManager.Primary, out var arriving) && arriving is not null)
+                    {
+                        TreeArranger.ArrangeAndPosition(
+                            arriving, registry, WorkAreaResolver.Resolve(treeManager.Primary));
+                    }
+                }
+            }
 
             // Keeps the executor's focus record within one interval of the real foreground. Without
             // it the record only advances on a chord, so a user who clicks between windows with the
@@ -152,6 +186,8 @@ public sealed class AppComposition : IDisposable
         // the knob in one visible place instead of baked into TreeArranger's default.
         TreeArranger.Gap = TreeArranger.DefaultGap;
 
+        var desktops = new Win32VirtualDesktopService();
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -163,8 +199,9 @@ public sealed class AppComposition : IDisposable
             buildTray: controller => new TrayIconHost(controller),
             // Gated internally: an unrecognised Windows build reports unsupported and the desktop
             // chords become inert, rather than calling through a vtable that may have moved.
-            virtualDesktops: new Win32VirtualDesktopService(),
-            desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()));
+            virtualDesktops: desktops,
+            desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()),
+            resolveWindowDesktop: desktops.ResolveWindowDesktop);
     }
 
     /// <summary>
