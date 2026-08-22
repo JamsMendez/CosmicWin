@@ -19,6 +19,15 @@ public sealed class ActionExecutor(
 {
     private LeafNode? _focused;
 
+    /// <summary>
+    /// HA-1's <c>Alt+[</c>/<c>Alt+]</c>: the node the next Move/Toggle/Resize acts on. Null means
+    /// the focused leaf itself, which is the default and reproduces the pre-scope behaviour exactly.
+    /// LE-3, LE-5 and LE-6 are all written in terms of the focused NODE, and <see
+    /// cref="ITilingEngine"/> already accepts <see cref="Node"/>, so ascending does not add an
+    /// operation -- it selects which node the existing ones receive.
+    /// </summary>
+    private Node? _focusScope;
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -66,22 +75,17 @@ public sealed class ActionExecutor(
             case HotkeyActionKind.FocusRight: MoveFocus(Direction.Right, focused, foregroundHandle); break;
             case HotkeyActionKind.FocusUp: MoveFocus(Direction.Up, focused, foregroundHandle); break;
             case HotkeyActionKind.FocusDown: MoveFocus(Direction.Down, focused, foregroundHandle); break;
-            case HotkeyActionKind.MoveLeft: MutateAndArrange(focused, e => e.MoveNode(Direction.Left, focused)); break;
-            case HotkeyActionKind.MoveRight: MutateAndArrange(focused, e => e.MoveNode(Direction.Right, focused)); break;
-            case HotkeyActionKind.MoveUp: MutateAndArrange(focused, e => e.MoveNode(Direction.Up, focused)); break;
-            case HotkeyActionKind.MoveDown: MutateAndArrange(focused, e => e.MoveNode(Direction.Down, focused)); break;
-            case HotkeyActionKind.ToggleOrientation: MutateAndArrange(focused, e => e.ToggleAxis(focused)); break;
-            case HotkeyActionKind.ResizeLeft: MutateAndArrange(focused, e => e.ResizeNode(Direction.Left, focused)); break;
-            case HotkeyActionKind.ResizeRight: MutateAndArrange(focused, e => e.ResizeNode(Direction.Right, focused)); break;
-            case HotkeyActionKind.ResizeUp: MutateAndArrange(focused, e => e.ResizeNode(Direction.Up, focused)); break;
-            case HotkeyActionKind.ResizeDown: MutateAndArrange(focused, e => e.ResizeNode(Direction.Down, focused)); break;
-            case HotkeyActionKind.FocusIn:
-            case HotkeyActionKind.FocusOut:
-                // Deferred: Phase 1's ITilingEngine exposes no nested-group descend/ascend
-                // primitive (design note on ITilingEngine — root ownership/window lookup policy
-                // is App-layer scope, not yet defined). No-op rather than a crash; tracked as a
-                // documented deviation, not silently dropped behavior.
-                break;
+            case HotkeyActionKind.MoveLeft: MutateScope(focused, (e, n) => e.MoveNode(Direction.Left, n)); break;
+            case HotkeyActionKind.MoveRight: MutateScope(focused, (e, n) => e.MoveNode(Direction.Right, n)); break;
+            case HotkeyActionKind.MoveUp: MutateScope(focused, (e, n) => e.MoveNode(Direction.Up, n)); break;
+            case HotkeyActionKind.MoveDown: MutateScope(focused, (e, n) => e.MoveNode(Direction.Down, n)); break;
+            case HotkeyActionKind.ToggleOrientation: MutateScope(focused, (e, n) => e.ToggleAxis(n)); break;
+            case HotkeyActionKind.ResizeLeft: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Left, n)); break;
+            case HotkeyActionKind.ResizeRight: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Right, n)); break;
+            case HotkeyActionKind.ResizeUp: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Up, n)); break;
+            case HotkeyActionKind.ResizeDown: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Down, n)); break;
+            case HotkeyActionKind.FocusOut: AscendScope(focused); break;
+            case HotkeyActionKind.FocusIn: DescendScope(focused); break;
         }
     }
 
@@ -151,6 +155,9 @@ public sealed class ActionExecutor(
         if (activated)
         {
             _focused = result.Leaf;
+            // Ascending is short-lived by design: landing on a new window puts the user back on a
+            // leaf, so a forgotten Alt+[ cannot silently turn a later Move into a group move.
+            _focusScope = null;
         }
 
         Trace(direction, foregroundHandle, origin, target,
@@ -178,15 +185,81 @@ public sealed class ActionExecutor(
     /// arrange-and-position step after a window is added or removed) — on the SAME tree/work area
     /// <paramref name="focused"/> was just mutated on (WU18, closes V17-W1).
     /// </summary>
-    private void MutateAndArrange(LeafNode focused, Func<ITilingEngine, bool> mutate)
+    private void MutateScope(LeafNode focused, Func<ITilingEngine, Node, bool> mutate)
     {
         var (localEngine, workArea) = ResolveEngineAndWorkArea(focused);
-        if (!mutate(localEngine))
+        if (!mutate(localEngine, ResolveScope(focused)))
         {
             return;
         }
 
         TreeArranger.ArrangeAndPosition(localEngine, registry, workArea);
+    }
+
+    /// <summary>
+    /// HA-1 <c>Alt+[</c>: selects the parent of the current scope. A no-op at the tree root -- there
+    /// is nothing above it -- and never re-arranges anything, since ascending changes only WHICH node
+    /// the next mutation receives, not the layout.
+    /// </summary>
+    private void AscendScope(LeafNode focused)
+    {
+        if (ResolveScope(focused).Parent is { } parent)
+        {
+            _focusScope = parent;
+        }
+    }
+
+    /// <summary>
+    /// HA-1 <c>Alt+]</c>: undoes one <see cref="AscendScope"/> by stepping back down the path toward
+    /// the focused leaf. A no-op once the scope is the leaf itself.
+    /// </summary>
+    private void DescendScope(LeafNode focused)
+    {
+        var scope = ResolveScope(focused);
+        if (ReferenceEquals(scope, focused))
+        {
+            return;
+        }
+
+        // The child of `scope` that the focused leaf sits under -- walking UP from the leaf, since
+        // ResolveScope has already guaranteed the scope IS one of its ancestors.
+        Node child = focused;
+        while (child.Parent is { } parent && !ReferenceEquals(parent, scope))
+        {
+            child = parent;
+        }
+
+        _focusScope = child;
+    }
+
+    /// <summary>
+    /// The scope to act on, defaulting to <paramref name="focused"/> itself. A remembered scope is
+    /// honoured ONLY while the focused leaf is still somewhere beneath it; otherwise it is stale --
+    /// the user clicked a window in another branch, or the tree was reshaped under it -- and applying
+    /// it would mutate an unrelated subtree.
+    /// </summary>
+    private Node ResolveScope(LeafNode focused)
+    {
+        if (_focusScope is { } scope && IsAncestorOrSelf(scope, focused))
+        {
+            return scope;
+        }
+
+        _focusScope = null;
+        return focused;
+    }
+
+    private static bool IsAncestorOrSelf(Node candidate, LeafNode leaf)
+    {
+        for (Node? node = leaf; node is not null; node = node.Parent)
+        {
+            if (ReferenceEquals(node, candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
