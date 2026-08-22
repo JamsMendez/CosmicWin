@@ -176,6 +176,71 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         AssertTilesExactly(workArea, axis, [Read(nativeSource, window2.Handle), Read(nativeSource, window3.Handle)]);
     }
 
+    /// <summary>
+    /// Closes the test-fidelity gap named in Engram discovery #97. That run MEASURED a real defect
+    /// -- a window positioned within the first frames of its existence was silently overridden by
+    /// its own initialisation, landing at <c>L=1715 T=4 W=1728 H=1391</c> when it had been asked
+    /// for <c>X=1720 Y=0 W=1720 H=1392</c>, overlapping its neighbour by 5px -- and reasoned that
+    /// PRODUCTION should self-heal where the test did not, because the real
+    /// <see cref="Win32Workspace"/> raises <c>WindowBoundsChanged</c> from its
+    /// <c>EVENT_OBJECT_LOCATIONCHANGE</c> hook and <see cref="MultiMonitorWorkspaceAdapter"/>
+    /// answers it with decision #80's snap-back. That reasoning was never executed: this shim
+    /// declared <c>WindowBoundsChanged</c> and silenced the resulting CS0067 with a pragma, so
+    /// <c>OnWindowBoundsChanged</c> -- the ONLY production path that recovers a self-resizing
+    /// window -- had no real-window coverage at all.
+    /// <para>
+    /// This test drives that exact path end to end against real spawned windows: tile two, shove
+    /// one out of its slot by the measured drift through a DIRECT native
+    /// <see cref="INativeWindowSource.SetWindowPosition"/> (never through the tree, exactly as the
+    /// app''s own late init would), then raise the event production raises, and assert the window
+    /// is back on its tile -- re-read independently from the OS, not from the engine''s cache.
+    /// </para>
+    /// </summary>
+    [RequiresDesktopFact]
+    public void WindowThatResizesItselfAfterBeingTiled_IsSnappedBackIntoItsSlot()
+    {
+        var protectedPids = ResolveProtectedProcessTree();
+
+        var nativeSource = new ActivationRecordingNativeWindowSource(new Win32NativeWindowSource());
+        var displayManager = new Win32DisplayManager();
+        var registry = new WindowRegistry();
+        var treeManager = new TreeManager(displayManager.Displays, displayManager.Primary, registry);
+        var workspace = new OwnWindowsOnlyWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, treeManager, registry, () => ExceptionList.Empty, () => false, () => null);
+
+        var (_, window1) = SpawnOwn(protectedPids, nativeSource);
+        var display = treeManager.ResolveDisplay(window1.Bounds);
+        Assert.True(treeManager.TryGetTree(display, out var tree) && tree is not null);
+        var workArea = WorkAreaResolver.Resolve(display);
+        var axis = LayoutTree.ChooseSplitAxis(workArea.Width, workArea.Height);
+
+        workspace.RaiseAdded(window1);
+        var (_, window2) = SpawnOwn(protectedPids, nativeSource);
+        workspace.RaiseAdded(window2);
+        Thread.Sleep(Settle);
+
+        var tiled = Read(nativeSource, window2.Handle);
+        AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), tiled]);
+
+        // Engram #97's measured drift, reproduced exactly: 5px left, 4px down, 8px wider, 1px
+        // shorter. Applied through the native source DIRECTLY so the tree is never told -- which is
+        // precisely the shape of the defect, an out-of-band resize the window manager did not ask for.
+        var drifted = new Rectangle(tiled.Left - 5, tiled.Top + 4, tiled.Right + 3, tiled.Bottom - 1);
+        Assert.True(
+            nativeSource.SetWindowPosition(window2.Handle, drifted),
+            "Could not shove the window out of its slot, so this test would prove nothing about snapping it back.");
+        Thread.Sleep(Settle);
+        Assert.NotEqual(tiled, Read(nativeSource, window2.Handle));
+
+        // What the production Win32Workspace raises when its LOCATIONCHANGE hook sees the drift.
+        workspace.RaiseBoundsChanged(window2);
+        Thread.Sleep(Settle);
+
+        Assert.Equal(tiled, Read(nativeSource, window2.Handle));
+        AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), Read(nativeSource, window2.Handle)]);
+    }
+
     public void Dispose()
     {
         foreach (var spawned in _spawned)
@@ -295,9 +360,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     {
         public event EventHandler<WindowEventArgs>? WindowAdded;
         public event EventHandler<WindowEventArgs>? WindowRemoved;
-#pragma warning disable CS0067 // Part of IWorkspace's shape; this test never simulates an out-of-band OS move, only hotkey-driven ones.
         public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
-#pragma warning restore CS0067
 
         public bool IsOpen => false;
 
@@ -314,6 +377,15 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         public void RaiseAdded(IWindow window) => WindowAdded?.Invoke(this, new WindowEventArgs(window));
 
         public void RaiseRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+
+        /// <summary>
+        /// Mirrors what the production <see cref="Win32Workspace"/> does when its
+        /// <c>EVENT_OBJECT_LOCATIONCHANGE</c> hook reports that a tracked window's rectangle no
+        /// longer matches the one it cached: <c>UpdateBounds</c> raises this event, which is the
+        /// ONLY trigger for decision #80's snap-back. Without it this shim silently withheld the
+        /// single production path that recovers a window which re-sizes itself after being tiled.
+        /// </summary>
+        public void RaiseBoundsChanged(IWindow window) => WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
     }
 
     /// <summary>
