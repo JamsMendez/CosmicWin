@@ -247,6 +247,66 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         public nint GetForegroundHandle() => Handle;
     }
 
+    // V21-W1 (decision #81, user-impacting): reproduces the exact measured shape -- A dragged to
+    // x=1500 past B at x=960, but A's own SetPosition call FAILS during the snap-back attempt
+    // (IWindow.CanReposition flips false and never self-heals, per its documented contract). A
+    // window in this state must be treated exactly like a WE-1 exclusion: evicted from the tree
+    // rather than left permanently desynced from screen order. B reflows to fill the vacated slot.
+    [Fact]
+    public void WindowBoundsChanged_WindowRefusesReposition_IsEvictedFromTree_SiblingReflowsToFillSpace()
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var windowA = new RecordingWindow(new IntPtr(2001), Rectangle.FromSize(100, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(2002), Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+
+        windowA.FailNextSetPosition();
+        windowA.SimulateExternalMove(Rectangle.FromSize(1500, 100, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(Assert.Single(group.Children)).Window);
+        Assert.False(windowA.CanReposition);
+        Assert.Equal(Rectangle.FromSize(1500, 100, 400, 300), windowA.Bounds); // keeps the drag, never snapped back
+        Assert.Equal(3, windowA.SetPositionCallCount); // add(1) + B-add reflow(2) + failed snap-back attempt(3), then never again
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), windowB.LastSetPosition); // reflowed into A's vacated space
+        Assert.Equal(3, windowB.SetPositionCallCount); // add(1) + A's snap-back reflow(2) + eviction reflow(3)
+        Assert.False(s.Registry.TryGetLeaf(windowA.Handle, out _)); // untracked, like a WE-1 exclusion
+
+        // Idempotence: a SECOND out-of-band move for the now-evicted A must be a full no-op --
+        // proves it is genuinely untracked (owner entry gone), not just missing from the tree.
+        windowA.SimulateExternalMove(Rectangle.FromSize(1600, 100, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+        Assert.Equal(3, windowA.SetPositionCallCount);
+    }
+
+    // V21-W1: closes the measured focus inversion directly -- since A is evicted from the tree
+    // and registry, a FocusRight hotkey with A in the foreground must no-op (A can no longer be
+    // resolved as focused), instead of misdirecting activation to B (which is now physically on
+    // A's LEFT after the drag, not its right).
+    [Fact]
+    public async Task WindowBoundsChanged_WindowRefusesReposition_ThenFocusRight_IsNoOp_NeverMisdirectsToWrongSibling()
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var windowA = new RecordingWindow(new IntPtr(2101), Rectangle.FromSize(100, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(2102), Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+        windowA.FailNextSetPosition();
+        windowA.SimulateExternalMove(Rectangle.FromSize(1500, 100, 400, 300));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
+
+        Assert.Equal(0, windowB.TryActivateCallCount);
+        Assert.Equal(0, windowA.TryActivateCallCount);
+    }
+
     [Fact]
     public void Dispose_UnsubscribesFromWorkspaceEvents_LaterAddIsIgnored()
     {

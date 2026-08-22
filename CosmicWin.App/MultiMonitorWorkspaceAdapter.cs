@@ -113,6 +113,18 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// real position entirely -- re-arranging the UNCHANGED tree re-applies the same geometry,
     /// undoing the drag on screen, cross-monitor included (returns to its ORIGINAL slot).
     /// </summary>
+    /// <remarks>
+    /// V21-W1 (decision #81): the snap-back attempt above can itself fail -- a window whose
+    /// <see cref="IWindow.SetPosition"/> refuses to move flips <see cref="IWindow.CanReposition"/>
+    /// to <c>false</c> permanently (one-way, never self-heals per its documented contract). Left
+    /// alone, that window keeps the drag forever while the tree still treats it as being in its
+    /// old slot -- desyncing tree order from screen order for good (the measured defect: a
+    /// dragged-past sibling becomes the wrong `FocusRight` target). Decided reading for a window
+    /// ALREADY in the tree that starts refusing repositioning: treat it exactly like a WE-1
+    /// exclusion -- evict it from the tree/registry (untileable, left floating where it is) and
+    /// reflow the remaining siblings into the space it vacated, mirroring the design threat-matrix
+    /// row "Cross-process window manipulation" (leaf marked untileable, never retried in a loop).
+    /// </remarks>
     private void OnWindowBoundsChanged(object? sender, WindowEventArgs e)
     {
         if (_isPaused())
@@ -127,7 +139,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+        var workArea = WorkAreaResolver.Resolve(display);
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+
+        if (!e.Window.CanReposition)
+        {
+            _owners.Remove(handle);
+            if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
+            {
+                TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+            }
+        }
     }
 
     public void Dispose()
