@@ -38,7 +38,7 @@ public sealed class AppCompositionTests
         new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
             Rectangle.FromSize(left, top, width, height), 1.0, primary);
 
-    private static Harness WireHarness()
+    private static Harness WireHarness(Action? shutdown = null, Action? disableTaskTrigger = null)
     {
         var workspace = new FakeWorkspace();
         var primary = Display(1, 0, 0, 1920, 1080, primary: true);
@@ -55,13 +55,14 @@ public sealed class AppCompositionTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: focusTrace,
+            disableTaskTrigger: disableTaskTrigger ?? (() => { }),
             hookFactory: writer =>
             {
                 capturedHook = new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0);
                 return capturedHook;
             },
             loadExceptions: () => ExceptionList.Empty,
-            shutdown: () => { },
+            shutdown: shutdown ?? (() => { }),
             buildTray: controller =>
             {
                 capturedController = controller;
@@ -200,6 +201,46 @@ public sealed class AppCompositionTests
         return condition();
     }
 
+
+    /// <summary>
+    /// TC-3-W1: Salir must stop the logon trigger from bringing CosmicWin back on the next sign-in,
+    /// and it must do so BEFORE the process is torn down -- after <c>shutdown</c> there is no
+    /// guarantee anything still runs. The order assertion is the whole point; asserting only that
+    /// both ran would pass on a composition that disables nothing until it is already exiting.
+    /// </summary>
+    [Fact]
+    public void Wire_TrayExit_DisablesTheScheduledTaskTrigger_BeforeShuttingDown()
+    {
+        var order = new List<string>();
+        var harness = WireHarness(
+            shutdown: () => order.Add("shutdown"),
+            disableTaskTrigger: () => order.Add("disable"));
+
+        using (harness.Composition)
+        {
+            harness.TrayController.Exit();
+        }
+
+        Assert.Equal(new[] { "disable", "shutdown" }, order);
+    }
+
+    /// <summary>TC-3's other two menu entries must stay untouched: only Salir disables the trigger.</summary>
+    [Fact]
+    public void Wire_PauseAndReload_DoNotTouchTheScheduledTaskTrigger()
+    {
+        var disableCount = 0;
+        var harness = WireHarness(disableTaskTrigger: () => disableCount++);
+
+        using (harness.Composition)
+        {
+            harness.TrayController.TogglePause();
+            harness.TrayController.TogglePause();
+            harness.TrayController.Reload();
+        }
+
+        Assert.Equal(0, disableCount);
+    }
+
     /// <summary>Approval test for <c>App.OnExit</c>'s exact disposal chain, now owned by <see cref="AppComposition.Dispose"/>: the injected workspace and tray both get disposed exactly once.</summary>
     [Fact]
     public void Dispose_DisposesTrayAndWorkspace_ExactlyOnce()
@@ -216,6 +257,7 @@ public sealed class AppCompositionTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new RecordingFocusTrace(),
+            disableTaskTrigger: () => { },
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },

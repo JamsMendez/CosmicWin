@@ -55,6 +55,15 @@ public sealed class TaskInstaller
     public static IReadOnlyList<string> BuildQueryArgs(string taskName) =>
         new[] { "/Query", "/TN", taskName };
 
+    /// <summary>
+    /// The exact, fixed argv <c>schtasks /Change /DISABLE</c> receives (TC-3). Deliberately NOT
+    /// <see cref="BuildUninstallArgs"/>: TC-3 says "disable the Scheduled Task trigger", where ES-4
+    /// says "remove the Scheduled Task ... restoring stock behavior". Quitting from the tray must
+    /// not throw the user's installation away -- the task stays registered, only its trigger stops.
+    /// </summary>
+    public static IReadOnlyList<string> BuildDisableArgs(string taskName) =>
+        new[] { "/Change", "/TN", taskName, "/DISABLE" };
+
     /// <summary>ES-2: registers the Scheduled Task with highest privileges, trigger "at log on".</summary>
     public void Install()
     {
@@ -84,9 +93,25 @@ public sealed class TaskInstaller
     /// stopped), schtasks reports that with the same generic non-zero exit code as "not found", so
     /// this check treats it as absence too rather than re-adding a locale-dependent text match.
     /// </summary>
-    public void Uninstall()
+    public void Uninstall() => RunUnlessTheTaskIsAlreadyGone("/Delete", BuildUninstallArgs(_taskName));
+
+    /// <summary>
+    /// TC-3 (Salir): stops the logon trigger from firing again, without unregistering the task.
+    /// Shares <see cref="RunUnlessTheTaskIsAlreadyGone"/> with <see cref="Uninstall"/> so the
+    /// locale-independent idempotency rule V26-W1 established lives at ONE choke point -- a second
+    /// copy is a second place for it to drift back to reading stderr text.
+    /// </summary>
+    public void Disable() => RunUnlessTheTaskIsAlreadyGone("/Change /DISABLE", BuildDisableArgs(_taskName));
+
+    /// <summary>
+    /// Runs <paramref name="arguments"/> and, on failure, asks schtasks itself whether the task
+    /// still exists (V26-W1: never its stderr, which is a per-language MUI resource). Gone means
+    /// there was nothing to do and the failure is swallowed; still present means the failure was
+    /// genuine and <paramref name="verb"/>'s original exit code is thrown unchanged.
+    /// </summary>
+    private void RunUnlessTheTaskIsAlreadyGone(string verb, IReadOnlyList<string> arguments)
     {
-        var result = _runner.Run(SchTasksExe, BuildUninstallArgs(_taskName));
+        var result = _runner.Run(SchTasksExe, arguments);
         if (result.ExitCode == 0)
         {
             return;
@@ -96,7 +121,7 @@ public sealed class TaskInstaller
         if (queryResult.ExitCode == 0)
         {
             throw new InvalidOperationException(
-                $"schtasks /Delete failed with exit code {result.ExitCode}: {result.StandardError}");
+                $"schtasks {verb} failed with exit code {result.ExitCode}: {result.StandardError}");
         }
     }
 }

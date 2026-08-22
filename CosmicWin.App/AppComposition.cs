@@ -68,6 +68,7 @@ public sealed class AppComposition : IDisposable
         IForegroundWindowSource foreground,
         ExceptionListStore exceptionStore,
         IFocusTrace focusTrace,
+        Action disableTaskTrigger,
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
         Action shutdown,
@@ -86,7 +87,17 @@ public sealed class AppComposition : IDisposable
         workspace.Open();
         hook.Start();
 
-        var trayController = CompositionRoot.BuildTrayMenuController(hook, exceptionStore, loadExceptions, shutdown);
+        // TC-3-W1: Salir stops the logon trigger BEFORE tearing the process down -- after shutdown
+        // there is no guarantee anything still runs. Disable, not uninstall: TC-3 says "disable the
+        // Scheduled Task trigger" where ES-4 says "remove", so quitting once must not throw the
+        // user's installation away.
+        var trayController = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore, loadExceptions,
+            exit: () =>
+            {
+                disableTaskTrigger();
+                shutdown();
+            });
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);
@@ -107,6 +118,7 @@ public sealed class AppComposition : IDisposable
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
+            disableTaskTrigger: DisableScheduledTaskTrigger,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
@@ -127,11 +139,7 @@ public sealed class AppComposition : IDisposable
             return false;
         }
 
-        var installer = new TaskInstaller(
-            TaskName,
-            Environment.ProcessPath ?? throw new InvalidOperationException("Cannot resolve the current process path."),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CosmicWin", "CosmicWinTask.xml"),
-            runner ?? new Win32ProcessRunner());
+        var installer = CreateInstaller(runner);
 
         switch (args[0])
         {
@@ -143,6 +151,36 @@ public sealed class AppComposition : IDisposable
                 return true;
             default:
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// The one place the real <see cref="TaskInstaller"/> is constructed, shared by <see
+    /// cref="TryHandleTaskCommand"/> and <see cref="DisableScheduledTaskTrigger"/> so the task name,
+    /// executable path and XML location cannot drift apart between the two.
+    /// </summary>
+    private static TaskInstaller CreateInstaller(IProcessRunner? runner = null) =>
+        new(
+            TaskName,
+            Environment.ProcessPath ?? throw new InvalidOperationException("Cannot resolve the current process path."),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CosmicWin", "CosmicWinTask.xml"),
+            runner ?? new Win32ProcessRunner());
+
+    /// <summary>
+    /// TC-3-W1's production trigger-disable. A failure here is DELIBERATELY swallowed: the user asked
+    /// to quit, and Salir's own contract -- remove the hook and exit -- must not be held hostage by
+    /// schtasks. <see cref="TaskInstaller.Disable"/> already treats an absent task as success, so
+    /// what reaches this catch is a genuine refusal (no elevation, service stopped), not routine.
+    /// </summary>
+    private static void DisableScheduledTaskTrigger()
+    {
+        try
+        {
+            CreateInstaller().Disable();
+        }
+        catch (InvalidOperationException)
+        {
+            // Declared residual: quitting still works, but the trigger may fire again next logon.
         }
     }
 

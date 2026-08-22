@@ -207,4 +207,64 @@ public sealed class TaskInstallerTests
             File.Delete(xmlPath);
         }
     }
+
+    // TC-3-W1 RED #1 (threat matrix, same rule as every other verb here): a fixed argv array, never
+    // a composed command-line string. TC-3 says "disable the Scheduled Task trigger", which is
+    // deliberately different wording from ES-4's "remove the Scheduled Task ... restoring stock
+    // behavior" -- so this is a genuine /Change /DISABLE, not a reuse of /Delete. The task stays
+    // registered and the user's own installation is not silently thrown away by quitting once.
+    [Fact]
+    public void BuildDisableArgs_ReturnsExactFixedArgv()
+    {
+        var args = TaskInstaller.BuildDisableArgs("CosmicWin");
+
+        Assert.Equal(new[] { "/Change", "/TN", "CosmicWin", "/DISABLE" }, args);
+    }
+
+    [Fact]
+    public void Disable_Success_InvokesSchtasksChangeDisableWithFixedArgv()
+    {
+        var runner = new FakeProcessRunner { ExitCodeToReturn = 0 };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        installer.Disable();
+
+        Assert.Equal("schtasks.exe", runner.LastFileName);
+        Assert.Equal(TaskInstaller.BuildDisableArgs("CosmicWin.Test"), runner.LastArguments);
+    }
+
+    // Mirrors Uninstall's V26-W1 shape exactly: existence decides idempotency, never stderr text,
+    // which is a per-language MUI resource. Disabling a task that was never installed is nothing to
+    // do, not a failure -- and Salir must never fail because of it.
+    [Fact]
+    public void Disable_TaskAlreadyAbsent_IsIdempotent_DoesNotThrow()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 1,
+            StandardErrorToReturn = "ERROR: The system cannot find the file specified.\r\n",
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        installer.Disable(); // Must not throw.
+
+        Assert.Equal(TaskInstaller.BuildQueryArgs("CosmicWin.Test"), runner.LastArguments);
+    }
+
+    // The discriminator: the idempotency guard must not swallow a real failure. /Query reports the
+    // task IS still there, so /Change's failure was genuine and has to surface.
+    [Fact]
+    public void Disable_GenuineFailure_StillThrows_NotSwallowedByIdempotencyGuard()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 5,
+            StandardErrorToReturn = "ERROR: Access is denied.\r\n",
+            ResultByVerb = new() { ["/Query"] = new ProcessRunResult(0, "TaskName: CosmicWin.Test", string.Empty) },
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        var ex = Assert.Throws<InvalidOperationException>(installer.Disable);
+        Assert.Contains("exit code 5", ex.Message);
+    }
 }
