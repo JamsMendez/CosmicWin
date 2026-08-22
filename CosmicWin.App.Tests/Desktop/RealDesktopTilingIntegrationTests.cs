@@ -439,5 +439,13 @@ internal sealed class RequiresDesktopFactAttribute : FactAttribute
         {
             Skip = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
         }
+        else if (System.Diagnostics.Process.GetProcessesByName("CosmicWin.App").Length > 0)
+        {
+            // A live window manager TILES and ACTIVATES the very windows these facts spawn, so they
+            // fail on geometry that was never theirs. That misleading red cost several rounds of
+            // diagnosis before being recognised, so it is named rather than suffered. An elevated
+            // instance cannot be stopped from a test run: exit it from the tray.
+            Skip = "CosmicWin.App is running and would tile the windows this fact spawns. Exit it from the tray first.";
+        }
     }
 }

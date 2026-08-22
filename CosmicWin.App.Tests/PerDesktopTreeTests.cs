@@ -163,4 +163,55 @@ public sealed class PerDesktopTreeTests
         Assert.Equal(new WindowRef(arriving.Handle), Assert.IsType<LeafNode>(visible!.Root).Window);
         Assert.Equal(1, arriving.SetPositionCallCount);
     }
+
+    /// <summary>
+    /// Reported after the move landed: sending a window away moved it on screen but left both
+    /// layouts untouched. It kept its slot on the desktop it had left -- a hole nothing was drawn
+    /// into -- and never joined the one it arrived at.
+    /// <para>
+    /// Leaving must read exactly like closing: the survivors reclaim the space. Arriving must read
+    /// exactly like opening: it takes its place among whatever is already there. Neither is a
+    /// special case; they are the two halves the shell move was missing.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void MovingAWindowAway_LetsTheSurvivorsReclaimItsSpace_AndJoinsTheDesktopItArrivesAt()
+    {
+        var display = Display();
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([display], display, registry) { CurrentDesktop = () => DesktopOne };
+        var workspace = new FakeWorkspace();
+
+        var lives = new Dictionary<nint, Guid>();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            ResolveWindowDesktop = handle => lives.TryGetValue(handle, out var d) ? d : DesktopOne,
+        };
+
+        var stays = new RecordingWindow(new IntPtr(0x601), Rectangle.FromSize(0, 0, 400, 300));
+        var leaves = new RecordingWindow(new IntPtr(0x602), Rectangle.FromSize(0, 0, 400, 300));
+        var alreadyThere = new RecordingWindow(new IntPtr(0x603), Rectangle.FromSize(0, 0, 400, 300));
+        workspace.RaiseWindowAdded(stays);
+        workspace.RaiseWindowAdded(leaves);
+
+        lives[alreadyThere.Handle] = DesktopTwo;
+        workspace.RaiseWindowAdded(alreadyThere);
+
+        // The shell has moved it; the trees have not caught up yet.
+        lives[leaves.Handle] = DesktopTwo;
+        adapter.RehomeToDesktop(leaves.Handle);
+
+        // Left behind: the survivor is alone and holds the whole work area, exactly as a close.
+        Assert.True(trees.TryGetTree(DesktopOne, display, out var from));
+        var survivor = Assert.IsType<LeafNode>(from!.Root);
+        Assert.Equal(new WindowRef(stays.Handle), survivor.Window);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1000, 600), stays.LastSetPosition);
+
+        // Arrived: it joined the desktop that already had a window, as a new one would.
+        Assert.True(trees.TryGetTree(DesktopTwo, display, out var to));
+        var group = Assert.IsType<GroupNode>(to!.Root);
+        Assert.Equal(2, group.Children.Count);
+        Assert.Contains(group.Children.OfType<LeafNode>(), leaf => leaf.Window == new WindowRef(leaves.Handle));
+    }
 }

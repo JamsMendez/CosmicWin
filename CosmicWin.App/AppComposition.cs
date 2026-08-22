@@ -113,6 +113,7 @@ public sealed class AppComposition : IDisposable
         {
             ResolveWindowDesktop = resolveWindowDesktop,
         };
+        executor.WindowMovedToDesktop = sessionAdapter.RehomeToDesktop;
         workspace.Open();
         hook.Start();
 

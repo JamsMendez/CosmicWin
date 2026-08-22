@@ -145,6 +145,59 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
     }
 
+    /// <summary>
+    /// Brings both trees in line after the SHELL has already moved a window to another desktop.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The move itself only changes where Windows draws the window; without this the layouts never
+    /// hear about it. The window kept its slot on the desktop it left -- a hole nothing was drawn
+    /// into -- and never joined the one it arrived at. Reported immediately after the move landed.
+    /// </para>
+    /// <para>
+    /// Both halves are deliberately the ORDINARY paths, not special cases. Leaving reuses the same
+    /// removal and reflow a CLOSE does, so the survivors reclaim the space the same way. Arriving
+    /// reuses the same insertion a NEW WINDOW does, so it takes its place among whatever is already
+    /// there. A move is a close and an open, in that order.
+    /// </para>
+    /// <para>
+    /// The destination is read back from the shell rather than passed in: it has already recorded
+    /// the move, which makes it the ground truth. An unknown answer leaves BOTH trees untouched --
+    /// half-applying this would be worse than not applying it, since the window would vanish from
+    /// one layout without appearing in the other.
+    /// </para>
+    /// </remarks>
+    public void RehomeToDesktop(nint windowHandle)
+    {
+        if (_isPaused() || !_owners.TryGetValue(windowHandle, out var display))
+        {
+            return;
+        }
+
+        var target = ResolveWindowDesktop?.Invoke(windowHandle) ?? Guid.Empty;
+        if (target == Guid.Empty
+            || !_registry.TryGetWindow(windowHandle, out var window) || window is null
+            || !_treeManager.TryGetTree(target, display, out var arriving) || arriving is null)
+        {
+            return;
+        }
+
+        var workArea = WorkAreaResolver.Resolve(display);
+
+        // Leaving: exactly a close.
+        if (_treeManager.TryGetTree(display, out var leaving) && leaving is not null
+            && !ReferenceEquals(leaving, arriving)
+            && WorkspaceSessionAdapter.RemoveWindow(leaving, _registry, windowHandle))
+        {
+            TreeArranger.ArrangeAndPosition(leaving, _registry, workArea);
+        }
+
+        // Arriving: exactly a new window. Not positioned -- the destination is not on screen, and
+        // it is laid out on arrival there anyway.
+        WorkspaceSessionAdapter.InsertWindow(arriving, _registry, workArea, window, focused: null);
+        _owners[windowHandle] = display;
+    }
+
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
     {
         var handle = e.Window.Handle;

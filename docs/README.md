@@ -85,8 +85,12 @@ One test is expected to skip: `TaskInstallerElevatedTests` needs elevation.
 
 Run the projects one at a time. The desktop-gated tests spawn real windows and move the real
 foreground, so they are serialised within a project and do not tolerate a second project racing
-them. Close the app first — besides the file lock, a live window manager tiles and activates the
-windows those tests spawn.
+them.
+
+**Close the app first.** A live window manager tiles and activates the very windows those tests
+spawn, so they fail on geometry that was never theirs — a misleading red that cost several rounds of
+diagnosis. They now detect a running `CosmicWin.App` and SKIP with that reason instead. Skipped is
+not passed: a run that reports skips has not verified the desktop facts at all.
 
 ## Diagnostics
 

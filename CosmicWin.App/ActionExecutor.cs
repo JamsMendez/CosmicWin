@@ -38,6 +38,13 @@ public sealed class ActionExecutor(
     /// <summary>Where desktop chords report what they actually did. Null disables the trace.</summary>
     public Diagnostics.IDesktopTrace? DesktopTrace { get; set; }
 
+    /// <summary>
+    /// Called after a window has actually landed on another desktop, so the layouts can catch up
+    /// with the shell. Moving a window changes only where Windows draws it; the tree it left and
+    /// the tree it joined both have to hear about it.
+    /// </summary>
+    public Action<nint>? WindowMovedToDesktop { get; set; }
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -220,6 +227,13 @@ public sealed class ActionExecutor(
         var ok = action.Kind == HotkeyActionKind.SwitchDesktop
             ? desktops.TrySwitchTo(action.Argument)
             : desktops.TryMoveWindowTo(foregroundHandle, action.Argument);
+
+        // Only after the shell confirms the window really moved. Rehoming on a FAILED move would
+        // tear the window out of a layout it never actually left.
+        if (ok && action.Kind == HotkeyActionKind.MoveWindowToDesktop)
+        {
+            WindowMovedToDesktop?.Invoke(foregroundHandle);
+        }
 
         DesktopTrace?.Record(
             $"{action.Kind} arg={action.Argument} ok={ok} supported={desktops.IsSupported} " +
