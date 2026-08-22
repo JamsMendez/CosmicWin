@@ -19,6 +19,21 @@ if the two disagree, the file wins and this table is stale.
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window to that desktop, without following it |
 
+### Two collisions with Windows' own keyboard behaviour
+
+**AltGr is `Ctrl+Alt`, so the right Alt is not the left one.** On a layout that has AltGr — Spanish
+(Mexico), US-International — Windows synthesises `Ctrl+Alt` for the right Alt key. `AltGr+1`
+therefore arrives as `Alt+Ctrl+1`, matches nothing, and does nothing. Measured, not assumed: the
+trace recorded `unmatched chord: Alt, Control+D2`. Two consequences follow. Desktop chords work only
+with the LEFT Alt on such a layout, and `Alt+Ctrl+direction` — the resize chord — is by construction
+the same key combination as `AltGr+direction`.
+
+**`Alt+Shift` is Windows' default language-switch hotkey**, and every move chord starts with it. The
+hook suppresses the matched key but not the modifiers, so Windows sees `Alt+Shift` pressed and
+released with nothing in between — exactly the switch gesture. That is why the input language flips
+by itself during a run. Turn the hotkey off in Settings → Time & language → Typing → Advanced
+keyboard settings → Input language hot keys → *Not Assigned*.
+
 **An unregistered chord is indistinguishable from a broken feature.** The low-level hook only
 swallows chords it matches; everything else passes through to whatever has focus. `Ctrl+Shift` +
 direction is *not* bound, so pressing it does nothing and looks exactly like a bug. Move is
@@ -84,6 +99,11 @@ of a hypothesis, and each was written because a guess had already been wrong onc
 | `CosmicWin.Layout.Tests/MoveSequenceDiagnostic.cs` | What does the tree look like after each move chord? (Found a degenerate single-child group stranding the window.) |
 | `CosmicWin.Interop.Tests/Win32/FrameBoundsDiagnostic.cs` | How far is the drawn frame from `GetWindowRect`? (Measured the 7px invisible border, 0 on top.) |
 | `CosmicWin.Interop.Tests/Win32/VirtualDesktopProbeDiagnostic.cs` | Does this Windows build expose the virtual-desktop vtable we declare? |
+
+A fourth trace is written by the running app rather than a test:
+`%LOCALAPPDATA%\CosmicWin\desktop-trace.log` records every virtual-desktop chord — action, count
+and index before and after, and the error — plus any chord that matched NO entry, which is otherwise
+invisible and reads exactly like a broken feature.
 
 Run one with the detailed logger, or its output is swallowed:
 
