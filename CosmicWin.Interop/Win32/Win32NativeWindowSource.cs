@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.System.Threading;
 using Windows.Win32.UI.Accessibility;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -133,7 +134,35 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         // application windows. Fine-grained exclusion heuristics (WE-1: TOOLWINDOW, dialogs,
         // no-sysmenu) belong to CosmicWin.Layout's WindowDescriptor/Filters (Phase 3) — Interop
         // only decides what is trackable at all, not what the tiling engine should tile.
-        return PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) == HWND.Null;
+        var hasOwner = PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) != HWND.Null;
+        return IsTrackable(hasOwner, ReadIsCloaked(hwnd));
+    }
+
+    /// <summary>
+    /// MR-1: pure decision extracted from the two raw Win32 reads in <see cref="IsTrackable(HWND)"/>
+    /// so the phantom-window exclusion is unit-testable without a live cloaked HWND -- DWM
+    /// cloaking cannot be self-triggered by a spawned test window (it is driven entirely by
+    /// OS-internal virtual-desktop switching / UWP suspension). See
+    /// <c>Win32NativeWindowSourceCloakingTests</c>, which pins this against the exact descriptor
+    /// shape (unowned, cloaked) measured on a real desktop enumeration.
+    /// </summary>
+    internal static bool IsTrackable(bool hasOwner, bool isCloaked) => !hasOwner && !isCloaked;
+
+    /// <summary>
+    /// MR-1 (2026-08-22): a real desktop enumeration found DWM-cloaked windows -- e.g. a
+    /// suspended UWP host frame (<c>ApplicationFrameWindow</c>, owned by <c>explorer.exe</c>
+    /// itself) -- passing every other WE-1/Interop check while <c>IsWindowVisible</c> still
+    /// reports <c>true</c> and nothing renders on screen. Such a window silently occupied a
+    /// tiling slot, so real windows never got their full share of the work area. A failed
+    /// <c>DwmGetWindowAttribute</c> call (non-success HRESULT) degrades to "not cloaked" --
+    /// fail-open, matching every other raw read in this class, since a diagnostic-read failure
+    /// must never exclude a window that IS actually visible.
+    /// </summary>
+    private static bool ReadIsCloaked(HWND hwnd)
+    {
+        int cloaked;
+        var hr = PInvoke.DwmGetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_CLOAKED, &cloaked, (uint)sizeof(int));
+        return hr.Succeeded && cloaked != 0;
     }
 
     private static string ReadWindowTitle(HWND hwnd)

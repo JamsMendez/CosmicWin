@@ -108,6 +108,27 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
+    /// MR-1 (2026-08-22): a real desktop enumeration found this window is a persistent phantom
+    /// (unowned, cloaked, owned by explorer.exe itself) that used to pass every check and take a
+    /// tiling slot. Confirms the fix on the exact real class this was measured against, without
+    /// asserting anything about ambient desktop state beyond this one handle.
+    /// </summary>
+    [Fact]
+    public void EnumerateTopLevelWindows_ExcludesTheRealExplorerApplicationFrameWindowPhantom()
+    {
+        var source = new Win32NativeWindowSource();
+
+        var handles = source.EnumerateTopLevelWindows();
+
+        foreach (var handle in handles)
+        {
+            Assert.True(
+                source.TryGetWindowInfo(handle, out var info) && info.ClassName != "ApplicationFrameWindow",
+                "A cloaked ApplicationFrameWindow phantom should never reach EnumerateTopLevelWindows.");
+        }
+    }
+
+    /// <summary>
     /// MR-2 (2026-08-22 first real run): observation #96 measured plain <c>SetForegroundWindow</c>
     /// returning <c>false</c> from a background process on this exact machine. This proves the
     /// <c>AttachThreadInput</c> fix actually moves the real OS foreground -- not just that the call
