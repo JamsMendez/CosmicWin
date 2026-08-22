@@ -95,7 +95,10 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         }
 
         var workArea = _workArea();
-        InsertWindow(_tree, _registry, workArea, window);
+        // This single-tree adapter is not a production path (AppComposition wires
+        // MultiMonitorWorkspaceAdapter) and has no focus source of its own, so placement here keeps
+        // the pre-LE-4 append behaviour rather than inventing a second answer.
+        InsertWindow(_tree, _registry, workArea, window, focused: null);
         TreeArranger.ArrangeAndPosition(_tree, _registry, workArea);
     }
 
@@ -104,9 +107,30 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptions);
 
     /// <summary>Add-side tree mutation (W1's split-region heuristic included), extracted (WU17) so <see cref="MultiMonitorWorkspaceAdapter"/> reuses the exact same, already-pinned logic for any resolved per-monitor <paramref name="tree"/>.</summary>
-    internal static void InsertWindow(LayoutTree tree, WindowRegistry registry, Rect workArea, IWindow window)
+    internal static void InsertWindow(
+        LayoutTree tree, WindowRegistry registry, Rect workArea, IWindow window, LeafNode? focused)
     {
         var windowRef = new WindowRef(window.Handle);
+
+        // LE-4, as its own scenario states it: a new window SPLITS the focused tile -- beside it or
+        // below it, chosen from that tile's aspect ratio. Until this existed only the very first
+        // split behaved this way, because it was the only case where the root happened to be a bare
+        // leaf; every later window was appended to the end of the root group, ignoring focus.
+        if (focused is not null && BelongsTo(tree, focused))
+        {
+            var focusedRegion = focused.LastGeometry is { Width: > 0, Height: > 0 } focusedGeometry
+                ? focusedGeometry
+                : workArea;
+            var wasRoot = ReferenceEquals(tree.Root, focused);
+            var split = LayoutTree.SplitLeafInPlace(focused, windowRef, focusedRegion.Width, focusedRegion.Height);
+            if (wasRoot)
+            {
+                tree.Root = split;
+            }
+
+            registry.Register(window, (LeafNode)split.Children[^1]);
+            return;
+        }
 
         switch (tree.Root)
         {
@@ -136,6 +160,21 @@ public sealed class WorkspaceSessionAdapter : IDisposable
                 registry.Register(window, newLeaf);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="node"/> hangs off <paramref name="tree"/>'s own root. A focused leaf
+    /// belonging to some other tree must never be split by a window arriving on this one.
+    /// </summary>
+    private static bool BelongsTo(LayoutTree tree, Node node)
+    {
+        Node current = node;
+        while (current.Parent is { } parent)
+        {
+            current = parent;
+        }
+
+        return ReferenceEquals(current, tree.Root);
     }
 
     private void OnWindowRemoved(object? sender, WindowEventArgs e)

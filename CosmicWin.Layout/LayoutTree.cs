@@ -151,6 +151,37 @@ public sealed class LayoutTree : ITilingEngine
         AddChild(leaf, new LeafNode(newWindow), regionWidth, regionHeight);
 
     /// <summary>
+    /// LE-4 as its own scenario states it: a new window SPLITS the tile it lands on, so the group
+    /// replaces <paramref name="leaf"/> exactly where the leaf sat -- same slot, same slot size,
+    /// same siblings. This is what makes nesting happen at all during ordinary use; appending to the
+    /// root group instead produces a flat row forever, which is neither LE-4 nor COSMIC behaviour.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AddChild(LeafNode, WindowRef, int, int)"/> alone is NOT enough for a nested leaf:
+    /// it re-parents the leaf into the new group and returns, leaving the old parent still listing
+    /// the leaf. The leaf then has two parents and the group is unreachable. A root leaf is
+    /// unaffected only because its caller assigns <c>Root</c> by hand.
+    /// </remarks>
+    public static GroupNode SplitLeafInPlace(
+        LeafNode leaf, WindowRef newWindow, int regionWidth, int regionHeight)
+    {
+        // Captured BEFORE the split -- AddChild re-parents the leaf into the new group.
+        var parent = leaf.Parent as GroupNode;
+        int slot = parent?.Children.IndexOf(leaf) ?? -1;
+
+        var group = AddChild(leaf, newWindow, regionWidth, regionHeight);
+        if (parent is null || slot < 0)
+        {
+            return group;
+        }
+
+        // The group inherits the leaf's slot outright: Sizes is untouched, so no sibling moves.
+        group.Parent = parent;
+        parent.Children[slot] = group;
+        return group;
+    }
+
+    /// <summary>
     /// D3 <c>RemoveChild</c>: removes the child (and its size) at <paramref name="index"/> from
     /// <paramref name="group"/>, proportionally redistributing its freed size among the remaining
     /// siblings so that <c>Sizes.Sum() == GroupLength</c> continues to hold (design D1). Unlike

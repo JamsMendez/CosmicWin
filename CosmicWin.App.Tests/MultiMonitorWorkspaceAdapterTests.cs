@@ -43,7 +43,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowAdded_OnPrimaryAndSecondary_RouteToOwnTree_AndArrangeWithOwnWorkArea()
     {
         var s = TwoDisplays();
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var onPrimary = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(100, 100, 400, 300));
         var onSecondary = new RecordingWindow(new IntPtr(20), Rectangle.FromSize(2000, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(onPrimary);
@@ -60,7 +60,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowRemoved_OnSecondary_ReflowsOnlySecondaryTree_PrimaryUntouched()
     {
         var s = TwoDisplays();
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var onPrimary = new RecordingWindow(new IntPtr(40), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(onPrimary);
         var primarySetCountAfterAdd = onPrimary.SetPositionCallCount;
@@ -82,7 +82,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowAdded_WhilePaused_DoesNotTrackOrArrange()
     {
         var s = OneDisplay();
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => true);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => true, () => null);
         var window = new RecordingWindow(new IntPtr(70), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(window);
         s.Trees.TryGetTree(s.Primary, out var tree);
@@ -95,7 +95,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     {
         var s = OneDisplay();
         var exceptions = new ExceptionList([new ExceptionRule(ExceptionRuleKind.ProcessName, "Excluded.exe")]);
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => exceptions, () => false);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => exceptions, () => false, () => null);
         var window = new RecordingWindow(new IntPtr(80), Rectangle.FromSize(100, 100, 400, 300), processName: "Excluded.exe");
         s.Workspace.RaiseWindowAdded(window);
         s.Trees.TryGetTree(s.Primary, out var tree);
@@ -108,7 +108,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     {
         var s = OneDisplay();
         var paused = false;
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused, () => null);
         var first = new RecordingWindow(new IntPtr(90), Rectangle.FromSize(100, 100, 400, 300));
         var second = new RecordingWindow(new IntPtr(100), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(first);
@@ -129,7 +129,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowBoundsChanged_WindowDraggedFromSecondaryToPrimary_SnapsBackToOriginalMonitorSlot()
     {
         var s = TwoDisplays();
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(801), Rectangle.FromSize(2000, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(802), Rectangle.FromSize(2000, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
@@ -158,7 +158,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     {
         var s = TwoDisplays();
         var paused = false;
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused);
+        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused, () => null);
         var windowA = new RecordingWindow(new IntPtr(901), Rectangle.FromSize(2000, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
         var setCountBeforeDrag = windowA.SetPositionCallCount;
@@ -179,7 +179,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     private static (Setup S, RecordingWindow A, RecordingWindow B) DragPastSibling(nint handleA, nint handleB)
     {
         var s = OneDisplay();
-        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(handleA, Rectangle.FromSize(100, 100, 400, 300));
         var windowB = new RecordingWindow(handleB, Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
@@ -225,7 +225,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void Dispose_UnsubscribesFromWindowBoundsChanged_LaterDragIsIgnored()
     {
         var s = OneDisplay();
-        var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(1501), Rectangle.FromSize(100, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(1502), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
@@ -256,7 +256,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowBoundsChanged_WindowRefusesReposition_IsEvictedFromTree_SiblingReflowsToFillSpace()
     {
         var s = OneDisplay();
-        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(2001), Rectangle.FromSize(100, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(2002), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
@@ -291,7 +291,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public async Task WindowBoundsChanged_WindowRefusesReposition_ThenFocusRight_IsNoOp_NeverMisdirectsToWrongSibling()
     {
         var s = OneDisplay();
-        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(2101), Rectangle.FromSize(100, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(2102), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
@@ -316,7 +316,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void WindowAdded_WindowRefusesRepositionOnItsFirstArrange_IsEvictedFromTree_NeverCoexistsWithSibling()
     {
         var s = OneDisplay();
-        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(3001), Rectangle.FromSize(1500, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(3002), Rectangle.FromSize(100, 100, 400, 300));
 
@@ -339,7 +339,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public async Task WindowAdded_WindowRefusesRepositionOnItsFirstArrange_ThenFocusRight_IsNoOp_NeverMisdirectsToWrongSibling()
     {
         var s = OneDisplay();
-        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         var windowA = new RecordingWindow(new IntPtr(3101), Rectangle.FromSize(1500, 100, 400, 300));
         var windowB = new RecordingWindow(new IntPtr(3102), Rectangle.FromSize(100, 100, 400, 300));
         windowA.FailNextSetPosition();
@@ -357,7 +357,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public void Dispose_UnsubscribesFromWorkspaceEvents_LaterAddIsIgnored()
     {
         var s = OneDisplay();
-        var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
+        var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
         adapter.Dispose();
         var window = new RecordingWindow(new IntPtr(110), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(window);

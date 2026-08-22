@@ -95,7 +95,8 @@ public sealed class AppComposition : IDisposable
         executor.FocusTrace = focusTrace;
         var hook = hookFactory(dispatcher.Writer);
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
-            workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused);
+            workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
+            executor.ResolveFocusedLeaf);
         workspace.Open();
         hook.Start();
 
@@ -117,7 +118,16 @@ public sealed class AppComposition : IDisposable
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
         // disagreeing with the desktop, and nothing else ever looks again.
-        var reconcile = scheduleReconcile(ReconcileInterval, workspace.Poll);
+        var reconcile = scheduleReconcile(ReconcileInterval, () =>
+        {
+            workspace.Poll();
+
+            // Keeps the executor's focus record within one interval of the real foreground. Without
+            // it the record only advances on a chord, so a user who clicks between windows with the
+            // mouse and then opens a new one would have it split whichever tile they last used a
+            // hotkey on (LE-4 placement).
+            executor.ResolveFocusedLeaf();
+        });
 
         return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray, reconcile);
     }

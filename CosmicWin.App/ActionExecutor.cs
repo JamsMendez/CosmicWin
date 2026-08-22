@@ -49,6 +49,16 @@ public sealed class ActionExecutor(
     /// </summary>
     public IFocusTrace? FocusTrace { get; set; }
 
+    /// <summary>
+    /// The leaf CosmicWin currently treats as focused, resolved the same way a chord resolves it:
+    /// the OS foreground when it maps to a tracked window, otherwise the last leaf successfully
+    /// activated. LE-4's window placement asks for this when a window arrives -- and by then the
+    /// newcomer has usually already stolen the foreground, so the fallback is what answers, naming
+    /// the tile the user was actually on.
+    /// </summary>
+    public LeafNode? ResolveFocusedLeaf() =>
+        TryResolveFocused(foreground.GetForegroundHandle(), out var leaf) ? leaf : null;
+
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
         var foregroundHandle = foreground.GetForegroundHandle();

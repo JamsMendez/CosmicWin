@@ -75,7 +75,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         // Constraint 3: this shim, never the real Win32Workspace, is the adapter's event source.
         var workspace = new OwnWindowsOnlyWorkspace();
         using var adapter = new MultiMonitorWorkspaceAdapter(
-            workspace, treeManager, registry, () => ExceptionList.Empty, () => false);
+            workspace, treeManager, registry, () => ExceptionList.Empty, () => false, () => null);
 
         var (spawned1, window1) = SpawnOwn(protectedPids, nativeSource);
         var display = treeManager.ResolveDisplay(window1.Bounds);

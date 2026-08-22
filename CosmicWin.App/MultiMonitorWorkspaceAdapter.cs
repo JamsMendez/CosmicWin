@@ -48,12 +48,19 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly WindowRegistry _registry;
     private readonly Func<ExceptionList> _exceptions;
     private readonly Func<bool> _isPaused;
+    private readonly Func<LeafNode?> _focusedLeaf;
     private readonly Dictionary<nint, IDisplay> _owners = new();
 
+    /// <param name="focusedLeaf">
+    /// LE-4: the tile a newly arriving window splits. Mandatory rather than optional -- a dropped
+    /// focus source does not fail, it silently reverts to appending every window to the end of the
+    /// row, which is exactly the defect this parameter exists to close.
+    /// </param>
     public MultiMonitorWorkspaceAdapter(
         IWorkspace workspace, TreeManager treeManager, WindowRegistry registry,
-        Func<ExceptionList> exceptions, Func<bool> isPaused)
+        Func<ExceptionList> exceptions, Func<bool> isPaused, Func<LeafNode?> focusedLeaf)
     {
+        _focusedLeaf = focusedLeaf;
         _workspace = workspace;
         _treeManager = treeManager;
         _registry = registry;
@@ -85,7 +92,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var workArea = WorkAreaResolver.Resolve(display);
-        WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window);
+        WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, _focusedLeaf());
         _owners[window.Handle] = display;
 
         TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
