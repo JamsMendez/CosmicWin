@@ -10,6 +10,9 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
     private readonly bool[] _acceptedKeyDown = new bool[256];
     private volatile bool _paused;
 
+    /// <summary>The last modifier+key combination that matched no chord, for diagnosis. Never null-cleared.</summary>
+    public volatile string? LastUnmatched;
+
     /// <summary>Task 3.15/3.16 (WU11), settled full-pause semantics: while <c>true</c>, no chord matches and nothing is written to the dispatcher channel. Written from the tray's UI thread, read from this hook's dedicated STA thread -- <c>volatile</c> mirrors the existing <see cref="LowLevelKeyboardHook"/> <c>_lastActivity</c> pattern.</summary>
     public bool IsPaused
     {
@@ -29,7 +32,20 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             return suppress;
         }
         if (_paused) return false;
-        if (!chords.TryMatch(modifiers, key, out var action)) return false;
+        if (!chords.TryMatch(modifiers, key, out var action))
+        {
+            // A chord that matches nothing vanishes without trace, which is indistinguishable from
+            // a broken feature -- exactly how "the right Alt does not work" was reported, with no
+            // way to see what modifiers actually arrived. Recorded in MEMORY only: this runs inside
+            // the low-level keyboard hook, and Windows uninstalls a hook that takes too long.
+            if (modifiers != ModifierKeys.None)
+            {
+                LastUnmatched = $"{modifiers}+{key}";
+            }
+
+            return false;
+        }
+
         return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
     }
 }
@@ -65,6 +81,9 @@ public sealed class LowLevelKeyboardHook : IDisposable
         get => _processor.IsPaused;
         set => _processor.IsPaused = value;
     }
+
+    /// <summary>The last chord that matched nothing, so a "this key does nothing" report can be answered with what actually arrived.</summary>
+    public string? LastUnmatchedChord => _processor.LastUnmatched;
 
     public LowLevelKeyboardHook(ChannelWriter<HotkeyAction> writer)
         : this(writer, new WindowsKeyboardHookPlatform(), DefaultWatchdogInterval) { }

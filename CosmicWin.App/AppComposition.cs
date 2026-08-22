@@ -138,10 +138,18 @@ public sealed class AppComposition : IDisposable
         // no event for this, and asking on a timer is enough: the only thing that must happen on a
         // switch is laying out the tree the user just arrived at.
         var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
+        string? lastReportedUnmatched = null;
 
         var reconcile = scheduleReconcile(ReconcileInterval, () =>
         {
             workspace.Poll();
+
+            // Publishes off the hook thread, so the hook itself never waits on a file.
+            if (hook.LastUnmatchedChord is { } unmatched && unmatched != lastReportedUnmatched)
+            {
+                lastReportedUnmatched = unmatched;
+                desktopTrace?.Record($"unmatched chord: {unmatched}");
+            }
 
             if (virtualDesktops is not null)
             {
