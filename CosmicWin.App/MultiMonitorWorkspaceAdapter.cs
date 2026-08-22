@@ -1,4 +1,3 @@
-using System.Linq;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
@@ -25,25 +24,12 @@ namespace CosmicWin.App;
 /// <c>CosmicWin.Interop</c>.
 /// </remarks>
 /// <remarks>
-/// WU19 (closes verify-report #21 V18-W2, spec WT-1's move/resize tracking clause): subscribes
-/// the already-existing, already-tested <see cref="IWorkspace.WindowBoundsChanged"/> so an
-/// OUT-OF-BAND move (a mouse drag, not a hotkey) re-homes the leaf into whichever monitor's tree
-/// its real position now belongs to, instead of leaving it structurally rooted in its OLD tree --
-/// the exact desync that reproduces V17-W1's transcript on the next hotkey. Design choice (spec
-/// WT-1 mandates the WM TRACK a move, not fight it): the tree is updated to follow the window,
-/// never the reverse -- a drag is never snapped back to its pre-drag tree slot. Gated by the same
-/// <see cref="_isPaused"/> check as <see cref="OnWindowAdded"/>, and to the SAME degree: while
-/// paused, a drag is a full no-op (no re-home, no reflow), not merely a reflow-skip -- the most
-/// conservative reading available, since decision #64's "full pause, no reconcile" text speaks
-/// only to reflow and does not settle whether structural tree state may still shift under a paused
-/// user; this class does not let it.
-/// </remarks>
-/// <remarks>
-/// WU20 (closes V19-W1): a SAME-monitor drag no longer early-returns -- sibling ORDER can
-/// disagree with real screen order even though tree MEMBERSHIP stayed correct, and NextFocus is
-/// purely tree-ordinal (LE-2), so focus silently inverted. Reorders the parent group to match
-/// screen order (same precedent: tree follows window), then reflows that tree. Gated identically
-/// to <see cref="_isPaused"/> (decision #76).
+/// WU21 (decision #80, supersedes WU19's/WU20's own "tree follows window" choice, never put to the
+/// user): a dragged window SNAPS BACK to its tree slot on drop -- the tree is the source of truth;
+/// windows move between slots/monitors only via a hotkey (spec LE-5). A plain re-arrange of the
+/// window's OWN tree undoes any drag by construction, since <see cref="TreeArranger"/> never reads
+/// on-screen position -- removes WU19's cross-monitor re-home and WU20's reorder outright, rather
+/// than fixing them further. Gated by <see cref="_isPaused"/> exactly like decision #76.
 /// </remarks>
 public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 {
@@ -122,10 +108,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
-    /// V18-W2 closure: re-homes an already-tracked leaf when its real on-screen position no longer
-    /// matches the monitor whose tree structurally contains it (an out-of-band drag). No-op while
-    /// paused (full skip, see the class remarks), for an untracked/excluded window, or when the
-    /// window's resolved display has not actually changed (a same-monitor drag needs no re-home).
+    /// Decision #80 (WU21): snaps an already-tracked window back to its tree slot after any
+    /// out-of-band move. No-op while paused or for an untracked/excluded window. Ignores the new
+    /// real position entirely -- re-arranging the UNCHANGED tree re-applies the same geometry,
+    /// undoing the drag on screen, cross-monitor included (returns to its ORIGINAL slot).
     /// </summary>
     private void OnWindowBoundsChanged(object? sender, WindowEventArgs e)
     {
@@ -134,83 +120,14 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
-        var window = e.Window;
-        var handle = window.Handle;
-        if (!_owners.TryGetValue(handle, out var oldDisplay))
-        {
-            return;
-        }
-
-        var newDisplay = _treeManager.ResolveDisplay(window.Bounds);
-        if (newDisplay.Handle == oldDisplay.Handle)
-        {
-            ReorderWithinTree(oldDisplay, window);
-            return;
-        }
-
-        if (!_treeManager.TryGetTree(oldDisplay, out var oldTree) || oldTree is null ||
-            !_treeManager.TryGetTree(newDisplay, out var newTree) || newTree is null)
-        {
-            return;
-        }
-
-        if (!WorkspaceSessionAdapter.RemoveWindow(oldTree, _registry, handle))
-        {
-            return;
-        }
-
-        var newWorkArea = WorkAreaResolver.Resolve(newDisplay);
-        WorkspaceSessionAdapter.InsertWindow(newTree, _registry, newWorkArea, window);
-        _owners[handle] = newDisplay;
-
-        TreeArranger.ArrangeAndPosition(oldTree, _registry, WorkAreaResolver.Resolve(oldDisplay));
-        TreeArranger.ArrangeAndPosition(newTree, _registry, newWorkArea);
-    }
-
-    /// <summary>
-    /// V19-W1 closure: reorders the dragged leaf's parent group by leading edge (dragged: real
-    /// <see cref="IWindow.Bounds"/>; siblings: <see cref="Node.LastGeometry"/>), then reflows that
-    /// tree so geometry and focus agree with the new screen order. No-op for a single-window tree.
-    /// </summary>
-    private void ReorderWithinTree(IDisplay display, IWindow window)
-    {
-        if (!_registry.TryGetLeaf(window.Handle, out var leaf) || leaf is null ||
-            leaf.Parent is not GroupNode parent ||
+        var handle = e.Window.Handle;
+        if (!_owners.TryGetValue(handle, out var display) ||
             !_treeManager.TryGetTree(display, out var tree) || tree is null)
         {
             return;
         }
 
-        var entries = parent.Children
-            .Select((node, i) => (Node: node, Size: parent.Sizes[i]))
-            .OrderBy(entry => LeadingEdge(parent.Axis, entry.Node, leaf, window.Bounds))
-            .ToList();
-
-        if (entries.Select(entry => entry.Node).SequenceEqual(parent.Children))
-        {
-            return;
-        }
-
-        parent.Children.Clear();
-        parent.Sizes.Clear();
-        foreach (var (node, size) in entries)
-        {
-            parent.Children.Add(node);
-            parent.Sizes.Add(size);
-        }
-
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
-    }
-
-    /// <summary>The dragged leaf uses its real current bounds; every other sibling uses its last-arranged geometry.</summary>
-    private static int LeadingEdge(SplitAxis axis, Node node, LeafNode dragged, Rectangle draggedBounds)
-    {
-        if (ReferenceEquals(node, dragged))
-        {
-            return axis == SplitAxis.Horizontal ? draggedBounds.Left : draggedBounds.Top;
-        }
-
-        return axis == SplitAxis.Horizontal ? node.LastGeometry.X : node.LastGeometry.Y;
     }
 
     public void Dispose()

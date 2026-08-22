@@ -122,14 +122,11 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(firstSetCountBeforePause, first.SetPositionCallCount);
     }
 
-    // Verify-report #21 V18-W2: reproduces probe E's shape -- two windows tiled on the SECONDARY
-    // monitor, one dragged (out-of-band, not by hotkey) onto the PRIMARY monitor. Before the fix,
-    // no code path ever observed the drag, so the leaf stayed structurally rooted in the secondary
-    // tree while its real Bounds said primary -- the exact desync that later reproduces V17-W1's
-    // "tree mutates, nothing repositions" transcript on the next hotkey. This proves the drag alone
-    // re-homes the leaf into the tree matching its real position and reflows BOTH affected trees.
+    // Decision #80 (WU21, replaces WU19's cross-monitor re-home): a window tiled on the SECONDARY
+    // monitor is dragged onto the PRIMARY monitor -- since the tree never changes, it snaps BACK to
+    // its ORIGINAL monitor's slot; the primary tree stays untouched.
     [Fact]
-    public void WindowBoundsChanged_WindowDraggedFromSecondaryToPrimary_ReHomesLeaf_AndReflowsBothTrees()
+    public void WindowBoundsChanged_WindowDraggedFromSecondaryToPrimary_SnapsBackToOriginalMonitorSlot()
     {
         var s = TwoDisplays();
         using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
@@ -137,23 +134,27 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         var windowB = new RecordingWindow(new IntPtr(802), Rectangle.FromSize(2000, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
         s.Workspace.RaiseWindowAdded(windowB);
+        var originalPositionB = windowB.LastSetPosition;
 
         windowB.SimulateExternalMove(Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowBoundsChanged(windowB);
 
         s.Trees.TryGetTree(s.Primary, out var primaryTree);
         s.Trees.TryGetTree(s.Secondary, out var secondaryTree);
-        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(primaryTree!.Root).Window);
+        Assert.Null(primaryTree!.Root); // never re-homed to primary
         var secondaryGroup = Assert.IsType<GroupNode>(secondaryTree!.Root);
-        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(Assert.Single(secondaryGroup.Children)).Window);
-        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), windowB.LastSetPosition);
-        Assert.Equal(Rectangle.FromSize(1920, 0, 1280, 720), windowA.LastSetPosition);
+        Assert.Equal(2, secondaryGroup.Children.Count);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(secondaryGroup.Children[0]).Window);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(secondaryGroup.Children[1]).Window);
+        Assert.Equal(originalPositionB, windowB.LastSetPosition); // snapped back on screen
+        Assert.Equal(3, windowA.SetPositionCallCount); // pins a genuine re-arrange, not a value that already matched
+        Assert.Equal(2, windowB.SetPositionCallCount);
     }
 
-    // Decision #64 ("full pause, no reconcile"): a drag while paused must not trigger a reflow, the
-    // same way OnWindowAdded and OnWindowRemoved already do not (V18-W2 fix design note).
+    // Decision #76 ("full pause, no reconcile"): a drag while paused must not trigger a snap-back,
+    // the same way OnWindowAdded and OnWindowRemoved already do not.
     [Fact]
-    public void WindowBoundsChanged_WhilePaused_DoesNotReHomeOrReflow()
+    public void WindowBoundsChanged_WhilePaused_DoesNotSnapBackOrReflow()
     {
         var s = TwoDisplays();
         var paused = false;
@@ -173,9 +174,8 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(setCountBeforeDrag, windowA.SetPositionCallCount);
     }
 
-    // Verify-report #21 V19-W1 (probes 1-3): tree MEMBERSHIP stayed correct after a same-monitor
-    // drag, but sibling ORDER can disagree with screen order, and NextFocus is tree-ordinal (LE-2).
-    // windowA drags from the LEFT slot past windowB, to x=1500, ending up genuinely on the RIGHT.
+    // Shared setup: two windows side by side, windowA dragged past windowB to x=1500 -- under
+    // decision #80 the tree never updates, so the drag is always undone on drop.
     private static (Setup S, RecordingWindow A, RecordingWindow B) DragPastSibling(nint handleA, nint handleB)
     {
         var s = OneDisplay();
@@ -189,92 +189,38 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         return (s, windowA, windowB);
     }
 
+    // Decision #80 (supersedes WU19's/WU20's "tree follows window" rule, never put to the user): a
+    // dragged tiled window snaps BACK to its tree slot -- RED against WU20 code, which would instead
+    // leave A at the dragged position and swap tree order.
     [Fact]
-    public void WindowBoundsChanged_SameMonitorDrag_ReordersTheGroup_AndReflowsBothWindowsToTheirNewSlots()
+    public void WindowBoundsChanged_DraggedWindowOnSameMonitor_SnapsBackToTreeSlot_TreeOrderUnchanged()
     {
         var (s, windowA, windowB) = DragPastSibling(new IntPtr(1001), new IntPtr(1002));
         s.Trees.TryGetTree(s.Primary, out var tree);
         var group = Assert.IsType<GroupNode>(tree!.Root);
-        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
-        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
-        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowB.LastSetPosition);
-        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowA.LastSetPosition);
-    }
-
-    // Before this fix, tree order stayed [A, B], so FocusLeft from B wrongly walked to A --
-    // physically on the RIGHT after the drag. After the fix, B is genuinely leftmost, so FocusLeft
-    // from B must find no match (LE-2 step 4), never activate the window on the right.
-    [Fact]
-    public async Task WindowBoundsChanged_SameMonitorDrag_ThenFocusLeftFromNowLeftmostWindow_ActivatesNothing()
-    {
-        var (s, windowA, windowB) = DragPastSibling(new IntPtr(1101), new IntPtr(1102));
-        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowB.Handle }) { TreeManager = s.Trees };
-        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
-        Assert.Equal(0, windowA.TryActivateCallCount);
-        Assert.Equal(0, windowB.TryActivateCallCount);
-    }
-
-    // Before this fix, FocusRight from B (tree index 1, the LAST slot) could never reach A, even
-    // though A ends up physically on the right after the drag. After the fix, tree order agrees
-    // with screen order, so FocusRight from B must reach A.
-    [Fact]
-    public async Task WindowBoundsChanged_SameMonitorDrag_ThenFocusRightFromNowLeftmostWindow_ActivatesTheWindowOnTheRight()
-    {
-        var (s, windowA, windowB) = DragPastSibling(new IntPtr(1201), new IntPtr(1202));
-        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowB.Handle }) { TreeManager = s.Trees };
-        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
-        Assert.Equal(1, windowA.TryActivateCallCount);
-        Assert.Equal(0, windowB.TryActivateCallCount);
-    }
-
-    // Decision #76: a drag while paused is a full no-op on the same-monitor path too.
-    [Fact]
-    public void WindowBoundsChanged_SameMonitorDrag_WhilePaused_DoesNotReorderOrReflow()
-    {
-        var s = OneDisplay();
-        var paused = false;
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => paused);
-        var windowA = new RecordingWindow(new IntPtr(1301), Rectangle.FromSize(100, 100, 400, 300));
-        var windowB = new RecordingWindow(new IntPtr(1302), Rectangle.FromSize(100, 100, 400, 300));
-        s.Workspace.RaiseWindowAdded(windowA);
-        s.Workspace.RaiseWindowAdded(windowB);
-        var setCountA = windowA.SetPositionCallCount;
-        paused = true;
-        windowA.SimulateExternalMove(Rectangle.FromSize(1500, 100, 400, 300));
-        s.Workspace.RaiseWindowBoundsChanged(windowA);
-        s.Trees.TryGetTree(s.Primary, out var tree);
-        var group = Assert.IsType<GroupNode>(tree!.Root);
         Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
         Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
-        Assert.Equal(setCountA, windowA.SetPositionCallCount);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+        Assert.Equal(3, windowA.SetPositionCallCount); // pins a genuine re-arrange, not a value that already matched
+        Assert.Equal(2, windowB.SetPositionCallCount);
     }
 
-    // Verify-report #21 V19-W2: pins the same-display guard. A flat 3-child group distinguishes
-    // in-place reorder (dragged window lands wherever its new screen position says) from the
-    // remove-then-append-at-the-end cross-monitor path (always drops it last).
+    // Decision #80 (WU21, replaces WU20's V19-W1 reorder fix): since a drag is always snapped back,
+    // tree order can never disagree with screen order, so directional focus behaves as if the drag
+    // never happened, with no reorder logic needed to keep it correct.
     [Fact]
-    public void WindowBoundsChanged_SameMonitorDrag_MiddleWindowDraggedToTheFront_ReordersInPlace_NotAppendedAtTheEnd()
+    public async Task WindowBoundsChanged_SameMonitorDrag_ThenFocusRight_StillActivatesTheOriginalRightWindow()
     {
-        var s = OneDisplay();
-        using var adapter = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false);
-        var windowA = new RecordingWindow(new IntPtr(1401), Rectangle.FromSize(100, 100, 400, 300));
-        var windowB = new RecordingWindow(new IntPtr(1402), Rectangle.FromSize(100, 100, 400, 300));
-        var windowC = new RecordingWindow(new IntPtr(1403), Rectangle.FromSize(100, 100, 400, 300));
-        s.Workspace.RaiseWindowAdded(windowA);
-        s.Workspace.RaiseWindowAdded(windowB);
-        s.Workspace.RaiseWindowAdded(windowC);
-        windowB.SimulateExternalMove(Rectangle.FromSize(-500, 100, 400, 300));
-        s.Workspace.RaiseWindowBoundsChanged(windowB);
-        s.Trees.TryGetTree(s.Primary, out var tree);
-        var group = Assert.IsType<GroupNode>(tree!.Root);
-        Assert.Equal(3, group.Children.Count);
-        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
-        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
-        Assert.Equal(new WindowRef(windowC.Handle), Assert.IsType<LeafNode>(group.Children[2]).Window);
+        var (s, windowA, windowB) = DragPastSibling(new IntPtr(1101), new IntPtr(1102));
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
+        Assert.Equal(1, windowB.TryActivateCallCount);
+        Assert.Equal(0, windowA.TryActivateCallCount);
     }
 
-    // Verify-report #21 V19-W3: pins Dispose's WindowBoundsChanged unsubscription (the existing
-    // Dispose test below covers only WindowAdded).
+    // Pins Dispose's unsubscription AND the constructor's subscription: deleting either line goes
+    // RED, since SetPosition is never called again after Dispose to undo the post-dispose drag.
     [Fact]
     public void Dispose_UnsubscribesFromWindowBoundsChanged_LaterDragIsIgnored()
     {
@@ -284,13 +230,14 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         var windowB = new RecordingWindow(new IntPtr(1502), Rectangle.FromSize(100, 100, 400, 300));
         s.Workspace.RaiseWindowAdded(windowA);
         s.Workspace.RaiseWindowAdded(windowB);
+        var setCountBeforeDispose = windowA.SetPositionCallCount;
         adapter.Dispose();
+
         windowA.SimulateExternalMove(Rectangle.FromSize(1500, 100, 400, 300));
         s.Workspace.RaiseWindowBoundsChanged(windowA);
-        s.Trees.TryGetTree(s.Primary, out var tree);
-        var group = Assert.IsType<GroupNode>(tree!.Root);
-        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
-        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
+
+        Assert.Equal(setCountBeforeDispose, windowA.SetPositionCallCount);
+        Assert.Equal(Rectangle.FromSize(1500, 100, 400, 300), windowA.Bounds); // never snapped back
     }
 
     private sealed class FakeForegroundWindowSource : IForegroundWindowSource
