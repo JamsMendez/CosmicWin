@@ -22,7 +22,20 @@ public sealed class LayoutTree : ITilingEngine
     FocusResult ITilingEngine.NextFocus(Direction direction, LeafNode focused) =>
         NextFocus(direction, focused);
 
-    bool ITilingEngine.MoveNode(Direction direction, Node focused) => MoveNode(direction, focused);
+    bool ITilingEngine.MoveNode(Direction direction, Node focused)
+    {
+        // The move can leave the group the node came FROM redundant (one child) or empty. Prune
+        // needs the tree to re-seat a collapsing ROOT, which the static core deliberately cannot
+        // reach -- so the engine-facing entry point heals that last level.
+        var origin = focused.Parent as GroupNode;
+        if (!MoveNode(direction, focused))
+        {
+            return false;
+        }
+
+        Prune(this, origin);
+        return true;
+    }
 
     bool ITilingEngine.ToggleAxis(Node focused) => ToggleAxis(focused);
 
@@ -368,65 +381,180 @@ public sealed class LayoutTree : ITilingEngine
     };
 
     /// <summary>
-    /// LE-5: swaps a node with its directional sibling in a matching-axis group, or nests it
-    /// with an adjacent sibling under a new group when the immediate axis does not match.
+    /// LE-5, re-cut as cosmic-comp's ancestor walk. Ported (algorithm only) from
+    /// <c>TilingLayout::move_current_node</c>,
+    /// <c>cosmic-epoch/cosmic-comp/src/shell/layout/tiling/mod.rs:1507</c> -- its
+    /// <c>while let Some(parent) = maybe_parent</c> loop climbs the tree until it finds a level
+    /// that can absorb the move, instead of giving up at the node's own parent.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This REPLACES the original "act only inside <c>focused.Parent</c>" rule, which was measured
+    /// against the real WM on 2026-08-22 and reported as the thing that makes CosmicWin feel unlike
+    /// COSMIC. Pushing a window at the edge of its group toward the outside used to return false and
+    /// do nothing; HA-1's <c>Alt+[</c> existed so the user could hand-raise the scope that this walk
+    /// now derives per keypress. <c>Alt+[</c> keeps its meaning -- deliberately moving a WHOLE group
+    /// as one unit -- but is no longer required for an ordinary window to leave its group.
+    /// </para>
+    /// <para>
+    /// Four cases, in cosmic-comp's own order:
+    /// <list type="number">
+    /// <item>axis mismatch at this level -- the level splits perpendicular and the focused node
+    /// takes the leading or trailing half (<see cref="SplitOutOf"/>);</item>
+    /// <item>axis matches and we ARRIVED here from below -- the node leaves its old group and joins
+    /// this one beside the subtree it came out of (cosmic-comp's
+    /// <c>MoveBehavior::ToParent</c>);</item>
+    /// <item>axis matches at our own level -- move INTO the neighbour when it is a group
+    /// (cosmic-comp's <c>is_group()</c> branch), otherwise swap with it, sizes included, which is
+    /// the original LE-5 behaviour and the only branch that survives unchanged;</item>
+    /// <item>no room at this level -- ascend and try again.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// Deliberate divergence: where cosmic-comp inserts into the MIDDLE of a perpendicular
+    /// neighbouring group (mod.rs:1737, "we want the middle"), this inserts at the edge the move
+    /// came from -- a window pushed Right enters the neighbour at its start. Same escape, but the
+    /// landing slot follows the direction the user pressed instead of the group's parity.
+    /// </para>
+    /// </remarks>
     public static bool MoveNode(Direction direction, Node focused)
     {
-        if (focused.Parent is not GroupNode parent)
+        if (focused.Parent is not GroupNode origin)
         {
             return false;
         }
 
-        int focusedIndex = parent.Children.IndexOf(focused);
-        var requestedAxis = AxisOf(direction);
-        if (parent.Axis == requestedAxis)
+        int originIndex = origin.Children.IndexOf(focused);
+        if (originIndex < 0)
         {
-            int siblingIndex = focusedIndex + StepOf(direction);
-            if (siblingIndex < 0 || siblingIndex >= parent.Children.Count)
+            return false;
+        }
+
+        var axis = AxisOf(direction);
+        int step = StepOf(direction);
+
+        Node child = focused;
+        GroupNode? level = origin;
+
+        while (level is not null)
+        {
+            int index = level.Children.IndexOf(child);
+
+            // (1) This level stacks the wrong way for the requested direction.
+            if (level.Axis != axis)
             {
-                return false;
+                if (level.Children.Count < 2)
+                {
+                    return false;
+                }
+
+                SplitOutOf(level, focused, axis, step, origin, originIndex);
+                return true;
             }
 
-            (parent.Children[focusedIndex], parent.Children[siblingIndex]) =
-                (parent.Children[siblingIndex], parent.Children[focusedIndex]);
-            (parent.Sizes[focusedIndex], parent.Sizes[siblingIndex]) =
-                (parent.Sizes[siblingIndex], parent.Sizes[focusedIndex]);
-            return true;
+            int neighbourIndex = index + step;
+            if (neighbourIndex >= 0 && neighbourIndex < level.Children.Count)
+            {
+                // (2) We climbed to get here, so this level is a NEW home, not a reshuffle.
+                if (!ReferenceEquals(child, focused))
+                {
+                    Detach(origin, originIndex);
+                    AddChild(level, focused, step < 0 ? index : index + 1);
+                    return true;
+                }
+
+                // (3a) The neighbour is a group of its own: move INTO it rather than treating it
+                // as one opaque tile to swap with.
+                if (level.Children.Count == 2 && level.Children[neighbourIndex] is GroupNode neighbour)
+                {
+                    Detach(origin, originIndex);
+                    AddChild(neighbour, focused, step < 0 ? neighbour.Children.Count : 0);
+                    return true;
+                }
+
+                // (3b) Original LE-5: swap with the plain sibling, carrying sizes along.
+                (level.Children[index], level.Children[neighbourIndex]) =
+                    (level.Children[neighbourIndex], level.Children[index]);
+                (level.Sizes[index], level.Sizes[neighbourIndex]) =
+                    (level.Sizes[neighbourIndex], level.Sizes[index]);
+                return true;
+            }
+
+            // (4) Out of room here -- carry on upward, now representing the level we just left.
+            child = level;
+            level = level.Parent as GroupNode;
         }
 
-        if (parent.Children.Count < 2)
+        return false;
+    }
+
+    /// <summary>
+    /// cosmic-comp's case (1): <paramref name="level"/> splits along <paramref name="axis"/>, its
+    /// former contents drop into a nested group, and <paramref name="focused"/> takes the half the
+    /// direction points at.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="level"/> is rewritten IN PLACE rather than replaced by a new group above it,
+    /// for the same reason <see cref="ToggleAxis"/> flips an axis in place: other nodes' <see
+    /// cref="Node.Parent"/> pointers and the parent's own <c>Children</c> slot reference this exact
+    /// instance. It also means this works when <paramref name="level"/> is the tree ROOT, which a
+    /// static helper cannot re-seat.
+    /// </remarks>
+    private static void SplitOutOf(
+        GroupNode level, Node focused, SplitAxis axis, int step, GroupNode origin, int originIndex)
+    {
+        // Take the node out first, so its old siblings reclaim the space before anything is rebuilt.
+        // The collapse is skipped when the origin IS this level: it is about to be refilled, and
+        // collapsing a group mid-rewrite would detach it from the tree.
+        if (ReferenceEquals(origin, level))
         {
-            return false;
+            RemoveChild(origin, originIndex);
+        }
+        else
+        {
+            Detach(origin, originIndex);
         }
 
-        int adjacentIndex = focusedIndex + 1 < parent.Children.Count
-            ? focusedIndex + 1
-            : focusedIndex - 1;
-        int insertionIndex = Math.Min(focusedIndex, adjacentIndex);
-        var first = parent.Children[insertionIndex];
-        var second = parent.Children[insertionIndex + 1];
-        int firstSize = parent.Sizes[insertionIndex];
-        int secondSize = parent.Sizes[insertionIndex + 1];
-        int combinedSize = firstSize + secondSize;
-
-        var nested = new GroupNode(requestedAxis)
+        var nested = new GroupNode(level.Axis) { GroupLength = level.GroupLength, Parent = level };
+        foreach (var existing in level.Children)
         {
-            GroupLength = combinedSize,
-            Parent = parent
-        };
-        nested.Children.Add(first);
-        nested.Children.Add(second);
-        nested.Sizes.Add(firstSize);
-        nested.Sizes.Add(secondSize);
-        first.Parent = nested;
-        second.Parent = nested;
+            existing.Parent = nested;
+            nested.Children.Add(existing);
+        }
 
-        parent.Children.RemoveRange(insertionIndex, 2);
-        parent.Sizes.RemoveRange(insertionIndex, 2);
-        parent.Children.Insert(insertionIndex, nested);
-        parent.Sizes.Insert(insertionIndex, combinedSize);
-        return true;
+        nested.Sizes.AddRange(level.Sizes);
+
+        level.Children.Clear();
+        level.Sizes.Clear();
+        level.Axis = axis;
+        level.Children.Add(nested);
+        level.Sizes.Add(level.GroupLength);
+        AddChild(level, focused, step < 0 ? 0 : 1);
+    }
+
+    /// <summary>
+    /// Removes a node from the group it is leaving and collapses that group if the departure left
+    /// it holding a single child. Stops short of the root case, which needs the tree -- the
+    /// <see cref="ITilingEngine"/> entry point follows up with <see cref="Prune"/> for that.
+    /// </summary>
+    private static void Detach(GroupNode origin, int originIndex)
+    {
+        RemoveChild(origin, originIndex);
+
+        if (origin.Children.Count != 1 || origin.Parent is not GroupNode above)
+        {
+            return;
+        }
+
+        int slot = above.Children.IndexOf(origin);
+        if (slot < 0)
+        {
+            return;
+        }
+
+        var survivor = origin.Children[0];
+        survivor.Parent = above;
+        above.Children[slot] = survivor;
     }
 
     /// <summary>
