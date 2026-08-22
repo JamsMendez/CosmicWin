@@ -20,13 +20,19 @@ namespace CosmicWin.App.Tests.Desktop;
 /// explicit interactive run (<c>COSMICWIN_RUN_DESKTOP_TESTS=1</c>).
 /// </summary>
 /// <remarks>
+/// WU29: the spawn host is <see cref="SpawnedAlacrittyWindow"/>, not <see cref="SpawnedNotepadWindow"/>
+/// -- on this project's Windows build, <c>notepad.exe</c> is a tabbed packaged app and a second
+/// launch opens a TAB in the first process's window rather than a second top-level window, which
+/// produced a misleading tiling-geometry failure the first time this test ran (see Engram #94).
+/// <see cref="SpawnOwn"/> asserts the one-window-per-process property directly, so a future
+/// regression in the host fails loudly instead of producing another confusing geometry mismatch.
 /// Safety (six hard constraints, each enforced at the cited line):
 /// <para>(1) Only PIDs from Process.Start are ever touched: every handle below originates from
-/// <see cref="SpawnedNotepadWindow.Handle"/>, itself rooted in the <c>Process.Start</c> call inside
-/// <see cref="SpawnedNotepadWindow.Spawn"/> -- see <see cref="SpawnOwn"/>. Nothing here is ever
+/// <see cref="SpawnedAlacrittyWindow.Handle"/>, itself rooted in the <c>Process.Start</c> call inside
+/// <see cref="SpawnedAlacrittyWindow.Spawn"/> -- see <see cref="SpawnOwn"/>. Nothing here is ever
 /// selected by window title, class, or process name against the ambient desktop.</para>
 /// <para>(2) Never enumerate-and-close: the sole cleanup path is <see cref="Dispose"/> below, which
-/// disposes only the <see cref="SpawnedNotepadWindow"/> instances this test itself created.</para>
+/// disposes only the <see cref="SpawnedAlacrittyWindow"/> instances this test itself created.</para>
 /// <para>(3) The WM under test tracks only spawned PIDs: <see cref="OwnWindowsOnlyWorkspace"/>'s
 /// <c>Open</c>/<c>Poll</c> throw (structurally unreachable -- never enumerates or hooks the real
 /// desktop); the only way a window ever reaches <see cref="MultiMonitorWorkspaceAdapter"/> under test
@@ -48,7 +54,10 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(500);
 
-    private readonly List<SpawnedNotepadWindow> _spawned = [];
+    private readonly List<SpawnedAlacrittyWindow> _spawned = [];
+
+    /// <summary>WU29: every handle observed so far, used by <see cref="SpawnOwn"/> to verify the spawn host's one-window-per-process property before it is relied on.</summary>
+    private readonly HashSet<nint> _seenHandles = [];
 
     [RequiresDesktopFact]
     public void RealProductionPath_TilesRealWindows_ThroughAddFocusMoveAndClose()
@@ -147,15 +156,25 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     }
 
     /// <summary>Constraint 1/4: spawns via the existing hardened harness, then rejects (and disposes) any PID colliding with <paramref name="protectedPids"/> before it is ever wired into the tiling path.</summary>
-    private (SpawnedNotepadWindow Spawned, IWindow Window) SpawnOwn(HashSet<int> protectedPids, Win32NativeWindowSource nativeSource)
+    private (SpawnedAlacrittyWindow Spawned, IWindow Window) SpawnOwn(HashSet<int> protectedPids, Win32NativeWindowSource nativeSource)
     {
-        var spawned = SpawnedNotepadWindow.Spawn();
+        var spawned = SpawnedAlacrittyWindow.Spawn();
         if (protectedPids.Contains(spawned.ProcessId))
         {
             spawned.Dispose();
             throw new InvalidOperationException(
                 "Constraint 4: a spawned window's PID collided with this session's own protected process tree -- refusing to proceed.");
         }
+
+        // WU29: verify the one-window-per-process property BEFORE relying on it -- a spawn host
+        // that silently starts tabbing (as notepad.exe did, see Engram #94) must fail loudly here
+        // instead of producing a confusing downstream tiling-geometry mismatch.
+        Assert.NotEqual(nint.Zero, spawned.Handle);
+        Assert.True(
+            _seenHandles.Add(spawned.Handle),
+            "Spawn host produced a duplicate top-level window handle across processes -- it no " +
+            "longer guarantees one top-level window per process (the exact failure mode notepad.exe " +
+            "exhibited on this Windows build, see Engram #94).");
 
         _spawned.Add(spawned);
         Assert.True(nativeSource.TryGetWindowInfo(spawned.Handle, out var info));
