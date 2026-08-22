@@ -1,3 +1,4 @@
+using System.Xml;
 using CosmicWin.App.Startup;
 
 namespace CosmicWin.App.Tests.Startup;
@@ -85,5 +86,72 @@ public sealed class TaskInstallerTests
 
         Assert.Equal("schtasks.exe", runner.LastFileName);
         Assert.Equal(TaskInstaller.BuildUninstallArgs("CosmicWin.Test"), runner.LastArguments);
+    }
+
+    // V25-W2 RED: schtasks /Delete against a task that was never installed exits 1 with this exact
+    // stderr (measured against real schtasks in verify-report V25-W2). ES-4 requires removal
+    // "cleanly, restoring stock behavior" -- there is nothing to restore here, so this is success,
+    // not a failure. Only THIS specific absence signature is swallowed.
+    [Fact]
+    public void Uninstall_TaskAlreadyAbsent_IsIdempotent_DoesNotThrow()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 1,
+            StandardErrorToReturn = "ERROR: The system cannot find the file specified.\r\n",
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        installer.Uninstall(); // Must not throw.
+
+        Assert.Equal(TaskInstaller.BuildUninstallArgs("CosmicWin.Test"), runner.LastArguments);
+    }
+
+    // V25-W2 companion: a genuine failure (unrelated stderr, e.g. access denied) MUST still throw --
+    // the idempotency fix must not swallow real errors.
+    [Fact]
+    public void Uninstall_GenuineFailure_StillThrows_NotSwallowedByIdempotencyFix()
+    {
+        var runner = new FakeProcessRunner
+        {
+            ExitCodeToReturn = 5,
+            StandardErrorToReturn = "ERROR: Access is denied.\r\n",
+        };
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        var ex = Assert.Throws<InvalidOperationException>(installer.Uninstall);
+        Assert.Contains("exit code 5", ex.Message);
+    }
+
+    // V25-C1 RED (unconditional, no trait gate, no elevation, no real task): the declared encoding
+    // and the on-disk bytes must agree, or MSXML6 (Task Scheduler's own parser) rejects the file
+    // with "Switch from current encoding to specified encoding not supported." A real XmlDocument
+    // parse against the ACTUAL WRITTEN BYTES is the only assertion that would have caught this --
+    // asserting string content via File.ReadAllText (encoding-detecting) does not.
+    [Fact]
+    public void Install_WritesXmlWhoseDeclaredEncodingMatchesItsOnDiskBytes_AndParsesWithARealXmlParser()
+    {
+        var runner = new FakeProcessRunner { ExitCodeToReturn = 0 };
+        var xmlPath = Path.Combine(Path.GetTempPath(), $"cosmicwin-{Guid.NewGuid():N}.xml");
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", xmlPath, runner);
+
+        try
+        {
+            installer.Install();
+
+            var bytes = File.ReadAllBytes(xmlPath);
+            Assert.True(bytes.Length >= 2, "Written XML file is too short to carry a byte order mark.");
+            Assert.Equal(0xFF, bytes[0]);
+            Assert.Equal(0xFE, bytes[1]);
+
+            using var stream = File.OpenRead(xmlPath);
+            var document = new XmlDocument();
+            document.Load(stream); // Throws XmlException if the declared/actual encodings disagree.
+            Assert.Equal("Task", document.DocumentElement!.LocalName);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
     }
 }
