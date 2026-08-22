@@ -24,6 +24,13 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // Task 3.20 (ES-2/ES-4): single delegating call, pinned by AppEntryPointThinnessTests.
+        if (AppComposition.TryHandleTaskCommand(e.Args))
+        {
+            Shutdown();
+            return;
+        }
+
         _composition = AppComposition.WireProduction(Shutdown);
     }
 

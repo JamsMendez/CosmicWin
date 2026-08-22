@@ -17,5 +17,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CosmicWin.App\CosmicWin.App.csproj" />
+    <!-- Task 3.22: drives CosmicWin.Launcher.Program.Run directly with a fake IProcessRunner. -->
+    <ProjectReference Include="..\CosmicWin.Launcher\CosmicWin.Launcher.csproj" />
   </ItemGroup>
 </Project>

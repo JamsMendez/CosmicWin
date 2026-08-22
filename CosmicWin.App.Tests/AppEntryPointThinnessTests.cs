@@ -36,6 +36,19 @@ public sealed class AppEntryPointThinnessTests
     }
 
     [Fact]
+    public void AppXamlCs_OnStartup_DelegatesToTryHandleTaskCommand_ExactlyOnce()
+    {
+        // Task 3.20: pins the single delegating call for --install-task/--uninstall-task.
+        var source = ReadAppXamlCsSource();
+
+        var taskCommandCalls = System.Text.RegularExpressions.Regex.Matches(
+            source, @"AppComposition\.TryHandleTaskCommand\(");
+        Assert.True(
+            taskCommandCalls.Count == 1,
+            $"Expected exactly one AppComposition.TryHandleTaskCommand(...) call in App.xaml.cs, found {taskCommandCalls.Count}.");
+    }
+
+    [Fact]
     public void AppXamlCs_DoesNotCallCompositionRootDirectly()
     {
         var source = ReadAppXamlCsSource();

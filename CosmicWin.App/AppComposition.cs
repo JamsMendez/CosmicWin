@@ -1,5 +1,7 @@
+using System.IO;
 using System.Threading.Channels;
 using CosmicWin.App.Input;
+using CosmicWin.App.Startup;
 using CosmicWin.App.Tray;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
@@ -103,6 +105,39 @@ public sealed class AppComposition : IDisposable
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
             buildTray: controller => new TrayIconHost(controller));
+    }
+
+    private const string TaskName = "CosmicWin";
+
+    /// <summary>
+    /// Tasks 3.20/3.21/3.22 (ES-2/ES-4): the ONE delegating call <c>App.OnStartup</c> makes for
+    /// <c>--install-task</c>/<c>--uninstall-task</c>, called BEFORE <see cref="WireProduction"/>.
+    /// <paramref name="runner"/> defaults to the real runner, overridable only for tests.
+    /// </summary>
+    public static bool TryHandleTaskCommand(IReadOnlyList<string> args, IProcessRunner? runner = null)
+    {
+        if (args.Count == 0)
+        {
+            return false;
+        }
+
+        var installer = new TaskInstaller(
+            TaskName,
+            Environment.ProcessPath ?? throw new InvalidOperationException("Cannot resolve the current process path."),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CosmicWin", "CosmicWinTask.xml"),
+            runner ?? new Win32ProcessRunner());
+
+        switch (args[0])
+        {
+            case "--install-task":
+                installer.Install();
+                return true;
+            case "--uninstall-task":
+                installer.Uninstall();
+                return true;
+            default:
+                return false;
+        }
     }
 
     /// <summary>Mirrors <c>App.OnExit</c>'s exact disposal order: tray, hook, adapter, workspace, dispatcher.</summary>
