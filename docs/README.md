@@ -16,6 +16,8 @@ if the two disagree, the file wins and this table is stale.
 | `Alt+[` | Ascend scope (act on the parent group) |
 | `Alt+]` | Descend scope |
 | `Alt+O` | Toggle the focused group's split axis |
+| `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
+| `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window to that desktop, without following it |
 
 **An unregistered chord is indistinguishable from a broken feature.** The low-level hook only
 swallows chords it matches; everything else passes through to whatever has focus. `Ctrl+Shift` +
@@ -101,6 +103,36 @@ ported from it, never copied. The parts that have actually been consulted:
 
 `Orientation` is inverted between the two projects: cosmic-comp's `Orientation::Vertical` measures
 width and means side-by-side, which is CosmicWin's `SplitAxis.Horizontal`. Translate deliberately.
+
+## Virtual desktops
+
+Windows' own desktops, addressed by POSITION — `CreateDesktop` appends at the end and desktops carry
+no durable number, so "desktop 3" means "the third one". An emptied desktop is NOT auto-deleted.
+
+Microsoft publishes no API for creating or switching desktops, and that is deliberate:
+`IVirtualDesktopManager` has three methods, none of which can, and its own remarks say applications
+"should avoid automatically switching the user from one virtual desktop to another". Moving a window
+DOES use that documented interface. Only create and switch use the undocumented
+`IVirtualDesktopManagerInternal`, declared by hand in `CosmicWin.Interop/Win32/VirtualDesktops/` —
+no third-party package, no runtime code generation, and the COM object comes from the already-running
+shell.
+
+**The declaration order in those interfaces IS the vtable.** A Windows update that inserts or
+reorders a method produces no compile error and no exception — later calls silently dispatch to the
+wrong function, in an elevated process. Two defences, and neither is optional:
+
+- Every member CosmicWin does not call is a slot holder with a deliberately wrong signature. It
+  holds its position and cannot be invoked by accident. `RemoveDesktop` is one of them.
+- `VirtualDesktopProbe` runs once and makes three independent slots corroborate each other —
+  `GetCount`, `GetDesktops` and `GetCurrentDesktop` must all agree. A shifted vtable can satisfy any
+  one by luck. Failing that check makes the feature inert rather than wrong.
+
+`VirtualDesktopVTableTests` re-proves the layout across MORE than one desktop, arranging the extra
+one through Windows' documented `Win+Ctrl+D` rather than through `CreateDesktop` — verifying a
+mutator by calling it would be circular. It cleans up after itself, and your screen will flash to a
+new desktop and back while it runs.
+
+Verified on OS 10.0.26200 (the build-26100 layout still holds).
 
 ## Spacing
 
