@@ -174,6 +174,27 @@ new desktop and back while it runs.
 
 Verified on OS 10.0.26200 (the build-26100 layout still holds).
 
+## Tray menu
+
+The three commands carry icons drawn from Windows' own icon FONT -- `Segoe Fluent Icons` on 11,
+`Segoe MDL2 Assets` as the fallback on 10. .NET ships no icon set that covers them: `SystemIcons`
+stops at Error, Warning, Shield and friends, with no pause, refresh or exit.
+
+A font rather than embedded bitmaps, for the reason the tray icon itself already had to solve: it
+renders at whatever size the notification area asks for at this display's DPI, where one bitmap
+would be smeared to fit. Three rules hold it together:
+
+- The family is resolved BY NAME through `FontFamily`. Constructing a `Font` for an unknown family
+  makes GDI+ substitute a default face silently, drawing a missing-glyph box instead of failing
+  where it can be caught.
+- The colour is `SystemColors.MenuText`, so the icons follow the user's light or dark theme. Fixed
+  black is four invisible squares on a dark menu.
+- The pause icon flips WITH its label, pinned by a test that requires the two to agree in every
+  state. A menu reading "Reanudar" beside a pause icon is worse than no icon at all.
+
+`ToolStripMenuItem` does not own its `Image`, exactly as `NotifyIcon` does not own its `Icon`. Both
+the swapped-out pause image and every image still held at disposal are released by hand.
+
 ## Spacing
 
 `TreeArranger.Gap` is the single spacing knob and **defaults to zero**; `AppComposition` opts

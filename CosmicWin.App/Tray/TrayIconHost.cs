@@ -18,19 +18,43 @@ public sealed class TrayIconHost : IDisposable
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _pauseItem;
     private readonly Icon? _ownedIcon;
+    private readonly ContextMenuStrip _menu;
 
     public TrayIconHost(TrayMenuController controller)
     {
-        _pauseItem = new ToolStripMenuItem(PauseLabel(controller.IsPaused));
-        _pauseItem.Click += (_, _) => _pauseItem.Text = PauseLabel(controller.TogglePause());
+        _pauseItem = new ToolStripMenuItem(PauseLabel(controller.IsPaused))
+        {
+            Image = TrayGlyphs.Render(TrayGlyphs.ForPause(controller.IsPaused)),
+        };
+        _pauseItem.Click += (_, _) =>
+        {
+            var isPaused = controller.TogglePause();
+            _pauseItem.Text = PauseLabel(isPaused);
 
-        var reloadItem = new ToolStripMenuItem("Reload");
+            // The icon flips WITH the label, never after it. They are two renderings of one
+            // decision, and "Reanudar" beside a pause icon reads worse than no icon at all.
+            // ToolStripMenuItem does not own its Image, so the outgoing one is released here.
+            var previous = _pauseItem.Image;
+            _pauseItem.Image = TrayGlyphs.Render(TrayGlyphs.ForPause(isPaused));
+            previous?.Dispose();
+        };
+
+        var reloadItem = new ToolStripMenuItem("Reload")
+        {
+            Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
+        };
         reloadItem.Click += (_, _) => controller.Reload();
 
-        var exitItem = new ToolStripMenuItem("Salir");
+        var exitItem = new ToolStripMenuItem("Salir")
+        {
+            Image = TrayGlyphs.Render(TrayGlyphs.Exit),
+        };
         exitItem.Click += (_, _) => controller.Exit();
 
-        var menu = new ContextMenuStrip();
+        // Kept so Dispose can release the images: ToolStripMenuItem never owns the Image handed
+        // to it, and the menu outlives every local here.
+        _menu = new ContextMenuStrip();
+        var menu = _menu;
         menu.Items.Add(_pauseItem);
         menu.Items.Add(reloadItem);
         menu.Items.Add(exitItem);
@@ -81,5 +105,13 @@ public sealed class TrayIconHost : IDisposable
         // here. SystemIcons.Application is a shared system handle and must NOT be disposed, which is
         // why only the icon this class created is tracked.
         _ownedIcon?.Dispose();
+
+        // Same rule one level down: a menu item does not own its Image either.
+        foreach (var item in _menu.Items.OfType<ToolStripMenuItem>())
+        {
+            item.Image?.Dispose();
+        }
+
+        _menu.Dispose();
     }
 }
