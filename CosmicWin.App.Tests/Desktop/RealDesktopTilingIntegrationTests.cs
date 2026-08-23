@@ -422,6 +422,8 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback) => inner.SubscribeWindowEvents(callback);
 
+        public IDisposable SubscribeShownWindows(Action<nint> callback) => inner.SubscribeShownWindows(callback);
+
         public bool TryActivateWindow(nint hwnd)
         {
             LastActivateAttempt = hwnd;

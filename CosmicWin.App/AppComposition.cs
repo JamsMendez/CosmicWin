@@ -40,9 +40,14 @@ public sealed class AppComposition : IDisposable
     private readonly IDisposable _tray;
     private readonly IDisposable _reconcile;
 
+    /// <summary>Both null when no shown-window watcher was supplied -- dialogs are then simply left where they open.</summary>
+    private readonly IWindowShownWatcher? _windowShown;
+    private readonly FloatingDialogAdapter? _dialogAdapter;
+
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
-        MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile)
+        MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile,
+        IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -50,6 +55,8 @@ public sealed class AppComposition : IDisposable
         _sessionAdapter = sessionAdapter;
         _tray = tray;
         _reconcile = reconcile;
+        _windowShown = windowShown;
+        _dialogAdapter = dialogAdapter;
     }
 
     /// <summary>
@@ -102,7 +109,8 @@ public sealed class AppComposition : IDisposable
         Func<TrayMenuController, IDisposable> buildTray,
         IVirtualDesktopService? virtualDesktops = null,
         Diagnostics.IDesktopTrace? desktopTrace = null,
-        Func<nint, Guid>? resolveWindowDesktop = null)
+        Func<nint, Guid>? resolveWindowDesktop = null,
+        IWindowShownWatcher? windowShown = null)
     {
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
@@ -262,7 +270,30 @@ public sealed class AppComposition : IDisposable
             executor.ResolveFocusedLeaf();
         });
 
-        return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray, reconcile);
+        // A separate path on purpose, sharing only the pause flag. Modal dialogs never reach the
+        // workspace above -- its trackability gate drops every owned window, which is what keeps
+        // tooltips and context menus out of the tiling engine -- so seeing them at all takes a
+        // second, narrower event source that touches none of it.
+        FloatingDialogAdapter? dialogAdapter = null;
+        if (windowShown is not null)
+        {
+            dialogAdapter = new FloatingDialogAdapter(
+                windowShown, treeManager, () => exceptionStore.Current, () => hook.IsPaused)
+            {
+                // Off unless asked for: one line per owned window shown anywhere on the desktop is
+                // diagnostic volume, not something to write during ordinary use.
+                //
+                // A marker FILE, not an environment variable. CosmicWin always runs elevated, and an
+                // elevated process launched through UAC gets a fresh environment block rather than
+                // its launcher's -- so a variable set beside the launch would silently never arrive,
+                // and the diagnostic would look like it had proven the path dead.
+                Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
+            };
+            windowShown.Open();
+        }
+
+        return new AppComposition(
+            dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter);
     }
 
     /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/>. Called exactly once, from <c>App.OnStartup</c>.</summary>
@@ -295,7 +326,8 @@ public sealed class AppComposition : IDisposable
             // chords become inert, rather than calling through a vtable that may have moved.
             virtualDesktops: desktops,
             desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()),
-            resolveWindowDesktop: desktops.ResolveWindowDesktop);
+            resolveWindowDesktop: desktops.ResolveWindowDesktop,
+            windowShown: new Win32WindowShownWatcher());
     }
 
     /// <summary>
@@ -390,6 +422,10 @@ public sealed class AppComposition : IDisposable
         _tray.Dispose();
         _hook.Dispose();
 
+        // The adapter first, then the source it listens to: unsubscribing before the hook is torn
+        // down means no event can arrive against a half-disposed adapter.
+        _dialogAdapter?.Dispose();
+        _windowShown?.Dispose();
         _sessionAdapter.Dispose();
         _workspace.Dispose();
         _dispatcher.DisposeAsync().AsTask().GetAwaiter().GetResult();

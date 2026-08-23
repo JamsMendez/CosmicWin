@@ -94,7 +94,7 @@ not passed: a run that reports skips has not verified the desktop facts at all.
 
 ## Diagnostics
 
-Four test-shaped files assert nothing on purpose. They answer a question with measured data instead
+Five test-shaped files assert nothing on purpose. They answer a question with measured data instead
 of a hypothesis, and each was written because a guess had already been wrong once.
 
 | File | Answers |
@@ -103,8 +103,15 @@ of a hypothesis, and each was written because a guess had already been wrong onc
 | `CosmicWin.Layout.Tests/MoveSequenceDiagnostic.cs` | What does the tree look like after each move chord? (Found a degenerate single-child group stranding the window.) |
 | `CosmicWin.Interop.Tests/Win32/FrameBoundsDiagnostic.cs` | How far is the drawn frame from `GetWindowRect`? (Measured the 7px invisible border, 0 on top.) |
 | `CosmicWin.Interop.Tests/Win32/VirtualDesktopProbeDiagnostic.cs` | Does this Windows build expose the virtual-desktop vtable we declare? |
+| `CosmicWin.App.Tests/Desktop/ModalDialogSnapshotDiagnostic.cs` | What IS the window the user calls a modal, and which predicate matches it? (Settled that GoLand's Settings dialog is owned and untrackable.) |
 
-A fourth trace is written by the running app rather than a test:
+The modal one takes a SNAPSHOT rather than watching a window of time. Watching was the original
+design and it failed twice for the same reason: it puts the person running it under a stopwatch, and
+reading the instruction took longer than the window. Open the dialog first, take the picture second.
+Watching survives behind `COSMICWIN_DIAG_WATCH_SECONDS`, for the one question a snapshot cannot
+answer -- which windows MOVE when a chord fires.
+
+A trace is also written by the running app rather than a test:
 `%LOCALAPPDATA%\CosmicWin\desktop-trace.log` records every virtual-desktop chord — action, count
 and index before and after, and the error — plus any chord that matched NO entry, which is otherwise
 invisible and reads exactly like a broken feature.
@@ -193,6 +200,48 @@ switch chord. The tick alone leaves it a full interval stale, which sends a wind
 after `Alt+2` back to desktop 1 -- the defect, re-created by its own fix. Switches made outside
 CosmicWin (`Win+Ctrl+arrow`, Task View) still leave a 400ms window where this can be wrong.
 
+
+## Modal dialogs
+
+A modal dialog is centred on the work area when it opens, at the size it asked for, and never enters
+the tree.
+
+It needed a second event source to be seen at all. `Win32NativeWindowSource.IsTrackable` is
+`!hasOwner && !isCloaked` and gates the hook arm itself, so a window with an OWNER never reaches the
+workspace -- and every modal has one. The tiling pipeline has never seen a dialog.
+
+Widening that gate was the obvious fix and the wrong one: it is the single function keeping tooltips,
+dropdowns, context menus and IME candidate lists out of the tiling engine, and all of them would have
+arrived alongside the dialogs. So `Win32WindowShownWatcher` runs beside it on its own
+`EVENT_OBJECT_SHOW` registration, and the two hooks PARTITION the desktop rather than overlap it --
+the tiling hook takes `!hasOwner`, this one takes the rest. `NoWindowIsEverReportedByBothHooks` pins
+that.
+
+The owner check is also what keeps the second hook cheap. Everything past it reads the window in full
+-- rectangle, DWM frame, class, title and a process handle -- and the hook fires for every window
+shown anywhere on the desktop, so without it every menu that opens would cost an `OpenProcess`.
+
+`WindowFilters.IsModalDialog` is then the only thing standing between a context menu and being moved
+out from under the pointer that opened it: owned, has `WS_SYSMENU`, not a tool window, not minimized,
+and no maximise or minimise box. It matches only windows `IsAutoExcluded` already refuses, so a
+centred dialog cannot also be tiled.
+
+Measured on this machine, with the dialog open on screen:
+
+```
+0x000309FE owner=YES track=no autoex=YES modal=YES | SYSMENU
+           proc=goland64.exe class=SunAwtDialog title=Settings - GoLandWorkspace
+```
+
+JetBrains IDEs are Java/Swing: the main window is `SunAwtFrame` (unowned, tiled normally) and every
+dialog is `SunAwtDialog` (owned, `WS_SYSMENU` only, no maximise or minimise box).
+
+Create `%LOCALAPPDATA%\CosmicWin	race-dialogs` to make this path write one line per owned window
+shown anywhere on the desktop, plus one per centring, into `desktop-trace.log`; delete the file to
+stop. It is a marker FILE and not an environment variable on purpose -- CosmicWin always runs
+elevated, and a process launched through UAC gets a fresh environment block rather than its
+launcher's, so a variable set beside the launch would silently never arrive and the diagnostic would
+look like it had proven the path dead.
 
 ## Tray menu
 

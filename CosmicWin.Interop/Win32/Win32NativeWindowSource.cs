@@ -111,6 +111,11 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return new WinEventHookSubscription(callback);
     }
 
+    public IDisposable SubscribeShownWindows(Action<nint> callback)
+    {
+        return new ShownWindowHookSubscription(callback);
+    }
+
     /// <summary>How long <see cref="Activate"/> waits for its input-attached worker before giving up.</summary>
     private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -243,6 +248,20 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// shape (unowned, cloaked) measured on a real desktop enumeration.
     /// </summary>
     internal static bool IsTrackable(bool hasOwner, bool isCloaked) => !hasOwner && !isCloaked;
+
+    /// <summary>
+    /// The exact complement of <see cref="IsTrackable(bool, bool)"/>'s owner half, extracted for the
+    /// same reason: the raw <c>GetWindow</c> read cannot be unit-tested without a live HWND, so the
+    /// decision is separated from it.
+    /// </summary>
+    /// <remarks>
+    /// The two hooks partition the desktop rather than overlap it. The tiling hook takes
+    /// <c>!hasOwner</c>; this one takes the rest, because a window WITH an owner is precisely what
+    /// that gate drops and precisely where a modal dialog lives. Nothing unowned is ever reported
+    /// here -- the tiling path already has it, and reporting it twice would invite two answers about
+    /// where the same window belongs.
+    /// </remarks>
+    internal static bool IsShownWindowWorthReporting(bool hasOwner) => hasOwner;
 
     /// <summary>
     /// MR-1 : a real desktop enumeration found DWM-cloaked windows -- e.g. a
@@ -476,6 +495,82 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             if (!_moveSizeHook.IsNull)
             {
                 PInvoke.UnhookWinEvent(_moveSizeHook);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A SECOND, deliberately narrow <c>SetWinEventHook</c> registration: <c>EVENT_OBJECT_SHOW</c>
+    /// alone, with no trackability gate.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It exists so modal dialogs can be seen at all. <see cref="WinEventHookSubscription"/> gates
+    /// its create/show arm on <see cref="IsTrackable(HWND)"/> -- <c>!hasOwner &amp;&amp;
+    /// !isCloaked</c> -- and every modal has an owner, so no dialog has ever reached a caller
+    /// through that path. Relaxing the gate there was the alternative and is the worse trade: it is
+    /// the one function keeping tooltips, dropdowns, context menus and IME candidate lists out of
+    /// the tiling pipeline, and every one of them would have arrived alongside the dialogs.
+    /// </para>
+    /// <para>
+    /// One event, not a range. The tiling hook spans <c>EVENT_OBJECT_CREATE</c>..
+    /// <c>EVENT_OBJECT_LOCATIONCHANGE</c> because it needs all of them; asking the OS for a range
+    /// here would deliver every event in between for no reason, on every window on the desktop.
+    /// </para>
+    /// </remarks>
+    private sealed class ShownWindowHookSubscription : IDisposable
+    {
+        private readonly WINEVENTPROC _thunk;
+        private readonly HWINEVENTHOOK _hook;
+        private Action<nint>? _callback;
+
+        public ShownWindowHookSubscription(Action<nint> callback)
+        {
+            _callback = callback;
+            _thunk = OnWinEvent;
+
+            _hook = PInvoke.SetWinEventHook(
+                PInvoke.EVENT_OBJECT_SHOW,
+                PInvoke.EVENT_OBJECT_SHOW,
+                HMODULE.Null,
+                _thunk,
+                idProcess: 0,
+                idThread: 0,
+                PInvoke.WINEVENT_OUTOFCONTEXT | PInvoke.WINEVENT_SKIPOWNPROCESS);
+
+            if (_hook.IsNull)
+            {
+                throw new InvalidOperationException("SetWinEventHook failed for the shown-window event.");
+            }
+        }
+
+        private void OnWinEvent(HWINEVENTHOOK hWinEventHook, uint eventType, HWND hwnd, int idObject, int idChild, uint idEventThread, uint dwmsEventTime)
+        {
+            // The window itself, not one of its controls. A dialog shows its buttons and labels on
+            // the way up, and each of those arrives here as a child object.
+            if (idObject != (int)OBJECT_IDENTIFIER.OBJID_WINDOW || idChild != 0 || hwnd == HWND.Null)
+            {
+                return;
+            }
+
+            // One GetWindow call, and it pays for itself. Everything past this point reads the
+            // window in full -- title, class, rectangle, DWM frame, and a process handle -- and this
+            // hook fires for every window shown anywhere on the desktop. Paying that for windows the
+            // caller cannot possibly want would put an OpenProcess behind every menu that opens.
+            if (!IsShownWindowWorthReporting(PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) != HWND.Null))
+            {
+                return;
+            }
+
+            _callback?.Invoke(hwnd);
+        }
+
+        public void Dispose()
+        {
+            _callback = null;
+            if (!_hook.IsNull)
+            {
+                PInvoke.UnhookWinEvent(_hook);
             }
         }
     }

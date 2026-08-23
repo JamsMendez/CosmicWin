@@ -71,4 +71,18 @@ internal interface INativeWindowSource
     /// the native call fails — e.g. activation is refused for a higher-integrity/protected window.
     /// </summary>
     bool TryActivateWindow(nint hwnd);
+
+    /// <summary>
+    /// Subscribes to every top-level window being SHOWN, with NO trackability filtering. Disposing
+    /// the returned handle unsubscribes.
+    /// </summary>
+    /// <remarks>
+    /// A separate registration from <see cref="SubscribeWindowEvents"/>, not a widening of it. That
+    /// one gates its create arm on trackability — <c>!hasOwner &amp;&amp; !isCloaked</c> — which is
+    /// the single function keeping tooltips, dropdowns, context menus and IME candidate lists out
+    /// of the tiling pipeline, and a modal dialog is dropped by the same rule for having an owner.
+    /// Loosening it to reach dialogs would let all of that through with them; a second, narrower
+    /// hook leaves the tiling path byte-for-byte as it was.
+    /// </remarks>
+    IDisposable SubscribeShownWindows(Action<nint> callback);
 }

@@ -16,6 +16,7 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     private readonly HashSet<nint> _failingActivationHandles = new();
     private readonly Dictionary<nint, int> _activationAttempts = new();
     private NativeWindowEventCallback? _callback;
+    private Action<nint>? _shownCallback;
 
     private readonly HashSet<nint> _hiddenFromEnumeration = [];
 
@@ -71,6 +72,19 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         _callback = callback;
         return new Subscription(this);
     }
+
+    public IDisposable SubscribeShownWindows(Action<nint> callback)
+    {
+        _shownCallback = callback;
+        return new ShownSubscription(this);
+    }
+
+    /// <summary>
+    /// Simulates the ungated show hook firing. Deliberately independent of
+    /// <see cref="SimulateWindowCreatedWithEvent"/>: the whole point of the second registration is
+    /// that it reports windows the trackable path never delivers.
+    /// </summary>
+    public void SimulateWindowShown(nint hwnd) => _shownCallback?.Invoke(hwnd);
 
     /// <summary>Seeds a window as already open before <c>Open()</c> enumerates.</summary>
     public void SeedExistingWindow(
@@ -137,5 +151,14 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         public Subscription(FakeNativeWindowSource owner) => _owner = owner;
 
         public void Dispose() => _owner._callback = null;
+    }
+
+    private sealed class ShownSubscription : IDisposable
+    {
+        private readonly FakeNativeWindowSource _owner;
+
+        public ShownSubscription(FakeNativeWindowSource owner) => _owner = owner;
+
+        public void Dispose() => _owner._shownCallback = null;
     }
 }

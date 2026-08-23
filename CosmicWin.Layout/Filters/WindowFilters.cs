@@ -47,4 +47,30 @@ public static class WindowFilters
     /// </summary>
     public static bool IsExcluded(WindowDescriptor descriptor, ExceptionList exceptions)
         => IsAutoExcluded(descriptor) || exceptions.Matches(descriptor);
+
+    /// <summary>
+    /// A modal dialog: the window that is centred and left floating when it opens, rather than
+    /// tiled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the OWNED branch of <see cref="IsAutoExcluded"/> read forwards. That branch already
+    /// decided such a window must never be tiled; this one says what to do with it instead. The
+    /// guards above it are repeated deliberately rather than inherited, because they are what keeps
+    /// the predicate narrow: the event source that delivers a dialog also delivers every tooltip,
+    /// dropdown, context menu and IME candidate list on the desktop, and centring one of those
+    /// would yank it out from under the pointer that summoned it.
+    /// </para>
+    /// <para>
+    /// <c>WS_SYSMENU</c> is what separates a dialog the user must answer from a transient popup: a
+    /// dialog has a close button, a menu and a tooltip do not.
+    /// </para>
+    /// </remarks>
+    public static bool IsModalDialog(WindowDescriptor descriptor) =>
+        descriptor.IsOwned
+        && (descriptor.ExStyle & WindowStyleFlags.ExToolWindow) == 0
+        && (descriptor.Style & WindowStyleFlags.SystemMenu) != 0
+        && (descriptor.Style & WindowStyleFlags.Minimized) == 0
+        && (descriptor.Style & WindowStyleFlags.MaximizeBox) == 0
+        && (descriptor.Style & WindowStyleFlags.MinimizeBox) == 0;
 }
