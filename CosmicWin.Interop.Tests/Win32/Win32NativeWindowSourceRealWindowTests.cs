@@ -109,23 +109,48 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// MR-1 : a real desktop enumeration found this window is a persistent phantom
-    /// (unowned, cloaked, owned by explorer.exe itself) that used to pass every check and take a
-    /// tiling slot. Confirms the fix on the exact real class this was measured against, without
-    /// asserting anything about ambient desktop state beyond this one handle.
+    /// MR-1: a real desktop enumeration found a persistent phantom -- unowned, cloaked, and owned by
+    /// explorer.exe itself -- that used to pass every check and take a tiling slot.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This asserted the CLASS, and the class was the wrong thing to assert. Re-measured on a live
+    /// desktop, three windows carry it:
+    /// </para>
+    /// <code>
+    /// 0x004B0842 admitted=YES proc=ApplicationFrameHost.exe title='Sticky Notes'
+    /// 0x00090686 admitted=no  proc=ApplicationFrameHost.exe title='Settings'
+    /// 0x00050736 admitted=no  proc=explorer.exe             title=''
+    /// </code>
+    /// <para>
+    /// <c>ApplicationFrameWindow</c> is the frame Windows wraps around EVERY UWP app, so the old
+    /// assertion said no UWP app may ever be tiled -- which contradicts the product. It passed only
+    /// while no UWP app happened to be open, and failed the moment one was: a plain <c>[Fact]</c>
+    /// reading the ambient desktop, whose result depended on what the machine had running. That is
+    /// a flakiness shape worth naming, not just a wrong assertion.
+    /// </para>
+    /// <para>
+    /// The phantom is the explorer-owned one, and it is what the fix was for. Narrowed to exactly
+    /// that, the fact holds whatever else is open.
+    /// </para>
+    /// </remarks>
     [Fact]
     public void EnumerateTopLevelWindows_ExcludesTheRealExplorerApplicationFrameWindowPhantom()
     {
         var source = new Win32NativeWindowSource();
 
-        var handles = source.EnumerateTopLevelWindows();
-
-        foreach (var handle in handles)
+        foreach (var handle in source.EnumerateTopLevelWindows())
         {
-            Assert.True(
-                source.TryGetWindowInfo(handle, out var info) && info.ClassName != "ApplicationFrameWindow",
-                "A cloaked ApplicationFrameWindow phantom should never reach EnumerateTopLevelWindows.");
+            Assert.True(source.TryGetWindowInfo(handle, out var info), "An enumerated handle must still be readable.");
+
+            var isExplorerPhantom =
+                info.ClassName == "ApplicationFrameWindow"
+                && info.ProcessName.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase);
+
+            Assert.False(
+                isExplorerPhantom,
+                "The cloaked explorer-owned ApplicationFrameWindow phantom should never reach " +
+                $"EnumerateTopLevelWindows. Got 0x{handle:X8} titled '{info.Title}'.");
         }
     }
 
