@@ -96,6 +96,32 @@ public sealed class ActionExecutor(
             return ValueTask.CompletedTask;
         }
 
+        // A chord that MOVES a window acts on the window the user is looking at, or on nothing in the
+        // tree at all. TryResolveFocused deliberately falls back to the last known leaf when the
+        // foreground is untracked, and that is right for a FOCUS chord -- it is how a user returns to
+        // the tiled world from a dialog or a non-tiled app, where dropping the chord would strand
+        // them. For a mutation it is wrong twice over. Reported from real use: with a modal dialog
+        // focused, Alt+Shift+<direction> rearranged the window BEHIND it. The dialog is owned, so it
+        // is never in the tree (measured), and the chord landed on whatever had been focused before.
+        //
+        // Answered BEFORE focus is resolved, exactly like the desktop chords above: this is about a
+        // window the tree does not contain, so making it wait on a resolved leaf would drop the chord
+        // whenever the tree is empty or nothing has been focused yet.
+        if (IsMutation(action.Kind) && !IsTracked(foregroundHandle))
+        {
+            // Doing nothing was only half the answer. A floating window still deserves the chord --
+            // it simply cannot travel through a tree it is not in, so the direction goes to whoever
+            // manages it. Resize and toggle-axis are deliberately not offered: half a work area is a
+            // position rather than a size a dialog laid itself out for, and a window in no group has
+            // no split axis to toggle.
+            if (MoveDirectionOf(action.Kind) is { } floating)
+            {
+                MoveFloatingWindow?.Invoke(foregroundHandle, floating);
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
         if (TryResolveFocused(foregroundHandle, out var focused))
         {
             Dispatch(action.Kind, focused, foregroundHandle);
@@ -110,6 +136,41 @@ public sealed class ActionExecutor(
 
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>
+    /// Handles a move chord for a window the tree does not contain, reporting whether anyone owned
+    /// it. Unset -- as in every test that predates floating dialogs -- such a chord is simply dropped.
+    /// </summary>
+    public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
+
+    /// <summary>The direction a MOVE chord names, or <see langword="null"/> if it is not a move.</summary>
+    private static Direction? MoveDirectionOf(HotkeyActionKind kind) => kind switch
+    {
+        HotkeyActionKind.MoveLeft => Direction.Left,
+        HotkeyActionKind.MoveRight => Direction.Right,
+        HotkeyActionKind.MoveUp => Direction.Up,
+        HotkeyActionKind.MoveDown => Direction.Down,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether this chord CHANGES the layout, as opposed to navigating it.
+    /// </summary>
+    /// <remarks>
+    /// Scope changes (<see cref="HotkeyActionKind.FocusIn"/>/<see cref="HotkeyActionKind.FocusOut"/>)
+    /// are navigation, not mutation: they choose what a later chord will act on and move nothing by
+    /// themselves.
+    /// </remarks>
+    private static bool IsMutation(HotkeyActionKind kind) => kind
+        is HotkeyActionKind.MoveLeft or HotkeyActionKind.MoveRight
+        or HotkeyActionKind.MoveUp or HotkeyActionKind.MoveDown
+        or HotkeyActionKind.ResizeLeft or HotkeyActionKind.ResizeRight
+        or HotkeyActionKind.ResizeUp or HotkeyActionKind.ResizeDown
+        or HotkeyActionKind.ToggleOrientation;
+
+    /// <summary>Whether the OS foreground maps to a leaf CosmicWin actually holds.</summary>
+    private bool IsTracked(nint foregroundHandle) =>
+        foregroundHandle != 0 && registry.TryGetLeaf(foregroundHandle, out var leaf) && leaf is not null;
 
     private void Dispatch(HotkeyActionKind kind, LeafNode focused, nint foregroundHandle)
     {

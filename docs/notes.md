@@ -39,6 +39,33 @@ swallows chords it matches; everything else passes through to whatever has focus
 direction is *not* bound, so pressing it does nothing and looks exactly like a bug. Move is
 `Alt+Shift`.
 
+### A chord that moves needs a window it can see
+
+Move, resize and toggle-axis act on the window holding the FOREGROUND, and do nothing to the tree
+when that window is not in it. Focus chords are deliberately different: they still fall back to the
+last leaf CosmicWin activated, because that is how a user returns to the tiled world from a dialog
+or a non-tiled app.
+
+The distinction was reported from real use. With GoLand's Settings dialog focused, `Alt+Shift+`
+direction rearranged the GoLand window BEHIND it. A modal is owned, `IsTrackable` is
+`!hasOwner && !isCloaked`, so the dialog is never in the tree -- and the executor fell back to the
+last leaf it had focused, which was the window underneath. Rearranging something the user did not
+aim at is bad; doing it where a modal hides it is worse.
+
+A move chord aimed at a floating dialog is not dropped, though: it SNAPS the dialog instead, since
+there is no tile for it to travel between. Left and right take a half of the work area, up takes all
+of it, and down returns it to the size it OPENED at, centred -- which is why `FloatingDialogAdapter`
+remembers that size from the moment it first sees the window. After a snap the dialog is half the
+screen wide and there is nothing left on the window itself to restore from.
+
+Resize and toggle-axis stay no-ops for a floating window. Half a work area is a position rather than
+a size a dialog laid itself out for, and a window in no group has no split axis to toggle.
+
+Two behaviours were reported as one here, and separating them took a measurement. Moving the modal
+itself to half-left, half-right and fullscreen was Windows' own Snap (`Win+`direction) throughout --
+proven by closing CosmicWin, at which point `Alt+Shift+`direction did nothing while `Win+`direction
+still moved it.
+
 `Alt+[` is not required to move a window out of its group — `MoveNode` walks up the tree on its own
 (the reference implementation's ancestor walk). Its remaining purpose is deliberately moving a whole group as
 one unit.
@@ -199,7 +226,6 @@ took the user. `AppComposition` samples it instead, and from BOTH the reconcilia
 switch chord. The tick alone leaves it a full interval stale, which sends a window opened straight
 after `Alt+2` back to desktop 1 -- the defect, re-created by its own fix. Switches made outside
 CosmicWin (`Win+Ctrl+arrow`, Task View) still leave a 400ms window where this can be wrong.
-
 
 ## Modal dialogs
 

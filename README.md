@@ -16,7 +16,10 @@ and Windows' own virtual desktops are driven from the keyboard.
 - **Resize** — grow toward a neighbour, or shrink when there is none.
 - **Virtual desktops** — switch by number, send a window to one, each with its own layout. A new
   window opens on the desktop you are on, even when Windows would have put it somewhere else.
-- **Dialogs float** — a modal opens centred at its own size and is never tiled.
+- **Dialogs float** — a modal opens centred at its own size and is never tiled. The move chord snaps
+  it to half the screen or the whole work area instead of walking the tree, and returns it to the
+  size it opened at. Resize does nothing while one holds the foreground, rather than rearranging the
+  window behind it.
 - **Windows that fight back** — a window dragged out of its slot snaps back on drop; a window that
   resizes itself is put back; a window that refuses to be positioned is left alone rather than
   fought.

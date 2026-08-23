@@ -289,6 +289,9 @@ public sealed class AppComposition : IDisposable
                 // and the diagnostic would look like it had proven the path dead.
                 Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
             };
+            // The other half of the executor's untracked-foreground rule: a move chord aimed at a
+            // window the tree does not contain is offered here instead of being dropped.
+            executor.MoveFloatingWindow = dialogAdapter.TrySnap;
             windowShown.Open();
         }
 
