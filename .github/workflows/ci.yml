@@ -33,12 +33,15 @@ jobs:
       - name: Build
         run: dotnet build CosmicWin.sln -c Release --no-restore
 
-      # The desktop-gated tests spawn real windows and move the real foreground. They skip
-      # unless COSMICWIN_RUN_DESKTOP_TESTS=1, which is deliberately never set here: a hosted
-      # agent has no interactive desktop to verify those facts against. A green run therefore
-      # proves the headless suite only.
+      # Desktop facts spawn real windows, move the real foreground, and read whatever the
+      # machine happens to have open. A hosted agent has no interactive desktop to verify any
+      # of that against, so the whole `RequiresDesktop` category is excluded by trait here.
+      #
+      # The trait is the gate that matters, not COSMICWIN_RUN_DESKTOP_TESTS: only some of those
+      # facts consult that variable, so leaving it unset excludes some of them and not others.
+      # A green run proves the headless suite only.
       - name: Test
-        run: dotnet test CosmicWin.sln -c Release --no-build --verbosity normal
+        run: dotnet test CosmicWin.sln -c Release --no-build --verbosity normal --filter "Category!=RequiresDesktop"
 
       - name: Publish
         run: dotnet publish CosmicWin.App/CosmicWin.App.csproj -c Release --no-build -o artifacts/CosmicWin
