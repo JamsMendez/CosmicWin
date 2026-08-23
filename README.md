@@ -25,6 +25,8 @@ and Windows' own virtual desktops are driven from the keyboard.
 - **Windows that fight back** — a window dragged out of its slot snaps back on drop; a window that
   resizes itself is put back; a window that refuses to be positioned is left alone rather than
   fought.
+- **Start at logon** — an opt-in Scheduled Task starts CosmicWin elevated when you log on, without a
+  UAC prompt every time.
 
 ## What it does not do yet
 
@@ -52,6 +54,35 @@ cd CosmicWin
 `run.ps1` builds, copies the output to a git-ignored `run/`, and launches that copy elevated — accept
 the UAC prompt. Running the copy leaves the build tree unlocked, so builds and tests keep working
 while the app is open. Exit from the tray icon.
+
+## Start at logon
+
+CosmicWin does not install itself. Autostart is opt-in, and it is a Scheduled Task rather than a
+`Run` registry key because the app must start elevated — a `Run` entry cannot, and would hand you a
+UAC prompt at every logon.
+
+```powershell
+CosmicWin.exe --install-task     # register the logon task
+CosmicWin.exe --uninstall-task   # remove it
+```
+
+Both commands do their work and exit immediately; neither starts the window manager. Run them from
+an elevated shell — registering a task that runs with highest privileges is itself a privileged
+operation.
+
+Four things worth knowing before you rely on it:
+
+- **The task points at the executable you invoked**, resolved at install time. Install from the copy
+  you actually run — `run\CosmicWin.exe` after `run.ps1`, not the build tree, which `run.ps1`
+  deliberately leaves unlocked. Move or delete that copy and the task starts nothing.
+- **Quitting from the tray disables the trigger.** Exiting is read as "not right now", so the task
+  stays registered but stops firing, and the next logon is quiet. Re-run `--install-task` to turn it
+  back on; it re-registers over the existing task and re-enables the trigger.
+- **`--uninstall-task` is idempotent.** A task that was never installed counts as success, so it is
+  safe to run twice, or on a machine you are not sure about.
+- **The task XML is written to** `%LOCALAPPDATA%\CosmicWin\CosmicWinTask.xml`. It is an artefact of
+  installation, not a configuration file — editing it changes nothing until the next install, which
+  overwrites it.
 
 ## Keybindings
 
