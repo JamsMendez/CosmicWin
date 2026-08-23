@@ -293,16 +293,40 @@ public sealed class AppCompositionTests
         }
     }
 
+    /// <summary>
+    /// REWRITTEN: the pass used to Poll on every tick, and this fact asserted exactly that. The tick
+    /// was then split, because a one-second lag before windows from a closed desktop were tiled came
+    /// from work that is CHEAP waiting on a timer sized for work that is not. <c>Poll</c> enumerates
+    /// every top-level window on the system and keeps its original cadence; the desktop check runs
+    /// on every tick.
+    /// <para>
+    /// What this fact protects is unchanged and is the part that matters: the pass still drives the
+    /// workspace's own catch-up, and still does so on a bounded, recurring schedule.
+    /// </para>
+    /// </summary>
     [Fact]
-    public void Wire_ReconciliationPass_DrivesTheWorkspacesOwnCatchUp()
+    public void Wire_ReconciliationPass_StillDrivesTheWorkspacesOwnCatchUp_OnTheSlowerCadence()
     {
         var harness = WireHarness();
         using (harness.Composition)
         {
             Assert.Equal(0, harness.Workspace.PollCallCount);
 
+            // The cheap tick alone must not pay for the expensive enumeration.
             harness.Scheduler.Fire();
-            harness.Scheduler.Fire();
+            Assert.Equal(0, harness.Workspace.PollCallCount);
+
+            for (var tick = 1; tick < AppComposition.PollEveryNthWatch; tick++)
+            {
+                harness.Scheduler.Fire();
+            }
+
+            Assert.Equal(1, harness.Workspace.PollCallCount);
+
+            for (var tick = 0; tick < AppComposition.PollEveryNthWatch; tick++)
+            {
+                harness.Scheduler.Fire();
+            }
 
             Assert.Equal(2, harness.Workspace.PollCallCount);
         }

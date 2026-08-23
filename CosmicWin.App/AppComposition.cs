@@ -53,12 +53,26 @@ public sealed class AppComposition : IDisposable
     }
 
     /// <summary>
-    /// WT-1's "polling fallback reconciliation pass on a bounded interval". Frequent enough that a
-    /// window the hook dropped is picked up before the user notices, cheap enough to ignore: a pass
-    /// only raises events for windows whose bounds or membership ACTUALLY changed, so a steady
-    /// desktop costs one enumeration and nothing else.
+    /// How often the cheap checks run. Everything on this tick must stay cheap, because this is the
+    /// responsiveness floor for anything CosmicWin can only notice by ASKING -- a desktop closing
+    /// and handing its windows away raises no event we subscribe to.
     /// </summary>
-    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan WatchInterval = TimeSpan.FromMilliseconds(400);
+
+    /// <summary>
+    /// How often the FULL reconciliation runs, expressed in watch ticks. <c>Poll</c> enumerates
+    /// every top-level window on the system, so it stays at its original two seconds while the
+    /// desktop check -- a handful of lookups over tracked windows -- runs five times as often.
+    /// Measured as the cause of a one-second lag before windows from a closed desktop were tiled:
+    /// the work was cheap, the wait was not.
+    /// <para>
+    /// WT-1's "polling fallback reconciliation pass on a bounded interval" is this slower tick.
+    /// Frequent enough that a window the hook dropped is picked up before the user notices, cheap
+    /// enough to ignore: a pass only raises events for windows whose bounds or membership ACTUALLY
+    /// changed, so a steady desktop costs one enumeration and nothing else.
+    /// </para>
+    /// </summary>
+    internal const int PollEveryNthWatch = 5;
 
     /// <summary>
     /// Wires every collaborator, in <c>App.OnStartup</c>'s exact order: <see
@@ -158,9 +172,14 @@ public sealed class AppComposition : IDisposable
         // after our own chord showed the user a loose window for up to a full interval.
         executor.DesktopSwitched = ApplyArrivingLayout;
 
-        var reconcile = scheduleReconcile(ReconcileInterval, () =>
+        var watchTick = 0;
+        var reconcile = scheduleReconcile(WatchInterval, () =>
         {
-            workspace.Poll();
+            if (++watchTick >= PollEveryNthWatch)
+            {
+                watchTick = 0;
+                workspace.Poll();
+            }
 
             // Publishes off the hook thread, so the hook itself never waits on a file.
             if (hook.LastUnmatchedChord is { } unmatched && unmatched != lastReportedUnmatched)
@@ -187,7 +206,7 @@ public sealed class AppComposition : IDisposable
             // Keeps the executor's focus record within one interval of the real foreground. Without
             // it the record only advances on a chord, so a user who clicks between windows with the
             // mouse and then opens a new one would have it split whichever tile they last used a
-            // hotkey on (LE-4 placement).
+            // hotkey on (LE-4 placement). One native read, so it belongs on the cheap tick.
             executor.ResolveFocusedLeaf();
         });
 
