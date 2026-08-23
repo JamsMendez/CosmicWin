@@ -1,0 +1,49 @@
+# Builds and tests every push and pull request on a GitHub-hosted Windows agent.
+#
+# SignPath signs through its own pipeline and requires every pre-signing job to run on
+# GitHub-hosted agents, so this workflow is a prerequisite for signing, not only a check.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # The product targets Windows and its interop is Win32; there is nothing to gain from
+    # another runner image.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore CosmicWin.sln
+
+      - name: Build
+        run: dotnet build CosmicWin.sln -c Release --no-restore
+
+      # The desktop-gated tests spawn real windows and move the real foreground. They skip
+      # unless COSMICWIN_RUN_DESKTOP_TESTS=1, which is deliberately never set here: a hosted
+      # agent has no interactive desktop to verify those facts against. A green run therefore
+      # proves the headless suite only.
+      - name: Test
+        run: dotnet test CosmicWin.sln -c Release --no-build --verbosity normal
+
+      - name: Publish
+        run: dotnet publish CosmicWin.App/CosmicWin.App.csproj -c Release --no-build -o artifacts/CosmicWin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CosmicWin
+          path: artifacts/CosmicWin
