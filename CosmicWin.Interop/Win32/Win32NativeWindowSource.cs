@@ -14,7 +14,7 @@ namespace CosmicWin.Interop.Win32;
 /// Real, CsWin32-backed <see cref="INativeWindowSource"/>: enumerates via <c>EnumWindows</c>,
 /// reads geometry/title via <c>GetWindowRect</c>/<c>GetWindowTextW</c>, and subscribes to
 /// create/destroy/move-resize notifications via <c>SetWinEventHook</c>. Ports the pattern from
-/// fancywm's <c>WinMan.Windows.WinEventHookHelper</c> (algorithm only — original code).
+/// the reference implementation's <c>the reference implementation.WinEventHookHelper</c> (algorithm only — original code).
 /// </summary>
 internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 {
@@ -115,13 +115,13 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// MR-2 (Engram discovery #106). The fourth supervised run recorded 40 focus chords and every
+    /// MR-2. The fourth supervised run recorded 40 focus chords and every
     /// activation failed: once the App layer stopped trusting its own optimistic focus cache, the
     /// earlier bare-<c>AttachThreadInput</c> fix was revealed to have never worked at all. It ran on
     /// <c>ActionDispatcher.RunAsync</c>'s thread-pool thread, and <c>AttachThreadInput</c> shares
     /// INPUT queues -- a thread-pool thread has none, so there was nothing to attach to.
     /// <para>
-    /// This is the escalation the vendored FancyWM reference (<c>FancyWM/Utilities/FocusHelper.cs</c>)
+    /// This is the escalation the vendored the reference implementation reference (<c>the reference implementation/Utilities/FocusHelper.cs</c>)
     /// uses, algorithm only: try plainly, then from a dedicated thread that first CREATES a message
     /// queue and attaches to the foreground thread's input, then -- only if that is still refused --
     /// release Windows' foreground lock with two synthetic Alt taps and retry. The synthetic input
@@ -245,7 +245,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     internal static bool IsTrackable(bool hasOwner, bool isCloaked) => !hasOwner && !isCloaked;
 
     /// <summary>
-    /// MR-1 (2026-08-22): a real desktop enumeration found DWM-cloaked windows -- e.g. a
+    /// MR-1 : a real desktop enumeration found DWM-cloaked windows -- e.g. a
     /// suspended UWP host frame (<c>ApplicationFrameWindow</c>, owned by <c>explorer.exe</c>
     /// itself) -- passing every other WE-1/Interop check while <c>IsWindowVisible</c> still
     /// reports <c>true</c> and nothing renders on screen. Such a window silently occupied a
@@ -429,7 +429,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             switch (eventType)
             {
                 // EVENT_OBJECT_SHOW was already arriving inside the subscribed range with no case
-                // for it (Engram discovery #106). Trackability requires IsWindowVisible, and a
+                // for it. Trackability requires IsWindowVisible, and a
                 // top-level window is normally created HIDDEN and shown a moment later, so the
                 // CREATE arm dropped such a window and nothing looked again -- Win32Workspace.Poll()
                 // runs on no production path. Win32Workspace.TryAddWindow is idempotent, so the two

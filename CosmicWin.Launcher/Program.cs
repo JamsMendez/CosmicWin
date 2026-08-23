@@ -3,8 +3,8 @@ using CosmicWin.Interop;
 namespace CosmicWin.Launcher;
 
 /// <summary>
-/// Task 3.22 (D6): unelevated asInvoker shim, no UAC prompt on double-click. Asks the
-/// ALREADY-registered elevated Scheduled Task (task 3.20, ES-2) to run via <c>schtasks /Run</c>,
+/// Unelevated asInvoker shim, no UAC prompt on double-click. Asks the
+/// ALREADY-registered elevated Scheduled Task (ES-2) to run via <c>schtasks /Run</c>,
 /// which elevates silently via its own RunLevel HighestAvailable.
 /// </summary>
 public static class Program

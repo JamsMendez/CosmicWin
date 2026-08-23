@@ -1,7 +1,7 @@
 namespace CosmicWin.App.Tray;
 
 /// <summary>
-/// Tasks 3.15/3.16/3.17/3.18/3.36/3.37 (WU11): pure, Win32-free tray menu behavior. Mirrors the
+/// Pure, Win32-free tray menu behavior. Mirrors the
 /// <c>Func&lt;Rect&gt; workArea</c>/<c>Func&lt;ExceptionList&gt; exceptions</c> single-source-of-truth
 /// idiom already established by <see cref="WorkspaceSessionAdapter"/> -- the controller owns no
 /// state of its own beyond what the injected delegates report, so it is fully unit-testable with
@@ -22,7 +22,7 @@ public sealed class TrayMenuController(
         return next;
     }
 
-    /// <summary>WE-3: re-invokes the injected reload trigger (closes verify-report #21 V10-W4).</summary>
+    /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();
 
     /// <summary>Spec TC-3 (Salir): invokes the injected exit trigger.</summary>

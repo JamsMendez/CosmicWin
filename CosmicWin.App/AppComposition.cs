@@ -14,9 +14,9 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Closes verify-report #21 revision 15 SUGGESTION V15-S1: extracts <c>App.xaml.cs</c>'s
-/// composition into a plain, directly-testable class. Four consecutive closures (V11-W1, V12-W1,
-/// V13-W1, V14-W1) defended the composition site from OUTSIDE a WPF <see
+/// Extracts <c>App.xaml.cs</c>'s
+/// composition into a plain, directly-testable class. Four consecutive closures (,
+/// ) defended the composition site from OUTSIDE a WPF <see
 /// cref="System.Windows.Application"/> subclass -- three by tightening the type system, the last
 /// (<c>CompositionSiteArchitectureTests</c>, now deleted) by reading its source text -- and each
 /// closure fell to a mutation the previous one had not anticipated. This class does not add a
@@ -79,11 +79,11 @@ public sealed class AppComposition : IDisposable
     /// cref="CompositionRoot.Build"/> against <paramref name="treeManager"/>'s <see
     /// cref="TreeManager.Primary"/> tree, then <paramref name="treeManager"/> and <paramref
     /// name="focusTrace"/> are ALSO assigned onto
-    /// the returned executor (WU18, closes V17-W1: a hotkey mutation on a secondary monitor's
+    /// the returned executor (closes: a hotkey mutation on a secondary monitor's
     /// focused window now arranges that SAME secondary tree, not always the primary one; <paramref
     /// name="focusTrace"/> is mandatory rather than optional so the MR-2 diagnostic cannot be
     /// silently dropped from the one composition site that has to carry it), then the hook, then <see cref="MultiMonitorWorkspaceAdapter"/> --
-    /// WU17's real production caller of <paramref name="treeManager"/> (closes carried finding W3)
+    /// 's real production caller of <paramref name="treeManager"/>
     /// -- then <paramref name="workspace"/>.Open(), <paramref name="hook"/>.Start(), the tray, then
     /// the dispatcher loop.
     /// </summary>
@@ -213,7 +213,7 @@ public sealed class AppComposition : IDisposable
         return new AppComposition(dispatcher, hook, workspace, sessionAdapter, tray, reconcile);
     }
 
-    /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/> (WU17). Called exactly once, from <c>App.OnStartup</c>.</summary>
+    /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/>. Called exactly once, from <c>App.OnStartup</c>.</summary>
     public static AppComposition WireProduction(Action shutdown)
     {
         var registry = new WindowRegistry();
@@ -268,7 +268,7 @@ public sealed class AppComposition : IDisposable
     private const string TaskName = "CosmicWin";
 
     /// <summary>
-    /// Tasks 3.20/3.21/3.22 (ES-2/ES-4): the ONE delegating call <c>App.OnStartup</c> makes for
+    /// The ONE delegating call <c>App.OnStartup</c> makes for
     /// <c>--install-task</c>/<c>--uninstall-task</c>, called BEFORE <see cref="WireProduction"/>.
     /// <paramref name="runner"/> defaults to the real runner, overridable only for tests.
     /// </summary>

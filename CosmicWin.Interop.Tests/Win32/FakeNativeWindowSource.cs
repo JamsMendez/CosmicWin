@@ -6,7 +6,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// <summary>
 /// In-memory <see cref="INativeWindowSource"/> that lets tests simulate the OS independently
 /// from whether the hook actually fires — this is what makes the "hook misses an event, polling
-/// catches it" scenario (spec WT-1) testable without a real desktop session.
+/// catches it" scenario testable without a real desktop session.
 /// </summary>
 internal sealed class FakeNativeWindowSource : INativeWindowSource
 {
@@ -115,7 +115,7 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
 
     /// <summary>
     /// Simulates a window disappearing WITHOUT the hook delivering an event — the "hook misses
-    /// an event" scenario (spec WT-1). Only a subsequent <c>Poll()</c> reconciliation will
+    /// an event" scenario. Only a subsequent <c>Poll</c> reconciliation will
     /// notice, via <see cref="EnumerateTopLevelWindows"/> no longer returning it.
     /// </summary>
     public void SimulateWindowDestroyedSilently(nint hwnd) => _windows.Remove(hwnd);

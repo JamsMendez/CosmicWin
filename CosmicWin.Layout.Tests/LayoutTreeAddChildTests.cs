@@ -4,8 +4,8 @@ using CosmicWin.Layout;
 namespace CosmicWin.Layout.Tests;
 
 /// <summary>
-/// D3 <c>AddChild</c> (ported from cosmic-comp's <c>Data::add_window</c>): equal-share initial
-/// placement, proportional shrink of existing siblings, and design D1's invariant that
+/// D3 <c>AddChild</c> (ported from the reference implementation): equal-share initial
+/// placement, proportional shrink of existing siblings, and the design's invariant that
 /// <c>Sizes.Sum() == GroupLength</c> always holds afterward. Also covers LE-4's split-orientation
 /// heuristic, used when a Leaf is first split into a Group.
 /// </summary>
@@ -102,19 +102,19 @@ public class LayoutTreeAddChildTests
     [InlineData(1000, 1000, SplitAxis.Vertical)]   // square: height >= width -> stacked
     public void ChooseSplitAxis_UsesAspectRatioHeuristic(int width, int height, SplitAxis expected)
     {
-        // NOTE (spec/design inconsistency discovered during implementation): spec LE-4's literal
+        // NOTE (spec/design inconsistency discovered during implementation): LE-4's literal
         // text pairs "width > height -> Vertical split (side-by-side)". That labeling actually
-        // matches cosmic-comp's ORIGINAL (rejected) convention verified in
-        // cosmic-epoch/cosmic-comp/src/shell/layout/tiling/mod.rs — Orientation::Vertical there
+        // matches the reference implementation's ORIGINAL (rejected) convention verified in
+        // the reference implementation's shell/layout/tiling/mod.rs — Orientation::Vertical there
         // measures geo.size.w (i.e. is the side-by-side axis), while Orientation::Horizontal
-        // measures geo.size.h (i.e. is the "inverted" stacked axis design D2 says CosmicWin
+        // measures geo.size.h (i.e. is the "inverted" stacked axis the design says CosmicWin
         // rejects). Design D2 explicitly flips this so SplitAxis.Horizontal = children left->right
         // (side by side). Applying D2's own definition, the *behavior* LE-4 describes (wide ->
         // side-by-side, tall -> stacked) maps to Horizontal/Vertical the other way round from
         // LE-4's literal parenthetical labels. This test follows D2's definition (source of
         // truth for what the enum values mean) while preserving LE-4's behavioral intent (wide
         // regions split side by side). Flagged in apply-progress/return summary for spec
-        // reconciliation — see sdd/cosmic-win/apply-progress.
+        // reconciliation — see the design notes.
         Assert.Equal(expected, LayoutTree.ChooseSplitAxis(width, height));
     }
 
@@ -151,7 +151,7 @@ public class LayoutTreeAddChildTests
     // Task 3.4 (MM-3 reparent) needs an overload that inserts an ALREADY-EXISTING Node instance
     // (e.g. a LeafNode already registered in App's WindowRegistry when a monitor disconnects) --
     // not the WindowRef overload above, which always builds a brand-new LeafNode and would orphan
-    // the caller's existing registry mapping (the exact bug WU7C part 2 hit and fixed elsewhere).
+    // the caller's existing registry mapping (a bug this rule exists to prevent).
     [Fact]
     public void AddChild_LeafWithExistingNode_PreservesNodeReference_ForCrossTreeReparenting()
     {

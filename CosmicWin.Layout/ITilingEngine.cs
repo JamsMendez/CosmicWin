@@ -23,8 +23,7 @@ public interface ITilingEngine
     /// <summary>
     /// Removes <paramref name="focused"/> from wherever it currently sits in the tree (inside a
     /// group, or as the bare root). Exposed on the engine -- not tied to any concrete tree type --
-    /// so the shared arrange choke point can evict an untileable leaf by construction (verify-report
-    /// #21 CRITICAL V22-W1) without depending on a specific implementation.
+    /// so the shared arrange choke point can evict an untileable leaf by construction without depending on a specific implementation.
     /// </summary>
     bool Remove(Node focused);
 }

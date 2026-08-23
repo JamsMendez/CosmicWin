@@ -5,13 +5,13 @@ using CosmicWin.Layout;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Design D4 / Phase 3 (tasks 3.1-3.8, spec MM-1..MM-5): owns one <see cref="LayoutTree"/> per
+/// Owns one <see cref="LayoutTree"/> per
 /// connected monitor (MM-1); connect creates an empty tree (MM-2); disconnect reparents into the
 /// primary tree (MM-3); a DPI/work-area change reflows only that monitor (MM-4); MM-5 resolves
 /// cross-monitor focus fallthrough when LE-2's in-tree walk finds no match.
 /// </summary>
 /// <remarks>
-/// Deliberate scope boundary (documented, not silent, see sdd/cosmic-win/apply-progress): this
+/// Deliberate scope boundary (documented, not silent, see the design notes): this
 /// batch does not wire <see cref="TreeManager"/> into <see cref="CompositionRoot"/>/
 /// <see cref="App"/> -- that requires <see cref="ActionExecutor"/>/
 /// <see cref="WorkspaceSessionAdapter"/> to become monitor-aware, out of this batch's scope.
@@ -122,7 +122,7 @@ public sealed class TreeManager
     /// <summary>The display currently treated as primary (see <see cref="SetPrimary"/>).</summary>
     public IDisplay Primary => _displays[_primaryHandle];
 
-    /// <summary>WU17 (closes W3, MM-1): resolves which connected monitor <paramref name="windowBounds"/> belongs to (whose <see cref="IDisplay.Bounds"/> contains the window's center), falling back to <see cref="Primary"/> when none match (e.g. an off-screen rect), mirroring MM-3's reparent-into-primary fail-safe.</summary>
+    /// <summary>: resolves which connected monitor <paramref name="windowBounds"/> belongs to (whose <see cref="IDisplay.Bounds"/> contains the window's center), falling back to <see cref="Primary"/> when none match (e.g. an off-screen rect), mirroring MM-3's reparent-into-primary fail-safe.</summary>
     public IDisplay ResolveDisplay(Rectangle windowBounds)
     {
         var centerX = windowBounds.Left + windowBounds.Width / 2;
@@ -264,7 +264,7 @@ public sealed class TreeManager
     /// MM-5: when LE-2's in-tree walk reaches root with no match, resolves the nearest connected
     /// monitor whose center lies in <paramref name="direction"/> from <paramref name="current"/>,
     /// returning its tree's first leaf (depth-first). Geometric ranking applies only BETWEEN
-    /// monitors -- LE-2's own in-tree walk stays tree-walk-only (spec LE-2 step 4 boundary).
+    /// monitors -- LE-2's own in-tree walk stays tree-walk-only.
     /// </summary>
     public FocusResult FocusAdjacentDisplay(IDisplay current, Direction direction)
     {

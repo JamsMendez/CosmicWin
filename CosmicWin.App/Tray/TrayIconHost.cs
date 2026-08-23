@@ -4,8 +4,8 @@ using System.Windows.Forms;
 namespace CosmicWin.App.Tray;
 
 /// <summary>
-/// Task 3.16 (WU11): thin WinForms <see cref="NotifyIcon"/>/<see cref="ContextMenuStrip"/> wrapper
-/// -- the sole owner of the actual tray icon/menu (spec TC-1). Deliberately holds no behavior of
+/// Thin WinForms <see cref="NotifyIcon"/>/<see cref="ContextMenuStrip"/> wrapper
+/// the sole owner of the actual tray icon/menu. Deliberately holds no behavior of
 /// its own beyond forwarding clicks to <see cref="TrayMenuController"/> and mapping the pause state
 /// to its label via <see cref="PauseLabel"/>; everything else here needs a live Win32
 /// desktop/taskbar/notification area to exercise meaningfully and is covered only by the manual
@@ -43,7 +43,7 @@ public sealed class TrayIconHost : IDisposable
         };
     }
 
-    /// <summary>Task 3.16: the one sliver of tray label logic extracted as a pure function and unit-tested (spec TC-1/TC-2's exact "Pausar"/"Reanudar" strings).</summary>
+    /// <summary>The one sliver of tray label logic extracted as a pure function and unit-tested.</summary>
     public static string PauseLabel(bool isPaused) => isPaused ? "Reanudar" : "Pausar";
 
     public void Dispose()

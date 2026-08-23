@@ -1,8 +1,8 @@
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Carries the <see cref="IWindow"/> a workspace event refers to. Mirrors winman's
-/// <c>WindowChangedEventArgs</c> shape (<c>fancywm/winman/src/WinMan/Events.cs</c>).
+/// Carries the <see cref="IWindow"/> a workspace event refers to. Shaped after the reference implementation's
+/// <c>WindowChangedEventArgs</c> shape.
 /// </summary>
 public sealed class WindowEventArgs : EventArgs
 {
@@ -15,11 +15,11 @@ public sealed class WindowEventArgs : EventArgs
 }
 
 /// <summary>
-/// Tracks the set of top-level windows on the system. Mirrors the shape of winman's
-/// <c>WinMan.IWorkspace</c> (see <c>fancywm/winman/src/WinMan/IWorkspace.cs</c>), trimmed to
+/// Tracks the set of top-level windows on the system. Shaped after the reference implementation's
+/// <c>IWorkspace</c>, trimmed to
 /// what WT-1 (window-tracking) requires: enumerate at startup, then track create/destroy/
 /// move/resize via events, with <see cref="Poll"/> as the reconciliation fallback for a missed
-/// event (spec scenario "Hook misses an event").
+/// event.
 /// </summary>
 public interface IWorkspace : IDisposable
 {

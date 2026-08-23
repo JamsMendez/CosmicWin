@@ -1,14 +1,14 @@
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Represents a tracked top-level Win32 window. Mirrors the shape of winman's
-/// <c>WinMan.IWindow</c> (see <c>fancywm/winman/src/WinMan/IWindow.cs</c>), trimmed to the
+/// Represents a tracked top-level Win32 window. Shaped after the reference implementation's
+/// <c>IWindow</c>, trimmed to the
 /// surface CosmicWin's tiling engine actually needs.
 /// </summary>
 /// <remarks>
 /// Once a window dies (<see cref="IsAlive"/> becomes <c>false</c>), property reads MUST return
 /// default-but-valid values (<see cref="string.Empty"/>, <see cref="Rectangle.Empty"/>) rather
-/// than throw — this matches winman's documented contract and keeps callers (the tiling engine,
+/// than throw — this matches the reference implementation's contract and keeps callers (the tiling engine,
 /// the hook-driven dispatcher) simple.
 /// </remarks>
 public interface IWindow : IEquatable<IWindow>
@@ -62,10 +62,10 @@ public interface IWindow : IEquatable<IWindow>
     /// </summary>
     bool TryActivate();
 
-    /// <summary>Raw <c>GetClassName</c> value, uninterpreted by Interop (design D1/D7/D8 — only Layout's <c>WindowFilters</c> assigns meaning). Empty once dead.</summary>
+    /// <summary>Raw <c>GetClassName</c> value, uninterpreted by Interop. Empty once dead.</summary>
     string ClassName { get; }
 
-    /// <summary>Owning process executable file name (e.g. <c>"Spotify.exe"</c>, matching spec WE-2's config format). Empty once dead or unqueryable.</summary>
+    /// <summary>Owning process executable file name (e.g. <c>"Spotify.exe"</c>, matching WE-2's config format). Empty once dead or unqueryable.</summary>
     string ProcessName { get; }
 
     /// <summary>Raw <c>GWL_STYLE</c> bits, uninterpreted (see <see cref="ClassName"/>).</summary>

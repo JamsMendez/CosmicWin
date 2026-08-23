@@ -3,7 +3,7 @@ namespace CosmicWin.Layout.Filters;
 /// <summary>
 /// Win32 window style/extended-style bit values needed by <see cref="WindowFilters"/> (spec
 /// WE-1). Declared as plain documented constants — not a Win32 P/Invoke type — so
-/// <c>CosmicWin.Layout</c> stays Win32-free (design D1/D8) while still matching the real Windows
+/// <c>CosmicWin.Layout</c> stays Win32-free while still matching the real Windows
 /// API bit values <c>CosmicWin.Interop</c> would read off a real <c>HWND</c>.
 /// </summary>
 public static class WindowStyleFlags

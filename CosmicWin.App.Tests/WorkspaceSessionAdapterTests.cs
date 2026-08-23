@@ -6,10 +6,10 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Task 2.19 (WU7D-extended): <see cref="WorkspaceSessionAdapter"/> syncs the shared tree/registry
+/// Task 2.19: <see cref="WorkspaceSessionAdapter"/> syncs the shared tree/registry
 /// with <c>WindowAdded</c>/<c>WindowRemoved</c> -- first window becomes a lone leaf root, a second
 /// splits it via <c>AddChild</c>, removal walks <c>Node.Parent</c> into <c>RemoveChild</c>, and
-/// removing the sole remaining window clears the root. Also covers verify-report #21 CRITICAL C2
+/// removing the sole remaining window clears the root. Also covers
 /// (add/remove must actually arrange and position every live leaf) and WARNING W1 (the split
 /// region must come from the existing leaf/work area, not the newly-arriving window's own size).
 /// </summary>

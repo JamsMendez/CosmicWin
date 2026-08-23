@@ -85,7 +85,7 @@ public sealed class ActionExecutorFocusScopeTests
         await Press(executor, HotkeyActionKind.FocusOut);
         await Press(executor, HotkeyActionKind.MoveRight);
 
-        // cosmic-comp parity (2026-08-22): the root has THREE children, so LE-5 forks instead of
+        // reference-implementation parity: the root has THREE children, so LE-5 forks instead of
         // swapping -- the group pairs up with D inside a new group taking D's slot. A keeps the
         // left half (450); the pair splits the right half, group at 450 and D at 675. What this
         // fact actually pins is unchanged and still holds: the chord moved the WHOLE group, since
@@ -179,7 +179,7 @@ public sealed class ActionExecutorFocusScopeTests
 
         await Press(executor, HotkeyActionKind.MoveLeft);
 
-        // D forked with the inner GROUP as a single sibling (cosmic-comp parity, 2026-08-22: three
+        // D forked with the inner GROUP as a single sibling (reference-implementation parity: three
         // root children fork rather than swap), which is what a LEAF-scoped LE-5 move does. Had the
         // stale group scope survived, the move would have acted on the group instead and left D
         // where it was -- D ending up at 675 rather than untouched is what proves the scope dropped.

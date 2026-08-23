@@ -4,8 +4,8 @@ using System.IO;
 namespace CosmicWin.App.Diagnostics;
 
 /// <summary>
-/// Appends one line per focus chord to a plain text file the maintainer reads after a supervised
-/// run. Lives beside the other <c>%LOCALAPPDATA%\CosmicWin</c> artifacts (design D6, the same
+/// Appends one line per focus chord to a plain text file the user reads after a supervised
+/// run. Lives beside the other <c>%LOCALAPPDATA%\CosmicWin</c> artifacts (the design, the same
 /// convention <see cref="CosmicWin.App.ExceptionListFile"/> follows).
 /// </summary>
 /// <param name="path">Destination file; its directory is created on first write.</param>

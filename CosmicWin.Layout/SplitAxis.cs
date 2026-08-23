@@ -4,10 +4,10 @@ namespace CosmicWin.Layout;
 /// The axis along which a <see cref="GroupNode"/> arranges its children (LE-1).
 /// </summary>
 /// <remarks>
-/// Design D2: <see cref="Horizontal"/> means children are arranged left-to-right (side by side,
+/// <see cref="Horizontal"/> means children are arranged left-to-right (side by side,
 /// <see cref="GroupNode.Sizes"/> are widths); <see cref="Vertical"/> means children are arranged
 /// top-to-bottom (stacked, <see cref="GroupNode.Sizes"/> are heights). This is a deliberate
-/// naming choice: cosmic-comp's own <c>Orientation::Horizontal</c> actually measures
+/// naming choice: the reference implementation's own <c>Orientation::Horizontal</c> actually measures
 /// <c>size.h</c> (i.e. it means "stacked", the opposite of what the name suggests) — a trap this
 /// design explicitly avoids by making the enum name match the visual arrangement.
 /// </remarks>

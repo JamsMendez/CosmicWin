@@ -34,7 +34,7 @@ internal sealed class FakeWorkspace : IWorkspace
 
     public void RaiseWindowRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
 
-    /// <summary>Simulates the real <c>Win32Workspace</c> raising <see cref="WindowBoundsChanged"/> after an out-of-band move (verify-report #21 V18-W2).</summary>
+    /// <summary>Simulates the real <c>Win32Workspace</c> raising <see cref="WindowBoundsChanged"/> after an out-of-band move.</summary>
     public void RaiseWindowBoundsChanged(IWindow window) => WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
 
     public void Dispose()

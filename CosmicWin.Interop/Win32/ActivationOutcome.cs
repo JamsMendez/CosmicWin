@@ -5,7 +5,7 @@ namespace CosmicWin.Interop.Win32;
 /// foreground. Recorded rather than collapsed to a boolean so a later run can tell which rung is
 /// doing the work.
 ///
-/// MEASURED 2026-08-22 on the development machine (Windows 11 26200), activating between two real
+/// MEASURED on the development machine (Windows 11 26200), activating between two real
 /// external windows: the reported rung was <see cref="InputUnlocked"/>. Both <see cref="Direct"/>
 /// and <see cref="AttachedInput"/> were refused, so the synthetic Alt taps are not a defensive
 /// extra -- they are the ONLY rung that works here, and removing them puts focus navigation back

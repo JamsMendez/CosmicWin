@@ -9,7 +9,7 @@ namespace CosmicWin.App.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <paramref name="ForegroundHandle"/> is what makes an <see cref="FocusTraceOutcome.Activated"/>
-/// line trustworthy (Engram discovery #104). <c>Win32NativeWindowSource.TryActivateWindow</c>
+/// line trustworthy. <c>Win32NativeWindowSource.TryActivateWindow</c>
 /// short-circuits to success when the target ALREADY holds the foreground, so without this field a
 /// chord that activated the window the user was already on is indistinguishable from a chord that
 /// genuinely moved focus -- both just say "Activated" while only one of them changed the screen.

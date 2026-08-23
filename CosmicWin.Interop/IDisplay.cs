@@ -1,8 +1,8 @@
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Represents a physical monitor attached to the system. Mirrors the shape of winman's
-/// <c>WinMan.IDisplay</c> (see <c>fancywm/winman/src/WinMan/IDisplay.cs</c>), trimmed to what
+/// Represents a physical monitor attached to the system. Shaped after the reference implementation's
+/// <c>IDisplay</c>, trimmed to what
 /// WT-2 (DPI-correct geometry) and multi-monitor-tiling (MM-1..5, later work units) require.
 /// </summary>
 public interface IDisplay : IEquatable<IDisplay>

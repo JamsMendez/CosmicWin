@@ -101,7 +101,7 @@ public sealed class LayoutTreeSplitLeafInPlaceTests
         Assert.Same(root, group.Children[0]);
     }
 
-    /// <summary>Splitting must keep design D1's invariant inside the new group as well.</summary>
+    /// <summary>Splitting must keep the design's invariant inside the new group as well.</summary>
     [Fact]
     public void SplitLeafInPlace_NewGroupSizesSumToItsLength()
     {

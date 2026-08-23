@@ -7,7 +7,7 @@ using Windows.Win32.UI.WindowsAndMessaging;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// The "new window is not tiled" defect (Engram discovery #106). <c>SubscribeWindowEvents</c>
+/// The "new window is not tiled" defect. <c>SubscribeWindowEvents</c>
 /// subscribed the whole <c>EVENT_OBJECT_CREATE</c>..<c>EVENT_OBJECT_LOCATIONCHANGE</c> range but
 /// handled only CREATE, DESTROY and LOCATIONCHANGE — <c>EVENT_OBJECT_SHOW</c> was already arriving
 /// with no case for it. Because trackability requires <c>IsWindowVisible</c>, and a top-level window

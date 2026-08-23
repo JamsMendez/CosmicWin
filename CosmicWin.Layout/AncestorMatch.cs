@@ -7,7 +7,7 @@ namespace CosmicWin.Layout;
 /// (or is) the node the walk started from.
 /// </summary>
 /// <remarks>
-/// Design D3/LE-6: this is the exact shape WU6's <c>ResizeNode</c> is meant to reuse — <see
+/// This is the exact shape 's <c>ResizeNode</c> is meant to reuse — <see
 /// cref="ChildIndex"/> identifies the "target" subtree, and its neighbor at <c>ChildIndex +
 /// step</c> (the step implied by the original <see cref="Direction"/>) is the resize/focus
 /// boundary on the other side.

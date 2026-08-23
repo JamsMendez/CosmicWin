@@ -1,7 +1,7 @@
 namespace CosmicWin.Layout.Filters;
 
 /// <summary>
-/// An immutable, user-editable manual exception list (spec WE-2). Applied in addition to WE-1's
+/// An immutable, user-editable manual exception list. Applied in addition to WE-1's
 /// automatic heuristics via <see cref="WindowFilters.IsExcluded"/>.
 /// </summary>
 public sealed class ExceptionList

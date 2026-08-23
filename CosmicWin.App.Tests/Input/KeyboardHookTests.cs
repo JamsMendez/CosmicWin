@@ -85,7 +85,7 @@ public sealed class KeyboardHookTests
         Assert.Equal(1, channel.Reader.Count);
     }
 
-    /// <summary>Task 3.15/3.16 (WU11), settled full-pause semantics: Pausar gates hotkey matching entirely -- a registered chord is neither suppressed nor written to the channel while paused.</summary>
+    /// <summary>Pausar gates hotkey matching entirely -- a registered chord is neither suppressed nor written to the channel while paused.</summary>
     [Fact]
     public void Process_WhilePaused_NeverMatchesAnyChord_AndNeverWritesToChannel()
     {
@@ -98,7 +98,7 @@ public sealed class KeyboardHookTests
         Assert.False(channel.Reader.TryRead(out _));
     }
 
-    /// <summary>Reanudar restores hotkeys identically to the never-paused baseline (spec TC-2 "Reanudar restores hotkeys").</summary>
+    /// <summary>Reanudar restores hotkeys identically to the never-paused baseline.</summary>
     [Fact]
     public void Process_AfterUnpause_MatchesChordsAgainIdenticallyToBaseline()
     {

@@ -3,8 +3,7 @@ namespace CosmicWin.App.Diagnostics;
 /// <summary>
 /// The single fact a focus chord produced, ordered along <c>ActionExecutor</c>'s focus path. Every
 /// value below is externally indistinguishable from the others on real hardware -- the window just
-/// does not change -- which is exactly why MR-2 could not be diagnosed by observation (Engram
-/// discovery #101) and why the outcome must be recorded rather than inferred.
+/// does not change -- which is exactly why a dead focus chord could not be diagnosed by observation and why the outcome must be recorded rather than inferred.
 /// </summary>
 public enum FocusTraceOutcome
 {

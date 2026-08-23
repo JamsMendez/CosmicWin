@@ -4,14 +4,14 @@ namespace CosmicWin.Interop;
 /// A rectangle in real (unscaled by DPI) screen-space pixel coordinates.
 /// </summary>
 /// <remarks>
-/// The design doc's <c>ITilingEngine</c> sketch (Engram <c>sdd/cosmic-win/design</c>) uses an
+/// The design doc's <c>ITilingEngine</c> sketch uses an
 /// illustrative <c>Rect</c> name for a type owned by <c>CosmicWin.Layout</c> (Phase 1, not yet
 /// built). This <see cref="Rectangle"/> is the Interop layer's own geometry type — it mirrors
-/// winman's <c>WinMan.Rectangle</c> shape (Left/Top/Right/Bottom, not X/Y/Width/Height) rather
-/// than <see cref="System.Drawing.Rectangle"/>, since winman's Left/Right/Top/Bottom style
+/// the reference implementation's <c>Rectangle</c> shape (Left/Top/Right/Bottom, not X/Y/Width/Height) rather
+/// than <see cref="System.Drawing.Rectangle"/>, since the reference implementation's Left/Right/Top/Bottom style
 /// avoids the "did I add or overwrite width" class of bug when repeatedly reflowing windows.
 /// Kept deliberately separate from any future <c>CosmicWin.Layout.Rect</c> — Interop stays
-/// Win32-shaped, Layout stays Win32-free (design D1/D7).
+/// Win32-shaped, Layout stays Win32-free.
 /// </remarks>
 public readonly record struct Rectangle(int Left, int Top, int Right, int Bottom)
 {

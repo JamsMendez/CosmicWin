@@ -4,7 +4,7 @@ using Xunit.Abstractions;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// TEMPORARY diagnostic, not a behavioural test. Reported 2026-08-22: tiled windows at the screen
+/// TEMPORARY diagnostic, not a behavioural test. Reported: tiled windows at the screen
 /// edge look inset on the left, right and bottom but flush against the top. Win32's
 /// <c>GetWindowRect</c> includes a window's INVISIBLE resize border, which on this Windows build is
 /// present on three sides and absent on the fourth; <c>DWMWA_EXTENDED_FRAME_BOUNDS</c> reports what

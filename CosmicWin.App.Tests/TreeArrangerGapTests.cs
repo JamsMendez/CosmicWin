@@ -6,10 +6,10 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Reported 2026-08-22: windows at the screen edge had visible space on the left, right and bottom
+/// Reported: windows at the screen edge had visible space on the left, right and bottom
 /// but none at the top. The cause was measured in Interop -- Win32's invisible resize border is 7px
 /// on three sides and 0 on the top -- and fixed there, so a tile now lands exactly where it is
-/// asked. That left a choice, and the maintainer chose a uniform, configurable gap over flush.
+/// asked. That left a choice, and the user chose a uniform, configurable gap over flush.
 /// <para>
 /// The arithmetic that makes it uniform: HALF the gap comes off the work area and HALF off every
 /// tile. Adjacent windows then contribute half each, and an outer edge contributes the work-area

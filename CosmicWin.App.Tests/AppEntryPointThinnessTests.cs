@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Replaces the deleted <c>CompositionSiteArchitectureTests</c> (verify-report #21 revision 15
-/// WARNING V15-W1: that test's source-text wiring-correctness assertions were falsified by probes
+/// Replaces the deleted <c>CompositionSiteArchitectureTests</c> (
+/// WARNING: that test's source-text wiring-correctness assertions were falsified by probes
 /// P1/P2/P6, each editing only <c>App.xaml.cs</c>). Wiring CORRECTNESS is now proven by real
 /// behavioral facts in <c>AppCompositionTests</c>, which exercise <see
 /// cref="AppComposition.Wire"/> directly. This file keeps only what a source-text check can
@@ -38,7 +38,7 @@ public sealed class AppEntryPointThinnessTests
     [Fact]
     public void AppXamlCs_OnStartup_DelegatesToTryHandleTaskCommand_ExactlyOnce()
     {
-        // Task 3.20: pins the single delegating call for --install-task/--uninstall-task.
+        // Pins the single delegating call for --install-task/--uninstall-task.
         var source = ReadAppXamlCsSource();
 
         var taskCommandCalls = System.Text.RegularExpressions.Regex.Matches(
@@ -73,7 +73,7 @@ public sealed class AppEntryPointThinnessTests
         var source = ReadAppXamlCsSource();
 
         // Structurally, nothing left in App.xaml.cs should be reassignable across two statements
-        // the way the old `_hook` field was (verify-report #21 probe P1's exact shape) -- the only
+        // the way the old `_hook` field was -- the only
         // field this class should own now is the single opaque, already-disposed-as-a-unit result
         // of AppComposition.WireProduction.
         Assert.DoesNotContain("_hook", source);

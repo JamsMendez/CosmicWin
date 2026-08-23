@@ -13,7 +13,7 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
     /// <summary>The last modifier+key combination that matched no chord, for diagnosis. Never null-cleared.</summary>
     public volatile string? LastUnmatched;
 
-    /// <summary>Task 3.15/3.16 (WU11), settled full-pause semantics: while <c>true</c>, no chord matches and nothing is written to the dispatcher channel. Written from the tray's UI thread, read from this hook's dedicated STA thread -- <c>volatile</c> mirrors the existing <see cref="LowLevelKeyboardHook"/> <c>_lastActivity</c> pattern.</summary>
+    /// <summary>While <c>true</c>, no chord matches and nothing is written to the dispatcher channel. Written from the tray's UI thread, read from this hook's dedicated STA thread -- <c>volatile</c> mirrors the existing <see cref="LowLevelKeyboardHook"/> <c>_lastActivity</c> pattern.</summary>
     public bool IsPaused
     {
         get => _paused;
@@ -75,7 +75,7 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     public bool? UnhookSucceeded { get; private set; }
 
-    /// <summary>Task 3.15/3.16 (WU11): pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
+    /// <summary>Pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
     public bool IsPaused
     {
         get => _processor.IsPaused;

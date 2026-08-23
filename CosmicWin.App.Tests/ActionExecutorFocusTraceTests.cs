@@ -7,7 +7,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// MR-2 diagnosis (Engram discovery #101): `Alt+H`/`Alt+L` do nothing on real hardware even with
+/// MR-2 diagnosis: `Alt+H`/`Alt+L` do nothing on real hardware even with
 /// the `AttachThreadInput` activation fix in place, and the two remaining candidates -- `NextFocus`
 /// never returning <see cref="FocusWalkStatus.Found"/>, versus <see cref="IWindow.TryActivate"/>
 /// still failing -- produce the SAME external symptom (nothing happens). These tests pin the
@@ -121,7 +121,7 @@ public sealed class ActionExecutorFocusTraceTests
     }
 
     /// <summary>
-    /// The field that makes an <c>Activated</c> line trustworthy (Engram discovery #104): when the
+    /// The field that makes an <c>Activated</c> line trustworthy: when the
     /// cache drove the walk because the real foreground was untracked, the entry must still report
     /// the REAL foreground, so a trivial self-activation can never again read as a genuine move.
     /// </summary>

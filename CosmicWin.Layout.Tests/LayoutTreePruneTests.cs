@@ -1,7 +1,7 @@
 namespace CosmicWin.Layout.Tests;
 
 /// <summary>
-/// Closing a window must heal the tree it leaves behind. Measured on real hardware 2026-08-22, right
+/// Closing a window must heal the tree it leaves behind. Measured on real hardware, right
 /// after new windows started splitting the focused tile: closing one left its space blank instead of
 /// letting the survivors expand into it.
 ///

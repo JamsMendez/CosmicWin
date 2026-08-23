@@ -1,8 +1,8 @@
 namespace CosmicWin.Layout;
 
 /// <summary>
-/// Tree operations for the tiling layout engine. This work unit (WU4) covers only node
-/// construction and <see cref="AddChild(GroupNode,Node,int)"/> — see WU5/WU6 (design D3) for
+/// Tree operations for the tiling layout engine. This work unit covers only node
+/// construction and <see cref="AddChild(GroupNode,Node,int)"/> — see / for
 /// <c>RemoveChild</c>, <c>NextFocus</c>, <c>ToggleAxis</c>, <c>MoveNode</c>, <c>ResizeNode</c>,
 /// and <c>Arrange</c>.
 /// </summary>
@@ -49,8 +49,8 @@ public sealed class LayoutTree : ITilingEngine
     /// (redistributing the freed size via <see cref="RemoveChild"/>), or as the bare <see
     /// cref="Root"/> (cleared to <see langword="null"/>). Mirrors the App layer's equivalent
     /// registry-driven node removal, exposed here so the App-layer arrange choke point can evict an
-    /// untileable leaf through the <see cref="ITilingEngine"/> abstraction alone (verify-report #21
-    /// CRITICAL V22-W1) without this Win32-free assembly depending on App-layer types.
+    /// untileable leaf through the <see cref="ITilingEngine"/> abstraction alone (
+    /// CRITICAL) without this Win32-free assembly depending on App-layer types.
     /// </summary>
     public bool Remove(Node focused)
     {
@@ -88,23 +88,23 @@ public sealed class LayoutTree : ITilingEngine
     /// <para>
     /// Spec/design note: LE-4's literal wording ("width &gt; height -&gt; Vertical split
     /// (side-by-side)") uses the opposite enum label from what this method returns. That literal
-    /// wording matches cosmic-comp's original <c>Orientation</c> convention (verified against
-    /// <c>cosmic-epoch/cosmic-comp/src/shell/layout/tiling/mod.rs</c>: <c>Orientation::Vertical</c>
+    /// wording matches the reference implementation's original <c>Orientation</c> convention (verified against it:
+    /// <c>Orientation::Vertical</c>
     /// there measures <c>geo.size.w</c>, i.e. is the side-by-side axis) — precisely the
-    /// "inverted" naming design D2 says CosmicWin rejects. This method implements D2's own
+    /// "inverted" naming the design says CosmicWin rejects. This method implements D2's own
     /// definition of what the enum values mean, applied to LE-4's behavioral intent (wide
     /// regions split side by side, tall regions stack). Flagged for spec reconciliation; see
-    /// sdd/cosmic-win/apply-progress.
+    /// the design notes.
     /// </para>
     /// </remarks>
     public static SplitAxis ChooseSplitAxis(int width, int height) =>
         width > height ? SplitAxis.Horizontal : SplitAxis.Vertical;
 
     /// <summary>
-    /// D3 <c>AddChild</c>, ported from cosmic-comp's <c>Data::add_window</c>: inserts
+    /// D3 <c>AddChild</c>, ported from the reference implementation: inserts
     /// <paramref name="child"/> into <paramref name="group"/> at <paramref name="index"/>,
     /// giving it an equal share of the group's length and proportionally shrinking existing
-    /// siblings so that <c>Sizes.Sum() == GroupLength</c> always holds afterward (design D1).
+    /// siblings so that <c>Sizes.Sum == GroupLength</c> always holds afterward.
     /// The new child absorbs any rounding remainder, guaranteeing the invariant exactly.
     /// </summary>
     public static void AddChild(GroupNode group, Node child, int index)
@@ -138,7 +138,7 @@ public sealed class LayoutTree : ITilingEngine
     /// leaf and <paramref name="newNode"/>, choosing the group's axis via
     /// <see cref="ChooseSplitAxis"/> (LE-4). Takes an existing <see cref="Node"/> (rather than a
     /// <see cref="WindowRef"/>) so callers that already hold a registered node -- e.g.
-    /// <c>TreeManager</c>'s MM-3 reparent (task 3.4) -- can move it without orphaning an existing
+    /// <c>TreeManager</c>'s MM-3 reparent -- can move it without orphaning an existing
     /// <c>WindowRegistry</c> mapping.
     /// </summary>
     public static GroupNode AddChild(LeafNode leaf, Node newNode, int regionWidth, int regionHeight)
@@ -176,7 +176,7 @@ public sealed class LayoutTree : ITilingEngine
     /// </list>
     /// </summary>
     /// <remarks>
-    /// The empty case is the visible defect (measured 2026-08-22): <see cref="Arrange"/> answers an
+    /// The empty case is the visible defect (measured): <see cref="Arrange"/> answers an
     /// empty group by zeroing its length and returning, but the PARENT still reserves a slot and a
     /// size for it, so that region is claimed and nothing is ever drawn there. A flat tree never
     /// showed this — there was only the root group, whose own <see cref="RemoveChild"/>
@@ -231,7 +231,7 @@ public sealed class LayoutTree : ITilingEngine
     /// LE-4 as its own scenario states it: a new window SPLITS the tile it lands on, so the group
     /// replaces <paramref name="leaf"/> exactly where the leaf sat -- same slot, same slot size,
     /// same siblings. This is what makes nesting happen at all during ordinary use; appending to the
-    /// root group instead produces a flat row forever, which is neither LE-4 nor COSMIC behaviour.
+    /// root group instead produces a flat row forever, which is not the intended behaviour.
     /// </summary>
     /// <remarks>
     /// <see cref="AddChild(LeafNode, WindowRef, int, int)"/> alone is NOT enough for a nested leaf:
@@ -261,7 +261,7 @@ public sealed class LayoutTree : ITilingEngine
     /// <summary>
     /// D3 <c>RemoveChild</c>: removes the child (and its size) at <paramref name="index"/> from
     /// <paramref name="group"/>, proportionally redistributing its freed size among the remaining
-    /// siblings so that <c>Sizes.Sum() == GroupLength</c> continues to hold (design D1). Unlike
+    /// siblings so that <c>Sizes.Sum == GroupLength</c> continues to hold. Unlike
     /// <see cref="AddChild(GroupNode,Node,int)"/> — whose rounding remainder lands on the newly
     /// inserted child — removal has no "new" element to absorb overflow into, so the convention
     /// here is that the LAST remaining sibling absorbs the rounding remainder.
@@ -311,7 +311,7 @@ public sealed class LayoutTree : ITilingEngine
     /// cref="Node.Parent"/>) without finding a match.
     /// </summary>
     /// <remarks>
-    /// Design D3/LE-6: this exact helper is reused, unmodified, by WU6's <c>ResizeNode</c> — the
+    /// This exact helper is reused, unmodified, by 's <c>ResizeNode</c> — the
     /// returned <see cref="AncestorMatch.ChildIndex"/> identifies the "target" subtree for both
     /// callers; <c>NextFocus</c> reads the sibling at <c>ChildIndex + step</c>, while
     /// <c>ResizeNode</c> transfers a size ratio between <c>ChildIndex</c> and that same neighbor.
@@ -390,37 +390,37 @@ public sealed class LayoutTree : ITilingEngine
     };
 
     /// <summary>
-    /// LE-5, re-cut as cosmic-comp's ancestor walk. Ported (algorithm only) from
+    /// LE-5, re-cut as an ancestor walk, ported (algorithm only) from
     /// <c>TilingLayout::move_current_node</c>,
-    /// <c>cosmic-epoch/cosmic-comp/src/shell/layout/tiling/mod.rs:1507</c> -- its
+    /// the reference implementation's ancestor walk -- its
     /// <c>while let Some(parent) = maybe_parent</c> loop climbs the tree until it finds a level
     /// that can absorb the move, instead of giving up at the node's own parent.
     /// </summary>
     /// <remarks>
     /// <para>
     /// This REPLACES the original "act only inside <c>focused.Parent</c>" rule, which was measured
-    /// against the real WM on 2026-08-22 and reported as the thing that makes CosmicWin feel unlike
-    /// COSMIC. Pushing a window at the edge of its group toward the outside used to return false and
+    /// against the real WM and reported as the thing that makes CosmicWin feel unlike
+    /// the reference implementation. Pushing a window at the edge of its group toward the outside used to return false and
     /// do nothing; HA-1's <c>Alt+[</c> existed so the user could hand-raise the scope that this walk
     /// now derives per keypress. <c>Alt+[</c> keeps its meaning -- deliberately moving a WHOLE group
     /// as one unit -- but is no longer required for an ordinary window to leave its group.
     /// </para>
     /// <para>
-    /// Four cases, in cosmic-comp's own order:
+    /// Four cases, in its own order:
     /// <list type="number">
     /// <item>axis mismatch at this level -- the level splits perpendicular and the focused node
     /// takes the leading or trailing half (<see cref="SplitOutOf"/>);</item>
     /// <item>axis matches and we ARRIVED here from below -- the node leaves its old group and joins
-    /// this one beside the subtree it came out of (cosmic-comp's
+    /// this one beside the subtree it came out of (the reference implementation's
     /// <c>MoveBehavior::ToParent</c>);</item>
     /// <item>axis matches at our own level -- move INTO the neighbour when it is a group
-    /// (cosmic-comp's <c>is_group()</c> branch), otherwise swap with it, sizes included, which is
+    /// (its <c>is_group()</c> branch), otherwise swap with it, sizes included, which is
     /// the original LE-5 behaviour and the only branch that survives unchanged;</item>
     /// <item>no room at this level -- ascend and try again.</item>
     /// </list>
     /// </para>
     /// <para>
-    /// Deliberate divergence: where cosmic-comp inserts into the MIDDLE of a perpendicular
+    /// Deliberate divergence: where the reference implementation inserts into the MIDDLE of a perpendicular
     /// neighbouring group (mod.rs:1737, "we want the middle"), this inserts at the edge the move
     /// came from -- a window pushed Right enters the neighbour at its start. Same escape, but the
     /// landing slot follows the direction the user pressed instead of the group's parity.
@@ -482,7 +482,7 @@ public sealed class LayoutTree : ITilingEngine
                 }
 
                 // (3b) Exactly two of us here: swap, carrying sizes along. This is the original
-                // LE-5 behaviour, and cosmic-comp guards it the same way -- `len == 2`.
+                // LE-5 behaviour, and the reference implementation guards it the same way -- `len == 2`.
                 if (level.Children.Count == 2)
                 {
                     (level.Children[index], level.Children[neighbourIndex]) =
@@ -492,12 +492,12 @@ public sealed class LayoutTree : ITilingEngine
                     return true;
                 }
 
-                // (3c) Three or more siblings: cosmic-comp's "else we make a new fork" -- pair up
+                // (3c) Three or more siblings: the reference implementation's "else we make a new fork" -- pair up
                 // with the neighbour inside a new group of the SAME axis, taking the neighbour's
                 // slot. Swapping instead looks equivalent on a flat row but is not: a swap is an
                 // involution, so pressing the same direction again just undoes it and the window
                 // can never travel past its neighbour. The fork is what makes the walk a reversible
-                // CYCLE -- measured against the real COSMIC on 2026-08-22, where a window pushed
+                // CYCLE -- measured against the reference implementation, where a window pushed
                 // repeatedly keeps advancing instead of dead-ending after two presses.
                 var neighbourNode = level.Children[neighbourIndex];
                 Detach(origin, originIndex);
@@ -533,7 +533,7 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
-    /// cosmic-comp's case (1): <paramref name="level"/> splits along <paramref name="axis"/>, its
+    /// the reference implementation's case (1): <paramref name="level"/> splits along <paramref name="axis"/>, its
     /// former contents drop into a nested group, and <paramref name="focused"/> takes the half the
     /// direction points at.
     /// </summary>

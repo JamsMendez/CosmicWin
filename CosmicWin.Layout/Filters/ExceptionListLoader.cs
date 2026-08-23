@@ -1,9 +1,9 @@
 namespace CosmicWin.Layout.Filters;
 
 /// <summary>
-/// Parses the plain-text manual exception-list config file format (spec WE-2) into an
+/// Parses the plain-text manual exception-list config file format into an
 /// <see cref="ExceptionList"/>. Takes raw text content rather than a file path so
-/// <c>CosmicWin.Layout</c> stays Win32/IO-free (design D1/D8); the App layer owns reading the
+/// <c>CosmicWin.Layout</c> stays Win32/IO-free; the App layer owns reading the
 /// file from disk and re-invoking <see cref="Parse"/> on change (WE-3).
 ///
 /// Format: one rule per line, <c>kind:value</c> where <c>kind</c> is <c>process</c>, <c>title</c>,

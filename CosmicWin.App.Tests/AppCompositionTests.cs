@@ -10,8 +10,8 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Closes verify-report #21 revision 15 SUGGESTION V15-S1 and re-attacks carried WARNING V14-W1.
-/// <c>App.xaml.cs</c>'s composition (four consecutive closures -- V11-W1, V12-W1, V13-W1, V14-W1 --
+/// Closes and re-attacks carried WARNING.
+/// <c>App.xaml.cs</c>'s composition (four consecutive closures --,,,
 /// each defeated a mutation the previous one did not anticipate, the last one falling to three
 /// probes editing only <c>App.xaml.cs</c>) is extracted here into <see cref="AppComposition"/>, a
 /// plain class with no WPF base type. Unlike the deleted <c>CompositionSiteArchitectureTests</c>
@@ -120,7 +120,7 @@ public sealed class AppCompositionTests
         }
     }
 
-    /// <summary>WU17 (closes W3): proves <see cref="AppComposition.Wire"/> genuinely routes through the given <see cref="TreeManager"/> -- a window on the secondary display lands in the secondary's own tree, not the primary's.</summary>
+    /// <summary>: proves <see cref="AppComposition.Wire"/> genuinely routes through the given <see cref="TreeManager"/> -- a window on the secondary display lands in the secondary's own tree, not the primary's.</summary>
     [Fact]
     public void Wire_TwoDisplays_RoutesEachWindowToItsOwnMonitorTree()
     {
@@ -145,7 +145,7 @@ public sealed class AppCompositionTests
     /// The P1/P6-killer: toggling pause through the SAME <see cref="TrayMenuController"/> <see
     /// cref="AppComposition.Wire"/> composed must gate the SAME hook the adapter's gate delegate
     /// reads. If the composition ever rebinds the local hook variable between the sanctioned
-    /// adapter construction and the point the tray controller is wired (verify-report #21 probe
+    /// adapter construction and the point the tray controller is wired (probe
     /// P1's exact shape), the tray toggle affects the NEW hook while the adapter's gate keeps
     /// reading the orphaned OLD one -- this fact goes RED the instant that happens, because it
     /// exercises real runtime behavior, not source text.
@@ -185,7 +185,7 @@ public sealed class AppCompositionTests
     }
 
     /// <summary>
-    /// MR-2 (Engram discovery #101): the focus diagnostic is worthless if it is not actually wired
+    /// MR-2: the focus diagnostic is worthless if it is not actually wired
     /// into the composition the app really runs, so this drives the FULL production chain -- a real
     /// <see cref="LowLevelKeyboardHook"/> raising <c>Alt+L</c>, the dispatcher loop, the executor's
     /// tree walk, activation -- and asserts the recorded entry. Reading the LAST entry rather than

@@ -10,7 +10,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests.Desktop;
 
 /// <summary>
-/// WU28: the first test in this project that drives the REAL production tiling composition
+/// The first test in this project that drives the REAL production tiling composition
 /// (<see cref="TreeManager"/>, <see cref="MultiMonitorWorkspaceAdapter"/>, <see cref="TreeArranger"/>,
 /// <see cref="ActionExecutor"/>, <see cref="CompositionRoot"/>, <see cref="Win32DisplayManager"/>,
 /// <see cref="Win32Window"/>/<see cref="Win32NativeWindowSource"/>) against real spawned windows and
@@ -20,10 +20,10 @@ namespace CosmicWin.App.Tests.Desktop;
 /// explicit interactive run (<c>COSMICWIN_RUN_DESKTOP_TESTS=1</c>).
 /// </summary>
 /// <remarks>
-/// WU29: the spawn host is <see cref="SpawnedAlacrittyWindow"/>, not <see cref="SpawnedNotepadWindow"/>
+/// The spawn host is <see cref="SpawnedAlacrittyWindow"/>, not <see cref="SpawnedNotepadWindow"/>
 /// -- on this project's Windows build, <c>notepad.exe</c> is a tabbed packaged app and a second
 /// launch opens a TAB in the first process's window rather than a second top-level window, which
-/// produced a misleading tiling-geometry failure the first time this test ran (see Engram #94).
+/// produced a misleading tiling-geometry failure the first time this test ran (see an earlier finding).
 /// <see cref="SpawnOwn"/> asserts the one-window-per-process property directly, so a future
 /// regression in the host fails loudly instead of producing another confusing geometry mismatch.
 /// Safety (six hard constraints, each enforced at the cited line):
@@ -58,7 +58,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
     private readonly List<SpawnedAlacrittyWindow> _spawned = [];
 
-    /// <summary>WU29: every handle observed so far, used by <see cref="SpawnOwn"/> to verify the spawn host's one-window-per-process property before it is relied on.</summary>
+    /// <summary>: every handle observed so far, used by <see cref="SpawnOwn"/> to verify the spawn host's one-window-per-process property before it is relied on.</summary>
     private readonly HashSet<nint> _seenHandles = [];
 
     [RequiresDesktopFact]
@@ -120,7 +120,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         // dispatched chord (ActionExecutor.ScheduleAsync); never SendInput.
         //
         // This step used to seed "currently focused" through a fixed IForegroundWindowSource and
-        // refuse to assert the real OS foreground at all, on the strength of Engram observation #96:
+        // refuse to assert the real OS foreground at all, on the strength of an earlier finding:
         // SetForegroundWindow measured returning False from a background process, judged OS policy
         // rather than a CosmicWin defect. That premise is now FALSE. Win32NativeWindowSource.Activate
         // escalates (message-queue thread -> AttachThreadInput -> synthetic Alt taps -> retry) and
@@ -158,7 +158,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         var beforeW3 = Read(nativeSource, window3.Handle);
         Assert.True(beforeW2.Left < beforeW3.Left, "Precondition: window2 starts to the left of window3.");
 
-        // cosmic-comp parity (2026-08-22): with THREE siblings a move forks rather than swaps, so
+        // reference-implementation parity: with THREE siblings a move forks rather than swaps, so
         // passing a neighbour takes two presses -- the first pairs the two windows up inside a new
         // group, the second exchanges them within it. Both are asserted, because the pair-then-
         // exchange cycle is the behaviour, and one press alone would look like a failed swap.
@@ -192,14 +192,14 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Closes the test-fidelity gap named in Engram discovery #97. That run MEASURED a real defect
+    /// That run MEASURED a real defect
     /// -- a window positioned within the first frames of its existence was silently overridden by
     /// its own initialisation, landing at <c>L=1715 T=4 W=1728 H=1391</c> when it had been asked
     /// for <c>X=1720 Y=0 W=1720 H=1392</c>, overlapping its neighbour by 5px -- and reasoned that
     /// PRODUCTION should self-heal where the test did not, because the real
     /// <see cref="Win32Workspace"/> raises <c>WindowBoundsChanged</c> from its
     /// <c>EVENT_OBJECT_LOCATIONCHANGE</c> hook and <see cref="MultiMonitorWorkspaceAdapter"/>
-    /// answers it with decision #80's snap-back. That reasoning was never executed: this shim
+    /// answers it with an earlier decision's snap-back. That reasoning was never executed: this shim
     /// declared <c>WindowBoundsChanged</c> and silenced the resulting CS0067 with a pragma, so
     /// <c>OnWindowBoundsChanged</c> -- the ONLY production path that recovers a self-resizing
     /// window -- had no real-window coverage at all.
@@ -238,7 +238,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         var tiled = Read(nativeSource, window2.Handle);
         AssertTilesExactly(workArea, axis, [Read(nativeSource, window1.Handle), tiled]);
 
-        // Engram #97's measured drift, reproduced exactly: 5px left, 4px down, 8px wider, 1px
+        // An earlier finding's measured drift, reproduced exactly: 5px left, 4px down, 8px wider, 1px
         // shorter. Applied through the native source DIRECTLY so the tree is never told -- which is
         // precisely the shape of the defect, an out-of-band resize the window manager did not ask for.
         var drifted = new Rectangle(tiled.Left - 5, tiled.Top + 4, tiled.Right + 3, tiled.Bottom - 1);
@@ -275,15 +275,15 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
                 "Constraint 4: a spawned window's PID collided with this session's own protected process tree -- refusing to proceed.");
         }
 
-        // WU29: verify the one-window-per-process property BEFORE relying on it -- a spawn host
-        // that silently starts tabbing (as notepad.exe did, see Engram #94) must fail loudly here
+        // Verify the one-window-per-process property BEFORE relying on it -- a spawn host
+        // that silently starts tabbing (as notepad.exe did, see an earlier finding) must fail loudly here
         // instead of producing a confusing downstream tiling-geometry mismatch.
         Assert.NotEqual(nint.Zero, spawned.Handle);
         Assert.True(
             _seenHandles.Add(spawned.Handle),
             "Spawn host produced a duplicate top-level window handle across processes -- it no " +
             "longer guarantees one top-level window per process (the exact failure mode notepad.exe " +
-            "exhibited on this Windows build, see Engram #94).");
+            "exhibited on this Windows build).");
 
         _spawned.Add(spawned);
         Assert.True(nativeSource.TryGetWindowInfo(spawned.Handle, out var info));
@@ -397,14 +397,14 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         /// Mirrors what the production <see cref="Win32Workspace"/> does when its
         /// <c>EVENT_OBJECT_LOCATIONCHANGE</c> hook reports that a tracked window's rectangle no
         /// longer matches the one it cached: <c>UpdateBounds</c> raises this event, which is the
-        /// ONLY trigger for decision #80's snap-back. Without it this shim silently withheld the
+        /// ONLY trigger for an earlier decision's snap-back. Without it this shim silently withheld the
         /// single production path that recovers a window which re-sizes itself after being tiled.
         /// </summary>
         public void RaiseBoundsChanged(IWindow window) => WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
     }
 
     /// <summary>
-    /// WU30 (Engram observation #96): delegates every member to <paramref name="inner"/> unmodified
+    /// Delegates every member to <paramref name="inner"/> unmodified
     /// -- the real Win32 call still fires, best-effort -- except <see cref="TryActivateWindow"/>,
     /// which additionally RECORDS the targeted handle before delegating. This is what lets step 4
     /// assert WHICH window CosmicWin's own focus path attempts to activate without depending on

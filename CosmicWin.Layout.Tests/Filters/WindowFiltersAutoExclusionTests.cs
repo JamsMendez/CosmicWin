@@ -67,7 +67,7 @@ public class WindowFiltersAutoExclusionTests
     public void IsAutoExcluded_UnownedWindowLackingBothMaximizeAndMinimizeBox_ReturnsFalse()
     {
         // Pins WE-1's "owned windows lacking WS_MAXIMIZEBOX/WS_MINIMIZEBOX (dialogs)" restriction
-        // (verify-report #21 rev 9 V9-W2): an UNOWNED fixed-size top-level window that merely
+        // an UNOWNED fixed-size top-level window that merely
         // cannot be maximized or minimized is a legitimate window, not the dialog shape WE-1
         // targets, and must NOT be auto-excluded — only OWNED windows lacking both boxes qualify.
         var descriptor = Normal() with { Style = WindowStyleFlags.SystemMenu, IsOwned = false };
@@ -76,7 +76,7 @@ public class WindowFiltersAutoExclusionTests
     }
 
     /// <summary>
-    /// Measured on real hardware 2026-08-22. The maintainer launched CosmicWin with a minimized
+    /// Measured on real hardware. The maintainer launched CosmicWin with a minimized
     /// Brave window on the desktop and the Windows Terminal took only HALF the screen: the filter
     /// chain admitted the minimized window, so the tree held two leaves and handed an entire tile
     /// to something that is not drawn anywhere. The diagnostic snapshot recorded it verbatim --

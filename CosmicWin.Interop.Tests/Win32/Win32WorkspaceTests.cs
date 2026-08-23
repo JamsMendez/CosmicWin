@@ -161,7 +161,7 @@ public class Win32WorkspaceTests
     }
 
     /// <summary>
-    /// Reported from real use 2026-08-22: dragging a tiled window showed a flickering ghost while
+    /// Reported from real use: dragging a tiled window showed a flickering ghost while
     /// the window itself never moved, and dropping it changed nothing. The snap-back was correct
     /// but relentless -- Windows raises EVENT_OBJECT_LOCATIONCHANGE for every intermediate frame of
     /// a drag, so the tree re-applied the tile dozens of times per second and fought the gesture.
@@ -211,7 +211,7 @@ public class Win32WorkspaceTests
     }
 
     /// <summary>
-    /// Measured on real hardware 2026-08-22: switching virtual desktops rearranged the windows on
+    /// Measured on real hardware: switching virtual desktops rearranged the windows on
     /// the desktop returned to. The chain was verifiable in code -- DWM CLOAKS every window on the
     /// desktop being left, <c>IsTrackable</c> rejects a cloaked window, so the enumeration stops
     /// listing it, and <see cref="Win32Workspace.Poll"/> read "absent from the enumeration" as

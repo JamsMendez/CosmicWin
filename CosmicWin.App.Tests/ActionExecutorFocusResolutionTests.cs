@@ -6,7 +6,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// MR-2 root cause (Engram discovery #104). The third supervised run's focus trace showed
+/// MR-2 root cause. The third supervised run's focus trace showed
 /// activation to `0x99030A` FAILING at 12:46:32 and the very next chord ten seconds later reporting
 /// `focused=0x99030A` anyway: <c>ActionExecutor</c> consulted its <c>_focused</c> cache FIRST and
 /// returned it on nothing more than "still tracked and alive", and <c>MoveFocus</c> advanced that

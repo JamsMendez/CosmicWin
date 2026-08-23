@@ -6,8 +6,8 @@ namespace CosmicWin.Layout.Tests;
 /// LE-2 "Directional focus — tree walk": given a focused Leaf and a <see cref="Direction"/>,
 /// ascend from parent to parent until a matching-orientation ancestor with an available sibling
 /// boundary is found, or the tree root is reached with no match. Also covers the
-/// <see cref="Node.Parent"/> back-reference introduced by this work unit (WU5) to support the
-/// ancestor walk, and the <c>FindMatchingAncestor</c> helper design D3/LE-6 states WU6's
+/// <see cref="Node.Parent"/> back-reference introduced by this work unit to support the
+/// ancestor walk, and the <c>FindMatchingAncestor</c> helper the design/LE-6 states 's
 /// <c>ResizeNode</c> is meant to reuse.
 /// </summary>
 public class LayoutTreeNextFocusTests
@@ -133,7 +133,7 @@ public class LayoutTreeNextFocusTests
         Assert.NotEqual(FocusWalkStatus.Found, FocusResult.NoMatch.Status);
     }
 
-    // --- FindMatchingAncestor helper, shaped for WU6's ResizeNode reuse (design D3/LE-6) ---
+    // --- FindMatchingAncestor helper, shaped for 's ResizeNode reuse ---
 
     [Fact]
     public void FindMatchingAncestor_ReturnsMatchingAncestorAndChildIndex()

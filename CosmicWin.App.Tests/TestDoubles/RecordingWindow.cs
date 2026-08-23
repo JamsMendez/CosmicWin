@@ -11,7 +11,7 @@ namespace CosmicWin.App.Tests.TestDoubles;
 /// </summary>
 internal sealed class RecordingWindow : IWindow
 {
-    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing facts don't read as auto-excluded once filtering wires up (task 3.32).</summary>
+    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing facts don't read as auto-excluded once filtering wires up.</summary>
     private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
 
     private bool _failNextSetPosition;
@@ -109,7 +109,7 @@ internal sealed class RecordingWindow : IWindow
     /// Simulates an OUT-OF-BAND move (a mouse drag), the way the real OS reports it: <see
     /// cref="Bounds"/> changes WITHOUT going through <see cref="SetPosition"/> and without
     /// incrementing <see cref="SetPositionCallCount"/> -- this is what the WM did NOT do, not what
-    /// it did (verify-report #21 V18-W2).
+    /// it did.
     /// </summary>
     public void SimulateExternalMove(Rectangle bounds) => Bounds = bounds;
 

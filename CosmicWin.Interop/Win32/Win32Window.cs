@@ -13,7 +13,7 @@ namespace CosmicWin.Interop.Win32;
 /// </remarks>
 internal sealed class Win32Window : IWindow
 {
-    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing positional call sites read as tileable, not auto-excluded (task 3.32).</summary>
+    /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing positional call sites read as tileable, not auto-excluded.</summary>
     private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
 
     private readonly INativeWindowSource _nativeSource;

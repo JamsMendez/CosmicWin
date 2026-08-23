@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 
 namespace CosmicWin.App.Tests.Startup;
 
-/// <summary>Task 3.21 (ES-1): manifest CONTENT and csproj WIRING as source-text facts; real effect is only observable on a real elevated/non-elevated logon (ES-3, human-only).</summary>
+/// <summary>Manifest CONTENT and csproj WIRING as source-text facts; real effect is only observable on a real elevated/non-elevated logon (ES-3, human-only).</summary>
 public sealed class ManifestTests
 {
     private static string ReadSibling(string relativePath, [CallerFilePath] string testFilePath = "")

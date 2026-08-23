@@ -56,16 +56,16 @@ public sealed class ActionExecutor(
     public Rect WorkArea { get; set; }
 
     /// <summary>
-    /// WU18 (closes verify-report #21 V17-W1): when set, every mutation resolves and arranges
+    /// When set, every mutation resolves and arranges
     /// the FOCUSED window's OWN monitor tree/work area, instead of always the primary <paramref
     /// name="engine"/>/<see cref="WorkArea"/> — restoring tree/screen agreement on secondary
-    /// monitors. Null preserves the pre-WU18, primary-only behavior, so tests that construct this
+    /// monitors. Null preserves the pre-, primary-only behavior, so tests that construct this
     /// class directly without a monitor topology stay unaffected.
     /// </summary>
     public TreeManager? TreeManager { get; set; }
 
     /// <summary>
-    /// MR-2 diagnosis (Engram discovery #101): when set, every FOCUS chord records what actually
+    /// MR-2 diagnosis: when set, every FOCUS chord records what actually
     /// happened along the focus path -- the leaf it started from, the tree-walk result, the target
     /// handle and whether activation succeeded. Focus chords are the only ones traced; Move/Resize
     /// are known to work and stay silent. Null keeps the executor entirely untraced, so every test
@@ -140,7 +140,7 @@ public sealed class ActionExecutor(
     /// foreground window is untracked and nothing has been focused yet, or the tree is empty.
     /// </summary>
     /// <remarks>
-    /// MR-2 root cause (Engram discovery #104): the cache used to be consulted FIRST and returned on
+    /// MR-2 root cause: the cache used to be consulted FIRST and returned on
     /// nothing more than "still tracked and alive", so it never re-synced with the desktop. Paired
     /// with <see cref="MoveFocus"/> advancing it before knowing whether activation worked, a single
     /// failed <c>SetForegroundWindow</c> desynced CosmicWin's focus model permanently — every later
@@ -192,7 +192,7 @@ public sealed class ActionExecutor(
             return;
         }
 
-        // The cache advances only on a REAL activation (Engram discovery #104). Moving it first --
+        // The cache advances only on a REAL activation. Moving it first
         // as this method used to -- meant a rejected SetForegroundWindow still relocated CosmicWin's
         // idea of focus, and nothing ever moved it back.
         var activated = window.TryActivate();
@@ -271,9 +271,9 @@ public sealed class ActionExecutor(
     /// <summary>
     /// Applies a tree mutation (Move/Toggle/Resize) and, only if it actually changed something,
     /// re-arranges and positions every live leaf via the shared <see cref="TreeArranger"/>
-    /// (verify-report #21 CRITICAL C2: <see cref="WorkspaceSessionAdapter"/> now applies the same
+    /// (: <see cref="WorkspaceSessionAdapter"/> now applies the same
     /// arrange-and-position step after a window is added or removed) — on the SAME tree/work area
-    /// <paramref name="focused"/> was just mutated on (WU18, closes V17-W1).
+    /// <paramref name="focused"/> was just mutated on.
     /// </summary>
     private void MutateScope(LeafNode focused, Func<ITilingEngine, Node, bool> mutate)
     {
@@ -353,7 +353,7 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
-    /// WU18 (closes V17-W1): resolves <paramref name="focused"/>'s OWN monitor tree/work area via
+    /// Resolves <paramref name="focused"/>'s OWN monitor tree/work area via
     /// <see cref="TreeManager"/> — <see cref="TreeManager.ResolveDisplay"/> is safe to reuse here
     /// because a tracked window's real <c>Bounds</c> still reflects whichever monitor it is
     /// physically on, even mid-desync. Falls back to the primary <paramref name="engine"/>/<see

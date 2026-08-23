@@ -6,7 +6,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// The maintainer's report, 2026-08-22, immediately after new windows began splitting the focused
+/// The user's report, immediately after new windows began splitting the focused
 /// tile: "cuando las cierro no se reacomoda y no se extienden, queda vacío el espacio que ocupaban".
 ///
 /// These facts drive the real production removal path and assert the property the eye actually

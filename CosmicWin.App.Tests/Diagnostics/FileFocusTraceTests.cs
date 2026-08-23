@@ -5,7 +5,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests.Diagnostics;
 
 /// <summary>
-/// The on-disk half of the MR-2 diagnostic (Engram discovery #101): the maintainer reads this file
+/// The on-disk half of the MR-2 diagnostic: the user reads this file
 /// after one supervised run, so every field the two candidates differ on must survive to disk, the
 /// sink must APPEND (a run is many keypresses), and it must never throw -- a diagnostic that can
 /// crash the app it is diagnosing is worse than no diagnostic.

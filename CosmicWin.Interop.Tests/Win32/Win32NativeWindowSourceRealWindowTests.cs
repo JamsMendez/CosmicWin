@@ -8,7 +8,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// <summary>
 /// Task 0.10: first real exercise of the CsWin32-backed <see cref="Win32NativeWindowSource"/>
 /// against an actual desktop session and a genuinely external process's window — everything
-/// before this batch (WU1/WU2) only exercised the tracking/geometry/reposition algorithms via
+/// before this batch only exercised the tracking/geometry/reposition algorithms via
 /// <see cref="FakeNativeWindowSource"/>. Tagged <c>RequiresDesktop</c> so CI-safe unit runs can
 /// exclude it: <c>dotnet test --filter Category!=RequiresDesktop</c>. Run the desktop-requiring
 /// suite explicitly with <c>dotnet test --filter Category=RequiresDesktop</c>.
@@ -57,7 +57,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// V10-W1: <c>ReadStyle</c>/<c>ReadClassName</c>/<c>ReadProcessName</c>/<c>ReadIsOwned</c> had
+    /// <c>ReadStyle</c>/<c>ReadClassName</c>/<c>ReadProcessName</c>/<c>ReadIsOwned</c> had
     /// zero automated coverage -- four mutations to those P/Invoke reads (including <c>ReadStyle</c>
     /// returning <c>0</c>, which would make every real window fail the <c>WS_SYSMENU</c> check and
     /// silently disable tiling entirely) survived the full suite. Uses the same spawned, self-owned
@@ -83,7 +83,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// V11-W4: this test was load-flaky (3/3 passed idle, 2/2 failed under back-to-back suite
+    /// This test was load-flaky (3/3 passed idle, 2/2 failed under back-to-back suite
     /// runs) because <see cref="SpawnedNotepadWindow.Dispose"/> only requested a close and could
     /// return before the process had actually exited under load. <see
     /// cref="SpawnedNotepadWindow.Dispose"/> now escalates to a forced kill if the graceful close
@@ -109,7 +109,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// MR-1 (2026-08-22): a real desktop enumeration found this window is a persistent phantom
+    /// MR-1 : a real desktop enumeration found this window is a persistent phantom
     /// (unowned, cloaked, owned by explorer.exe itself) that used to pass every check and take a
     /// tiling slot. Confirms the fix on the exact real class this was measured against, without
     /// asserting anything about ambient desktop state beyond this one handle.
@@ -130,7 +130,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// MR-2 (2026-08-22 first real run): observation #96 measured plain <c>SetForegroundWindow</c>
+    /// MR-2 ( first real run): observation #96 measured plain <c>SetForegroundWindow</c>
     /// returning <c>false</c> from a background process on this exact machine. This proves the
     /// <c>AttachThreadInput</c> fix actually moves the real OS foreground -- not just that the call
     /// returns a boolean -- against a genuinely external spawned window.
@@ -158,7 +158,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// Reported 2026-08-22: tiled windows looked inset on the left, right and bottom but flush
+    /// Reported: tiled windows looked inset on the left, right and bottom but flush
     /// against the top. Measured cause: Win32's <c>GetWindowRect</c> includes the INVISIBLE resize
     /// border, which on this build is 7px on three sides and 0 on the top --
     /// <c>invisible inset: left=7 top=0 right=7 bottom=7</c>. Positioning on those coordinates

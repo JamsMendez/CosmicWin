@@ -5,7 +5,7 @@ namespace CosmicWin.Layout.Tests;
 public class LayoutTreeMoveNodeTests
 {
     /// <summary>
-    /// Two siblings: a plain swap, sizes carried along. cosmic-comp guards this the same way
+    /// Two siblings: a plain swap, sizes carried along. the reference implementation guards this the same way
     /// (<c>len == 2</c>); with exactly two children a fork would be indistinguishable from a swap
     /// anyway, so the cheaper operation wins.
     /// </summary>
@@ -25,14 +25,14 @@ public class LayoutTreeMoveNodeTests
     }
 
     /// <summary>
-    /// REWRITTEN for cosmic-comp parity (2026-08-22). This asserted a SWAP for a three-child group.
-    /// Measured against the real COSMIC, three-or-more siblings fork instead: the mover pairs up
+    /// REWRITTEN for reference-implementation parity. This asserted a SWAP for a three-child group.
+    /// Measured against the reference implementation, three-or-more siblings fork instead: the mover pairs up
     /// with its neighbour inside a new group taking that neighbour's slot.
     /// <para>
     /// The difference is not cosmetic. A swap is an involution -- press the same direction twice
     /// and you are back where you started, so a window can never travel past its neighbour, which
-    /// is exactly the dead end the maintainer hit after two presses. The fork turns the walk into a
-    /// reversible cycle, which is what COSMIC actually does.
+    /// is exactly the dead end the user hit after two presses. The fork turns the walk into a
+    /// reversible cycle, which is what the reference implementation actually does.
     /// </para>
     /// </summary>
     [Fact]
@@ -77,9 +77,9 @@ public class LayoutTreeMoveNodeTests
     }
 
     /// <summary>
-    /// REWRITTEN for cosmic-comp parity (2026-08-22). This test used to assert the opposite: that
+    /// REWRITTEN for reference-implementation parity. This test used to assert the opposite: that
     /// the focused node was buried in a NEW nested group together with an adjacent sibling, leaving
-    /// it one level DEEPER than it started. cosmic-comp's case (1) does the reverse -- the level
+    /// it one level DEEPER than it started. the reference implementation's case (1) does the reverse -- the level
     /// itself splits perpendicular, its former contents drop into the nested group, and the focused
     /// node is lifted OUT to take the half the direction points at. That is what makes a window
     /// pushed sideways leave its stack instead of sinking further into it.
@@ -112,11 +112,11 @@ public class LayoutTreeMoveNodeTests
     }
 
     /// <summary>
-    /// REWRITTEN for cosmic-comp parity (2026-08-22). The old name said it all --
+    /// REWRITTEN for reference-implementation parity. The old name said it all
     /// <c>UsesPreviousSiblingAndPreservesOrder</c> -- it asserted that a mismatched move IGNORED the
     /// direction pressed and kept the original sibling order. That is precisely the behaviour the
     /// maintainer reported as wrong on real hardware: pressing Left has to send the window LEFT.
-    /// cosmic-comp places the node at index 0 for Left/Up and index 1 for Right/Down.
+    /// the reference implementation places the node at index 0 for Left/Up and index 1 for Right/Down.
     /// </summary>
     [Fact]
     public void MoveNode_OrientationMismatch_HonoursTheDirectionPressed()
@@ -162,12 +162,12 @@ public class LayoutTreeMoveNodeTests
         Assert.Null(focused.Parent);
     }
 
-    // --- COSMIC parity: move_current_node's ancestor walk (cosmic-comp/src/shell/layout/tiling/mod.rs:1507) ---
+    // --- reference-implementation parity: move_current_node's ancestor walk (the reference implementation/src/shell/layout/tiling/mod.rs:1507) ---
 
     /// <summary>
-    /// Maintainer report, 2026-08-22, verified against the vendored cosmic-comp source: pushing a
+    /// Maintainer report, verified against the vendored the reference implementation source: pushing a
     /// window at the EDGE of its group toward the outside must escape the group, not dead-end.
-    /// Layout is COSMIC's own example -- one window on the left half, two stacked on the right.
+    /// Layout is the reference implementation's own example -- one window on the left half, two stacked on the right.
     /// Focus the TOP of the stack and press Up: there is no sibling above it inside the stack, so
     /// the walk must ascend and act at the level above, exactly as
     /// <c>move_current_node</c>'s <c>while let Some(parent) = maybe_parent</c> loop does.
@@ -191,7 +191,7 @@ public class LayoutTreeMoveNodeTests
 
     /// <summary>
     /// The second half of the same report: pushing a window TOWARD a neighbouring group must move
-    /// it INTO that group. cosmic-comp does this at mod.rs:1717 --
+    /// it INTO that group. the reference implementation does this at mod.rs:1717 --
     /// <c>is_group() &amp;&amp; len == 2</c> then <c>move_node(ToParent(&amp;next_child_id))</c>.
     /// CosmicWin instead swaps the window with the whole group as an opaque unit.
     /// </summary>

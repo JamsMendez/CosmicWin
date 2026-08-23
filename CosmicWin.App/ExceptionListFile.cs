@@ -3,10 +3,10 @@ using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App;
 
-/// <summary>Task 3.34: owns the on-disk manual exception-list read (spec WE-2). <see cref="ExceptionListLoader.Parse"/> takes raw text, not a path, keeping <c>CosmicWin.Layout</c> IO-free (D1/D8) -- this App-layer type owns the file.</summary>
+/// <summary>Owns the on-disk manual exception-list read. <see cref="ExceptionListLoader.Parse"/> takes raw text, not a path, keeping <c>CosmicWin.Layout</c> IO-free (D1/D8) -- this App-layer type owns the file.</summary>
 public static class ExceptionListFile
 {
-    /// <summary>Default on-disk location, consistent with design D6's <c>%LOCALAPPDATA%</c> use for the Scheduled Task XML.</summary>
+    /// <summary>Default on-disk location, consistent with the design's <c>%LOCALAPPDATA%</c> use for the Scheduled Task XML.</summary>
     public static string ResolvePath() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CosmicWin", "exceptions.conf");
 

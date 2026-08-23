@@ -9,7 +9,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Tasks 3.15/3.16 (WU11), settled full-pause semantics (Engram decision #62): Pausar gates <see
+/// Pausar gates <see
 /// cref="WorkspaceSessionAdapter.OnWindowAdded"/> in addition to the hotkey path (see <see
 /// cref="Input.KeyboardHookTests"/>) -- a window opened while paused is NOT auto-tiled and is not
 /// retroactively pulled in on Reanudar (forward-only, matching WE-3's own scenario direction).
@@ -34,7 +34,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
         Assert.False(registry.TryGetWindow(window.Handle, out _));
     }
 
-    /// <summary>A window opened during a pause is not retroactively pulled in once Reanudar is clicked (forward-only rule, decision #58).</summary>
+    /// <summary>A window opened during a pause is not retroactively pulled in once Reanudar is clicked (forward-only rule, an earlier decision).</summary>
     [Fact]
     public void WindowAdded_AfterResume_NewWindowIsAddedAndArranged_PauseWindowNeverRetroactivelyPulledIn()
     {
@@ -57,7 +57,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
         Assert.False(registry.TryGetWindow(duringPause.Handle, out _));
     }
 
-    /// <summary>Existing window positions are unaffected by pausing (spec TC-2: "existing window positions are unaffected").</summary>
+    /// <summary>Existing window positions are unaffected by pausing.</summary>
     [Fact]
     public void WindowAdded_WhilePaused_DoesNotRearrangeOrRepositionAnExistingTiledWindow()
     {
@@ -83,7 +83,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
     }
 
     /// <summary>
-    /// V11-W2 (WU11-W2), settled decision #64 "full pause, no reconcile": while paused, closing a
+    /// While paused, closing a
     /// tracked window still removes its node from the tree and unregisters it -- no dead handle is
     /// left behind -- but <see cref="TreeArranger.ArrangeAndPosition"/> is NOT invoked, so the
     /// surviving sibling is left exactly where it was, un-repositioned. The on-screen hole this
@@ -120,7 +120,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
     }
 
     /// <summary>
-    /// Regression guard (control case for V11-W2): the unpaused removal path is unchanged from
+    /// Regression guard (control case for): the unpaused removal path is unchanged from
     /// pre-existing behavior -- the node is removed AND the survivor is re-arranged and
     /// repositioned to fill the full work area, exactly as
     /// <see cref="WorkspaceSessionAdapterTests.WindowRemoved_WithSibling_ReArrangesTree_AndPositionsRemainingLeafToFullWorkArea"/>
@@ -155,39 +155,39 @@ public sealed class WorkspaceSessionAdapterPauseTests
     }
 
     /// <summary>
-    /// V12-W3: closes verify-report #21 revision 12's WARNING that the prior version of this fact
+    /// Closes 's WARNING that the prior version of this fact
     /// could not fail under any implementation. That version flipped a local <c>bool</c> captured by
     /// a lambda between setup and its assertion -- no production code ran in between, and under
     /// mutation MR1 (deleting the removal pause gate outright) only the sibling gated fact failed
     /// while this one stayed green.
     /// </summary>
     /// <remarks>
-    /// V13-W2: the V12-W3 rewrite routed "Reanudar" through <see
+    /// The rewrite routed "Reanudar" through <see
     /// cref="TrayMenuController.TogglePause"/> against a real <see cref="LowLevelKeyboardHook"/>, but
     /// built its own <see cref="TrayMenuController"/> instance with an inline delegate
     /// "mirrored...to be an equivalent" of <see cref="CompositionRoot.BuildTrayMenuController"/>'s
     /// own wiring, rather than obtaining the controller FROM that factory. That pinned the hand-
-    /// written mirror, not the real production seam: verify-report #21 probe P4 showed a genuine
+    /// written mirror, not the real production seam: probe P4 showed a genuine
     /// production-shaped reconcile-on-resume, wired through <see
     /// cref="CompositionRoot.BuildTrayMenuController"/>'s real <c>setPaused</c> delegate and invoked
-    /// from <see cref="App"/>, compiled clean and stayed green against the V12-W3 version of this
+    /// from <see cref="App"/>, compiled clean and stayed green against the version of this
     /// fact. This version obtains the controller directly from <see
     /// cref="CompositionRoot.BuildTrayMenuController"/> itself -- the exact factory the tray's
     /// Reanudar menu item drives in production -- so a future production reconcile wired into that
     /// factory's own <c>setPaused</c> delegate is now exercised by this fact, not bypassed by it.
-    /// V14-W2 correction: this fact still hand-built the ADAPTER half of the production wiring with
+    /// This fact still hand-built the ADAPTER half of the production wiring with
     /// <c>new WorkspaceSessionAdapter(...)</c>, which is <see
-    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s body retyped by hand -- verify-report #21
+    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s body retyped by hand
     /// probe P3 showed a genuine production reconcile-on-resume wired at THAT factory (where the
     /// hook and the adapter are actually coupled) escaped this fact entirely, with zero test edits
     /// needed to ship it. This version obtains the adapter from <see
     /// cref="CompositionRoot.BuildPauseGatedSession"/> itself, so BOTH halves of the fact now come
-    /// from production factories, not a mirror. "No reconcile on resume" (decision #64) still holds
+    /// from production factories, not a mirror. "No reconcile on resume" still holds
     /// true by construction today -- <see cref="WorkspaceSessionAdapter"/> has no resume hook, timer
-    /// or re-enumeration anywhere in the class. Proven by mutation, twice: (1) V13-W2's own proof --
+    /// or re-enumeration anywhere in the class. Proven by mutation, twice: (1) 's own proof
     /// temporarily adding a production-shaped <c>WorkspaceSessionAdapter.Reconcile()</c> wired into
     /// <see cref="CompositionRoot.BuildTrayMenuController"/>'s own <c>setPaused</c> delegate turns
-    /// this exact fact RED; (2) V14-W2's proof -- temporarily wiring that SAME <c>Reconcile()</c>
+    /// this exact fact RED; (2) 's proof -- temporarily wiring that SAME <c>Reconcile</c>
     /// into <see cref="CompositionRoot.BuildPauseGatedSession"/> itself (the factory this fact now
     /// calls) ALSO turns it RED, with NO edit to this file at all -- three production-only edits are
     /// enough. Reverting either probe restores GREEN (see apply-progress).
@@ -223,7 +223,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
     }
 
     /// <summary>
-    /// V14-W2: minimal <see cref="ITilingEngine"/> double so <see
+    /// Minimal <see cref="ITilingEngine"/> double so <see
     /// cref="WindowRemoved_WhilePaused_ThenResumedViaTogglePause_NoRetroactiveArrangeIsFired"/> can
     /// obtain a real <see cref="ActionExecutor"/> (needed by <see
     /// cref="CompositionRoot.BuildPauseGatedSession"/>) without depending on hotkey-dispatch
@@ -246,7 +246,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
         public bool Remove(Node focused) => false;
     }
 
-    /// <summary>V14-W2: minimal <see cref="IForegroundWindowSource"/> double, same reason as <see cref="RecordingTilingEngine"/>.</summary>
+    /// <summary>: minimal <see cref="IForegroundWindowSource"/> double, same reason as <see cref="RecordingTilingEngine"/>.</summary>
     private sealed class StaticForegroundWindowSource(nint handle) : IForegroundWindowSource
     {
         public nint GetForegroundHandle() => handle;

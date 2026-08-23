@@ -5,7 +5,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Task 2.20 (WU7D-corrected, R3-001-corrected): bridges an <see cref="IWorkspace"/>'s add/remove
+/// Task 2.20: bridges an <see cref="IWorkspace"/>'s add/remove
 /// events into the shared <see cref="LayoutTree"/> and <see cref="WindowRegistry"/>, converting
 /// <see cref="IWindow.Handle"/> to <see cref="WindowRef"/> at the Interop-&gt;Layout boundary
 /// (<c>CosmicWin.Layout</c> stays Win32-free). <see cref="ITilingEngine"/> has no
@@ -17,7 +17,7 @@ namespace CosmicWin.App;
 /// policy remain Phase 3 <c>TreeManager</c> scope.
 /// </summary>
 /// <remarks>
-/// Fixes verify-report #21 CRITICAL C2 and WARNING W1. C2: every add/remove now re-arranges the
+/// Fixes and WARNING W1. C2: every add/remove now re-arranges the
 /// tree and positions each live leaf via the shared <see cref="TreeArranger"/> -- previously this
 /// adapter only mutated the tree and never called <see cref="ITilingEngine.Arrange"/> or <see
 /// cref="IWindow.SetPosition"/> at all. The constructor's <c>workArea</c> parameter is a
@@ -38,20 +38,20 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     private readonly Func<bool> _isPaused;
 
     /// <summary>
-    /// Task 3.32: <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.
-    /// Task 3.15/3.16 (WU11), settled full-pause semantics: <paramref name="isPaused"/> mirrors the
+    /// <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.
+    /// <paramref name="isPaused"/> mirrors the
     /// same idiom -- while it reports <c>true</c>, a newly-created window is NOT auto-tiled (same
     /// creation-time-only, forward-only rule as exclusion).
     /// </summary>
     /// <remarks>
-    /// V13-W1: <paramref name="isPaused"/> is a MANDATORY parameter -- it used to default to
+    /// <paramref name="isPaused"/> is a MANDATORY parameter -- it used to default to
     /// never-paused (<c>Func&lt;bool&gt;? isPaused = null</c>), which was the terminal defaulting
-    /// site behind two prior closures one layer up: V11-W1 made <see
-    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s <c>hook</c> mandatory, and V12-W1 made <see
+    /// site behind two prior closures one layer up: made <see
+    /// cref="CompositionRoot.BuildPauseGatedSession"/>'s <c>hook</c> mandatory, and made <see
     /// cref="CompositionRoot.BuildSessionAdapter"/>'s <c>isPaused</c> mandatory -- but both still
     /// delegated to THIS constructor, which kept forgiving omission. Inlining this constructor
     /// directly at the <see cref="App"/> call site (bypassing both factories) compiled clean and
-    /// silently restored hotkeys-only pause for a third pass (verify-report #21 probe P2). There is
+    /// silently restored hotkeys-only pause for a third pass. There is
     /// no permissive default left at any layer of this chain now: production callers always go
     /// through <see cref="CompositionRoot.BuildPauseGatedSession"/>, and every direct construction
     /// site in the test suite (production has none) states its gate explicitly.
@@ -76,7 +76,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
 
     private void OnWindowAdded(object? sender, WindowEventArgs e)
     {
-        // Task 3.15/3.16 (WU11): settled full-pause semantics -- a window opened while paused is
+        // Settled full-pause semantics -- a window opened while paused is
         // NOT auto-tiled, and is not retroactively pulled in once Reanudar is clicked (same
         // creation-time-only, forward-only rule the exclusion guard below already applies).
         if (_isPaused())
@@ -86,9 +86,9 @@ public sealed class WorkspaceSessionAdapter : IDisposable
 
         var window = e.Window;
 
-        // Task 3.32: spec WT-3/WE-1/WE-2, closes verify-report #21 N1. Creation-time only -- an
+        // WT-3/WE-1/WE-2, closes. Creation-time only -- an
         // already-tracked window newly excluded by a later Reload is NOT retroactively removed
-        // (WU10 documented scope boundary).
+        //
         if (IsExcluded(window, _exceptions()))
         {
             return;
@@ -102,11 +102,11 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         TreeArranger.ArrangeAndPosition(_tree, _registry, workArea);
     }
 
-    /// <summary>Task 3.32 exclusion check, extracted (WU17) so <see cref="MultiMonitorWorkspaceAdapter"/> can share it verbatim rather than re-implement it.</summary>
+    /// <summary>Task 3.32 exclusion check, extracted so <see cref="MultiMonitorWorkspaceAdapter"/> can share it verbatim rather than re-implement it.</summary>
     internal static bool IsExcluded(IWindow window, ExceptionList exceptions) =>
         WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptions);
 
-    /// <summary>Add-side tree mutation (W1's split-region heuristic included), extracted (WU17) so <see cref="MultiMonitorWorkspaceAdapter"/> reuses the exact same, already-pinned logic for any resolved per-monitor <paramref name="tree"/>.</summary>
+    /// <summary>Add-side tree mutation (W1's split-region heuristic included), extracted so <see cref="MultiMonitorWorkspaceAdapter"/> reuses the exact same, already-pinned logic for any resolved per-monitor <paramref name="tree"/>.</summary>
     internal static void InsertWindow(
         LayoutTree tree, WindowRegistry registry, Rect workArea, IWindow window, LeafNode? focused)
     {
@@ -184,7 +184,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
             return;
         }
 
-        // V11-W2 (WU11-W2): settled full-pause semantics, "full pause, no reconcile" (decision #64).
+        // Settled full-pause semantics, "full pause, no reconcile".
         // Removing the node above always happens -- no dead handle is left in the tree while paused
         // -- but the reflow that would reposition the surviving windows is skipped entirely, and NOT
         // fired retroactively on resume (no resume hook exists anywhere in this adapter). The
@@ -197,7 +197,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
     }
 
-    /// <summary>Remove-side tree mutation, extracted (WU17) for <see cref="MultiMonitorWorkspaceAdapter"/> reuse. Returns <see langword="false"/> for a stale/unknown handle -- callers must skip their own reflow in that case.</summary>
+    /// <summary>Remove-side tree mutation, extracted for <see cref="MultiMonitorWorkspaceAdapter"/> reuse. Returns <see langword="false"/> for a stale/unknown handle -- callers must skip their own reflow in that case.</summary>
     internal static bool RemoveWindow(LayoutTree tree, WindowRegistry registry, nint handle)
     {
         if (!registry.TryGetLeaf(handle, out var leaf) || leaf is null)
@@ -212,7 +212,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
             {
                 LayoutTree.RemoveChild(parent, index);
                 // Without this the closed window's space stays claimed by the hollow group above it
-                // (measured 2026-08-22): the leaf leaves, the reserved slot does not.
+                // (measured): the leaf leaves, the reserved slot does not.
                 LayoutTree.Prune(tree, parent);
             }
         }

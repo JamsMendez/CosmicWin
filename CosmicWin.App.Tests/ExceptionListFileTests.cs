@@ -1,6 +1,6 @@
 namespace CosmicWin.App.Tests;
 
-/// <summary>Task 3.33/3.34: <see cref="ExceptionListFile"/> owns the on-disk manual exception-list read (spec WE-2). Plain BCL file I/O, no fake needed.</summary>
+/// <summary><see cref="ExceptionListFile"/> owns the on-disk manual exception-list read. Plain BCL file I/O, no fake needed.</summary>
 public sealed class ExceptionListFileTests
 {
     [Fact]

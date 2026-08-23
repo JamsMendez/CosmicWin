@@ -1,7 +1,7 @@
 namespace CosmicWin.Layout.Filters;
 
 /// <summary>
-/// Mutable holder for the currently active <see cref="ExceptionList"/> (spec WE-3). Callers keep
+/// Mutable holder for the currently active <see cref="ExceptionList"/>. Callers keep
 /// one long-lived <see cref="ExceptionListStore"/> reference and call <see cref="Reload"/> when
 /// the on-disk exception-list file changes (tray "Reload" or file-watch — the actual trigger and
 /// file I/O are an App-layer concern, out of this batch's Win32-free scope); every reader that
@@ -18,6 +18,6 @@ public sealed class ExceptionListStore
     /// <summary>Re-parses <paramref name="content"/> and replaces <see cref="Current"/> with the result.</summary>
     public void Reload(string content) => Current = ExceptionListLoader.Parse(content);
 
-    /// <summary>Task 3.37: replaces <see cref="Current"/> with an already-parsed list (e.g. from an on-disk file loader), for callers that read raw text themselves rather than handing it to this store.</summary>
+    /// <summary>Replaces <see cref="Current"/> with an already-parsed list (e.g. From an on-disk file loader), for callers that read raw text themselves rather than handing it to this store.</summary>
     public void Reload(ExceptionList replacement) => Current = replacement;
 }

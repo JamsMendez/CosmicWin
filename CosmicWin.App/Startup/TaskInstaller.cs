@@ -6,7 +6,7 @@ using CosmicWin.Interop;
 namespace CosmicWin.App.Startup;
 
 /// <summary>
-/// Tasks 3.19/3.20 (ES-2/ES-4): registers/removes the elevated logon Scheduled Task via
+/// Registers/removes the elevated logon Scheduled Task via
 /// <c>schtasks.exe</c>. Threat matrix: task name is allow-list validated, every call passes a
 /// FIXED argv array, and a non-zero exit always throws, never swallowed.
 /// </summary>
@@ -16,11 +16,11 @@ public sealed class TaskInstaller
 
     private const string SchTasksExe = "schtasks.exe";
 
-    // V25-C1: TaskXmlBuilder declares "encoding=UTF-16" (TaskXmlBuilder.cs:15) -- MSXML6, the parser
+    // TaskXmlBuilder declares "encoding=UTF-16" (TaskXmlBuilder.cs:15) -- MSXML6, the parser
     // Task Scheduler itself uses, requires the on-disk bytes to actually be UTF-16LE with a leading
     // byte order mark, or it rejects the file with "Switch from current encoding to specified
     // encoding not supported." UTF-16+BOM is chosen over re-declaring utf-8 because it is the
-    // verified-working route: confirmed against a real MSXML6 parse (see verify-report V25-C1).
+    // Verified-working route: confirmed against a real MSXML6 parse.
     private static readonly UnicodeEncoding TaskXmlEncoding = new(bigEndian: false, byteOrderMark: true);
 
     private readonly string _taskName;
@@ -43,7 +43,7 @@ public sealed class TaskInstaller
         _runner = runner;
     }
 
-    /// <summary>The exact, fixed argv <c>schtasks /Create</c> receives -- task 3.19's RED "fixed argv array" proof target.</summary>
+    /// <summary>The exact, fixed argv <c>schtasks /Create</c> receives -- 's RED "fixed argv array" proof target.</summary>
     public static IReadOnlyList<string> BuildInstallArgs(string taskName, string xmlPath) =>
         new[] { "/Create", "/TN", taskName, "/XML", xmlPath, "/F" };
 
@@ -51,7 +51,7 @@ public sealed class TaskInstaller
     public static IReadOnlyList<string> BuildUninstallArgs(string taskName) =>
         new[] { "/Delete", "/TN", taskName, "/F" };
 
-    /// <summary>The exact, fixed argv <c>schtasks /Query</c> receives -- V26-W1's locale-independent existence check.</summary>
+    /// <summary>The exact, fixed argv <c>schtasks /Query</c> receives -- 's locale-independent existence check.</summary>
     public static IReadOnlyList<string> BuildQueryArgs(string taskName) =>
         new[] { "/Query", "/TN", taskName };
 
@@ -83,7 +83,7 @@ public sealed class TaskInstaller
     /// that was never installed is treated as success -- ES-4's "cleanly, restoring stock behavior"
     /// needs nothing restored when there is nothing left.
     ///
-    /// V26-W1: existence, not /Delete's stderr, decides idempotency. schtasks' error text is a
+    /// Existence, not /Delete's stderr, decides idempotency. Schtasks' error text is a
     /// per-language MUI resource and does not match on non-English Windows. When /Delete fails, a
     /// follow-up <c>/Query</c> call asks schtasks itself whether the task remains; if it does not,
     /// the failure is swallowed regardless of what /Delete's own text said. If it does, /Delete's
@@ -98,14 +98,14 @@ public sealed class TaskInstaller
     /// <summary>
     /// TC-3 (Salir): stops the logon trigger from firing again, without unregistering the task.
     /// Shares <see cref="RunUnlessTheTaskIsAlreadyGone"/> with <see cref="Uninstall"/> so the
-    /// locale-independent idempotency rule V26-W1 established lives at ONE choke point -- a second
+    /// locale-independent idempotency rule established lives at ONE choke point -- a second
     /// copy is a second place for it to drift back to reading stderr text.
     /// </summary>
     public void Disable() => RunUnlessTheTaskIsAlreadyGone("/Change /DISABLE", BuildDisableArgs(_taskName));
 
     /// <summary>
     /// Runs <paramref name="arguments"/> and, on failure, asks schtasks itself whether the task
-    /// still exists (V26-W1: never its stderr, which is a per-language MUI resource). Gone means
+    /// still exists (: never its stderr, which is a per-language MUI resource). Gone means
     /// there was nothing to do and the failure is swallowed; still present means the failure was
     /// genuine and <paramref name="verb"/>'s original exit code is thrown unchanged.
     /// </summary>

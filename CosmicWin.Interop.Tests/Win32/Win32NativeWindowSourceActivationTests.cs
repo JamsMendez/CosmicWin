@@ -4,7 +4,7 @@ using Windows.Win32;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// MR-2's terminal fact (Engram discovery #106). The fourth supervised run recorded 40 focus chords
+/// MR-2's terminal fact. The fourth supervised run recorded 40 focus chords
 /// and <b>every single activation failed</b> — once the focus model stopped drifting, the
 /// <c>AttachThreadInput</c> fix from <c>4003d98</c> was revealed to have never worked at all. The
 /// cause is that the attach ran on <c>ActionDispatcher.RunAsync</c>'s thread-pool thread, which has
@@ -21,7 +21,7 @@ public sealed class Win32NativeWindowSourceActivationTests
     /// <summary>
     /// Turns a refusal into a diagnosis instead of a mystery.
     ///
-    /// Measured 2026-08-22 against a byte-identical assembly that had passed repeatedly minutes
+    /// Measured against a byte-identical assembly that had passed repeatedly minutes
     /// earlier: the whole suite failed because Windows had the foreground LOCKED system-wide.
     /// <c>SystemParametersInfo(SPI_GETFOREGROUNDLOCKTIMEOUT)</c> reported <c>int.MaxValue</c>, the
     /// documented signature of an active <c>LockSetForegroundWindow</c>, and in that state nothing

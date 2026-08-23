@@ -3,7 +3,7 @@ using CosmicWin.Interop;
 
 namespace CosmicWin.App.Tests;
 
-/// <summary>Task 3.29/3.30: pins the literal Interop-&gt;Layout adapter <see cref="WindowDescriptorBuilder"/> -- the only place an <c>IWindow</c> can become a <c>WindowDescriptor</c> (design D1/D8).</summary>
+/// <summary>Pins the literal Interop-&gt;Layout adapter <see cref="WindowDescriptorBuilder"/> -- the only place an <c>IWindow</c> can become a <c>WindowDescriptor</c>.</summary>
 public sealed class WindowDescriptorBuilderTests
 {
     [Fact]

@@ -99,12 +99,12 @@ public class Win32WindowTests
         Assert.False(activated);
     }
 
-    // Task 3.27: 5 pass-through facts pinning IWindow's new raw-descriptor surface (ClassName,
+    // 5 pass-through facts pinning IWindow's new raw-descriptor surface (ClassName,
     // ProcessName, Style, ExStyle, IsOwned), added so an App-layer adapter can build a Layout
     // WindowDescriptor from an IWindow without CosmicWin.Layout ever referencing Win32 (design
     // D1/D8/D7). Confirmed RED: named args `className:`/`processName:`/`style:`/`exStyle:`/
     // `isOwned:` do not exist on Win32Window's constructor (no such parameter, compile error) and
-    // the properties do not exist on IWindow (CS1061) before task 3.28's GREEN.
+    // the properties do not exist on IWindow (CS1061) before 's GREEN.
 
     [Fact]
     public void ClassName_ReflectsConstructorValue()

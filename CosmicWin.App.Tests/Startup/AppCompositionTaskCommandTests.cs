@@ -2,7 +2,7 @@ using CosmicWin.App.Startup;
 
 namespace CosmicWin.App.Tests.Startup;
 
-/// <summary>Task 3.20: <see cref="AppComposition.TryHandleTaskCommand"/> is the ONE delegating call <c>App.OnStartup</c> makes for <c>--install-task</c>/<c>--uninstall-task</c> (pinned by <c>AppEntryPointThinnessTests</c>).</summary>
+/// <summary><see cref="AppComposition.TryHandleTaskCommand"/> is the ONE delegating call <c>App.OnStartup</c> makes for <c>--install-task</c>/<c>--uninstall-task</c> (pinned by <c>AppEntryPointThinnessTests</c>).</summary>
 public sealed class AppCompositionTaskCommandTests
 {
     [Fact]

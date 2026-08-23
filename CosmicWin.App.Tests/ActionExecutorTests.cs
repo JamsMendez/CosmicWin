@@ -50,7 +50,7 @@ public sealed class ActionExecutorTests
     }
 
     /// <summary>
-    /// REWRITTEN for cosmic-comp parity (2026-08-22): this asserted a straight A/B swap across a
+    /// REWRITTEN for reference-implementation parity: this asserted a straight A/B swap across a
     /// three-leaf row. With three or more siblings LE-5 now forks -- the mover pairs up with its
     /// neighbour inside a new group taking that neighbour's slot -- so A and B share the left half
     /// at 225 each while C keeps 450. The executor contract under test is unchanged and still the
@@ -146,7 +146,7 @@ public sealed class ActionExecutorTests
         Assert.Equal(Rectangle.FromSize(495, 0, 405, 200), windowB.LastSetPosition);
     }
 
-    // V22-W1 (CRITICAL): TreeArranger.ArrangeAndPosition -- the shared choke point this call site
+    // TreeArranger.ArrangeAndPosition -- the shared choke point this call site
     // ALSO goes through -- now evicts a leaf whose SetPosition fails and reflows the survivors,
     // instead of leaving it stuck in the tree. Renamed/updated from the pre-fix
     // "CallsOnceAndDoesNotRetry" version, which pinned the OLD (broken) no-eviction behavior.
@@ -184,7 +184,7 @@ public sealed class ActionExecutorTests
         Assert.Equal(0, windowA.TryActivateCallCount + windowB.TryActivateCallCount + windowC.TryActivateCallCount);
     }
 
-    // WU18 (closes verify-report #21 V17-W1): reproduces probe P16's exact runtime shape -- two
+    // Reproduces probe P16's exact runtime shape -- two
     // windows on a SECONDARY (non-primary) monitor, one directional hotkey. Before the fix:
     // LayoutTree.MoveNode swapped the tree order but ActionExecutor always arranged the PRIMARY
     // tree/work area regardless of which tree it mutated, so zero SetPosition calls were issued
@@ -240,7 +240,7 @@ public sealed class ActionExecutorTests
         Assert.Equal(Rectangle.FromSize(2560, 0, 640, 720), windowA.LastSetPosition);
     }
 
-    // WU18: the tree-order swap alone is not the user-visible property -- focus DIRECTION is.
+    // The tree-order swap alone is not the user-visible property -- focus DIRECTION is.
     // After a Move swaps the secondary tree's order, FocusLeft must activate the window that is
     // NOW genuinely on screen to the left, not merely first in tree order.
     [Fact]

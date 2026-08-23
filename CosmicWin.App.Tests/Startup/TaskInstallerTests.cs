@@ -6,7 +6,7 @@ namespace CosmicWin.App.Tests.Startup;
 
 public sealed class TaskInstallerTests
 {
-    // Task 3.19 RED #1 (threat matrix): fixed argv array, never a composed command-line string.
+    // Fixed argv array, never a composed command-line string.
     [Fact]
     public void BuildInstallArgs_ReturnsExactFixedArgv()
     {
@@ -25,7 +25,7 @@ public sealed class TaskInstallerTests
         Assert.Equal(new[] { "/Delete", "/TN", "CosmicWin", "/F" }, args);
     }
 
-    // Task 3.19 RED #2 (threat matrix): injection-shaped task names rejected before reaching argv.
+    // Injection-shaped task names rejected before reaching argv.
     [Theory]
     [InlineData("CosmicWin & del /f /q C:\\")]
     [InlineData("CosmicWin\" /Create /TN evil")]
@@ -36,7 +36,7 @@ public sealed class TaskInstallerTests
             new TaskInstaller(taskName, @"C:\CosmicWin.exe", @"C:\Task.xml", new FakeProcessRunner()));
     }
 
-    // Task 3.19 RED #3 (threat matrix): non-zero schtasks exit propagates, never silently swallowed.
+    // Non-zero schtasks exit propagates, never silently swallowed.
     [Fact]
     public void Install_NonZeroExit_ThrowsAndNeverSwallows()
     {
@@ -63,7 +63,7 @@ public sealed class TaskInstallerTests
         Assert.Contains("exit code 5", ex.Message);
     }
 
-    // Task 3.20 GREEN: install writes the XML and invokes schtasks with the exact fixed argv (ES-2).
+    // Install writes the XML and invokes schtasks with the exact fixed argv (ES-2).
     [Fact]
     public void Install_Success_WritesXmlAndInvokesSchtasksWithFixedArgv()
     {
@@ -80,7 +80,7 @@ public sealed class TaskInstallerTests
         File.Delete(xmlPath);
     }
 
-    // Task 3.20 GREEN (ES-4): uninstall invokes schtasks /Delete /F with the exact fixed argv.
+    // Uninstall invokes schtasks /Delete /F with the exact fixed argv.
     [Fact]
     public void Uninstall_Success_InvokesSchtasksDeleteWithFixedArgv()
     {
@@ -93,10 +93,10 @@ public sealed class TaskInstallerTests
         Assert.Equal(TaskInstaller.BuildUninstallArgs("CosmicWin.Test"), runner.LastArguments);
     }
 
-    // V25-W2 RED: schtasks /Delete against a task that was never installed exits 1 with this exact
-    // stderr (measured against real schtasks in verify-report V25-W2). ES-4 requires removal
+    // Schtasks /Delete against a task that was never installed exits 1 with this exact
+    // stderr (measured against real schtasks in verify-report). ES-4 requires removal
     // "cleanly, restoring stock behavior" -- there is nothing to restore here, so this is success,
-    // not a failure. A follow-up /Query confirms absence (V26-W1: stderr text is never read).
+    // not a failure. A follow-up /Query confirms absence (: stderr text is never read).
     [Fact]
     public void Uninstall_TaskAlreadyAbsent_IsIdempotent_DoesNotThrow()
     {
@@ -112,7 +112,7 @@ public sealed class TaskInstallerTests
         Assert.Equal(TaskInstaller.BuildQueryArgs("CosmicWin.Test"), runner.LastArguments);
     }
 
-    // V25-W2 companion: a genuine failure (unrelated stderr, e.g. access denied) MUST still throw --
+    // A genuine failure (unrelated stderr, e.g. Access denied) MUST still throw
     // the idempotency fix must not swallow real errors.
     [Fact]
     public void Uninstall_GenuineFailure_StillThrows_NotSwallowedByIdempotencyFix()
@@ -129,8 +129,8 @@ public sealed class TaskInstallerTests
         Assert.Contains("exit code 5", ex.Message);
     }
 
-    // V26-W1 RED: the "task already absent" signature is an OS-localised FormatMessage string --
-    // proven language-dependent by direct FormatMessageW measurement in verify-report V26-W1. On
+    // The "task already absent" signature is an OS-localised FormatMessage string
+    // proven language-dependent by direct FormatMessageW measurement in verify-report. On
     // Spanish Windows /Delete's stderr never contains the English fragment, so a stderr-only guard
     // throws for an absent task. The locale-independent fix asks schtasks itself via /Query -- it
     // never reads /Delete's stderr text at all, so this must succeed regardless of language.
@@ -148,7 +148,7 @@ public sealed class TaskInstallerTests
         installer.Uninstall(); // Must not throw -- no English text is ever consulted.
     }
 
-    // V26-W2 RED: pins the discriminator itself, not just its outcome. Exit code 1 alone is
+    // Pins the discriminator itself, not just its outcome. Exit code 1 alone is
     // ambiguous -- schtasks returns it both for "task not found" AND for unrelated genuine
     // failures -- so a guard keyed on exit code alone (mutation M7 / the naive "ExitCode == 1"
     // discriminator) would wrongly swallow this. Only a real /Query check, which here reports the
@@ -176,7 +176,7 @@ public sealed class TaskInstallerTests
         Assert.Equal(new[] { "/Query", "/TN", "CosmicWin" }, args);
     }
 
-    // V25-C1 RED (unconditional, no trait gate, no elevation, no real task): the declared encoding
+    // The declared encoding
     // and the on-disk bytes must agree, or MSXML6 (Task Scheduler's own parser) rejects the file
     // with "Switch from current encoding to specified encoding not supported." A real XmlDocument
     // parse against the ACTUAL WRITTEN BYTES is the only assertion that would have caught this --
@@ -233,7 +233,7 @@ public sealed class TaskInstallerTests
         Assert.Equal(TaskInstaller.BuildDisableArgs("CosmicWin.Test"), runner.LastArguments);
     }
 
-    // Mirrors Uninstall's V26-W1 shape exactly: existence decides idempotency, never stderr text,
+    // Mirrors Uninstall's shape exactly: existence decides idempotency, never stderr text,
     // which is a per-language MUI resource. Disabling a task that was never installed is nothing to
     // do, not a failure -- and Salir must never fail because of it.
     [Fact]

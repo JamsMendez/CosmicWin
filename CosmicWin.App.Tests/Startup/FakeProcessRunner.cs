@@ -10,7 +10,7 @@ internal sealed class FakeProcessRunner : IProcessRunner
     public int ExitCodeToReturn;
     public string StandardErrorToReturn = string.Empty;
 
-    // V26-W1: lets a test give schtasks' two verbs independent responses -- e.g. /Delete fails while
+    // Lets a test give schtasks' two verbs independent responses -- e.g. /Delete fails while
     // a follow-up /Query reports the task gone (or still present) -- so the locale-independent
     // existence check can be exercised without ever inspecting stderr text.
     public Dictionary<string, ProcessRunResult>? ResultByVerb;

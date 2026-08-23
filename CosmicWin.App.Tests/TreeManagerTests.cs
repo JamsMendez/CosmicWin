@@ -6,7 +6,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Phase 3 tasks 3.1-3.8 (design D4, spec MM-1..MM-5): <see cref="TreeManager"/> owns one
+/// Phase 3 -3.8: <see cref="TreeManager"/> owns one
 /// <see cref="LayoutTree"/> per connected physical monitor, resilient to hotplug and
 /// DPI/work-area changes.
 /// </summary>
@@ -16,7 +16,7 @@ public sealed class TreeManagerTests
         new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
             Rectangle.FromSize(left, top, width, height), 1.0, primary);
 
-    // Task 3.1/3.2 (MM-1): exactly one tree root per connected physical monitor.
+    // Exactly one tree root per connected physical monitor.
     [Fact]
     public void Constructor_OnePerDisplay_CreatesDistinctEmptyTrees()
     {
@@ -31,7 +31,7 @@ public sealed class TreeManagerTests
         Assert.Null(secondaryTree!.Root);
     }
 
-    // Task 3.1/3.2 (MM-2): a newly-connected monitor gets a fresh, empty tree.
+    // A newly-connected monitor gets a fresh, empty tree.
     [Fact]
     public void OnDisplayConnected_NewDisplay_CreatesEmptyTree()
     {
@@ -63,7 +63,7 @@ public sealed class TreeManagerTests
         Assert.NotNull(after!.Root);
     }
 
-    // Task 3.3/3.4 (MM-3 scenario "Disconnect reparents windows"): a secondary monitor's 3 tiled
+    // A secondary monitor's 3 tiled
     // windows all reparent into the primary tree with no crash or loss, preserving the exact
     // registered LeafNode instances (WindowRegistry must not need re-registration).
     [Fact]
@@ -108,7 +108,7 @@ public sealed class TreeManagerTests
         Assert.Same(leaf3, found3);
     }
 
-    // Verify-report precedent (WU7C part 2/WU7D): every tree mutation must re-arrange and
+    // Verify-report precedent: every tree mutation must re-arrange and
     // reposition via the shared TreeArranger, not just mutate the tree in memory.
     [Fact]
     public void OnDisplayDisconnected_SecondaryWithWindow_PositionsReparentedWindowInPrimaryWorkArea()
@@ -200,7 +200,7 @@ public sealed class TreeManagerTests
             () => manager.OnDisplayDisconnected(newPrimary, new Rect(0, 0, 1920, 1080)));
     }
 
-    // Task 3.5/3.6 (MM-4 scenario "Work-area change reflows locally"): only the changed
+    // Only the changed
     // monitor's tree reflows; other monitors are unaffected (no window loss on either).
     [Fact]
     public void OnDisplayChanged_ReflowsOnlyThatMonitorsTree_LeavesOtherMonitorUntouched()
@@ -225,7 +225,7 @@ public sealed class TreeManagerTests
         Assert.Equal(0, secondaryWindow.SetPositionCallCount);
     }
 
-    // Task 3.7/3.8 (MM-5 scenario "Focus falls through to adjacent monitor"): the nearest
+    // The nearest
     // connected monitor in the requested direction resolves to its tree's first leaf.
     [Fact]
     public void FocusAdjacentDisplay_MonitorToRightExists_ReturnsFirstLeafOfThatMonitorsTree()
@@ -360,7 +360,7 @@ public sealed class TreeManagerTests
         Assert.Equal(FocusWalkStatus.NoMatch, manager.FocusAdjacentDisplay(primary, Direction.Right).Status);
     }
 
-    // WU17 (closes W3): exposes the constructor's primary handle so a caller (AppComposition) can
+    // Exposes the constructor's primary handle so a caller (AppComposition) can
     // retrieve the primary display's own tree/work area without duplicating that selection logic.
     [Fact]
     public void Primary_ReturnsTheDisplayPassedToConstructor()
@@ -372,7 +372,7 @@ public sealed class TreeManagerTests
         Assert.Same(primary, manager.Primary);
     }
 
-    // WU17 (closes W3, MM-1): a window's Bounds resolves to whichever display's Bounds contains
+    // A window's Bounds resolves to whichever display's Bounds contains
     // its center, falling back to primary when none match (off-screen rect) -- the routing
     // decision production add/remove needs.
     [Theory]

@@ -4,7 +4,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
 /// The positional policy — index arithmetic, range limits, create-on-demand — with no live shell.
-/// The maintainer chose positional over i3-style names (2026-08-22): the shell appends new desktops
+/// The maintainer chose positional over i3-style names : the shell appends new desktops
 /// at the end and gives them no durable number, so "desktop 3" can only mean "the third one".
 /// </summary>
 public sealed class Win32VirtualDesktopServiceTests

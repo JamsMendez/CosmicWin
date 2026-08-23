@@ -3,7 +3,7 @@ using CosmicWin.App.Tray;
 namespace CosmicWin.App.Tests.Tray;
 
 /// <summary>
-/// Tasks 3.15/3.17/3.36 (WU11): <see cref="TrayMenuController"/> is a pure, delegate-based
+/// <see cref="TrayMenuController"/> is a pure, delegate-based
 /// pass-through -- no hidden state, no Win32, no live tray needed to test menu behavior. Mirrors
 /// <see cref="WorkspaceSessionAdapter"/>'s injected-<c>Func</c> single-source-of-truth idiom.
 /// </summary>

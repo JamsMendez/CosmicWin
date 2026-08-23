@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 // a fake for unit testing WT-1's tracking algorithm without a real desktop session.
 [assembly: InternalsVisibleTo("CosmicWin.Interop.Tests")]
 
-// WU28: lets CosmicWin.App.Tests construct the real Win32Window/Win32NativeWindowSource for a
+// Lets CosmicWin.App.Tests construct the real Win32Window/Win32NativeWindowSource for a
 // desktop integration test against real spawned windows -- test-only, never ships in the
 // elevated binary, no runtime behavior change.
 [assembly: InternalsVisibleTo("CosmicWin.App.Tests")]

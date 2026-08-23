@@ -2,7 +2,7 @@ using CosmicWin.Launcher;
 
 namespace CosmicWin.App.Tests.Startup;
 
-/// <summary>Task 3.22: <see cref="Program.Run"/> is the entire shim (D6) -- runs the registered elevated Scheduled Task via <c>schtasks /Run</c> and returns its exit code.</summary>
+/// <summary><see cref="Program.Run"/> is the entire shim (D6) -- runs the registered elevated Scheduled Task via <c>schtasks /Run</c> and returns its exit code.</summary>
 public sealed class LauncherProgramTests
 {
     [Fact]

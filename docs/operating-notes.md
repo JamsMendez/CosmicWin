@@ -115,19 +115,17 @@ Run one with the detailed logger, or its output is swallowed:
 dotnet test <project> --filter "FullyQualifiedName~DesktopSnapshotDiagnostic" --logger "console;verbosity=detailed"
 ```
 
-## Reference implementation
+## Reference material
 
-`cosmic-epoch/` is a vendored checkout of COSMIC, kept as the behavioural reference. Algorithms are
-ported from it, never copied. The parts that have actually been consulted:
+Behaviour was modelled on other window managers, read and reimplemented rather than copied. Who
+they are and why is in the root [README](../README.md); the code no longer repeats it, and it names
+no upstream project.
 
-- `cosmic-comp/src/shell/layout/tiling/mod.rs` — `move_current_node` (the ancestor walk that makes a
-  move a reversible cycle), `resize`, and the insert heuristic that picks a split axis from the
-  focused tile's aspect ratio, which is what curls a run of new windows into a spiral.
-- `cosmic-comp/src/input/mod.rs` — how a resize keypress becomes an edge plus an inwards/outwards
-  intent.
-
-`Orientation` is inverted between the two projects: cosmic-comp's `Orientation::Vertical` measures
-width and means side-by-side, which is CosmicWin's `SplitAxis.Horizontal`. Translate deliberately.
+Optional checkouts can live under `docs/reference/`, which is git-ignored and never distributed --
+nothing here needs them to build, run or test. One translation trap is worth carrying regardless:
+the `Orientation` naming is INVERTED between the two projects. The reference implementation's
+`Orientation::Vertical` measures width and means side-by-side, which is CosmicWin's
+`SplitAxis.Horizontal`. Translate deliberately.
 
 ## Virtual desktops
 
@@ -190,12 +188,10 @@ other class's geometry assertions; use the explicit-gap overload of `ArrangeAndP
 
 MIT. Two facts make that the right fit rather than a default.
 
-Every line of product source here is ORIGINAL. The reference trees were read, never copied:
-`cosmic-epoch` is GPL-3, `fancywm` is PolyForm Perimeter 1.0.1 — which forbids using it to compete
-with the licensor's product, and CosmicWin is a competing tiling window manager — and
-`fancywm/winman-windows` is GPL-2. None of them is committed: `.gitignore` excludes both trees, and
-`git ls-files` returns nothing for either, so this repository distributes only its own code.
+Every line of product source here is ORIGINAL. Reference projects were read, never copied, and none
+of them is committed -- `.gitignore` excludes `docs/reference/`, so this repository distributes only
+its own code. That matters because their terms are not compatible with a permissive release.
 
 The single dependency is `Microsoft.Windows.CsWin32`, itself MIT and a source generator with no
 runtime surface (see `CosmicWin.Interop.csproj`). The virtual-desktop support adds no dependency at
-all — the COM object comes from the shell that is already running.
+all -- the COM object comes from the shell that is already running.

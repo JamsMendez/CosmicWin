@@ -23,7 +23,7 @@ public sealed class TaskXmlBuilderTests
         Assert.DoesNotContain("C:\\A & B\\CosmicWin.exe", xml);
     }
 
-    // V25-W6: without an explicit <ExecutionTimeLimit>, Task Scheduler applies the schema default
+    // Without an explicit <ExecutionTimeLimit>, Task Scheduler applies the schema default
     // PT72H, killing the WM after 3 days of uptime. PT0S means "no limit". Inspection-based (a real
     // Task Scheduler run cannot be exercised here -- registering a real task is forbidden), so this
     // pins the XML content, the strongest proof available without an elevated desktop session.

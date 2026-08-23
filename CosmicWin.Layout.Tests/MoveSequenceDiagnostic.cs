@@ -4,9 +4,9 @@ using Xunit.Abstractions;
 namespace CosmicWin.Layout.Tests;
 
 /// <summary>
-/// TEMPORARY diagnostic, not a behavioural test. Replays the maintainer's reported 3-window
+/// TEMPORARY diagnostic, not a behavioural test. Replays the user's reported 3-window
 /// scenario through the CURRENT engine and prints the resulting tree after each chord, so a
-/// report of COSMIC's behaviour can be contrasted against what CosmicWin actually does today
+/// report of the reference implementation's behaviour can be contrasted against what CosmicWin actually does today
 /// instead of against a guess about what it does.
 /// </summary>
 public sealed class MoveSequenceDiagnostic(ITestOutputHelper output)
@@ -38,7 +38,7 @@ public sealed class MoveSequenceDiagnostic(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The maintainer's second scenario: six windows opened back to back, which LE-4's
+    /// The user's second scenario: six windows opened back to back, which LE-4's
     /// aspect-ratio split heuristic curls into a spiral, then the LAST one pushed Right over and
     /// over. Prints every state so the reported walk can be contrasted against the real one.
     /// </summary>

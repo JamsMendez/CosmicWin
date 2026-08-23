@@ -6,12 +6,12 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Where a NEW window lands. Measured on real hardware 2026-08-22: every window after the second was
+/// Where a NEW window lands. Measured on real hardware: every window after the second was
 /// appended to the end of the root group, next to the last one, no matter which window had focus.
-/// That is neither what LE-4 says nor how COSMIC behaves.
+/// That is neither what LE-4 says nor how the reference implementation behaves.
 ///
 /// LE-4's own scenario is explicit — "a new Horizontal-oriented Group REPLACES the Leaf, with both
-/// windows side by side" — and the maintainer described the same thing from the product side: a new
+/// windows side by side" — and the user described the same thing from the product side: a new
 /// window opens BESIDE or BELOW the focused one, side chosen by the focused tile's aspect ratio.
 /// Only the very first split ever did this, because it was the only case where the tree root
 /// happened to be a bare leaf.
@@ -19,7 +19,7 @@ namespace CosmicWin.App.Tests;
 /// <remarks>
 /// The consequence is deliberate and worth stating: splitting the focused tile means each new
 /// window takes half of THAT tile, not an equal share of the row. Three windows opened without
-/// moving focus give 1/2, 1/4, 1/4 -- not thirds. That is the i3/COSMIC model, and it is what makes
+/// moving focus give 1/2, 1/4, 1/4 -- not thirds. That is the i3/the reference implementation model, and it is what makes
 /// nested groups (and therefore HA-1's Alt+[) arise during ordinary use at all.
 /// </remarks>
 public sealed class NewWindowPlacementTests
@@ -44,7 +44,7 @@ public sealed class NewWindowPlacementTests
         new(new IntPtr(handle), Rectangle.FromSize(0, 0, 400, 300));
 
     /// <summary>
-    /// The exact case the maintainer reported. Focus stays on the FIRST window while a third opens;
+    /// The exact case the user reported. Focus stays on the FIRST window while a third opens;
     /// it must split that window, not land next to the second one. On a 1920x1080 work area the
     /// focused tile is 960 wide by 1080 tall -- taller than wide -- so LE-4 stacks the newcomer
     /// BELOW it, which is precisely "abajo de la del focus actual".
@@ -145,7 +145,7 @@ public sealed class NewWindowPlacementTests
 
     /// <summary>
     /// A focused leaf living in ANOTHER monitor's tree must never be split by a window arriving on
-    /// this one. Out of active scope as a product feature (decision #86, single monitor), but the
+    /// this one. Out of active scope as a product feature, but the
     /// guard is free and keeps the shared static honest for whatever tree it is handed.
     /// </summary>
     [Fact]

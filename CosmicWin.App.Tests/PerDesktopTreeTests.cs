@@ -138,7 +138,7 @@ public sealed class PerDesktopTreeTests
     }
 
     /// <summary>
-    /// Measured on real hardware 2026-08-22, and caused by this very feature: CosmicWin stopped
+    /// Measured on real hardware, and caused by this very feature: CosmicWin stopped
     /// tiling entirely the moment per-desktop trees shipped.
     /// <para>
     /// The shell answers <c>Guid.Empty</c> for a window it will not place -- one mid-creation, or

@@ -12,7 +12,7 @@ namespace CosmicWin.App.Tests;
 /// reaches a recording <see cref="ITilingEngine"/> fake with the correct <see cref="Direction"/>
 /// and dispatched kind, end-to-end through <see cref="ActionDispatcher"/> -&gt; <see
 /// cref="ActionExecutor"/>, using a fake engine/registry/foreground -- no live desktop required.
-/// Closes verify-report #21 finding C1: before <see cref="CompositionRoot"/> existed, nothing but
+/// Before <see cref="CompositionRoot"/> existed, nothing but
 /// tests ever constructed a wired <see cref="ActionDispatcher"/>/<see cref="ActionExecutor"/> pair.
 /// </summary>
 public sealed class CompositionRootTests
@@ -104,7 +104,7 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// V10-W2: the composition-root joint at <c>App.xaml.cs</c> that wires <c>() =>
+    /// The composition-root joint at <c>App.xaml.cs</c> that wires <c> =>
     /// _exceptionStore.Current</c> into <see cref="WorkspaceSessionAdapter"/> had zero coverage --
     /// a mutation replacing that delegate with a constant <see cref="ExceptionList.Empty"/> passed
     /// the entire suite, silently discarding the user's whole on-disk exception list. Extracted to
@@ -179,7 +179,7 @@ public sealed class CompositionRootTests
         Assert.True(hook.IsPaused);
     }
 
-    /// <summary>Task 3.17/3.18 (WU11): Salir's trigger -- <see cref="CompositionRoot.BuildTrayMenuController"/> wires Exit onto the injected exit action exactly once.</summary>
+    /// <summary>Salir's trigger -- <see cref="CompositionRoot.BuildTrayMenuController"/> wires Exit onto the injected exit action exactly once.</summary>
     [Fact]
     public void BuildTrayMenuController_Exit_InvokesInjectedExitAction_ExactlyOnce()
     {
@@ -194,10 +194,10 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// Task 3.36/3.37 (WU11), closes verify-report #21 V10-W4: proves the tray Reload trigger is
+    /// Proves the tray Reload trigger is
     /// real end-to-end, through <see cref="TrayMenuController"/> and the SAME <see
     /// cref="ExceptionListStore"/> a real <see cref="WorkspaceSessionAdapter"/> reads from -- not
-    /// just <see cref="ExceptionListStore"/> in isolation. Mirrors spec WE-3's own scenario
+    /// just <see cref="ExceptionListStore"/> in isolation. Mirrors WE-3's own scenario
     /// ("Removing an exception restores tiling"). Uses an isolated temp file (matching the existing
     /// <c>ExceptionListFileTests</c> precedent) so no test ever touches the real on-disk
     /// <c>%LOCALAPPDATA%</c> exception list -- <paramref name="loadExceptions"/>-style injection is
@@ -244,7 +244,7 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// V11-W1: closes verify-report #21's mutation-surviving gap where deleting the <c>isPaused</c>
+    /// Closes 's mutation-surviving gap where deleting the <c>isPaused</c>
     /// argument from <c>App.xaml.cs</c>'s <see cref="CompositionRoot.BuildSessionAdapter"/> call
     /// compiled cleanly (the parameter is optional, defaulting to never-paused) and left the whole
     /// suite green. <see cref="CompositionRoot.BuildPauseGatedSession"/> wires the SAME hook
@@ -255,7 +255,7 @@ public sealed class CompositionRootTests
     /// through its actual <see cref="KeyboardEventProcessor"/>, proving that a SINGLE write of
     /// <c>hook.IsPaused</c> blocks BOTH a real chord match AND a <see
     /// cref="WorkspaceSessionAdapter"/> <c>WindowAdded</c> auto-tile -- the shared-flag invariant
-    /// decision #62 requires and that no prior fact proved through this joint.
+    /// an earlier decision requires and that no prior fact proved through this joint.
     /// </summary>
     [Fact]
     public void BuildPauseGatedSession_SingleHookPauseWrite_BlocksBothChordMatchAndWindowAdded()

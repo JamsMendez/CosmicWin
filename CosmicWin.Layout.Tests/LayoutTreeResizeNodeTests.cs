@@ -100,10 +100,10 @@ public class LayoutTreeResizeNodeTests
     }
 
     /// <summary>
-    /// REPLACES the MR-3 pin (2026-08-22). That fact asserted this exact scenario -- Ctrl+Alt+H on
+    /// REPLACES the MR-3 pin . That fact asserted this exact scenario -- Ctrl+Alt+H on
     /// the leftmost of two tiled windows -- was "correct, spec-compliant behavior, not a defect",
     /// on the grounds that LE-6 step 2 documents a no-op at a group boundary. The investigation was
-    /// right about the code and wrong about the spec: LE-6 is an incomplete port of cosmic-comp,
+    /// right about the code and wrong about the spec: LE-6 is an incomplete port of the reference implementation,
     /// which carries a shrink as a first-class intent, so the boundary no-op was never the whole
     /// story. The maintainer re-reported it from real use twice before it was believed.
     /// <para>
@@ -125,12 +125,12 @@ public class LayoutTreeResizeNodeTests
     }
 
     /// <summary>
-    /// Reported from real use 2026-08-22: "el resize decremental no funciona". It never did --
+    /// Reported from real use: "el resize decremental no funciona". It never did
     /// there was no shrink in the engine AT ALL. LE-6 only ever grew the focused subtree by taking
     /// from a neighbour on the pressed side, so the leading child of a group, having no neighbour
     /// that way, could only ever get bigger.
     /// <para>
-    /// cosmic-comp separates the two intents: <c>ResizeDirection::{Inwards,Outwards}</c> chooses
+    /// the reference implementation separates the two intents: <c>ResizeDirection::{Inwards,Outwards}</c> chooses
     /// shrink or grow, <c>ResizeEdge</c> chooses which boundary moves, and Inwards flips the edge
     /// (<c>input/mod.rs:2271</c>). It reaches that through a resize MODE with an on-screen
     /// indicator, which CosmicWin has no equivalent of. With four chords and no mode, the direction

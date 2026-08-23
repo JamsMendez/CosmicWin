@@ -1,8 +1,8 @@
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Enumerates the displays attached to the system. Mirrors the shape of winman's
-/// <c>WinMan.IDisplayManager</c> (see <c>fancywm/winman/src/WinMan/IDisplayManager.cs</c>),
+/// Enumerates the displays attached to the system. Shaped after the reference implementation's
+/// <c>IDisplayManager</c>,
 /// trimmed to what multi-monitor-tiling (MM-1..5, later work units) requires.
 /// </summary>
 public interface IDisplayManager

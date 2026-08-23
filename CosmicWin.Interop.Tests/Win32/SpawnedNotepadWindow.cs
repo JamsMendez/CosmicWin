@@ -30,10 +30,10 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </para>
 /// <para>
 /// <see cref="IDisposable"/> requests a normal close and only escalates to <see
-/// cref="Process.Kill()"/> if that graceful close does not complete within its own bound (V11-W4:
+/// cref="Process.Kill"/> if that graceful close does not complete within its own bound (:
 /// under back-to-back suite runs, <c>CloseMainWindow</c>'s WM_CLOSE can take longer than 5 seconds
 /// to be processed under load, leaving a process that exits "shortly after" instead of within the
-/// bound the original best-effort wait relied on -- observed directly during verify-report #21
+/// bound the original best-effort wait relied on -- observed directly during
 /// revision 11's audit). Escalating guarantees the process has actually exited by the time <see
 /// cref="Dispose"/> returns, instead of merely having requested that it exit, so a later test's own
 /// close-detection poll only has to wait out the OS's own handle-teardown lag rather than an
@@ -41,7 +41,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </para>
 /// </remarks>
 /// <summary>
-/// WU28: made <c>public</c> (was <c>internal</c>) so <c>CosmicWin.App.Tests</c> can reuse this
+/// Made <c>public</c> (was <c>internal</c>) so <c>CosmicWin.App.Tests</c> can reuse this
 /// exact hardened spawn/dispose harness for a real-desktop tiling integration test, via a new
 /// <c>CosmicWin.App.Tests</c>-&gt;<c>CosmicWin.Interop.Tests</c> <c>ProjectReference</c>, rather
 /// than re-implementing the same close/kill-on-timeout logic a second time.
@@ -62,7 +62,7 @@ public sealed class SpawnedNotepadWindow : IDisposable
     /// <summary>The real native handle of the spawned Notepad window.</summary>
     public nint Handle { get; }
 
-    /// <summary>The real OS process id that owns <see cref="Handle"/> (WU28 constraint 1/4: lets a caller verify this spawned window's PID against a protected-ancestry blacklist before ever touching it).</summary>
+    /// <summary>The real OS process id that owns <see cref="Handle"/>.</summary>
     public int ProcessId => _windowProcess.Id;
 
     /// <summary>Spawns Notepad and blocks (bounded) until its real main window handle is known.</summary>
@@ -123,7 +123,7 @@ public sealed class SpawnedNotepadWindow : IDisposable
                 _windowProcess.CloseMainWindow();
                 if (!_windowProcess.WaitForExit(5000))
                 {
-                    // V11-W4: the graceful close did not finish within the bound -- escalate so
+                    // The graceful close did not finish within the bound -- escalate so
                     // Dispose() never returns while the process is still alive, guaranteeing the
                     // caller's own close-detection poll only has to wait out OS handle teardown.
                     _windowProcess.Kill();

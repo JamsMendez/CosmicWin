@@ -4,8 +4,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Shared "arrange the tree, then position every live leaf's real window" step (verify-report
-/// #21 CRITICAL C2): both <see cref="ActionExecutor"/> (after a Move/Toggle/Resize mutation) and
+/// Shared "arrange the tree, then position every live leaf's real window" step: both <see cref="ActionExecutor"/> (after a Move/Toggle/Resize mutation) and
 /// <see cref="WorkspaceSessionAdapter"/> (after a window is added or removed) call
 /// <see cref="ITilingEngine.Arrange"/> and must apply the result identically -- one
 /// <see cref="IWindow.SetPosition"/> per live, tracked leaf, respecting <see
@@ -13,10 +12,10 @@ namespace CosmicWin.App;
 /// never drift apart.
 /// </summary>
 /// <remarks>
-/// V22-W1 (verify-report #21 CRITICAL, decision #83's shared-choke-point pattern): a leaf whose
+/// A leaf whose
 /// <see cref="IWindow.SetPosition"/> call fails here is evicted from the tree and <see
-/// cref="WindowRegistry"/> right at this shared choke point, mirroring decision #81's WE-1-style
-/// exclusion -- not re-implemented at any individual caller. WU22 wired an equivalent guard into
+/// cref="WindowRegistry"/> right at this shared choke point, mirroring an earlier decision's WE-1-style
+/// exclusion -- not re-implemented at any individual caller. Wired an equivalent guard into
 /// only ONE of <see cref="ITilingEngine"/>'s live call sites
 /// (<c>MultiMonitorWorkspaceAdapter.OnWindowBoundsChanged</c>); the very next verification
 /// reproduced the identical symptom through <c>OnWindowAdded</c>, which had no guard at all.
@@ -30,7 +29,7 @@ internal static class TreeArranger
     public const int DefaultGap = 8;
 
     /// <summary>
-    /// The single spacing knob, defaulting to OFF. Reported 2026-08-22: windows had space on three
+    /// The single spacing knob, defaulting to OFF. Reported: windows had space on three
     /// sides and none at the top, because Win32's invisible resize border is 7px on left/right/
     /// bottom and 0 on top. Interop now lands a tile exactly where it is asked, so any space on
     /// screen is deliberate -- this value, applied identically on all four sides.

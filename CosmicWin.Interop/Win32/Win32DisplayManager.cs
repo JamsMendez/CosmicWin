@@ -5,10 +5,10 @@ namespace CosmicWin.Interop.Win32;
 /// factor, bounds, and work area.
 /// </summary>
 /// <remarks>
-/// Ports the enumerate + <c>GetDpiForMonitor</c> pattern from fancywm's
-/// <c>WinMan.Windows.Win32DisplayManager</c> (algorithm only — original code), trimmed to what
+/// Ports the enumerate + <c>GetDpiForMonitor</c> pattern from the reference implementation's
+/// <c>the reference implementation.Win32DisplayManager</c> (algorithm only — original code), trimmed to what
 /// WT-2 and this work unit need: a point-in-time snapshot taken at construction. Hotplug
-/// tracking (MM-1/MM-2, Phase 3, WU8) is out of this work unit's scope.
+/// tracking (MM-1/MM-2, Phase 3,) is out of this work unit's scope.
 /// </remarks>
 public sealed class Win32DisplayManager : IDisplayManager
 {

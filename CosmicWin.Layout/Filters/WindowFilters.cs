@@ -2,7 +2,7 @@ namespace CosmicWin.Layout.Filters;
 
 /// <summary>
 /// WE-1 automatic exclusion heuristics, evaluated against a Win32-free <see cref="WindowDescriptor"/>
-/// (design D7). Interop's own trackability check (<c>Win32NativeWindowSource.IsTrackable</c>) only
+/// Interop's own trackability check (<c>Win32NativeWindowSource.IsTrackable</c>) only
 /// decides whether a window is trackable at all (visible, unowned); it deliberately defers all
 /// fine-grained tiling heuristics to this type, so a visible, unowned, non-sysmenu window (e.g. a
 /// shell tray window) is NOT excluded by Interop alone — callers MUST also apply
@@ -24,7 +24,7 @@ public static class WindowFilters
         }
 
         // A minimized window occupies no screen space, so giving it a tile hands a share of the
-        // work area to something nothing is drawn into -- measured 2026-08-22 as "the terminal only
+        // work area to something nothing is drawn into -- measured as "the terminal only
         // expanded to half the screen", with a minimized browser holding the other half.
         if ((descriptor.Style & WindowStyleFlags.Minimized) != 0)
         {

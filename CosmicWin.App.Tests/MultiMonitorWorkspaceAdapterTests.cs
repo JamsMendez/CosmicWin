@@ -7,7 +7,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// WU17 (closes carried finding W3, spec MM-1/MM-4): the first real production caller of <see
+/// The first real production caller of <see
 /// cref="TreeManager"/>. Reuses <see cref="WorkspaceSessionAdapter"/>'s extracted <see
 /// cref="WorkspaceSessionAdapter.InsertWindow"/>/<see cref="WorkspaceSessionAdapter.RemoveWindow"/>/
 /// <see cref="WorkspaceSessionAdapter.IsExcluded"/> statics (so both classes can never drift), but
@@ -104,7 +104,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Null(tree!.Root);
     }
 
-    // V11-W2 semantics (decision #64), re-proven here: removal always happens, only reflow is gated.
+    // Removal always happens, only reflow is gated.
     [Fact]
     public void WindowRemoved_WhilePaused_RemovesFromRegistry_ButSkipsReflow()
     {
@@ -124,7 +124,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(firstSetCountBeforePause, first.SetPositionCallCount);
     }
 
-    // Decision #80 (WU21, replaces WU19's cross-monitor re-home): a window tiled on the SECONDARY
+    // Decision #80: a window tiled on the SECONDARY
     // monitor is dragged onto the PRIMARY monitor -- since the tree never changes, it snaps BACK to
     // its ORIGINAL monitor's slot; the primary tree stays untouched.
     [Fact]
@@ -154,7 +154,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     }
 
     /// <summary>
-    /// Measured on real hardware 2026-08-22: a MINIMIZED window was admitted into the tree and held
+    /// Measured on real hardware: a MINIMIZED window was admitted into the tree and held
     /// a whole tile, so the one visible window only got half the screen. The filter now rejects
     /// WS_MINIMIZE, but that alone only covers windows already minimized at startup -- exclusion is
     /// evaluated in OnWindowAdded and never again. A window minimized WHILE tiled kept its tile.
@@ -233,7 +233,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     }
 
     // Shared setup: two windows side by side, windowA dragged past windowB to x=1500 -- under
-    // decision #80 the tree never updates, so the drag is always undone on drop.
+    // an earlier decision the tree never updates, so the drag is always undone on drop.
     private static (Setup S, RecordingWindow A, RecordingWindow B) DragPastSibling(nint handleA, nint handleB)
     {
         var s = OneDisplay();
@@ -247,8 +247,8 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         return (s, windowA, windowB);
     }
 
-    // Decision #80 (supersedes WU19's/WU20's "tree follows window" rule, never put to the user): a
-    // dragged tiled window snaps BACK to its tree slot -- RED against WU20 code, which would instead
+    // Decision #80 (supersedes 's/'s "tree follows window" rule, never put to the user): a
+    // dragged tiled window snaps BACK to its tree slot -- RED against code, which would instead
     // leave A at the dragged position and swap tree order.
     [Fact]
     public void WindowBoundsChanged_DraggedWindowOnSameMonitor_SnapsBackToTreeSlot_TreeOrderUnchanged()
@@ -264,7 +264,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(2, windowB.SetPositionCallCount);
     }
 
-    // Decision #80 (WU21, replaces WU20's V19-W1 reorder fix): since a drag is always snapped back,
+    // Decision #80: since a drag is always snapped back,
     // tree order can never disagree with screen order, so directional focus behaves as if the drag
     // never happened, with no reorder logic needed to keep it correct.
     [Fact]
@@ -305,7 +305,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         public nint GetForegroundHandle() => Handle;
     }
 
-    // V21-W1 (decision #81, user-impacting): reproduces the exact measured shape -- A dragged to
+    // Reproduces the exact measured shape -- A dragged to
     // x=1500 past B at x=960, but A's own SetPosition call FAILS during the snap-back attempt
     // (IWindow.CanReposition flips false and never self-heals, per its documented contract). A
     // window in this state must be treated exactly like a WE-1 exclusion: evicted from the tree
@@ -343,7 +343,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(3, windowA.SetPositionCallCount);
     }
 
-    // V21-W1: closes the measured focus inversion directly -- since A is evicted from the tree
+    // Closes the measured focus inversion directly -- since A is evicted from the tree
     // and registry, a FocusRight hotkey with A in the foreground must no-op (A can no longer be
     // resolved as focused), instead of misdirecting activation to B (which is now physically on
     // A's LEFT after the drag, not its right).
@@ -367,7 +367,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(0, windowA.TryActivateCallCount);
     }
 
-    // V22-W1 (CRITICAL, decision #83's shared-choke-point pattern): OnWindowAdded never checked
+    // OnWindowAdded never checked
     // CanReposition, so a protected window pinned at x=1500 stayed in the tree even after its own
     // first positioning attempt failed -- a later sibling still tiled into the slot next to it,
     // and FocusRight from the untileable window misdirected to that sibling. Fixed at the shared
@@ -393,7 +393,7 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.False(s.Registry.TryGetLeaf(windowA.Handle, out _)); // untracked, like a WE-1 exclusion
     }
 
-    // V22-W1 companion: closes the measured focus inversion directly through the OnWindowAdded
+    // Closes the measured focus inversion directly through the OnWindowAdded
     // path -- A can never be resolved as focused once evicted, so FocusRight must no-op.
     [Fact]
     public async Task WindowAdded_WindowRefusesRepositionOnItsFirstArrange_ThenFocusRight_IsNoOp_NeverMisdirectsToWrongSibling()

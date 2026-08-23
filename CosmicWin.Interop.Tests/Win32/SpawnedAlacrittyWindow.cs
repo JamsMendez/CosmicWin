@@ -3,11 +3,11 @@ using System.Diagnostics;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// WU29: spawns a real, external Alacritty window for real-desktop integration tests that need
+/// Spawns a real, external Alacritty window for real-desktop integration tests that need
 /// SEVERAL independently existing top-level windows -- as opposed to <see cref="SpawnedNotepadWindow"/>,
 /// whose host (<c>notepad.exe</c>, on this project's Windows build) is the packaged, tabbed Store
 /// app: a second launch opens a new TAB inside the first process's window instead of a second
-/// top-level window, so it cannot back a multi-window test (see Engram #94; measured directly:
+/// top-level window, so it cannot back a multi-window test (see an earlier finding; measured directly:
 /// two <c>notepad.exe</c> launches produced <c>MainWindowHandle</c> values <c>0</c> and a single
 /// real handle, i.e. 2 processes but only 1 top-level window). Alacritty, measured on the same
 /// machine, gave 2 processes and 2 distinct top-level window handles for 2 launches.
@@ -23,7 +23,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// On this configuration Alacritty launches WSL as a child process, so <see cref="Dispose"/> always
 /// escalates to <see cref="Process.Kill(bool)"/> with <c>entireProcessTree: true</c> once the
 /// bounded graceful <see cref="Process.CloseMainWindow"/> wait elapses (mirroring the same
-/// bounded-close-then-escalate hardening as <see cref="SpawnedNotepadWindow.Dispose"/>, V11-W4) --
+/// bounded-close-then-escalate hardening as <see cref="SpawnedNotepadWindow.Dispose"/>,)
 /// killing only the parent process would leave the WSL child running.
 /// </para>
 /// </remarks>
@@ -143,7 +143,7 @@ public sealed class SpawnedAlacrittyWindow : IDisposable
                 "C:\\Users\\jamsm\\Documents\\Bin\\Alacritty-v0.17.0.exe (a committed test must not " +
                 "hardcode one developer's absolute path). Notepad cannot be used for this: on this " +
                 "project's Windows build it is a tabbed packaged app and does not yield one " +
-                "top-level window per process (see Engram #94).");
+                "top-level window per process.");
         }
 
         return path;

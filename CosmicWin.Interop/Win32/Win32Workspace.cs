@@ -6,8 +6,8 @@ namespace CosmicWin.Interop.Win32;
 /// <see cref="Poll"/> as the bounded-interval reconciliation fallback for a missed event.
 /// </summary>
 /// <remarks>
-/// Ports the enumerate + hook + dirty-check pattern from fancywm's
-/// <c>WinMan.Windows.Win32Workspace</c>/<c>WinEventHookHelper</c> (algorithm only — this is
+/// Ports the enumerate + hook + dirty-check pattern from the reference implementation's
+/// <c>the reference implementation.Win32Workspace</c>/<c>WinEventHookHelper</c> (algorithm only — this is
 /// original code, not a copy), scoped to what WT-1 needs. The actual native calls are behind
 /// <see cref="INativeWindowSource"/> so the tracking algorithm is unit-testable without a real
 /// desktop session; production callers use the parameterless constructor, which wires up the
@@ -22,7 +22,7 @@ public sealed class Win32Workspace : IWorkspace
     /// Windows the user is currently dragging or resizing by hand. Every bounds change between
     /// MOVESIZESTART and MOVESIZEEND is an intermediate frame of one gesture, so reporting them
     /// makes every listener answer the drag mid-flight -- measured as a window that flickers under
-    /// the cursor and refuses to move, because decision #80's snap-back re-applied its tile on each
+    /// the cursor and refuses to move, because an earlier decision's snap-back re-applied its tile on each
     /// one. The cached bounds are deliberately left stale for the duration, which is what lets the
     /// drop fire exactly one event carrying the settled position.
     /// </summary>
@@ -75,7 +75,7 @@ public sealed class Win32Workspace : IWorkspace
             // Absent from the enumeration is NOT the same as gone. IsTrackable rejects a cloaked
             // window, and DWM cloaks every window on a virtual desktop the user switches away from
             // -- so treating absence as destruction dismantled the whole layout on a desktop change
-            // and rebuilt it in enumeration order on the way back (measured 2026-08-22). A window
+            // and rebuilt it in enumeration order on the way back (measured). A window
             // that still answers TryGetWindowInfo is alive; only its visibility changed.
             if (!currentSet.Contains(hwnd) && !_nativeSource.TryGetWindowInfo(hwnd, out _))
             {

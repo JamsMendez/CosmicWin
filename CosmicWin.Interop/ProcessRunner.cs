@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Injectable process-execution seam (WU25, ES-2/ES-4). Design threat matrix, "Subprocess: schtasks"
+/// Injectable process-execution seam. Design threat matrix, "Subprocess: schtasks"
 /// row: callers always pass a FIXED argv array, never a composed command-line string. Lives here,
 /// not <c>CosmicWin.App</c>, so <c>CosmicWin.Launcher</c>'s unelevated shim can reuse it without
 /// referencing the whole App assembly.

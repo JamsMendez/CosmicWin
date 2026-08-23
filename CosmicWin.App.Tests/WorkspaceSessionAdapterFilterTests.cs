@@ -6,10 +6,10 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Task 3.31/3.32: wires WU9's <see cref="WindowFilters"/>/<see cref="ExceptionList"/> (spec
-/// WE-1/WE-2) onto the real production tracking path -- closes verify-report #21's carried
+/// Wires 's <see cref="WindowFilters"/>/<see cref="ExceptionList"/> (spec
+/// WE-1/WE-2) onto the real production tracking path -- closes 's carried
 /// WARNING N1. Filtering applies only at window-creation time; an already-tracked window becoming
-/// newly excluded by a later Reload is NOT retroactively removed (WU10 documented scope boundary).
+/// newly excluded by a later Reload is NOT retroactively removed.
 /// </summary>
 public sealed class WorkspaceSessionAdapterFilterTests
 {

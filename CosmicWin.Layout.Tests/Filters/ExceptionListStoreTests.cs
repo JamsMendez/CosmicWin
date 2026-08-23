@@ -62,7 +62,7 @@ public class ExceptionListStoreTests
         Assert.False(store.Current.Matches(SpotifyWindow()));
     }
 
-    /// <summary>Task 3.37 (WU11): the tray's Reload wiring supplies an already-parsed <see cref="ExceptionList"/> (e.g. from a file loader) rather than raw text -- an overload accepting one directly.</summary>
+    /// <summary>The tray's Reload wiring supplies an already-parsed <see cref="ExceptionList"/> (e.g. From a file loader) rather than raw text -- an overload accepting one directly.</summary>
     [Fact]
     public void Reload_ExceptionListOverload_ReplacesCurrent_WithTheGivenInstance()
     {

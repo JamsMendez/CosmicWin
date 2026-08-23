@@ -13,5 +13,5 @@ public enum ExceptionRuleKind
     ClassName,
 }
 
-/// <summary>One manual exception-list entry (spec WE-2: by process name, window title substring, or window class).</summary>
+/// <summary>One manual exception-list entry.</summary>
 public readonly record struct ExceptionRule(ExceptionRuleKind Kind, string Value);

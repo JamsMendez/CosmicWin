@@ -1,6 +1,6 @@
-# Reference repos (fancywm, cosmic-comp) — read-only study material, not product source
-/fancywm/
-/cosmic-epoch/
+# Reference checkouts -- read-only study material, never product source and never distributed.
+# Their terms are incompatible with this project's MIT licence, and nothing here was copied.
+/docs/reference/
 
 # Local SDD tooling cache (machine-specific skill registry)
 /.atl/
