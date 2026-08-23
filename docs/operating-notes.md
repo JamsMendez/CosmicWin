@@ -40,7 +40,7 @@ direction is *not* bound, so pressing it does nothing and looks exactly like a b
 `Alt+Shift`.
 
 `Alt+[` is not required to move a window out of its group — `MoveNode` walks up the tree on its own
-(cosmic-comp's `move_current_node`). Its remaining purpose is deliberately moving a whole group as
+(the reference implementation's ancestor walk). Its remaining purpose is deliberately moving a whole group as
 one unit.
 
 ## Running the app
