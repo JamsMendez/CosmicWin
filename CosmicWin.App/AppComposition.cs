@@ -171,6 +171,11 @@ public sealed class AppComposition : IDisposable
 
             if (virtualDesktops is not null)
             {
+                // Windows moves windows on its own -- closing a desktop hands its windows to
+                // another, and Task View can drag one across. Neither raises anything we listen to,
+                // so the only way to notice is to ask.
+                sessionAdapter.ReconcileDesktops();
+
                 var nowOn = virtualDesktops.CurrentDesktopId;
                 if (nowOn != lastDesktop)
                 {

@@ -182,12 +182,27 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         var workArea = WorkAreaResolver.Resolve(display);
 
-        // Leaving: exactly a close.
-        if (_treeManager.TryGetTree(display, out var leaving) && leaving is not null
-            && !ReferenceEquals(leaving, arriving)
-            && WorkspaceSessionAdapter.RemoveWindow(leaving, _registry, windowHandle))
+        // Leaving: exactly a close, from whichever tree ACTUALLY holds it. Assuming the visible one
+        // only holds for a move CosmicWin issued itself; the shell reassigns windows on its own
+        // when a desktop closes, and those are filed under a desktop that no longer exists.
+        if (!_registry.TryGetLeaf(windowHandle, out var leaf) || leaf is null)
         {
-            TreeArranger.ArrangeAndPosition(leaving, _registry, workArea);
+            return;
+        }
+
+        if (_treeManager.TryGetTreeHolding(display, leaf, out var leaving) && leaving is not null)
+        {
+            // Already where it belongs: say nothing and change nothing, or the reconciliation pass
+            // would re-lay every window every time it ran.
+            if (ReferenceEquals(leaving, arriving))
+            {
+                return;
+            }
+
+            if (WorkspaceSessionAdapter.RemoveWindow(leaving, _registry, windowHandle))
+            {
+                TreeArranger.ArrangeAndPosition(leaving, _registry, workArea);
+            }
         }
 
         // Arriving: exactly a new window, AND laid out immediately. Deferring it until the user
@@ -198,6 +213,31 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         WorkspaceSessionAdapter.InsertWindow(arriving, _registry, workArea, window, focused: null);
         TreeArranger.ArrangeAndPosition(arriving, _registry, workArea);
         _owners[windowHandle] = display;
+    }
+
+    /// <summary>
+    /// Re-files every tracked window that the SHELL moved without telling us.
+    /// </summary>
+    /// <remarks>
+    /// Reported from real use: deleting a desktop handed its windows to another one, where they sat
+    /// untiled. Every other rehome here is triggered by a chord CosmicWin issued, and a window
+    /// manager that only learns about moves it made is blind to a closed desktop, to a Task View
+    /// drag, and to anything else the shell decides on its own. So this asks rather than waiting to
+    /// be told. A window already filed correctly costs one lookup and changes nothing.
+    /// </remarks>
+    public void ReconcileDesktops()
+    {
+        if (_isPaused() || ResolveWindowDesktop is null)
+        {
+            return;
+        }
+
+        // Copied first: rehoming mutates _owners, and enumerating a dictionary while it changes
+        // throws.
+        foreach (var handle in _owners.Keys.ToArray())
+        {
+            RehomeToDesktop(handle);
+        }
     }
 
     private void OnWindowRemoved(object? sender, WindowEventArgs e)

@@ -224,4 +224,73 @@ public sealed class PerDesktopTreeTests
         Assert.Equal(2, group.Children.Count);
         Assert.Contains(group.Children.OfType<LeafNode>(), leaf => leaf.Window == new WindowRef(leaves.Handle));
     }
+
+    /// <summary>
+    /// Reported from real use: deleting desktop 2 handed its windows to desktop 1, where they sat
+    /// untiled.
+    /// <para>
+    /// Every rehome so far was triggered by a chord CosmicWin itself issued. This one has no chord
+    /// at all -- Windows reassigns the orphaned windows on its own, and a window manager that only
+    /// learns about moves it made is blind to Task View, to a drag between desktops, and to a
+    /// desktop closing. So the reconciliation pass asks instead of waiting to be told.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void WindowsTheShellReassignedBehindOurBack_AreRefiledAndTiledWhereTheyLanded()
+    {
+        var display = Display();
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([display], display, registry) { CurrentDesktop = () => DesktopOne };
+        var workspace = new FakeWorkspace();
+
+        var lives = new Dictionary<nint, Guid>();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            ResolveWindowDesktop = handle => lives.TryGetValue(handle, out var d) ? d : DesktopOne,
+        };
+
+        var onOne = new RecordingWindow(new IntPtr(0x701), Rectangle.FromSize(0, 0, 400, 300));
+        var orphan = new RecordingWindow(new IntPtr(0x702), Rectangle.FromSize(0, 0, 400, 300));
+        workspace.RaiseWindowAdded(onOne);
+
+        lives[orphan.Handle] = DesktopTwo;
+        workspace.RaiseWindowAdded(orphan);
+
+        // Desktop 2 is closed: Windows hands its window to desktop 1 without telling anyone.
+        lives[orphan.Handle] = DesktopOne;
+        adapter.ReconcileDesktops();
+
+        Assert.True(trees.TryGetTree(DesktopOne, display, out var landed));
+        var group = Assert.IsType<GroupNode>(landed!.Root);
+        Assert.Equal(2, group.Children.Count);
+
+        // Tiled where it landed, not merely filed there.
+        Assert.Equal(1000, onOne.LastSetPosition!.Value.Width + orphan.LastSetPosition!.Value.Width);
+        Assert.NotEqual(onOne.LastSetPosition!.Value.Left, orphan.LastSetPosition!.Value.Left);
+    }
+
+    /// <summary>Nothing moved: the pass must not churn layouts every two seconds for no reason.</summary>
+    [Fact]
+    public void ReconcileDesktops_WhenNothingMoved_LeavesTheLayoutAlone()
+    {
+        var display = Display();
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([display], display, registry) { CurrentDesktop = () => DesktopOne };
+        var workspace = new FakeWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            ResolveWindowDesktop = _ => DesktopOne,
+        };
+
+        var settled = new RecordingWindow(new IntPtr(0x703), Rectangle.FromSize(0, 0, 400, 300));
+        workspace.RaiseWindowAdded(settled);
+        var afterArrival = settled.SetPositionCallCount;
+
+        adapter.ReconcileDesktops();
+        adapter.ReconcileDesktops();
+
+        Assert.Equal(afterArrival, settled.SetPositionCallCount);
+    }
 }

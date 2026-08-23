@@ -83,6 +83,38 @@ public sealed class TreeManager
         return true;
     }
 
+    /// <summary>
+    /// The tree that actually CONTAINS <paramref name="leaf"/> on this monitor, across every
+    /// desktop. Needed because a window can end up somewhere nobody filed it: Windows reassigns
+    /// orphaned windows when a desktop is closed, and a drag in Task View moves one without asking.
+    /// The tree that holds a leaf is a fact to look up, not an assumption to carry.
+    /// </summary>
+    public bool TryGetTreeHolding(IDisplay display, Node leaf, out LayoutTree? tree)
+    {
+        tree = null;
+        if (!_trees.TryGetValue(display.Handle, out var byDesktop))
+        {
+            return false;
+        }
+
+        Node root = leaf;
+        while (root.Parent is { } parent)
+        {
+            root = parent;
+        }
+
+        foreach (var candidate in byDesktop.Values)
+        {
+            if (ReferenceEquals(candidate.Root, root))
+            {
+                tree = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Every desktop's tree for one monitor, for operations that must not miss a hidden one.</summary>
     private IEnumerable<LayoutTree> TreesOn(nint displayHandle) =>
         _trees.TryGetValue(displayHandle, out var byDesktop) ? byDesktop.Values : [];
