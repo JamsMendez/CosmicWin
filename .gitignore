@@ -2,8 +2,12 @@
 # Their terms are incompatible with this project's MIT licence, and nothing here was copied.
 /docs/reference/
 
-# Local SDD tooling cache (machine-specific skill registry)
+# Local tooling state: machine-specific caches and indexes, useful to whoever is working here and
+# meaningless to anyone else. .engram/config.json was tracked before this and is untracked by the
+# same commit -- listing a path in .gitignore does nothing for a file git is already following.
 /.atl/
+/.engram/
+/.codegraph/
 
 # .NET build output
 bin/
