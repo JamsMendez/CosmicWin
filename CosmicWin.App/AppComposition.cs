@@ -121,12 +121,55 @@ public sealed class AppComposition : IDisposable
             treeManager.CurrentDesktop = () => virtualDesktops.CurrentDesktopId;
         }
         var hook = hookFactory(dispatcher.Writer);
+
+        // Which desktop the USER is on, and where it sits. Kept here rather than asked of the shell
+        // on demand, because the one moment it is needed -- a window arriving -- is the one moment
+        // the shell's answer is wrong: Windows can have followed the new window before CosmicWin
+        // hears about it, so asking then reports where the window took the user.
+        //
+        // Refreshed from two places, and BOTH are required. The reconciliation tick catches a switch
+        // CosmicWin did not make (Win+Ctrl+arrow, Task View); the switch chord refreshes it at once,
+        // because leaving that to the tick would leave the answer a full interval stale and send a
+        // window opened straight after Alt+2 back to where the user just left.
+        var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
+        var lastDesktopIndex = virtualDesktops?.CurrentIndex ?? 0;
+
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
             executor.ResolveFocusedLeaf)
         {
             ResolveWindowDesktop = resolveWindowDesktop,
+            Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
         };
+
+        if (virtualDesktops is { } desktopsForArrivals)
+        {
+            sessionAdapter.ResolveUserDesktop = () => lastDesktop;
+            sessionAdapter.SendWindowToDesktop = (handle, desktop) =>
+            {
+                // Positional, so only the desktop this composition is actually tracking can be
+                // aimed at -- an id it has no index for is not something to go looking for.
+                if (desktop != lastDesktop || lastDesktopIndex < 1)
+                {
+                    return false;
+                }
+
+                var moved = desktopsForArrivals.TryMoveWindowTo(handle, lastDesktopIndex);
+                if (moved)
+                {
+                    // The move alone leaves the user wherever the window took them. Putting the view
+                    // back is the other half of the reported defect, and costs nothing when the
+                    // shell never moved them -- switching to the desktop already shown is a no-op.
+                    desktopsForArrivals.TrySwitchTo(lastDesktopIndex);
+                }
+
+                desktopTrace?.Record(
+                    $"ArrivingWindow hwnd=0x{handle:X} sentTo={lastDesktopIndex} ok={moved} " +
+                    $"error={desktopsForArrivals.LastError ?? "(none)"}");
+
+                return moved;
+            };
+        }
         executor.WindowMovedToDesktop = sessionAdapter.RehomeToDesktop;
         workspace.Open();
         hook.Start();
@@ -149,10 +192,6 @@ public sealed class AppComposition : IDisposable
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
         // disagreeing with the desktop, and nothing else ever looks again.
-        // Which desktop the last reconciliation saw, so a change can be noticed. The shell offers
-        // no event for this, and asking on a timer is enough: the only thing that must happen on a
-        // switch is laying out the tree the user just arrived at.
-        var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
         string? lastReportedUnmatched = null;
 
         // The arriving desktop's own layout, applied to the work area in force NOW. Its windows
@@ -170,7 +209,19 @@ public sealed class AppComposition : IDisposable
         // Applied on the chord itself, not left to the timer. The timer remains the safety net for
         // a switch CosmicWin did not make -- Win+Ctrl+arrow, or Task View -- but waiting for it
         // after our own chord showed the user a loose window for up to a full interval.
-        executor.DesktopSwitched = ApplyArrivingLayout;
+        executor.DesktopSwitched = () =>
+        {
+            // Before the layout, and not left to the tick: until this runs, "the desktop the user is
+            // on" still names the one they just left, and the next window to open would be sent back
+            // there -- the reported defect, re-created by its own fix.
+            if (virtualDesktops is not null)
+            {
+                lastDesktop = virtualDesktops.CurrentDesktopId;
+                lastDesktopIndex = virtualDesktops.CurrentIndex;
+            }
+
+            ApplyArrivingLayout();
+        };
 
         var watchTick = 0;
         var reconcile = scheduleReconcile(WatchInterval, () =>
@@ -199,6 +250,7 @@ public sealed class AppComposition : IDisposable
                 if (nowOn != lastDesktop)
                 {
                     lastDesktop = nowOn;
+                    lastDesktopIndex = virtualDesktops.CurrentIndex;
                     ApplyArrivingLayout();
                 }
             }
@@ -267,6 +319,12 @@ public sealed class AppComposition : IDisposable
 
     private const string TaskName = "CosmicWin";
 
+    /// <summary>Create this file to make the window paths trace themselves; delete it to stop.</summary>
+    internal static string TraceMarkerPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CosmicWin",
+        "trace-dialogs");
+
     /// <summary>
     /// The ONE delegating call <c>App.OnStartup</c> makes for
     /// <c>--install-task</c>/<c>--uninstall-task</c>, called BEFORE <see cref="WireProduction"/>.
@@ -331,6 +389,7 @@ public sealed class AppComposition : IDisposable
         _reconcile.Dispose();
         _tray.Dispose();
         _hook.Dispose();
+
         _sessionAdapter.Dispose();
         _workspace.Dispose();
         _dispatcher.DisposeAsync().AsTask().GetAwaiter().GetResult();

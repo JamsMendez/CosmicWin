@@ -62,6 +62,35 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// </remarks>
     public Func<nint, Guid>? ResolveWindowDesktop { get; set; }
 
+    /// <summary>
+    /// Which virtual desktop the USER is on -- which is not always the one the shell reports.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a separate question from <see cref="TreeManager.CurrentDesktop"/>. A window born
+    /// elsewhere can drag the view after it before CosmicWin ever hears about the window, so by the
+    /// time <see cref="OnWindowAdded"/> runs the shell's live answer is already the wrong one -- it
+    /// names where the arriving window took the user, not where the user was. This must answer from
+    /// what was true just BEFORE the window appeared, or the redirect below has nothing to aim at.
+    /// </remarks>
+    public Func<Guid>? ResolveUserDesktop { get; set; }
+
+    /// <summary>
+    /// Sends a window to a desktop, reporting whether the shell actually did it. Unset -- as in every
+    /// test that predates this and every build without virtual desktops -- nothing is ever redirected.
+    /// </summary>
+    public Func<nint, Guid, bool>? SendWindowToDesktop { get; set; }
+
+    /// <summary>
+    /// Records every out-of-band bounds change this adapter reacts to. Unset in normal runs.
+    /// </summary>
+    /// <remarks>
+    /// A window moving on its own is invisible from inside: the adapter is TOLD a window's bounds
+    /// changed and re-applies the tree's geometry, and from the user's side that is indistinguishable
+    /// from CosmicWin having moved the window for no reason. This says which window, from where, to
+    /// where, and whether the reflow was ours.
+    /// </remarks>
+    public Diagnostics.IDesktopTrace? Trace { get; set; }
+
     /// <param name="focusedLeaf">
     /// LE-4: the tile a newly arriving window splits. Mandatory rather than optional -- a dropped
     /// focus source does not fail, it silently reverts to appending every window to the end of the
@@ -108,6 +137,30 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // arranged and CosmicWin stopped tiling outright (measured). Guessing "here" can
         // only be wrong about a window the user cannot see anyway; guessing "nowhere" loses windows.
         var named = ResolveWindowDesktop?.Invoke(window.Handle) ?? Guid.Empty;
+
+        // A window opens where the USER is. Windows decides where a new window is born, and an
+        // application that already owns one elsewhere can have the next born beside it -- measured
+        // in the desktop trace, which showed the user switch to desktop 2, launch a browser, and end
+        // up on desktop 1 with no switch of ours in between. Filing it faithfully was still the
+        // wrong answer: it recorded the shell's decision instead of overruling it.
+        //
+        // Only ever on a NAMED desktop that is not the user's. Empty means the shell would not say,
+        // which it answers for any window merely mid-creation -- moving windows on that would be
+        // moving them on a guess.
+        var redirected = false;
+        var user = ResolveUserDesktop?.Invoke() ?? Guid.Empty;
+        if (SendWindowToDesktop is { } send && named != Guid.Empty && user != Guid.Empty && named != user)
+        {
+            // A refused move leaves `named` alone on purpose. Filing it where we WANTED it would
+            // describe a desktop the window is not on -- the same lie the empty desktop id already
+            // taught this code not to tell.
+            redirected = send(window.Handle, user);
+            if (redirected)
+            {
+                named = user;
+            }
+        }
+
         var tree = visible;
         if (named != Guid.Empty)
         {
@@ -123,7 +176,11 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         // LE-4 splits the FOCUSED tile, but only when the focused window is on the same tree. A
         // window arriving on a desktop the user is not viewing has no focused tile to split there.
-        var focused = ReferenceEquals(visible, tree) ? _focusedLeaf() : null;
+        // A redirected window counts as arriving on the user's own tree even when the shell has
+        // momentarily taken the view elsewhere -- that view is about to be put back, and the tile
+        // the user was working in is the one this window should split. InsertWindow re-checks that
+        // the leaf really hangs off this tree, so a stale focus cannot place a window wrongly.
+        var focused = redirected || ReferenceEquals(visible, tree) ? _focusedLeaf() : null;
 
         WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;
@@ -131,7 +188,15 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Laid out whether or not its desktop is on screen. A hidden window accepts a position --
         // measured -- and doing it now is what makes the desktop already correct when the user
         // arrives, instead of correcting itself in front of them.
+        var beforeArrange = window.Bounds;
         TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+
+        Trace?.Record(
+            $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
+            $"[L={beforeArrange.Left} T={beforeArrange.Top} " +
+            $"W={beforeArrange.Width} H={beforeArrange.Height}] -> " +
+            $"[L={window.Bounds.Left} T={window.Bounds.Top} " +
+            $"W={window.Bounds.Width} H={window.Bounds.Height}] redirected={redirected}");
 
         // The choke point above evicts a window that fails ITS OWN first positioning
         // attempt (e.g. a protected window that never accepts a reposition) from the tree and
@@ -263,6 +328,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
+        Trace?.Record(
+            $"removed hwnd=0x{handle:X} class={e.Window.ClassName} proc={e.Window.ProcessName} " +
+            $"-- survivors reflowed");
+
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
     }
 
@@ -335,7 +404,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
+        var before = window.Bounds;
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+
+        if (before != window.Bounds)
+        {
+            Trace?.Record(
+                $"reflow hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                $"[L={before.Left} T={before.Top} W={before.Width} H={before.Height}] -> " +
+                $"[L={window.Bounds.Left} T={window.Bounds.Top} " +
+                $"W={window.Bounds.Width} H={window.Bounds.Height}]");
+        }
 
         if (!window.CanReposition)
         {

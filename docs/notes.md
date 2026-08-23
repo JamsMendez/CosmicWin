@@ -174,6 +174,26 @@ new desktop and back while it runs.
 
 Verified on OS 10.0.26200 (the build-26100 layout still holds).
 
+### A window opens where the user is
+
+Windows decides where a new window is born, and an application that already owns one elsewhere can
+have the next born beside it. That is not a CosmicWin bug and was measured, not assumed -- the trace
+recorded a switch to desktop 2, then a chord nine seconds later reporting `index=1->1`, with no
+`SwitchDesktop` of ours in between. `indexBefore` is sampled before the action, which is what makes
+that line conclusive.
+
+`OnWindowAdded` therefore overrules the shell: a window named on a desktop other than the user's is
+sent to the user's, and the view is put back if Windows followed it away. A refused move leaves the
+window filed where it actually is, never where we wanted it.
+
+**"The desktop the user is on" cannot be asked of the shell at that moment.** By the time the event
+arrives, Windows may already have followed the new window, so the live answer names where the window
+took the user. `AppComposition` samples it instead, and from BOTH the reconciliation tick and the
+switch chord. The tick alone leaves it a full interval stale, which sends a window opened straight
+after `Alt+2` back to desktop 1 -- the defect, re-created by its own fix. Switches made outside
+CosmicWin (`Win+Ctrl+arrow`, Task View) still leave a 400ms window where this can be wrong.
+
+
 ## Tray menu
 
 The three commands carry icons drawn from Windows' own icon FONT -- `Segoe Fluent Icons` on 11,

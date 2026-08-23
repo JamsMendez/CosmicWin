@@ -14,7 +14,8 @@ and Windows' own virtual desktops are driven from the keyboard.
 - **Movement** — move a window through the layout. The walk climbs the tree, so a window leaves its
   group when it runs out of room rather than dead-ending, and the walk is reversible.
 - **Resize** — grow toward a neighbour, or shrink when there is none.
-- **Virtual desktops** — switch by number, send a window to one, each with its own layout.
+- **Virtual desktops** — switch by number, send a window to one, each with its own layout. A new
+  window opens on the desktop you are on, even when Windows would have put it somewhere else.
 - **Windows that fight back** — a window dragged out of its slot snaps back on drop; a window that
   resizes itself is put back; a window that refuses to be positioned is left alone rather than
   fought.
