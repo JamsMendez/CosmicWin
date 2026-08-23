@@ -75,7 +75,7 @@ the code, because knowing where a rule came from is what makes it maintainable.
 
 ## Documentation
 
-[`docs/operating-notes.md`](docs/operating-notes.md) — the things that were only discoverable by
+[`docs/notes.md`](docs/notes.md) — the things that were only discoverable by
 getting them wrong once: how to run the tests and the false red that awaits if you set only one of
 the two environment variables, why some diagnostics assert nothing on purpose, and how the
 virtual-desktop interop defends itself against an undocumented vtable moving underneath it.
