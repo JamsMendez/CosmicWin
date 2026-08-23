@@ -141,7 +141,16 @@ public sealed class Win32NativeWindowSourceRealWindowTests
 
         foreach (var handle in source.EnumerateTopLevelWindows())
         {
-            Assert.True(source.TryGetWindowInfo(handle, out var info), "An enumerated handle must still be readable.");
+            // A handle that stops resolving between the enumeration and this read is a window
+            // that closed while the fact was running -- ambient timing, not a defect in the
+            // filter. Asserting readability here would fail this fact for a reason it was
+            // never written to detect, which is the same shape as the class assertion this
+            // fact already had to be narrowed away from. Skip it and keep judging the
+            // windows that are still there.
+            if (!source.TryGetWindowInfo(handle, out var info))
+            {
+                continue;
+            }
 
             var isExplorerPhantom =
                 info.ClassName == "ApplicationFrameWindow"
