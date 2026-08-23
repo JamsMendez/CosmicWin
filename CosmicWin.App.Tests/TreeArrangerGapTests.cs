@@ -40,7 +40,7 @@ public sealed class TreeArrangerGapTests
         registry.Register(windowA, left);
         registry.Register(windowB, right);
 
-        TreeArranger.ArrangeAndPosition(engine, registry, new Rect(0, 0, 1000, 600), gap: 8);
+        TreeArranger.ArrangeAndPosition(engine, registry, new Rect(0, 0, 1000, 600), gap: 8, afterArrange: null);
 
         var a = windowA.LastSetPosition!.Value;
         var b = windowB.LastSetPosition!.Value;
@@ -63,7 +63,7 @@ public sealed class TreeArrangerGapTests
         var window = new RecordingWindow(only.Window.Handle, Rectangle.Empty);
         registry.Register(window, only);
 
-        TreeArranger.ArrangeAndPosition(engine, registry, new Rect(0, 0, 1000, 600), gap: 0);
+        TreeArranger.ArrangeAndPosition(engine, registry, new Rect(0, 0, 1000, 600), gap: 0, afterArrange: null);
 
         Assert.Equal(Rectangle.FromSize(0, 0, 1000, 600), window.LastSetPosition);
     }

@@ -42,8 +42,31 @@ internal static class TreeArranger
     /// </summary>
     public static int Gap { get; set; }
 
-    public static void ArrangeAndPosition(ITilingEngine engine, WindowRegistry registry, Rect workArea) =>
-        ArrangeAndPosition(engine, registry, workArea, Gap);
+    /// <summary>
+    /// Runs after the reflow has settled, once, however many passes it took.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It exists for the focus border, and it is a PARAMETER rather than a second static knob beside
+    /// <see cref="Gap"/> on purpose -- that one is already documented as having raced 27 geometry
+    /// facts when a test class assigned it, and a second one would be the same trap with a different
+    /// name. Required, not optional, so a new call site cannot silently opt out of it the way the
+    /// eviction guard was silently missing from <c>OnWindowAdded</c>.
+    /// </para>
+    /// <para>
+    /// Nothing else can carry this. The border's other two paths both miss a reflow nobody asked
+    /// for: <c>ActionExecutor.AfterAction</c> only runs for a chord, and the bounds event never
+    /// arrives at all, because this method reaches the window through the SAME <see cref="IWindow"/>
+    /// instance the workspace caches -- <c>Win32Window.SetPosition</c> updates <c>Bounds</c> here,
+    /// so by the time the WinEvent lands <c>Win32Workspace.UpdateBounds</c> compares the new
+    /// rectangle against itself and reports no change. Closing a neighbour, sending one to another
+    /// desktop and collapsing a group all left the border a full reconciliation interval behind.
+    /// </para>
+    /// </remarks>
+    public static void ArrangeAndPosition(
+        ITilingEngine engine, WindowRegistry registry, Rect workArea,
+        Action<IReadOnlyList<nint>>? afterArrange) =>
+        ArrangeAndPosition(engine, registry, workArea, Gap, afterArrange);
 
     /// <summary>
     /// Explicit-spacing overload. Exists so a test can pin gap arithmetic WITHOUT assigning <see
@@ -52,7 +75,22 @@ internal static class TreeArranger
     /// run and passing in isolation.
     /// </summary>
     public static void ArrangeAndPosition(
-        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap)
+        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap,
+        Action<IReadOnlyList<nint>>? afterArrange)
+    {
+        // Allocated only when someone is listening: the overwhelmingly common reflow has no
+        // callback at all, and it should cost exactly what it did before.
+        var moved = afterArrange is null ? null : new List<nint>();
+
+        Apply(engine, registry, workArea, gap, moved);
+
+        // AFTER the last pass, not inside it. An eviction re-enters Apply, and a listener told to
+        // follow each pass would answer geometry the very next pass is about to replace.
+        afterArrange?.Invoke(moved!);
+    }
+
+    private static void Apply(
+        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap, List<nint>? moved)
     {
         var evictedAny = false;
 
@@ -73,7 +111,17 @@ internal static class TreeArranger
             if (window.CanReposition)
             {
                 var tile = Deflate(bounds, half);
+                var before = window.Bounds;
                 window.SetPosition(Rectangle.FromSize(tile.X, tile.Y, tile.Width, tile.Height));
+
+                // Only what actually MOVED. Re-arranging an unchanged tree re-applies the same
+                // geometry to every tile -- which is how a drag gets undone -- and reporting all of
+                // them would make "the tree was reflowed" indistinguishable from "your window
+                // moved", the one question the listener is asking.
+                if (window.Bounds != before)
+                {
+                    moved?.Add(windowRef.Handle);
+                }
             }
 
             // Checked AFTER the attempt above: CanReposition may have just flipped false as a
@@ -92,7 +140,7 @@ internal static class TreeArranger
         {
             // Tree shape changed (at least one leaf evicted) -- reflow the survivors into the
             // vacated space. Terminates: each recursive pass strictly shrinks the live-leaf set.
-            ArrangeAndPosition(engine, registry, workArea, gap);
+            Apply(engine, registry, workArea, gap, moved);
         }
     }
 

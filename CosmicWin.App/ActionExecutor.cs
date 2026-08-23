@@ -372,7 +372,11 @@ public sealed class ActionExecutor(
             return;
         }
 
-        TreeArranger.ArrangeAndPosition(localEngine, registry, workArea);
+        // Null on purpose, and the one call site that is right to pass it: every chord already ends
+        // in AfterAction, which refreshes the border once from ScheduleAsync's finally -- so it
+        // still runs when the tiling path throws. Handing the same callback here as well would
+        // place the border twice for one chord and buy nothing.
+        TreeArranger.ArrangeAndPosition(localEngine, registry, workArea, afterArrange: null);
     }
 
     /// <summary>

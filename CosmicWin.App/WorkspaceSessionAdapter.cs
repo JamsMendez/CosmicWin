@@ -37,6 +37,9 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     private readonly Func<ExceptionList> _exceptions;
     private readonly Func<bool> _isPaused;
 
+    /// <summary>Told which windows a reflow actually moved, so a reflow this adapter causes can reach the focus border.</summary>
+    private readonly Action<IReadOnlyList<nint>>? _afterArrange;
+
     /// <summary>
     /// <paramref name="exceptions"/> mirrors <paramref name="workArea"/>'s single-source-of-truth delegate pattern (2.27) -- a later Reload (WE-3) takes effect with no re-wiring.
     /// <paramref name="isPaused"/> mirrors the
@@ -58,7 +61,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
     /// </remarks>
     public WorkspaceSessionAdapter(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, Func<Rect> workArea,
-        Func<ExceptionList> exceptions, Func<bool> isPaused)
+        Func<ExceptionList> exceptions, Func<bool> isPaused, Action<IReadOnlyList<nint>>? afterArrange = null)
     {
         _workspace = workspace;
         _tree = tree;
@@ -66,6 +69,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         _workArea = workArea;
         _exceptions = exceptions;
         _isPaused = isPaused;
+        _afterArrange = afterArrange;
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;
@@ -99,7 +103,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
         // MultiMonitorWorkspaceAdapter) and has no focus source of its own, so placement here keeps
         // the pre-LE-4 append behaviour rather than inventing a second answer.
         InsertWindow(_tree, _registry, workArea, window, focused: null);
-        TreeArranger.ArrangeAndPosition(_tree, _registry, workArea);
+        TreeArranger.ArrangeAndPosition(_tree, _registry, workArea, _afterArrange);
     }
 
     /// <summary>Task 3.32 exclusion check, extracted so <see cref="MultiMonitorWorkspaceAdapter"/> can share it verbatim rather than re-implement it.</summary>
@@ -194,7 +198,7 @@ public sealed class WorkspaceSessionAdapter : IDisposable
             return;
         }
 
-        TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea());
+        TreeArranger.ArrangeAndPosition(_tree, _registry, _workArea(), _afterArrange);
     }
 
     /// <summary>Remove-side tree mutation, extracted for <see cref="MultiMonitorWorkspaceAdapter"/> reuse. Returns <see langword="false"/> for a stale/unknown handle -- callers must skip their own reflow in that case.</summary>

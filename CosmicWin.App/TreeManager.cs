@@ -36,6 +36,17 @@ public sealed class TreeManager
     private readonly Dictionary<nint, Dictionary<Guid, LayoutTree>> _trees = new();
     private nint _primaryHandle;
 
+    /// <summary>
+    /// Handed to every <see cref="TreeArranger.ArrangeAndPosition"/> call below, so a reflow this
+    /// manager causes reaches the focus border.
+    /// </summary>
+    /// <remarks>
+    /// A settable property rather than a constructor parameter because this class is built by
+    /// <c>Wire</c>'s CALLER, before the border it has to notify exists -- the same reason
+    /// <c>CurrentDesktop</c> and the executor's collaborators are assigned after construction.
+    /// </remarks>
+    public Action<IReadOnlyList<nint>>? AfterArrange { get; set; }
+
     public TreeManager(IReadOnlyList<IDisplay> displays, IDisplay primary, WindowRegistry registry)
     {
         _registry = registry;
@@ -195,7 +206,7 @@ public sealed class TreeManager
 
         if (TryGetTree(_displays[_primaryHandle], out var visible) && visible is not null)
         {
-            TreeArranger.ArrangeAndPosition(visible, _registry, primaryWorkArea);
+            TreeArranger.ArrangeAndPosition(visible, _registry, primaryWorkArea, AfterArrange);
         }
     }
 
@@ -257,7 +268,7 @@ public sealed class TreeManager
             return;
         }
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, AfterArrange);
     }
 
     /// <summary>

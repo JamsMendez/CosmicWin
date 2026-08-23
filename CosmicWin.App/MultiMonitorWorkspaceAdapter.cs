@@ -49,6 +49,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly Func<ExceptionList> _exceptions;
     private readonly Func<bool> _isPaused;
     private readonly Func<LeafNode?> _focusedLeaf;
+
+    /// <summary>Handed to every <see cref="TreeArranger.ArrangeAndPosition"/> call below, so a reflow this adapter causes reaches the focus border.</summary>
+    private readonly Action<IReadOnlyList<nint>>? _afterArrange;
+
     private readonly Dictionary<nint, IDisplay> _owners = new();
 
     /// <summary>
@@ -98,7 +102,8 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// </param>
     public MultiMonitorWorkspaceAdapter(
         IWorkspace workspace, TreeManager treeManager, WindowRegistry registry,
-        Func<ExceptionList> exceptions, Func<bool> isPaused, Func<LeafNode?> focusedLeaf)
+        Func<ExceptionList> exceptions, Func<bool> isPaused, Func<LeafNode?> focusedLeaf,
+        Action<IReadOnlyList<nint>>? afterArrange = null)
     {
         _focusedLeaf = focusedLeaf;
         _workspace = workspace;
@@ -106,6 +111,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _registry = registry;
         _exceptions = exceptions;
         _isPaused = isPaused;
+        _afterArrange = afterArrange;
 
         _workspace.WindowAdded += OnWindowAdded;
         _workspace.WindowRemoved += OnWindowRemoved;
@@ -189,7 +195,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // measured -- and doing it now is what makes the desktop already correct when the user
         // arrives, instead of correcting itself in front of them.
         var beforeArrange = window.Bounds;
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, _afterArrange);
 
         Trace?.Record(
             $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
@@ -266,7 +272,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
             if (WorkspaceSessionAdapter.RemoveWindow(leaving, _registry, windowHandle))
             {
-                TreeArranger.ArrangeAndPosition(leaving, _registry, workArea);
+                TreeArranger.ArrangeAndPosition(leaving, _registry, workArea, _afterArrange);
             }
         }
 
@@ -276,7 +282,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // false and TreeArranger would EVICT the leaf: a window on a desktop nobody is looking at
         // accepts a position exactly, wanted [120,140,700x480] read back identical.
         WorkspaceSessionAdapter.InsertWindow(arriving, _registry, workArea, window, focused: null);
-        TreeArranger.ArrangeAndPosition(arriving, _registry, workArea);
+        TreeArranger.ArrangeAndPosition(arriving, _registry, workArea, _afterArrange);
         _owners[windowHandle] = display;
     }
 
@@ -332,7 +338,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             $"removed hwnd=0x{handle:X} class={e.Window.ClassName} proc={e.Window.ProcessName} " +
             $"-- survivors reflowed");
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
     }
 
     /// <summary>
@@ -398,14 +404,14 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _owners.Remove(handle);
             if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
             {
-                TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+                TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
             }
 
             return;
         }
 
         var before = window.Bounds;
-        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display));
+        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
 
         if (before != window.Bounds)
         {

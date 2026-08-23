@@ -149,9 +149,39 @@ public sealed class AppComposition : IDisposable
         var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
         var lastDesktopIndex = virtualDesktops?.CurrentIndex ?? 0;
 
+        // The dispatcher runs chords on a pool thread; the overlay is a WPF window and must be
+        // touched on the thread that owns it, which is the same one the reconciliation timer already
+        // runs on. Unset -- as every test does -- it runs inline, which is what a test on one thread
+        // wants. Declared HERE, above the first collaborator that has to reach the border, rather
+        // than beside its other use further down.
+        var onOwningThread = scheduleOnOwningThread ?? (work => work());
+
+        // Handed to the collaborators that reflow WITHOUT a chord -- a window closing, one leaving
+        // for another desktop, a group collapsing -- which is precisely the set that had no path to
+        // the border at all and left it a full reconciliation interval behind.
+        //
+        // Filtered by what actually MOVED, not merely by "a reflow happened". A reflow re-applies
+        // geometry to every tile, so an unfocused window snapping back from a drag runs one too, and
+        // answering that would place the border on its own unchanged rectangle once per frame of
+        // somebody else's animation.
+        void AfterArrange(IReadOnlyList<nint> moved)
+        {
+            if (executor.ResolveFocusedLeaf() is not { } leaf || !moved.Contains(leaf.Window.Handle))
+            {
+                return;
+            }
+
+            onOwningThread(UpdateFocusBorder);
+        }
+
+        // Built by this method's CALLER, so it cannot take the callback at construction. Its own
+        // reflows are the hotplug and work-area ones -- dormant today, live the moment MM-2/MM-3
+        // land, and there is no reason to leave a known-blind call site behind for them to find.
+        treeManager.AfterArrange = AfterArrange;
+
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
             workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
-            executor.ResolveFocusedLeaf)
+            executor.ResolveFocusedLeaf, AfterArrange)
         {
             ResolveWindowDesktop = resolveWindowDesktop,
             Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
@@ -217,7 +247,7 @@ public sealed class AppComposition : IDisposable
             if (treeManager.TryGetTree(treeManager.Primary, out var arriving) && arriving is not null)
             {
                 TreeArranger.ArrangeAndPosition(
-                    arriving, registry, WorkAreaResolver.Resolve(treeManager.Primary));
+                    arriving, registry, WorkAreaResolver.Resolve(treeManager.Primary), AfterArrange);
             }
         }
 
@@ -263,10 +293,8 @@ public sealed class AppComposition : IDisposable
             focusBorder.ShowAround(focusedWindow.Bounds, onDisplay.Scaling, BorderGeometry.DefaultThickness);
         }
 
-        // The dispatcher runs chords on a pool thread; the overlay is a WPF window and must be
-        // touched on the thread that owns it, which is the same one this timer already runs on.
-        // Unset -- as every test does -- it runs inline, which is what a test on one thread wants.
-        var onOwningThread = scheduleOnOwningThread ?? (work => work());
+        // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused
+        // without moving anything at all, and the border still has to go and find it.
         executor.AfterAction = () => onOwningThread(UpdateFocusBorder);
 
         // Following the window itself, not just the chord that moved it. An application may take

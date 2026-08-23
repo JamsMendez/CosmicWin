@@ -228,6 +228,41 @@ public sealed class FocusBorderWiringTests
     }
 
     /// <summary>
+    /// A reflow nobody asked for still has to move the border: closing a neighbour stretches the
+    /// focused window, and the border has to arrive with it.
+    /// </summary>
+    /// <remarks>
+    /// Reported from real use. The two paths that existed both miss this. There is no chord, so
+    /// <c>AfterAction</c> never runs; and the bounds event cannot save it either, because
+    /// <c>TreeArranger</c> reaches the window through the SAME <c>IWindow</c> instance the workspace
+    /// caches, so <c>Win32Window.SetPosition</c> updates <c>Bounds</c> before the WinEvent arrives
+    /// and <c>Win32Workspace.UpdateBounds</c> then sees no change to report. That left the
+    /// reconciliation tick as the only surviving path, and the border a full interval behind. The
+    /// scheduler is deliberately NEVER fired here: if the border only moved on the tick, this fact
+    /// would fail.
+    /// </remarks>
+    [Fact]
+    public void WhenClosingANeighbourStretchesTheFocusedWindow_TheBorderFollowsWithoutTheTick()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var staying = new RecordingWindow(new IntPtr(0xB08), Rectangle.FromSize(0, 0, 1920, 540));
+            var closing = new RecordingWindow(new IntPtr(0xB09), Rectangle.FromSize(0, 540, 1920, 540));
+            harness.Workspace.RaiseWindowAdded(staying);
+            harness.Workspace.RaiseWindowAdded(closing);
+            harness.Foreground.Handle = staying.Handle;
+            harness.Scheduler.Fire();
+            harness.Border.Shown.Clear();
+
+            harness.Workspace.RaiseWindowRemoved(closing);
+
+            Assert.NotEmpty(harness.Border.Shown);
+            Assert.Equal(staying.Bounds, harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
     /// A window the border is NOT on moving is nothing to redraw for. During a reflow every tile
     /// reports a move, and answering all of them is work with nothing to show.
     /// </summary>
