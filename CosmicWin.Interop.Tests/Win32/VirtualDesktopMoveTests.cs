@@ -65,6 +65,21 @@ public sealed class VirtualDesktopMoveTests(ITestOutputHelper output)
             output.WriteLine($"after move : {nowOn}");
             Assert.NotEqual(homeDesktop, nowOn);
 
+            // Can a window sitting on a desktop nobody is looking at still be POSITIONED? The
+            // answer decides whether a moved window can be laid out at move time or only on
+            // arrival, and the difference is visible: laid out late, it appears floating and
+            // wrong for a moment before snapping into place. Measured rather than assumed,
+            // because if SetWindowPos refuses, Win32Window latches CanReposition to false and
+            // TreeArranger EVICTS the window -- a far worse outcome than a late layout.
+            var source = new Win32NativeWindowSource();
+            var wanted = Rectangle.FromSize(120, 140, 700, 480);
+            var accepted = source.SetWindowPosition(spawned.Handle, wanted);
+            Thread.Sleep(Settle);
+            source.TryGetWindowInfo(spawned.Handle, out var readBack);
+
+            output.WriteLine($"reposition while hidden: accepted={accepted} wanted=[{wanted.Left},{wanted.Top},{wanted.Width}x{wanted.Height}] got=[{readBack.Bounds.Left},{readBack.Bounds.Top},{readBack.Bounds.Width}x{readBack.Bounds.Height}]");
+            output.WriteLine($"verdict  : {(accepted && readBack.Bounds == wanted ? "USABLE -- a hidden window can be laid out at move time" : "NOT USABLE -- layout must wait for arrival")}");
+
             // And the user was NOT dragged along: sending a window away and following it are
             // separate intents, and only one of them was asked for.
             Assert.Equal(startedOn, desktops.CurrentIndex);

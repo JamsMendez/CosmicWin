@@ -45,6 +45,13 @@ public sealed class ActionExecutor(
     /// </summary>
     public Action<nint>? WindowMovedToDesktop { get; set; }
 
+    /// <summary>
+    /// Called the instant a desktop switch lands, so the arriving layout is applied before the user
+    /// sees it. Left to the reconciliation timer instead, it arrives up to a full interval late --
+    /// measured as windows appearing loose and then snapping into place.
+    /// </summary>
+    public Action? DesktopSwitched { get; set; }
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -233,6 +240,10 @@ public sealed class ActionExecutor(
         if (ok && action.Kind == HotkeyActionKind.MoveWindowToDesktop)
         {
             WindowMovedToDesktop?.Invoke(foregroundHandle);
+        }
+        else if (ok && action.Kind == HotkeyActionKind.SwitchDesktop)
+        {
+            DesktopSwitched?.Invoke();
         }
 
         DesktopTrace?.Record(

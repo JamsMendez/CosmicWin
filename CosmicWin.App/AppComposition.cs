@@ -141,6 +141,23 @@ public sealed class AppComposition : IDisposable
         var lastDesktop = virtualDesktops?.CurrentDesktopId ?? Guid.Empty;
         string? lastReportedUnmatched = null;
 
+        // The arriving desktop's own layout, applied to the work area in force NOW. Its windows
+        // were left exactly where they were when the user walked away, so without this they would
+        // still be wearing the previous desktop's geometry.
+        void ApplyArrivingLayout()
+        {
+            if (treeManager.TryGetTree(treeManager.Primary, out var arriving) && arriving is not null)
+            {
+                TreeArranger.ArrangeAndPosition(
+                    arriving, registry, WorkAreaResolver.Resolve(treeManager.Primary));
+            }
+        }
+
+        // Applied on the chord itself, not left to the timer. The timer remains the safety net for
+        // a switch CosmicWin did not make -- Win+Ctrl+arrow, or Task View -- but waiting for it
+        // after our own chord showed the user a loose window for up to a full interval.
+        executor.DesktopSwitched = ApplyArrivingLayout;
+
         var reconcile = scheduleReconcile(ReconcileInterval, () =>
         {
             workspace.Poll();
@@ -158,15 +175,7 @@ public sealed class AppComposition : IDisposable
                 if (nowOn != lastDesktop)
                 {
                     lastDesktop = nowOn;
-
-                    // The arriving desktop's own layout, applied to the work area in force NOW.
-                    // Its windows were left exactly where they were when the user walked away, so
-                    // without this they would still be wearing the previous desktop's geometry.
-                    if (treeManager.TryGetTree(treeManager.Primary, out var arriving) && arriving is not null)
-                    {
-                        TreeArranger.ArrangeAndPosition(
-                            arriving, registry, WorkAreaResolver.Resolve(treeManager.Primary));
-                    }
+                    ApplyArrivingLayout();
                 }
             }
 
