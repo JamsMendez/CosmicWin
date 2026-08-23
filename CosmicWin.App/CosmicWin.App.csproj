@@ -11,7 +11,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <!-- Task 3.21 (ES-1/D6): always-elevated startup + PerMonitorV2 (WT-2). -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>cosmicwin.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="cosmicwin.ico" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Task 3.16 (WU11): UseWindowsForms implicitly globals System.Drawing/System.Windows.Forms,
          which collide with CosmicWin.Interop.Rectangle and WPF's System.Windows.Application across
