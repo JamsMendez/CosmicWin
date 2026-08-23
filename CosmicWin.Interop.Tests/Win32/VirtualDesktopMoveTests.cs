@@ -1,3 +1,4 @@
+using CosmicWin.Interop.Win32;
 using CosmicWin.Interop.Win32.VirtualDesktops;
 using Xunit.Abstractions;
 

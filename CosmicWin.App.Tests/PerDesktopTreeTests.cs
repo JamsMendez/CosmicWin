@@ -79,11 +79,18 @@ public sealed class PerDesktopTreeTests
 
     /// <summary>
     /// A window can arrive on a desktop the user is NOT looking at. It must be filed where it
-    /// actually lives, and it must not be repositioned — moving a window nobody can see is at best
-    /// wasted work and at worst applies the wrong desktop's geometry to it.
+    /// actually lives — and laid out there straight away.
+    /// <para>
+    /// This fact previously asserted the OPPOSITE, that a hidden window must not be repositioned,
+    /// on the reasoning that moving a window nobody can see is wasted work. Real use disagreed:
+    /// deferring the layout showed the user a loose, wrongly-sized window that corrected itself in
+    /// front of them. The reasoning also rested on an untested fear that a hidden window might
+    /// refuse SetWindowPos, which would latch CanReposition and get the leaf EVICTED. Measured
+    /// instead: it accepts a position exactly, so the fear was unfounded and the cost was real.
+    /// </para>
     /// </summary>
     [Fact]
-    public void AWindowArrivingOnAHiddenDesktop_IsFiledThere_AndNotRepositioned()
+    public void AWindowArrivingOnAHiddenDesktop_IsFiledThere_AndLaidOutImmediately()
     {
         var display = Display();
         var registry = new WindowRegistry();
@@ -103,7 +110,10 @@ public sealed class PerDesktopTreeTests
 
         Assert.True(trees.TryGetTree(DesktopOne, display, out var visibleTree));
         Assert.Null(visibleTree!.Root);
-        Assert.Equal(0, hidden.SetPositionCallCount);
+
+        // Already wearing its destination's geometry, so arriving there shows nothing moving.
+        Assert.Equal(1, hidden.SetPositionCallCount);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1000, 600), hidden.LastSetPosition);
     }
 
     [Fact]

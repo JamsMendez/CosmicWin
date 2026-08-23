@@ -128,12 +128,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;
 
-        // Only the visible desktop is positioned. Arranging a hidden one would move windows nobody
-        // can see, and they are laid out on arrival there anyway.
-        if (ReferenceEquals(visible, tree))
-        {
-            TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
-        }
+        // Laid out whether or not its desktop is on screen. A hidden window accepts a position --
+        // measured -- and doing it now is what makes the desktop already correct when the user
+        // arrives, instead of correcting itself in front of them.
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea);
 
         // V22-W1: the choke point above evicts a window that fails ITS OWN first positioning
         // attempt (e.g. a protected window that never accepts a reposition) from the tree and
@@ -192,9 +190,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             TreeArranger.ArrangeAndPosition(leaving, _registry, workArea);
         }
 
-        // Arriving: exactly a new window. Not positioned -- the destination is not on screen, and
-        // it is laid out on arrival there anyway.
+        // Arriving: exactly a new window, AND laid out immediately. Deferring it until the user
+        // walks over showed them a loose, wrongly-sized window that then snapped into place.
+        // Measured before relying on it, because a refused SetWindowPos latches CanReposition to
+        // false and TreeArranger would EVICT the leaf: a window on a desktop nobody is looking at
+        // accepts a position exactly, wanted [120,140,700x480] read back identical.
         WorkspaceSessionAdapter.InsertWindow(arriving, _registry, workArea, window, focused: null);
+        TreeArranger.ArrangeAndPosition(arriving, _registry, workArea);
         _owners[windowHandle] = display;
     }
 
