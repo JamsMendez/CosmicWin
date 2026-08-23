@@ -65,13 +65,25 @@ Two collisions with Windows itself are worth knowing before you file a bug:
 - **`Alt+Shift` is Windows' default language-switch hotkey.** Every move chord starts with it, so the
   input language will flip unless you set that hotkey to *Not Assigned*.
 
-## Relationship to COSMIC
+## Prior art
 
-Behaviour is modelled on [COSMIC](https://github.com/pop-os/cosmic-epoch)'s `cosmic-comp`, and the
-Win32 window-tracking shape follows [FancyWM](https://github.com/FancyWM/fancywm)'s WinMan. Both were
-**read and reimplemented, never copied** — their licences are incompatible with this one, and neither
-is vendored, distributed or required to build. Where an algorithm was ported the source is cited in
-the code, because knowing where a rule came from is what makes it maintainable.
+Three projects were read while building this one. None is vendored, distributed, or needed to build,
+run or test CosmicWin, and no code was copied from any of them.
+
+- **[COSMIC](https://github.com/pop-os/cosmic-epoch)'s `cosmic-comp`** (GPL-3) — the tiling behaviour
+  this project models: how a move walks the tree, how a resize splits its intent, and how a new
+  window's split axis follows the tile it lands on. Rust to C#, so the algorithms were reimplemented
+  by definition.
+- **[WinMan](https://github.com/fancywm/winman)** by Veselin Karaganev (MIT) — the shape of the
+  window, display and workspace abstractions. MIT is compatible with this project's licence.
+- **WinMan.Windows** (GPL-2) — its enumerate-plus-hook window-tracking approach, reimplemented at
+  roughly a fifth of the size and a different shape.
+
+Copyright covers expression, not ideas or algorithms, and the code here shares no expression with
+any of them: a line-level comparison against the whole reference tree finds six identical lines out
+of 830, every one of them boilerplate that any Windows C# project writes the same way — the required
+signatures of a WPF startup override and a Win32 hook procedure, the canonical way to locate
+AppData, a standard guard clause, and two interface declarations from the MIT-licensed part.
 
 ## Documentation
 

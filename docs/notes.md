@@ -190,7 +190,8 @@ MIT. Two facts make that the right fit rather than a default.
 
 Every line of product source here is ORIGINAL. Reference projects were read, never copied, and none
 of them is committed -- `.gitignore` excludes `docs/reference/`, so this repository distributes only
-its own code. That matters because their terms are not compatible with a permissive release.
+its own code. That matters for two of them -- one is GPL-3 and another GPL-2 -- and not for the
+third, which is MIT and would have been compatible anyway. The README says which is which.
 
 The single dependency is `Microsoft.Windows.CsWin32`, itself MIT and a source generator with no
 runtime surface (see `CosmicWin.Interop.csproj`). The virtual-desktop support adds no dependency at
