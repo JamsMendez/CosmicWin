@@ -41,13 +41,16 @@ public sealed class AppComposition : IDisposable
     private readonly IDisposable _reconcile;
 
     /// <summary>Both null when no shown-window watcher was supplied -- dialogs are then simply left where they open.</summary>
+    private readonly IFocusBorder? _focusBorder;
+    private readonly Action _unfollowFocusedWindow;
     private readonly IWindowShownWatcher? _windowShown;
     private readonly FloatingDialogAdapter? _dialogAdapter;
 
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
         MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile,
-        IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter)
+        IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter,
+        IFocusBorder? focusBorder, Action unfollowFocusedWindow)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -57,6 +60,8 @@ public sealed class AppComposition : IDisposable
         _reconcile = reconcile;
         _windowShown = windowShown;
         _dialogAdapter = dialogAdapter;
+        _focusBorder = focusBorder;
+        _unfollowFocusedWindow = unfollowFocusedWindow;
     }
 
     /// <summary>
@@ -110,7 +115,9 @@ public sealed class AppComposition : IDisposable
         IVirtualDesktopService? virtualDesktops = null,
         Diagnostics.IDesktopTrace? desktopTrace = null,
         Func<nint, Guid>? resolveWindowDesktop = null,
-        IWindowShownWatcher? windowShown = null)
+        IWindowShownWatcher? windowShown = null,
+        IFocusBorder? focusBorder = null,
+        Action<Action>? scheduleOnOwningThread = null)
     {
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
@@ -231,6 +238,58 @@ public sealed class AppComposition : IDisposable
             ApplyArrivingLayout();
         };
 
+        // Called from BOTH the chord and the tick, and it must be both. The chord is what makes the
+        // border keep up -- Alt+O moves every window at once, and waiting for the tick left the
+        // border on the old rectangle for up to half a second. The tick is the safety net for the
+        // changes no chord caused: a mouse click landing on another window.
+        void UpdateFocusBorder()
+        {
+            if (focusBorder is null)
+            {
+                return;
+            }
+
+            var focusedLeaf = executor.ResolveFocusedLeaf();
+            if (hook.IsPaused
+                || focusedLeaf is null
+                || !registry.TryGetWindow(focusedLeaf.Window.Handle, out var focusedWindow)
+                || focusedWindow is not { IsAlive: true })
+            {
+                focusBorder.Hide();
+                return;
+            }
+
+            var onDisplay = treeManager.ResolveDisplay(focusedWindow.Bounds);
+            focusBorder.ShowAround(focusedWindow.Bounds, onDisplay.Scaling, BorderGeometry.DefaultThickness);
+        }
+
+        // The dispatcher runs chords on a pool thread; the overlay is a WPF window and must be
+        // touched on the thread that owns it, which is the same one this timer already runs on.
+        // Unset -- as every test does -- it runs inline, which is what a test on one thread wants.
+        var onOwningThread = scheduleOnOwningThread ?? (work => work());
+        executor.AfterAction = () => onOwningThread(UpdateFocusBorder);
+
+        // Following the window itself, not just the chord that moved it. An application may take
+        // several frames to settle where it was put -- Windows Terminal animates its resize -- so a
+        // single refresh after the chord lands before the window has finished arriving, and the
+        // border visibly trails it. This arrives once per frame of that movement, on the hook's own
+        // thread, and costs one placement each.
+        EventHandler<WindowEventArgs>? followFocusedWindow = null;
+        if (focusBorder is not null)
+        {
+            followFocusedWindow = (_, e) =>
+            {
+                // Only the window being framed. During a reflow every tile reports a move, and
+                // redrawing the border for windows it is not on is work with nothing to show for it.
+                if (executor.ResolveFocusedLeaf() is { } leaf && leaf.Window.Handle == e.Window.Handle)
+                {
+                    UpdateFocusBorder();
+                }
+            };
+
+            workspace.WindowBoundsChanged += followFocusedWindow;
+        }
+
         var watchTick = 0;
         var reconcile = scheduleReconcile(WatchInterval, () =>
         {
@@ -268,6 +327,7 @@ public sealed class AppComposition : IDisposable
             // mouse and then opens a new one would have it split whichever tile they last used a
             // hotkey on (LE-4 placement). One native read, so it belongs on the cheap tick.
             executor.ResolveFocusedLeaf();
+            UpdateFocusBorder();
         });
 
         // A separate path on purpose, sharing only the pause flag. Modal dialogs never reach the
@@ -296,7 +356,15 @@ public sealed class AppComposition : IDisposable
         }
 
         return new AppComposition(
-            dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter);
+            dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
+            focusBorder,
+            unfollowFocusedWindow: () =>
+            {
+                if (followFocusedWindow is not null)
+                {
+                    workspace.WindowBoundsChanged -= followFocusedWindow;
+                }
+            });
     }
 
     /// <summary>The sole production caller of <see cref="Wire"/>: supplies the real Win32 collaborators, including a real <see cref="Win32DisplayManager"/>-backed <see cref="TreeManager"/>. Called exactly once, from <c>App.OnStartup</c>.</summary>
@@ -330,8 +398,21 @@ public sealed class AppComposition : IDisposable
             virtualDesktops: desktops,
             desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()),
             resolveWindowDesktop: desktops.ResolveWindowDesktop,
-            windowShown: new Win32WindowShownWatcher());
+            windowShown: new Win32WindowShownWatcher(),
+            focusBorder: new FocusBorderOverlay(),
+            scheduleOnOwningThread: RunOnUiThread);
     }
+
+    /// <summary>
+    /// Marshals work onto the WPF UI thread, which owns the overlay window and the WinEvent hook.
+    /// </summary>
+    /// <remarks>
+    /// A chord is answered on <see cref="ActionDispatcher.RunAsync"/>'s pool thread, and a WPF
+    /// window may only be touched by the thread that created it. Without this, the very refresh that
+    /// makes the border keep up would throw from another thread instead.
+    /// </remarks>
+    private static void RunOnUiThread(Action work) =>
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(work);
 
     /// <summary>
     /// Runs the reconciliation pass on the WPF UI thread -- the SAME thread that installs the
@@ -427,8 +508,12 @@ public sealed class AppComposition : IDisposable
 
         // The adapter first, then the source it listens to: unsubscribing before the hook is torn
         // down means no event can arrive against a half-disposed adapter.
+        // Unsubscribed before the workspace it listens to is torn down, so no late event can arrive
+        // against a disposed overlay.
+        _unfollowFocusedWindow();
         _dialogAdapter?.Dispose();
         _windowShown?.Dispose();
+        _focusBorder?.Dispose();
         _sessionAdapter.Dispose();
         _workspace.Dispose();
         _dispatcher.DisposeAsync().AsTask().GetAwaiter().GetResult();

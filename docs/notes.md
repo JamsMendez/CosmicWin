@@ -290,6 +290,44 @@ would be smeared to fit. Three rules hold it together:
 `ToolStripMenuItem` does not own its `Image`, exactly as `NotifyIcon` does not own its `Icon`. Both
 the swapped-out pause image and every image still held at disposal are released by hand.
 
+## The focus border
+
+A border is drawn around the focused window, two pixels thick, in the system accent colour.
+
+**DWM cannot be asked for a thicker one.** Of its 29 window attributes, `DWMWA_BORDER_COLOR` can be
+written -- measured working cross-process here, 6 of 6 windows answering `S_OK`, which is not a
+given: `MoveWindowToDesktop` is equally documented and refuses any window the caller does not own.
+But `DWMWA_VISIBLE_FRAME_BORDER_THICKNESS` is a GET. DWM reports how many pixels it draws and will
+not be told, and no thickness attribute exists. So the border is drawn rather than requested.
+
+ONE overlay follows focus, not one per tile. The border the maintainer wanted thicker is Windows'
+accent border, which only ever marks the active window.
+
+It is drawn OUTSIDE the window, which only fits because `TreeArranger` insets every tile by
+`Gap / 2`, leaving exactly `Gap` between neighbours. That also fixes the ceiling: **at more than
+`Gap / 2` two neighbours' borders overlap**, and against the work area it falls off the screen.
+`BorderGeometryTests` pins the limit and the first pixel past it.
+
+The corner radius is `8 + thickness`. Eight is Windows 11's own value for an ordinary window and is
+a design constant, not a measurement -- `DWMWA_WINDOW_CORNER_PREFERENCE` carries a preference, never
+a number of pixels. Adding the thickness keeps the two curves concentric; reusing the window's
+radius unchanged draws a tighter arc that visibly parts from the corner at forty-five degrees.
+
+### Two things that looked like one bug
+
+**Lag.** The border first followed only the 400ms reconciliation tick, so a chord left it on the old
+rectangle for up to half a second -- worst on `Alt+O`, which moves every window at once. It now
+refreshes on every chord AND follows the focused window's own bounds changes, because an application
+may take several frames to settle where it was put: Windows Terminal animates its resize. The tick
+stays as the safety net for what no chord caused, such as a mouse click landing elsewhere.
+
+**A line across the middle of the window,** on roughly one placement in five. Not timing at all. The
+overlay was a WPF `AllowsTransparency` window -- software-rendered and layered -- and it could show
+its previous size inside its new position. It is now a SOLID window whose hollow centre is cut by
+`SetWindowRgn`, applied by the same call that moves it, so there is no separate frame left to go
+stale. `CreateRoundRectRgn` draws the rounded corners in real pixels, which removes DPI conversion
+from the path entirely.
+
 ## Spacing
 
 `TreeArranger.Gap` is the single spacing knob and **defaults to zero**; `AppComposition` opts

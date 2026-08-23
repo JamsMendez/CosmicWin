@@ -43,3 +43,12 @@ INPUT_TYPE
 PEEK_MESSAGE_REMOVE_TYPE
 TranslateMessage
 DispatchMessage
+DwmSetWindowAttribute
+GetWindowLongPtrW
+SetWindowLongPtrW
+WINDOW_EX_STYLE
+WINDOW_LONG_PTR_INDEX
+CreateRoundRectRgn
+CombineRgn
+SetWindowRgn
+DeleteObject

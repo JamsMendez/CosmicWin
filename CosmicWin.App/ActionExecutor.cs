@@ -85,6 +85,22 @@ public sealed class ActionExecutor(
 
     public ValueTask ScheduleAsync(HotkeyAction action, CancellationToken cancellationToken)
     {
+        try
+        {
+            Execute(action);
+        }
+        finally
+        {
+            // In a finally so a throw on the tiling path cannot leave the border stranded on a
+            // rectangle that no longer exists.
+            AfterAction?.Invoke();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private void Execute(HotkeyAction action)
+    {
         var foregroundHandle = foreground.GetForegroundHandle();
 
         // Desktop chords are answered BEFORE focus is resolved. They are about which desktop the
@@ -93,7 +109,7 @@ public sealed class ActionExecutor(
         // a desktop that happens to be empty.
         if (TryDispatchDesktop(action, foregroundHandle))
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         // A chord that MOVES a window acts on the window the user is looking at, or on nothing in the
@@ -119,7 +135,7 @@ public sealed class ActionExecutor(
                 MoveFloatingWindow?.Invoke(foregroundHandle, floating);
             }
 
-            return ValueTask.CompletedTask;
+            return;
         }
 
         if (TryResolveFocused(foregroundHandle, out var focused))
@@ -134,7 +150,7 @@ public sealed class ActionExecutor(
             Trace(direction, foregroundHandle, 0, 0, FocusTraceOutcome.UnresolvedFocus);
         }
 
-        return ValueTask.CompletedTask;
+        return;
     }
 
     /// <summary>
@@ -142,6 +158,18 @@ public sealed class ActionExecutor(
     /// it. Unset -- as in every test that predates floating dialogs -- such a chord is simply dropped.
     /// </summary>
     public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
+
+    /// <summary>
+    /// Invoked after every chord this executor answers, whatever it did.
+    /// </summary>
+    /// <remarks>
+    /// Exists for anything drawn ON TOP of the layout rather than by it. The focus border was
+    /// following the 400ms reconciliation tick, so a chord that re-laid the tree left it on the old
+    /// rectangle for up to half a second -- most visible on Alt+O, where every window moves at once.
+    /// The tick stays as the safety net for changes no chord caused, such as a mouse click landing
+    /// on another window.
+    /// </remarks>
+    public Action? AfterAction { get; set; }
 
     /// <summary>The direction a MOVE chord names, or <see langword="null"/> if it is not a move.</summary>
     private static Direction? MoveDirectionOf(HotkeyActionKind kind) => kind switch
