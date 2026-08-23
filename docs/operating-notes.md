@@ -195,3 +195,35 @@ its own code. That matters because their terms are not compatible with a permiss
 The single dependency is `Microsoft.Windows.CsWin32`, itself MIT and a source generator with no
 runtime surface (see `CosmicWin.Interop.csproj`). The virtual-desktop support adds no dependency at
 all -- the COM object comes from the shell that is already running.
+
+## Signing
+
+Unsigned, CosmicWin shows UAC's orange **"Unknown publisher"** prompt, because it requests
+administrator. That is a different warning from SmartScreen, which appears when someone DOWNLOADS
+the binary and never for one built locally. Signing addresses both, but not equally: UAC names the
+publisher immediately, while SmartScreen has to build a reputation for the certificate first.
+
+**A self-signed certificate is worse than nothing here.** It is trusted only where its root was
+installed by hand, so it changes nothing for anyone else while looking like protection.
+
+Two routes that actually work:
+
+| | Cost | Gate |
+| --- | --- | --- |
+| [SignPath Foundation](https://signpath.org/terms.html) | Free for OSS | OSI licence, no proprietary components, actively maintained, and **already publicly released** |
+| [Azure Artifact Signing](https://azure.microsoft.com/en-us/pricing/details/trusted-signing/) | ~$9.99/month | Identity validation; individuals supported in the USA and Canada |
+
+CosmicWin meets every SignPath condition except the release one, which is simply the next step:
+MIT is OSI-approved, the only dependency is build-time and MIT, and nothing here is proprietary.
+
+Once a certificate exists:
+
+```powershell
+dotnet build -c Release
+./scripts/sign.ps1 -Thumbprint <cert thumbprint>   # or -PfxPath <file.pfx>
+```
+
+The script signs only this project's own binaries -- signing a dependency would put this project's
+name on code it did not write -- always timestamps, and verifies the result afterwards rather than
+trusting signtool's exit code. The timestamp is not optional: without one the signature stops being
+valid the day the certificate expires.
