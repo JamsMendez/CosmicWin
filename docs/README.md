@@ -185,3 +185,17 @@ rectangle of 27 tests at once.
 
 Tests must never assign it. xUnit runs test classes in parallel, so mutating that static races every
 other class's geometry assertions; use the explicit-gap overload of `ArrangeAndPosition` instead.
+
+## Licence
+
+MIT. Two facts make that the right fit rather than a default.
+
+Every line of product source here is ORIGINAL. The reference trees were read, never copied:
+`cosmic-epoch` is GPL-3, `fancywm` is PolyForm Perimeter 1.0.1 — which forbids using it to compete
+with the licensor's product, and CosmicWin is a competing tiling window manager — and
+`fancywm/winman-windows` is GPL-2. None of them is committed: `.gitignore` excludes both trees, and
+`git ls-files` returns nothing for either, so this repository distributes only its own code.
+
+The single dependency is `Microsoft.Windows.CsWin32`, itself MIT and a source generator with no
+runtime surface (see `CosmicWin.Interop.csproj`). The virtual-desktop support adds no dependency at
+all — the COM object comes from the shell that is already running.
