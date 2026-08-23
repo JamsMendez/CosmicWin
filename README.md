@@ -1,3 +1,5 @@
+<img src="docs/image/icon-256.png" alt="CosmicWin" width="120" align="right" />
+
 # CosmicWin
 
 A tiling window manager for Windows 11, modelled on COSMIC's tiling behaviour.
