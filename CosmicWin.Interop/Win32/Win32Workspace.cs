@@ -72,12 +72,24 @@ public sealed class Win32Workspace : IWorkspace
 
         foreach (var hwnd in _windows.Keys.ToArray())
         {
+            if (currentSet.Contains(hwnd))
+            {
+                continue;
+            }
+
             // Absent from the enumeration is NOT the same as gone. IsTrackable rejects a cloaked
             // window, and DWM cloaks every window on a virtual desktop the user switches away from
             // -- so treating absence as destruction dismantled the whole layout on a desktop change
             // and rebuilt it in enumeration order on the way back (measured). A window
             // that still answers TryGetWindowInfo is alive; only its visibility changed.
-            if (!currentSet.Contains(hwnd) && !_nativeSource.TryGetWindowInfo(hwnd, out _))
+            //
+            // Which is why alive is not the whole test either. An application that lives in the
+            // notification area does not destroy its window when the user closes it, it HIDES it,
+            // and a hidden window answers every liveness question for as long as the process runs
+            // -- so this pass kept handing it a tile forever (reported with Discord: the slot it
+            // left behind was never reclaimed). WS_VISIBLE is what tells the two apart: cloaking
+            // leaves it set, ShowWindow(SW_HIDE) clears it.
+            if (!_nativeSource.TryGetWindowInfo(hwnd, out var info) || !info.IsVisible)
             {
                 RemoveWindow(hwnd);
             }
@@ -115,6 +127,12 @@ public sealed class Win32Workspace : IWorkspace
                 TryAddWindow(hwnd);
                 break;
             case NativeWindowEventKind.Destroyed:
+
+            // Tracked exactly like a destroy, on purpose. The two are different facts about the
+            // window -- a hidden one still has a live HWND and comes back through Created when the
+            // user reopens it from the tray -- but they are the SAME fact about the layout: nothing
+            // is drawn into that tile any more, so nothing may keep claiming it.
+            case NativeWindowEventKind.Hidden:
                 RemoveWindow(hwnd);
                 break;
             case NativeWindowEventKind.BoundsChanged:

@@ -259,4 +259,61 @@ public class Win32WorkspaceTests
 
         Assert.Equal(new IntPtr(2), Assert.Single(removed));
     }
+
+    /// <summary>
+    /// Reported from real use with Discord: closing it left its slot reserved and the focus border
+    /// drawn on it. An application that lives in the notification area does not DESTROY its window
+    /// on close, it hides it -- <c>ShowWindow(SW_HIDE)</c> -- so no destroy event is ever raised and
+    /// the window keeps answering every liveness question that is asked about it.
+    /// <para>
+    /// The hide is the close, as far as the layout is concerned: nothing is drawn into that tile
+    /// any more, so nothing may keep claiming it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void HookDeliversHideEvent_RaisesWindowRemoved_AndLeavesSnapshot()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(3), "Discord", Rectangle.FromSize(0, 0, 500, 500));
+        using var workspace = new Win32Workspace(source);
+        workspace.Open();
+        WindowEventArgs? received = null;
+        workspace.WindowRemoved += (_, e) => received = e;
+
+        source.SimulateWindowHiddenWithEvent(new IntPtr(3));
+
+        Assert.NotNull(received);
+        Assert.Equal(new IntPtr(3), received!.Window.Handle);
+        Assert.DoesNotContain(workspace.Snapshot, w => w.Handle == new IntPtr(3));
+    }
+
+    /// <summary>
+    /// The reconciliation half of the same defect. A missed hide is worse than a missed destroy: the
+    /// window stays alive forever, so <see cref="Win32Workspace.Poll"/>'s "still answers
+    /// TryGetWindowInfo" test keeps it in the tree for the rest of the session.
+    /// </summary>
+    /// <remarks>
+    /// Visibility is what separates this from the cloaked window above it, and it is a real
+    /// distinction rather than a convenient one: DWM cloaking leaves <c>WS_VISIBLE</c> set -- the
+    /// window is still shown, just not on the desktop being looked at -- while
+    /// <c>ShowWindow(SW_HIDE)</c> clears it. Asking "is it enumerable" cannot tell them apart;
+    /// asking "is it visible" can.
+    /// </remarks>
+    [Fact]
+    public void Poll_AWindowHiddenToTheNotificationArea_IsReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "Discord", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.SimulateWindowHiddenSilently(new IntPtr(2));
+        workspace.Poll();
+
+        Assert.Equal(new IntPtr(2), Assert.Single(removed));
+        Assert.DoesNotContain(workspace.Snapshot, w => w.Handle == new IntPtr(2));
+    }
 }

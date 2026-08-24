@@ -32,6 +32,7 @@ GetForegroundWindow
 GetCurrentThreadId
 DwmGetWindowAttribute
 EVENT_OBJECT_SHOW
+EVENT_OBJECT_HIDE
 EVENT_SYSTEM_MOVESIZESTART
 EVENT_SYSTEM_MOVESIZEEND
 PeekMessage
@@ -52,3 +53,5 @@ CreateRoundRectRgn
 CombineRgn
 SetWindowRgn
 DeleteObject
+ShowWindow
+SHOW_WINDOW_CMD

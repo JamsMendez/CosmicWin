@@ -25,7 +25,35 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// to every window on a virtual desktop the user switches away from. TryGetWindowInfo keeps
     /// answering for it, because the window is alive; only the enumeration stops listing it.
     /// </summary>
+    /// <remarks>
+    /// A cloaked window keeps <c>WS_VISIBLE</c> -- it is still shown, just not on the desktop being
+    /// looked at -- which is exactly what separates it from
+    /// <see cref="SimulateWindowHiddenSilently"/>, so this leaves <c>IsVisible</c> alone.
+    /// </remarks>
     public void HideFromEnumeration(nint hwnd) => _hiddenFromEnumeration.Add(hwnd);
+
+    /// <summary>
+    /// Simulates an application hiding its window into the notification area
+    /// (<c>ShowWindow(SW_HIDE)</c>) AND the hook delivering the event for it. The window stays
+    /// ALIVE -- the process is still running -- so it keeps answering
+    /// <see cref="TryGetWindowInfo"/>; it simply stops being visible and stops being enumerable.
+    /// </summary>
+    public void SimulateWindowHiddenWithEvent(nint hwnd)
+    {
+        SimulateWindowHiddenSilently(hwnd);
+        _callback?.Invoke(NativeWindowEventKind.Hidden, hwnd);
+    }
+
+    /// <summary>The same hide with the hook event dropped -- only a subsequent <c>Poll</c> can notice.</summary>
+    public void SimulateWindowHiddenSilently(nint hwnd)
+    {
+        if (_windows.TryGetValue(hwnd, out var info))
+        {
+            _windows[hwnd] = info with { IsVisible = false };
+        }
+
+        _hiddenFromEnumeration.Add(hwnd);
+    }
 
     public IReadOnlyList<nint> EnumerateTopLevelWindows() =>
         _windows.Keys.Where(handle => !_hiddenFromEnumeration.Contains(handle)).ToArray();
@@ -89,8 +117,10 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// <summary>Seeds a window as already open before <c>Open()</c> enumerates.</summary>
     public void SeedExistingWindow(
         nint hwnd, string title, Rectangle bounds,
-        string className = "", string processName = "", uint style = 0u, uint exStyle = 0u, bool isOwned = false) =>
-        _windows[hwnd] = new NativeWindowInfo(title, bounds, className, processName, style, exStyle, isOwned);
+        string className = "", string processName = "", uint style = 0u, uint exStyle = 0u, bool isOwned = false,
+        bool isVisible = true) =>
+        _windows[hwnd] = new NativeWindowInfo(
+            title, bounds, className, processName, style, exStyle, isOwned, isVisible);
 
     /// <summary>Simulates the OS creating a window AND the hook delivering the event for it.</summary>
     public void SimulateWindowCreatedWithEvent(
@@ -98,6 +128,10 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         string className = "", string processName = "", uint style = 0u, uint exStyle = 0u, bool isOwned = false)
     {
         _windows[hwnd] = new NativeWindowInfo(title, bounds, className, processName, style, exStyle, isOwned);
+
+        // A re-shown window is enumerable again. Without this a test could never bring one back,
+        // and coming back is precisely what a notification-area window does.
+        _hiddenFromEnumeration.Remove(hwnd);
         _callback?.Invoke(NativeWindowEventKind.Created, hwnd);
     }
 

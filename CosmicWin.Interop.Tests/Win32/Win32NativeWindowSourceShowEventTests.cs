@@ -1,8 +1,6 @@
-using System.Diagnostics;
 using CosmicWin.Interop.Win32;
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.Interop.Tests.Win32;
 
@@ -48,7 +46,7 @@ public sealed class Win32NativeWindowSourceShowEventTests
 
         try
         {
-            var observed = PumpUntil(
+            var observed = MessagePump.Until(
                 () => Volatile.Read(ref window) is { } spawned && created.Contains(spawned.Handle),
                 TimeSpan.FromSeconds(15));
 
@@ -59,31 +57,5 @@ public sealed class Win32NativeWindowSourceShowEventTests
             spawn.Wait(TimeSpan.FromSeconds(15));
             Volatile.Read(ref window)?.Dispose();
         }
-    }
-
-    /// <summary>
-    /// Drains this thread's message queue — which is what actually invokes a WINEVENT_OUTOFCONTEXT
-    /// callback — until <paramref name="condition"/> holds or the budget runs out.
-    /// </summary>
-    private static bool PumpUntil(Func<bool> condition, TimeSpan timeout)
-    {
-        var clock = Stopwatch.StartNew();
-        while (clock.Elapsed < timeout)
-        {
-            while (PInvoke.PeekMessage(out var message, HWND.Null, 0, 0, PEEK_MESSAGE_REMOVE_TYPE.PM_REMOVE))
-            {
-                PInvoke.TranslateMessage(message);
-                PInvoke.DispatchMessage(message);
-            }
-
-            if (condition())
-            {
-                return true;
-            }
-
-            Thread.Sleep(20);
-        }
-
-        return condition();
     }
 }

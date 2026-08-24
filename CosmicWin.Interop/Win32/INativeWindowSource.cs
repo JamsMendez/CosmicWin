@@ -8,7 +8,15 @@ internal readonly record struct NativeWindowInfo(
     string ProcessName = "",
     uint Style = 0u,
     uint ExStyle = 0u,
-    bool IsOwned = false);
+    bool IsOwned = false,
+
+    /// <summary>
+    /// Whether the window is SHOWN (<c>WS_VISIBLE</c>), as opposed to merely existing. The one
+    /// signal that separates a window hidden into the notification area -- which
+    /// <c>ShowWindow(SW_HIDE)</c> clears -- from one DWM has cloaked for being on another virtual
+    /// desktop, which keeps it set. Both vanish from the enumeration; only the first is gone.
+    /// </summary>
+    bool IsVisible = true);
 
 /// <summary>
 /// The kind of change delivered by <see cref="INativeWindowSource.SubscribeWindowEvents"/>.
@@ -28,6 +36,19 @@ internal enum NativeWindowEventKind
 
     /// <summary>The user let go (<c>EVENT_SYSTEM_MOVESIZEEND</c>).</summary>
     MoveSizeEnded,
+
+    /// <summary>
+    /// The window was hidden without being destroyed (<c>EVENT_OBJECT_HIDE</c>) -- what an
+    /// application that lives in the notification area does when the user closes it.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT folded into <see cref="Destroyed"/> at the source. The two are different
+    /// facts about the window -- one still has a live HWND and can come back through
+    /// <see cref="Created"/>, the other cannot -- and a source that lied about which one happened
+    /// would leave every consumer unable to tell them apart. They happen to have the same
+    /// consequence for tracking today; that is the consumer's decision to make, not this enum's.
+    /// </remarks>
+    Hidden,
 }
 
 /// <summary>

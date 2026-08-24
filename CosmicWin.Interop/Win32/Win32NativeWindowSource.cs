@@ -69,7 +69,8 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             ReadProcessName(handle),
             ReadStyle(handle),
             ReadExStyle(handle),
-            ReadIsOwned(handle));
+            ReadIsOwned(handle),
+            PInvoke.IsWindowVisible(handle));
         return true;
     }
 
@@ -463,6 +464,24 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
                     break;
                 case PInvoke.EVENT_OBJECT_DESTROY:
                     callback(NativeWindowEventKind.Destroyed, hwnd);
+                    break;
+
+                // The exact counterpart of the SHOW arm above, and it was missing for the same
+                // reason: HIDE sits inside the subscribed range (0x8003) and simply had no case, so
+                // every one of them was dropped. Reported with Discord -- an application that lives
+                // in the notification area is CLOSED by hiding its window, never by destroying it,
+                // so the destroy arm never fired and the window kept its tile and its focus border
+                // for the rest of the session.
+                //
+                // Re-checked rather than trusted: this is an out-of-context hook, so the callback
+                // runs some time after the event, and a window that has already been shown again by
+                // then is not hidden -- reporting it would evict a window the user is looking at.
+                case PInvoke.EVENT_OBJECT_HIDE:
+                    if (!PInvoke.IsWindowVisible(hwnd))
+                    {
+                        callback(NativeWindowEventKind.Hidden, hwnd);
+                    }
+
                     break;
                 case PInvoke.EVENT_OBJECT_LOCATIONCHANGE:
                     if (IsTrackable(hwnd))
