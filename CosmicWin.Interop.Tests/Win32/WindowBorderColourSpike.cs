@@ -19,9 +19,21 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// The change is cosmetic and reversible: run with <c>COSMICWIN_SPIKE_BORDER=restore</c> to hand
 /// every border back to DWM's default.
 /// </para>
+/// <para>
+/// It demands its OWN opt-in, and that is not symmetry with the other gates -- it is the difference
+/// between a fact that reads the desktop and one that repaints it. Gated on the shared desktop
+/// opt-in alone, it ran as an ordinary <c>[Fact]</c> on every <c>dotnet test</c> of the SOLUTION and
+/// left every window on the machine wearing a red border, with no restore. That is not
+/// hypothetical: it happened five times in one session and was reported as a defect in CosmicWin's
+/// own focus border. A DWM attribute belongs to the WINDOW, so the paint survives the test run, the
+/// testhost process, and a reboot -- nothing takes it back.
+/// </para>
 /// </remarks>
 public sealed class WindowBorderColourSpike(ITestOutputHelper output)
 {
+    /// <summary>The spike's own opt-in, separate from the shared desktop one (see the remarks).</summary>
+    private const string ModeVariable = "COSMICWIN_SPIKE_BORDER";
+
     [Fact]
     public void SetTheBorderColourOfEveryTrackableWindowAndReportWhatTheShellSaid()
     {
@@ -31,7 +43,19 @@ public sealed class WindowBorderColourSpike(ITestOutputHelper output)
             return;
         }
 
-        var restoring = Environment.GetEnvironmentVariable("COSMICWIN_SPIKE_BORDER") == "restore";
+        // The second opt-in, and the one that matters. Absent, this does NOTHING -- deliberately
+        // including the restore, so the variable means "I know what this touches" rather than
+        // "which direction". Anyone who needs to undo a painting already has to set it.
+        var mode = Environment.GetEnvironmentVariable(ModeVariable);
+        if (mode is not ("paint" or "restore"))
+        {
+            output.WriteLine(
+                $"NOT RUN. Set {ModeVariable}=paint to repaint every window's border on this " +
+                $"machine, or {ModeVariable}=restore to hand them all back to DWM.");
+            return;
+        }
+
+        var restoring = mode == "restore";
 
         // A colour nobody would mistake for an accent, so "did it work" needs no squinting.
         var colour = restoring ? Win32WindowBorder.Default : Win32WindowBorder.ColorRef(255, 0, 0);
