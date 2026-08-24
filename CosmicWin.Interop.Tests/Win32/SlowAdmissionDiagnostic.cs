@@ -24,15 +24,16 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// <para>
 /// The admission oracle is <c>EnumerateTopLevelWindows</c> rather than a hand-rolled copy of the
 /// gate, so what is measured is the real decision the production path makes, not a restatement of
-/// it. Read-only throughout: it opens Settings and closes nothing, and touches no other window.
+/// it. It CLOSES Settings twice -- once to force a cold launch, once to put the desktop back --
+/// and touches no other window.
 /// </para>
-/// </remarks>
-/// <remarks>
+/// <para>
 /// In the serialised desktop collection like every other fact that touches the real desktop.
 /// A class with NO <c>[Collection]</c> gets its own implicit one, which xunit runs in PARALLEL
 /// with <c>RealDesktop</c> -- so this raced the very facts that collection exists to serialise.
 /// Read-only is not an exemption: a reader that runs while another fact is moving windows or
 /// switching desktops reports a desktop nobody ever had.
+/// </para>
 /// </remarks>
 [Trait("Category", "RequiresDesktop")]
 [Collection(RealDesktopCollection.Name)]
@@ -85,7 +86,6 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
         CloseSettings();
 
         var source = new Win32NativeWindowSource();
-        var clock = Stopwatch.StartNew();
         // dwmsEventTime, NOT the time the callback ran. An out-of-context hook only delivers while
         // this thread retrieves messages, and enumerating every top-level window between pumps
         // starves that badly enough that a whole launch arrives in one batch wearing one timestamp
@@ -160,11 +160,22 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
             // The delegate must outlive the hook, so this is the earliest safe point.
             GC.KeepAlive(thunk);
 
-            // Put the desktop back. Killing Settings to get a cold launch and then leaving a fresh
-            // Settings window open is the same mutate-without-restore shape this batch just gated
-            // WindowBorderColourSpike for -- writing it into a NEW file while fixing it in an old
-            // one would be worth nothing.
-            CloseSettings();
+            // Clear up after the launch. Deliberately NOT called a restore: a Settings window the
+            // user had open was killed at the start and is not reopened, so this only guarantees the
+            // harness does not LEAVE one behind. That is the most a cold-launch measurement can
+            // offer, and leaving a fresh window open would be the same mutate-without-restore shape
+            // this batch gated WindowBorderColourSpike for.
+            //
+            // Suppressed HERE and nowhere else: an exception thrown from a finally REPLACES the one
+            // already in flight, so a failure to tidy up would erase the failure worth reading.
+            try
+            {
+                CloseSettings();
+            }
+            catch
+            {
+                // Tidying up is never worth losing the real exception over.
+            }
         }
 
         // Only the windows that actually arrived during the run: the desktop is full of traffic that
@@ -206,6 +217,17 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
         }
     }
 
+    /// <remarks>
+    /// Throws what it cannot handle. The only exception this swallows is a per-process one, because
+    /// a single stubborn instance must not stop the rest from closing -- everything else, notably a
+    /// failing <c>GetProcessesByName</c>, propagates so the caller fails loudly.
+    /// <para>
+    /// The finally-block caller is the one that cannot afford a throw, and it suppresses at ITS OWN
+    /// call site rather than here. Suppressing inside this method would have covered the
+    /// top-of-method call too, which is not in a finally and has nothing to be protected from --
+    /// silently widening an error swallow past the hazard that justified it.
+    /// </para>
+    /// </remarks>
     private static void CloseSettings()
     {
         foreach (var running in Process.GetProcessesByName("SystemSettings"))
@@ -219,8 +241,9 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
                 }
                 catch
                 {
-                    // Best-effort: an unkillable Settings only means this run measures nothing,
-                    // which the empty-admission assertion below already reports.
+                    // Per process, so one stubborn instance does not stop the rest from closing. An
+                    // unkillable Settings only means this run measures nothing, which the empty-run
+                    // message at the end of the method reports.
                 }
             }
         }

@@ -34,13 +34,13 @@ namespace CosmicWin.App.Tests.Desktop;
 /// manager would tile out from under them. This one has nothing to protect, and the app being live
 /// is the very condition being diagnosed.
 /// </para>
-/// </remarks>
-/// <remarks>
+/// <para>
 /// In the serialised desktop collection like every other fact that touches the real desktop.
 /// A class with NO <c>[Collection]</c> gets its own implicit one, which xunit runs in PARALLEL
 /// with <c>RealDesktop</c> -- so this raced the very facts that collection exists to serialise.
 /// Read-only is not an exemption: a reader that runs while another fact is moving windows or
 /// switching desktops reports a desktop nobody ever had.
+/// </para>
 /// </remarks>
 [Trait("Category", "RequiresDesktop")]
 [Collection(RealDesktopCollection.Name)]

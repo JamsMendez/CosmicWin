@@ -30,6 +30,14 @@ public sealed class DesktopSwitchVisibilityTests(ITestOutputHelper output)
 {
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(900);
 
+    /// <summary>How long the shell is given to cloak a window left on another desktop.</summary>
+    /// <remarks>
+    /// Generous on purpose. It is a ceiling on a wait that normally ends in a fraction of it, not a
+    /// duration anything sleeps for, so raising it costs a slow machine nothing and buys it the
+    /// difference between a real answer and a timing artefact.
+    /// </remarks>
+    private static readonly TimeSpan CloakTimeout = TimeSpan.FromSeconds(10);
+
     [RequiresDesktopFact]
     public void AWindowLeftOnAnotherDesktop_StopsBeingEnumerable_ButStaysVisible()
     {
@@ -62,16 +70,26 @@ public sealed class DesktopSwitchVisibilityTests(ITestOutputHelper output)
             Assert.True(
                 desktops.TrySwitchTo(elsewhere),
                 $"Could not switch to desktop {elsewhere}, so nothing could be measured: {desktops.LastError}");
-            Thread.Sleep(Settle);
+            // Waited for, not slept through. A fixed sleep is a bet that this machine cloaks within
+            // 900ms, and it fails on a slower one for reasons that have nothing to do with the fact.
+            //
+            // Waiting for the condition this then asserts is deliberate rather than circular: the
+            // wait's OUTCOME is the assertion. It answers "did cloaking ever take effect, within a
+            // budget generous enough that missing it means something", where the sleep could only
+            // answer "had it taken effect at exactly 900ms".
+            var cloaked = MessagePump.Until(
+                () => !source.EnumerateTopLevelWindows().Contains(spawned.Handle), CloakTimeout);
 
-            var stillEnumerable = source.EnumerateTopLevelWindows().Contains(spawned.Handle);
             var stillAlive = source.TryGetWindowInfo(spawned.Handle, out var after);
 
             output.WriteLine(
                 $"window 0x{spawned.Handle:X} left on desktop {startedOn}, viewing {elsewhere}: " +
-                $"enumerable={stillEnumerable} alive={stillAlive} visible={after.IsVisible}");
+                $"cloaked={cloaked} alive={stillAlive} visible={after.IsVisible}");
 
-            Assert.False(stillEnumerable, "A cloaked window was still enumerable, so this measures nothing.");
+            Assert.True(
+                cloaked,
+                $"The window was still enumerable after {CloakTimeout.TotalSeconds:F0}s on another " +
+                "desktop, so cloaking never took effect and this measures nothing.");
             Assert.True(stillAlive, "The window stopped existing merely because the user looked elsewhere.");
 
             // The whole point. If cloaking cleared WS_VISIBLE, Poll's new removal test could not
