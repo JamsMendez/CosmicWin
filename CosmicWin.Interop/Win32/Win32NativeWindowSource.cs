@@ -396,6 +396,31 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         /// the OS to deliver every system event in between.
         /// </summary>
         private readonly HWINEVENTHOOK _moveSizeHook;
+
+        /// <summary>
+        /// A THIRD registration, for <c>EVENT_OBJECT_UNCLOAKED</c> (0x8018) alone.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Measured with a real Settings launch: a UWP window is born CLOAKED and stays cloaked
+        /// through its own CREATE (+0ms) and SHOW (+125ms), so <see cref="IsTrackable(HWND)"/>
+        /// refuses it at both. It uncloaks at +190ms, and that event lands past the end of the range
+        /// above -- so the ONE event announcing that the window became trackable was the one nobody
+        /// listened to. What admitted it instead was whatever unrelated event happened to be
+        /// delivered after the uncloak, and failing that the two-second reconciliation tick: a
+        /// window joined the layout by luck, roughly a second late.
+        /// </para>
+        /// <para>
+        /// The CLOAK half is deliberately absent, and must stay absent. DWM cloaks every window on a
+        /// virtual desktop the user leaves, so treating it as a removal is precisely the regression
+        /// that once dismantled the whole layout on a desktop switch.
+        /// </para>
+        /// <para>
+        /// One event, not a range widened to reach it: 0x800C..0x8017 sits in between and would be
+        /// delivered for every window on the desktop for nothing.
+        /// </para>
+        /// </remarks>
+        private readonly HWINEVENTHOOK _uncloakHook;
         private NativeWindowEventCallback? _callback;
 
         public WinEventHookSubscription(NativeWindowEventCallback callback)
@@ -430,6 +455,22 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             {
                 PInvoke.UnhookWinEvent(_hook);
                 throw new InvalidOperationException("SetWinEventHook failed for the move/size range.");
+            }
+
+            _uncloakHook = PInvoke.SetWinEventHook(
+                PInvoke.EVENT_OBJECT_UNCLOAKED,
+                PInvoke.EVENT_OBJECT_UNCLOAKED,
+                HMODULE.Null,
+                _thunk,
+                idProcess: 0,
+                idThread: 0,
+                PInvoke.WINEVENT_OUTOFCONTEXT | PInvoke.WINEVENT_SKIPOWNPROCESS);
+
+            if (_uncloakHook.IsNull)
+            {
+                PInvoke.UnhookWinEvent(_hook);
+                PInvoke.UnhookWinEvent(_moveSizeHook);
+                throw new InvalidOperationException("SetWinEventHook failed for the uncloak event.");
             }
         }
 
@@ -491,6 +532,18 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 
                     break;
 
+                // Reported as CREATED, not as a kind of its own. A window that has just become
+                // trackable is, to everything downstream, a window that has just arrived -- and
+                // TryAddWindow is idempotent, so a window already tracked (every window on a desktop
+                // being returned to) costs one dictionary lookup and changes nothing.
+                case PInvoke.EVENT_OBJECT_UNCLOAKED:
+                    if (IsTrackable(hwnd))
+                    {
+                        callback(NativeWindowEventKind.Created, hwnd);
+                    }
+
+                    break;
+
                 // Brackets one hand-driven move/resize. Deliberately NOT gated on IsTrackable: the
                 // bracket must close for whatever it opened on, or a window that stops being
                 // trackable mid-gesture would leave the drag flag set forever.
@@ -514,6 +567,11 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             if (!_moveSizeHook.IsNull)
             {
                 PInvoke.UnhookWinEvent(_moveSizeHook);
+            }
+
+            if (!_uncloakHook.IsNull)
+            {
+                PInvoke.UnhookWinEvent(_uncloakHook);
             }
         }
     }
