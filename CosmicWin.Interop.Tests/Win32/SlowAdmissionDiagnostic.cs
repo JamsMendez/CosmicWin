@@ -93,9 +93,10 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
         // millisecond. dwmsEventTime is stamped by the OS when the event happened and shares its
         // clock with Environment.TickCount, so the two below are directly comparable.
         var events = new List<(uint At, uint Kind, nint Hwnd)>();
-        // A SET, not a map. It used to carry a timestamp that was always 0, sorted on, and then
-        // discarded -- the real per-event timing comes from `events` and `born` below.
-        var admitted = new HashSet<nint>();
+        // Each admitted window PAIRED with the info read at the moment it was admitted. Not a bare
+        // set of handles: the report runs after the finally has closed Settings, so the handle
+        // alone is not enough to say what the window WAS.
+        var admitted = new List<(nint Hwnd, NativeWindowInfo Info)>();
         var created = new Dictionary<nint, uint>();
         var known = new HashSet<nint>(source.EnumerateTopLevelWindows());
 
@@ -149,7 +150,14 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
             {
                 if (known.Add(hwnd))
                 {
-                    admitted.Add(hwnd);
+                    // Read the window HERE, while it is still alive. The finally below closes
+                    // Settings and the report loop runs after it, so reading there answers about a
+                    // dead window: TryGetWindowInfo returns false and every identifying field prints
+                    // empty. The timeline survived that because it is built from captured events,
+                    // which is exactly why the breakage looked cosmetic instead of total -- a
+                    // timeline for a bare hwnd, with no idea which application it belongs to.
+                    source.TryGetWindowInfo(hwnd, out var info);
+                    admitted.Add((hwnd, info));
                 }
             }
         }
@@ -180,9 +188,8 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
 
         // Only the windows that actually arrived during the run: the desktop is full of traffic that
         // has nothing to do with the launch, and reporting all of it would bury the answer.
-        foreach (var hwnd in admitted)
+        foreach (var (hwnd, info) in admitted)
         {
-            source.TryGetWindowInfo(hwnd, out var info);
             var mine = events.Where(e => e.Hwnd == hwnd).OrderBy(e => e.At).ToList();
             if (mine.Count == 0)
             {

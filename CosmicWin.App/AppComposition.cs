@@ -156,6 +156,28 @@ public sealed class AppComposition : IDisposable
         // than beside its other use further down.
         var onOwningThread = scheduleOnOwningThread ?? (work => work());
 
+        // What the border was last told to do. Three focus-border defects have been fixed so far and
+        // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
+        // whole defect class is "the border is late, or on the wrong rectangle", measured inside the
+        // 400ms reconciliation interval, right at the edge of what an eye reliably catches.
+        //
+        // Recorded on CHANGE only, deliberately. UpdateFocusBorder runs on every tick, so tracing
+        // each call would write a line every 400ms for the life of the session and bury the four
+        // lines that matter. A transition is the whole signal: when the border let go, and what it
+        // moved to.
+        var lastBorderDecision = string.Empty;
+
+        void RecordBorderDecision(string decision)
+        {
+            if (decision == lastBorderDecision)
+            {
+                return;
+            }
+
+            lastBorderDecision = decision;
+            desktopTrace?.Record($"border {decision}");
+        }
+
         // Handed to the collaborators that reflow WITHOUT a chord -- a window closing, one leaving
         // for another desktop, a group collapsing -- which is precisely the set that had no path to
         // the border at all and left it a full reconciliation interval behind.
@@ -306,6 +328,8 @@ public sealed class AppComposition : IDisposable
                 || !registry.TryGetWindow(focusedLeaf.Window.Handle, out var focusedWindow)
                 || focusedWindow is not { IsAlive: true })
             {
+                RecordBorderDecision(
+                    $"hidden: no framed window (paused={hook.IsPaused} foreground=0x{foregroundHandle:X})");
                 focusBorder.Hide();
                 return;
             }
@@ -319,11 +343,16 @@ public sealed class AppComposition : IDisposable
                 // GetForegroundWindow can keep naming the cloaked window from the desktop being
                 // left during the shell's transition. The registry spans every desktop, so a valid
                 // handle is not enough: only a leaf in the tree currently being viewed may be framed.
+                RecordBorderDecision($"hidden: 0x{foregroundHandle:X} is on another desktop's tree");
                 focusBorder.Hide();
                 return;
             }
 
-            focusBorder.ShowAround(focusedWindow.Bounds, onDisplay.Scaling, BorderGeometry.DefaultThickness);
+            var framed = focusedWindow.Bounds;
+            RecordBorderDecision(
+                $"around 0x{foregroundHandle:X} [L={framed.Left} T={framed.Top} " +
+                $"W={framed.Width} H={framed.Height}]");
+            focusBorder.ShowAround(framed, onDisplay.Scaling, BorderGeometry.DefaultThickness);
         }
 
         // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused

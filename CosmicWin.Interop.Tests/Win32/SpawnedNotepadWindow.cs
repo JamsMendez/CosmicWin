@@ -48,6 +48,9 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </summary>
 public sealed class SpawnedNotepadWindow : IDisposable
 {
+    /// <summary>How long the failure path keeps sweeping for a Notepad that has not appeared yet.</summary>
+    private static readonly TimeSpan CleanupGrace = TimeSpan.FromSeconds(8);
+
     private readonly Process _windowProcess;
     private readonly string _filePath;
     private bool _disposed;
@@ -73,37 +76,122 @@ public sealed class SpawnedNotepadWindow : IDisposable
         var filePath = Path.Combine(Path.GetTempPath(), $"{marker}.txt");
         File.WriteAllText(filePath, string.Empty);
 
-        using (var launcher = Process.Start(new ProcessStartInfo("notepad.exe", $"\"{filePath}\"") { UseShellExecute = true }))
+        // Every Notepad alive BEFORE the launch, so anything new can be recognised as ours.
+        // Deliberately by process id and not by the marker in the window title: on the failure path
+        // the marker FILE is gone before Notepad ever opens it, so the leaked window is titled
+        // "Notepad" or nothing at all and matches no marker. A leak detector keyed on the title
+        // reports green while two orphans sit on the desktop -- measured, not supposed.
+        var preExisting = NotepadProcessIds();
+
+        try
         {
-            if (launcher is null)
+            using (var launcher = Process.Start(new ProcessStartInfo("notepad.exe", $"\"{filePath}\"") { UseShellExecute = true }))
             {
-                File.Delete(filePath);
-                throw new InvalidOperationException("Failed to start notepad.exe.");
+                if (launcher is null)
+                {
+                    throw new InvalidOperationException("Failed to start notepad.exe.");
+                }
+            }
+
+            while (true)
+            {
+                foreach (var candidate in Process.GetProcessesByName("notepad"))
+                {
+                    candidate.Refresh();
+                    var handle = candidate.MainWindowHandle;
+                    if (handle != 0 && candidate.MainWindowTitle.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new SpawnedNotepadWindow(candidate, handle, filePath);
+                    }
+
+                    candidate.Dispose();
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    throw new TimeoutException(
+                        "Timed out waiting for the Notepad window associated with this test launch.");
+                }
+
+                Thread.Sleep(50);
+            }
+        }
+        catch
+        {
+            // Giving up is not a reason to leave a window on the desktop. The old code deleted the
+            // marker file, threw, and never touched the Notepad it had already launched -- so a
+            // spawn that timed out leaked a real top-level window for the rest of the session, which
+            // is exactly what a later foreground assertion trips over.
+            KillNotepadsStartedSince(preExisting);
+            TryDelete(filePath);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Kills every Notepad that appeared after <paramref name="preExisting"/> was captured, sweeping
+    /// repeatedly for a short while rather than once.
+    /// </summary>
+    /// <remarks>
+    /// The sweep has to outlive the giving-up moment, because that moment is precisely when the
+    /// window does not exist yet: <c>notepad.exe</c> is a launcher stub that hands off to a separate
+    /// window-owning process, and a spawn times out exactly when that hand-off is slow. Killing once
+    /// at the instant of failure finds nothing to kill and leaves the leak intact.
+    /// </remarks>
+    private static void KillNotepadsStartedSince(HashSet<int> preExisting)
+    {
+        var clock = Stopwatch.StartNew();
+        do
+        {
+            foreach (var id in NotepadProcessIds())
+            {
+                if (preExisting.Contains(id))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using var stray = Process.GetProcessById(id);
+                    stray.Kill();
+                    stray.WaitForExit(5000);
+                }
+                catch
+                {
+                    // Per process: one that will not die must not stop the others being cleaned up,
+                    // and none of this may mask the failure being propagated.
+                }
+            }
+
+            Thread.Sleep(100);
+        }
+        while (clock.Elapsed < CleanupGrace);
+    }
+
+    private static HashSet<int> NotepadProcessIds()
+    {
+        var ids = new HashSet<int>();
+        foreach (var candidate in Process.GetProcessesByName("notepad"))
+        {
+            using (candidate)
+            {
+                ids.Add(candidate.Id);
             }
         }
 
-        while (true)
+        return ids;
+    }
+
+    /// <summary>Deleting the marker file must never replace the exception explaining why we are here.</summary>
+    private static void TryDelete(string filePath)
+    {
+        try
         {
-            foreach (var candidate in Process.GetProcessesByName("notepad"))
-            {
-                candidate.Refresh();
-                var handle = candidate.MainWindowHandle;
-                if (handle != 0 && candidate.MainWindowTitle.Contains(marker, StringComparison.OrdinalIgnoreCase))
-                {
-                    return new SpawnedNotepadWindow(candidate, handle, filePath);
-                }
-
-                candidate.Dispose();
-            }
-
-            if (DateTime.UtcNow >= deadline)
-            {
-                File.Delete(filePath);
-                throw new TimeoutException(
-                    "Timed out waiting for the Notepad window associated with this test launch.");
-            }
-
-            Thread.Sleep(50);
+            File.Delete(filePath);
+        }
+        catch
+        {
+            // A leftover temp file is a far smaller problem than an IOException masking a timeout.
         }
     }
 
