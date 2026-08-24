@@ -1,3 +1,5 @@
+using CosmicWin.Interop.Tests.Win32;
+
 namespace CosmicWin.App.Tests.Desktop;
 
 /// <summary>
@@ -10,13 +12,16 @@ namespace CosmicWin.App.Tests.Desktop;
 /// time.
 /// </summary>
 /// <remarks>
-/// This only serialises WITHIN an assembly. <c>dotnet test</c> on the solution still runs the test
-/// PROJECTS in parallel, so a desktop run must invoke one project at a time:
-/// <c>dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj</c> then
-/// <c>dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj</c>.
+/// This serialises within an assembly only -- <c>DisableParallelization</c> stops at the assembly
+/// boundary and the desktop does not. <c>dotnet test</c> on the solution runs the test PROJECTS in
+/// parallel (measured here as three concurrent <c>testhost</c> processes), so the two desktop
+/// collections would otherwise drive the SAME foreground at once. The
+/// <see cref="RealDesktopSession"/> fixture closes that gap with a session-wide named lock, so a
+/// solution-wide run now WAITS instead of racing. Running the projects one at a time is still the
+/// faster way to do a desktop run; it is no longer the only correct one.
 /// </remarks>
 [CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class RealDesktopCollection
+public sealed class RealDesktopCollection : ICollectionFixture<RealDesktopSession>
 {
     public const string Name = "RealDesktop";
 }
