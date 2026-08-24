@@ -164,9 +164,18 @@ public sealed class AppComposition : IDisposable
         // geometry to every tile, so an unfocused window snapping back from a drag runs one too, and
         // answering that would place the border on its own unchanged rectangle once per frame of
         // somebody else's animation.
+        //
+        // Nothing focused is NOT that case, and it is the one the moved list cannot express. Closing
+        // the framed window does not move it, it ends it: its handle is in no moved list, so a plain
+        // "did the focused window move" test reads false and leaves the border drawn over a
+        // rectangle whose window is gone until the next tick. So the early return asks a narrower
+        // question -- is there a focused window that DIDN'T move -- and everything else, including
+        // having no focused window at all, goes to UpdateFocusBorder, which answers that state by
+        // drawing nothing. The extra work when nothing is focused is a Hide the tick was already
+        // making every interval anyway.
         void AfterArrange(IReadOnlyList<nint> moved)
         {
-            if (executor.ResolveFocusedLeaf() is not { } leaf || !moved.Contains(leaf.Window.Handle))
+            if (executor.ResolveFocusedLeaf() is { } leaf && !moved.Contains(leaf.Window.Handle))
             {
                 return;
             }

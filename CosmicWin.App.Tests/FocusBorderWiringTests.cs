@@ -302,6 +302,43 @@ public sealed class FocusBorderWiringTests
     }
 
     /// <summary>
+    /// Closing the window the border is ON is the one reflow the moved-handle filter cannot answer:
+    /// the focused window did not move, it stopped existing.
+    /// </summary>
+    /// <remarks>
+    /// Its handle is in no moved list, so the filter reads "the focused window did not move" and
+    /// leaves the border where it is -- framing a rectangle whose window is gone, until the next
+    /// reconciliation tick. The foreground is deliberately left on the dying window here: Windows
+    /// has not handed it to a survivor yet when the removal arrives, which is precisely the moment
+    /// the filter is blind at. No tiled window is active at that instant, so the honest answer is
+    /// to draw nothing and let the tick or the next foreground change place it. The scheduler is
+    /// NEVER fired after the close: if the border only let go on the tick, this fact would fail.
+    /// </remarks>
+    [Fact]
+    public void WhenTheFocusedWindowCloses_TheBorderLetsGoWithoutTheTick()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var staying = new RecordingWindow(new IntPtr(0xB0B), Rectangle.FromSize(0, 0, 1920, 540));
+            var closing = new RecordingWindow(new IntPtr(0xB0C), Rectangle.FromSize(0, 540, 1920, 540));
+            harness.Workspace.RaiseWindowAdded(staying);
+            harness.Workspace.RaiseWindowAdded(closing);
+            harness.Foreground.Handle = closing.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            harness.Border.Shown.Clear();
+            var hiddenBefore = harness.Border.HideCallCount;
+
+            harness.Workspace.RaiseWindowRemoved(closing);
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > hiddenBefore);
+        }
+    }
+
+    /// <summary>
     /// A window the border is NOT on moving is nothing to redraw for. During a reflow every tile
     /// reports a move, and answering all of them is work with nothing to show.
     /// </summary>
