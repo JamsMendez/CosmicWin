@@ -122,7 +122,7 @@ public sealed class SpawnedNotepadWindow : IDisposable
             // marker file, threw, and never touched the Notepad it had already launched -- so a
             // spawn that timed out leaked a real top-level window for the rest of the session, which
             // is exactly what a later foreground assertion trips over.
-            KillNotepadsStartedSince(preExisting);
+            KillNotepadsStartedSince(preExisting, NotepadProcessIds, CleanupGrace);
             TryDelete(filePath);
             throw;
         }
@@ -130,42 +130,66 @@ public sealed class SpawnedNotepadWindow : IDisposable
 
     /// <summary>
     /// Kills every Notepad that appeared after <paramref name="preExisting"/> was captured, sweeping
-    /// repeatedly for a short while rather than once.
+    /// repeatedly for <paramref name="grace"/> rather than once, and never throwing.
     /// </summary>
+    /// <param name="preExisting">Process ids already alive before the launch, which are not ours to kill.</param>
+    /// <param name="enumerate">Reads the live Notepad process ids. A delegate so the failure below can be forced in a test.</param>
+    /// <param name="grace">How long to keep sweeping for a window that has not appeared yet.</param>
     /// <remarks>
+    /// <para>
     /// The sweep has to outlive the giving-up moment, because that moment is precisely when the
     /// window does not exist yet: <c>notepad.exe</c> is a launcher stub that hands off to a separate
     /// window-owning process, and a spawn times out exactly when that hand-off is slow. Killing once
     /// at the instant of failure finds nothing to kill and leaves the leak intact.
+    /// </para>
+    /// <para>
+    /// Every pass is guarded as a WHOLE, not just the per-process kill inside it. This runs from a
+    /// catch block on the way to a rethrow, so an exception escaping here would not merely fail the
+    /// cleanup -- it would REPLACE the exception explaining why the spawn gave up, and the timeout
+    /// would never be seen. Guarding only the kill left the enumeration that drives the sweep
+    /// uncovered, which is that same masking bug wearing a different hat.
+    /// </para>
     /// </remarks>
-    private static void KillNotepadsStartedSince(HashSet<int> preExisting)
+    internal static void KillNotepadsStartedSince(
+        HashSet<int> preExisting,
+        Func<HashSet<int>> enumerate,
+        TimeSpan grace)
     {
         var clock = Stopwatch.StartNew();
         do
         {
-            foreach (var id in NotepadProcessIds())
+            try
             {
-                if (preExisting.Contains(id))
+                foreach (var id in enumerate())
                 {
-                    continue;
-                }
+                    if (preExisting.Contains(id))
+                    {
+                        continue;
+                    }
 
-                try
-                {
-                    using var stray = Process.GetProcessById(id);
-                    stray.Kill();
-                    stray.WaitForExit(5000);
+                    try
+                    {
+                        using var stray = Process.GetProcessById(id);
+                        stray.Kill();
+                        stray.WaitForExit(5000);
+                    }
+                    catch
+                    {
+                        // Per process: one that will not die must not stop the others being cleaned
+                        // up, and none of this may mask the failure being propagated.
+                    }
                 }
-                catch
-                {
-                    // Per process: one that will not die must not stop the others being cleaned up,
-                    // and none of this may mask the failure being propagated.
-                }
+            }
+            catch
+            {
+                // A pass that could not even read the process table is a failed PASS, not a failed
+                // sweep: the next one still runs, because the window this exists to kill may only
+                // appear later. Nothing leaves this method, by contract.
             }
 
             Thread.Sleep(100);
         }
-        while (clock.Elapsed < CleanupGrace);
+        while (clock.Elapsed < grace);
     }
 
     private static HashSet<int> NotepadProcessIds()
