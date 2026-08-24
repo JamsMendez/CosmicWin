@@ -63,12 +63,23 @@ public sealed class FocusBorderWiringTests
         public void Fire() => _callback!();
     }
 
+    private sealed class MutableVirtualDesktops(Guid current) : IVirtualDesktopService
+    {
+        public bool IsSupported => true;
+        public int Count => 2;
+        public int CurrentIndex { get; set; } = 1;
+        public Guid CurrentDesktopId { get; set; } = current;
+        public string? LastError => null;
+        public bool TrySwitchTo(int oneBasedIndex) => true;
+        public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex) => true;
+    }
+
     private sealed record Harness(
         AppComposition Composition, FakeWorkspace Workspace, NoForeground Foreground,
         RecordingFocusBorder Border, ImmediateScheduler Scheduler, LowLevelKeyboardHook Hook,
         FakeKeyboardHookPlatform Platform);
 
-    private static Harness Wire()
+    private static Harness Wire(IVirtualDesktopService? virtualDesktops = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -94,7 +105,8 @@ public sealed class FocusBorderWiringTests
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullDisposable(),
-            focusBorder: border);
+            focusBorder: border,
+            virtualDesktops: virtualDesktops);
 
         return new Harness(composition, workspace, foreground, border, scheduler, hook!, platform);
     }
@@ -294,6 +306,38 @@ public sealed class FocusBorderWiringTests
             // Excluded, so it never reaches the workspace and is never registered -- exactly what
             // the real exception list produces for Sticky Notes.
             harness.Foreground.Handle = new IntPtr(0xDEAD);
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > hiddenBefore);
+        }
+    }
+
+    /// <summary>
+    /// The foreground handle can lag a virtual-desktop switch and keep naming the cloaked window on
+    /// the desktop being left. Registry membership alone is global, so the border must also require
+    /// that the leaf belongs to the tree currently being viewed.
+    /// </summary>
+    [Fact]
+    public void AfterAnExternalDesktopSwitch_ThePreviousDesktopsFocusBorderIsHidden()
+    {
+        var desktopOne = new Guid("11111111-1111-1111-1111-111111111111");
+        var desktopTwo = new Guid("22222222-2222-2222-2222-222222222222");
+        var desktops = new MutableVirtualDesktops(desktopOne);
+        var harness = Wire(desktops);
+        using (harness.Composition)
+        {
+            var leftBehind = new RecordingWindow(new IntPtr(0xB0D), Rectangle.FromSize(0, 0, 1920, 1080));
+            harness.Workspace.RaiseWindowAdded(leftBehind);
+            harness.Foreground.Handle = leftBehind.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            harness.Border.Shown.Clear();
+            var hiddenBefore = harness.Border.HideCallCount;
+            desktops.CurrentDesktopId = desktopTwo;
+            desktops.CurrentIndex = 2;
+
             harness.Scheduler.Fire();
 
             Assert.Empty(harness.Border.Shown);

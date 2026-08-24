@@ -4,8 +4,8 @@ namespace CosmicWin.Layout.Filters;
 /// WE-1 automatic exclusion heuristics, evaluated against a Win32-free <see cref="WindowDescriptor"/>
 /// Interop's own trackability check (<c>Win32NativeWindowSource.IsTrackable</c>) only
 /// decides whether a window is trackable at all (visible, unowned); it deliberately defers all
-/// fine-grained tiling heuristics to this type, so a visible, unowned, non-sysmenu window (e.g. a
-/// shell tray window) is NOT excluded by Interop alone — callers MUST also apply
+/// fine-grained tiling heuristics to this type, so a visible, unowned shell window is NOT excluded
+/// by Interop alone — callers MUST also apply
 /// <see cref="IsAutoExcluded"/> (and, once wired, <see cref="IsExcluded"/>) before tiling a window.
 /// </summary>
 public static class WindowFilters
@@ -18,7 +18,10 @@ public static class WindowFilters
             return true;
         }
 
-        if ((descriptor.Style & WindowStyleFlags.SystemMenu) == 0)
+        var hasMaximizeBox = (descriptor.Style & WindowStyleFlags.MaximizeBox) != 0;
+        var hasMinimizeBox = (descriptor.Style & WindowStyleFlags.MinimizeBox) != 0;
+        if ((descriptor.Style & WindowStyleFlags.SystemMenu) == 0
+            && !(hasMaximizeBox && hasMinimizeBox))
         {
             return true;
         }
@@ -31,9 +34,7 @@ public static class WindowFilters
             return true;
         }
 
-        var lacksMaximizeBox = (descriptor.Style & WindowStyleFlags.MaximizeBox) == 0;
-        var lacksMinimizeBox = (descriptor.Style & WindowStyleFlags.MinimizeBox) == 0;
-        if (descriptor.IsOwned && lacksMaximizeBox && lacksMinimizeBox)
+        if (descriptor.IsOwned && !hasMaximizeBox && !hasMinimizeBox)
         {
             return true;
         }

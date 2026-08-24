@@ -5,8 +5,8 @@ namespace CosmicWin.Layout.Tests.Filters;
 
 /// <summary>
 /// WE-1: automatic exclusion heuristics — <c>WS_EX_TOOLWINDOW</c>, owned dialogs lacking both
-/// maximize and minimize boxes, and windows lacking <c>WS_SYSMENU</c>. Covers spec scenario
-/// "Splash screen excluded automatically" and the two other WE-1 heuristic clauses.
+/// maximize and minimize boxes, and non-application windows lacking <c>WS_SYSMENU</c>. Covers spec
+/// scenario "Splash screen excluded automatically" and the two other WE-1 heuristic clauses.
 /// </summary>
 public class WindowFiltersAutoExclusionTests
 {
@@ -33,10 +33,35 @@ public class WindowFiltersAutoExclusionTests
         Assert.True(WindowFilters.IsAutoExcluded(descriptor));
     }
 
-    [Fact]
-    public void IsAutoExcluded_MissingSystemMenu_ReturnsTrue()
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(WindowStyleFlags.MaximizeBox)]
+    [InlineData(WindowStyleFlags.MinimizeBox)]
+    public void IsAutoExcluded_MissingSystemMenuWithoutBothCaptionBoxes_ReturnsTrue(uint style)
     {
-        var descriptor = Normal() with { Style = WindowStyleFlags.MaximizeBox | WindowStyleFlags.MinimizeBox };
+        var descriptor = Normal() with { Style = style };
+
+        Assert.True(WindowFilters.IsAutoExcluded(descriptor));
+    }
+
+    /// <summary>
+    /// Measured custom-frame application shape: no WS_SYSMENU, but both standard caption-box
+    /// capabilities. Those controls distinguish a real application window from the shell/transient
+    /// windows the no-system-menu heuristic protects against.
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_CustomFrameWithBothCaptionBoxes_ReturnsFalse()
+    {
+        var descriptor = Normal() with { Style = 0x14C70000u };
+
+        Assert.False(WindowFilters.IsAutoExcluded(descriptor));
+    }
+
+    /// <summary>The custom-frame exception does not let an invisible minimized tile back in.</summary>
+    [Fact]
+    public void IsAutoExcluded_MinimizedCustomFrameWithBothCaptionBoxes_ReturnsTrue()
+    {
+        var descriptor = Normal() with { Style = 0x34C70000u };
 
         Assert.True(WindowFilters.IsAutoExcluded(descriptor));
     }

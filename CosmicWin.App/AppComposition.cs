@@ -311,6 +311,18 @@ public sealed class AppComposition : IDisposable
             }
 
             var onDisplay = treeManager.ResolveDisplay(focusedWindow.Bounds);
+            if (!treeManager.TryGetTree(onDisplay, out var visibleTree)
+                || visibleTree is null
+                || !treeManager.TryGetTreeHolding(onDisplay, focusedLeaf, out var owningTree)
+                || !ReferenceEquals(visibleTree, owningTree))
+            {
+                // GetForegroundWindow can keep naming the cloaked window from the desktop being
+                // left during the shell's transition. The registry spans every desktop, so a valid
+                // handle is not enough: only a leaf in the tree currently being viewed may be framed.
+                focusBorder.Hide();
+                return;
+            }
+
             focusBorder.ShowAround(focusedWindow.Bounds, onDisplay.Scaling, BorderGeometry.DefaultThickness);
         }
 
