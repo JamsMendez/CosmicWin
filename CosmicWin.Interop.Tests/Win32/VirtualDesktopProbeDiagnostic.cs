@@ -13,6 +13,15 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// through a mismatched vtable.
 /// </para>
 /// </summary>
+/// <remarks>
+/// In the serialised desktop collection like every other fact that touches the real desktop.
+/// A class with NO <c>[Collection]</c> gets its own implicit one, which xunit runs in PARALLEL
+/// with <c>RealDesktop</c> -- so this raced the very facts that collection exists to serialise.
+/// Read-only is not an exemption: a reader that runs while another fact is moving windows or
+/// switching desktops reports a desktop nobody ever had.
+/// </remarks>
+[Trait("Category", "RequiresDesktop")]
+[Collection(RealDesktopCollection.Name)]
 public sealed class VirtualDesktopProbeDiagnostic(ITestOutputHelper output)
 {
     [RequiresDesktopFact]
