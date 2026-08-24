@@ -25,9 +25,9 @@ public sealed class WindowBorderColourSpike(ITestOutputHelper output)
     [Fact]
     public void SetTheBorderColourOfEveryTrackableWindowAndReportWhatTheShellSaid()
     {
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
+        if (DesktopGate.OptInSkipReason() is { } notRun)
         {
-            output.WriteLine("NOT RUN. Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.");
+            output.WriteLine($"NOT RUN. {notRun}");
             return;
         }
 

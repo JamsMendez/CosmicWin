@@ -12,7 +12,7 @@ namespace CosmicWin.App.Tests.Desktop;
 /// </summary>
 public sealed class DesktopSnapshotDiagnostic(ITestOutputHelper output)
 {
-    [RequiresDesktopFact]
+    [RequiresDesktopSessionFact]
     public void ReportWindowsTheFilterChainAdmits()
     {
         var source = new Win32NativeWindowSource();

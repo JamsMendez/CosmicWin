@@ -1,4 +1,3 @@
-using System.Security.Principal;
 using CosmicWin.App.Startup;
 using CosmicWin.Interop;
 
@@ -30,21 +29,6 @@ public sealed class TaskInstallerElevatedTests
         finally
         {
             File.Delete(xmlPath);
-        }
-    }
-}
-
-internal sealed class RequiresElevatedFactAttribute : FactAttribute
-{
-    public RequiresElevatedFactAttribute()
-    {
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
-        {
-            Skip = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
-        }
-        else if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
-        {
-            Skip = "Requires an elevated (Administrator) process -- schtasks /RL HIGHEST needs elevation.";
         }
     }
 }

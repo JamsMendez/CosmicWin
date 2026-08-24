@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Principal;
 
 namespace CosmicWin.Interop.Tests.Win32;
 
@@ -7,13 +8,26 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two gates, because two different things are being demanded.
-/// <see cref="SessionSkipReason"/> is what ANY fact touching the real desktop needs: an interactive
-/// session the maintainer opted into, and no live window manager to tile the windows out from under
-/// it. <see cref="TerminalSkipReason"/> adds a spawned terminal binary that is not on every machine.
-/// Keeping them apart is the point: nine facts spawn Notepad or only read monitors, so hanging the
-/// terminal requirement on them would make them SKIP on machines where they should run -- which is
-/// how a gate meant to protect a desktop quietly becomes a gate that deletes coverage.
+/// Four gates, because four different things get demanded, and they compose from ONE opt-in check
+/// rather than repeating it. <see cref="OptInSkipReason(string?)"/> is the floor: an interactive
+/// session the maintainer asked for. <see cref="SessionSkipReason(string?, Func{bool})"/> adds "no
+/// live window manager" for facts that spawn windows.
+/// <see cref="TerminalSkipReason(string?, Func{bool}, string?)"/> adds a terminal binary that is not
+/// on every machine. <see cref="ElevatedSkipReason(string?, Func{bool})"/> adds Administrator.
+/// </para>
+/// <para>
+/// Keeping them apart is the point. Nine facts spawn Notepad or only read monitors, so hanging the
+/// terminal requirement on them would make them SKIP on machines where they should run -- that is
+/// how a gate meant to protect a desktop quietly becomes a gate that deletes coverage. Equally, a
+/// <c>schtasks</c> round-trip opens no window, so demanding an idle window manager of it would be a
+/// requirement invented out of symmetry rather than need.
+/// </para>
+/// <para>
+/// The expensive probes arrive as delegates so the opt-in can settle the question before they run.
+/// Enumerating every process on the machine to answer something a missing environment variable
+/// already decided is work every <c>dotnet test</c> paid for and never needed. The terminal path
+/// stays a plain string on purpose: reading an environment variable is a dictionary lookup with no
+/// cost worth deferring, and pretending otherwise would buy symmetry with a delegate nobody needs.
 /// </para>
 /// <para>
 /// It takes its inputs as arguments rather than reading the environment, so the decision can be
@@ -29,59 +43,85 @@ public static class DesktopGate
     /// <summary>Exact match, not truthiness: "0", "true" and " 1" are all somebody NOT opting in.</summary>
     private const string OptIn = "1";
 
-    /// <summary>Reads the two live inputs so an attribute does not have to.</summary>
-    public static string? SessionSkipReason() =>
-        SessionSkipReason(Environment.GetEnvironmentVariable(RunFlagVariable), WindowManagerRunning());
+    /// <summary>Reads the live opt-in so an attribute does not have to.</summary>
+    public static string? OptInSkipReason() =>
+        OptInSkipReason(Environment.GetEnvironmentVariable(RunFlagVariable));
 
-    /// <inheritdoc cref="SessionSkipReason()"/>
+    /// <inheritdoc cref="OptInSkipReason()"/>
+    public static string? SessionSkipReason() =>
+        SessionSkipReason(Environment.GetEnvironmentVariable(RunFlagVariable), WindowManagerRunning);
+
+    /// <inheritdoc cref="OptInSkipReason()"/>
     public static string? TerminalSkipReason() =>
         TerminalSkipReason(
             Environment.GetEnvironmentVariable(RunFlagVariable),
-            WindowManagerRunning(),
+            WindowManagerRunning,
             Environment.GetEnvironmentVariable(SpawnedAlacrittyWindow.ExecutablePathEnvVar));
 
+    /// <inheritdoc cref="OptInSkipReason()"/>
+    public static string? ElevatedSkipReason() =>
+        ElevatedSkipReason(Environment.GetEnvironmentVariable(RunFlagVariable), Elevated);
+
     /// <summary>
-    /// <see langword="null"/> to run, otherwise the reason the fact is skipped.
+    /// <see langword="null"/> to run, otherwise the reason the fact is skipped. Every other gate
+    /// starts here, so the opt-in message is the one a reader sees first on a machine that never
+    /// asked for any of this.
     /// </summary>
-    public static string? SessionSkipReason(string? runFlag, bool windowManagerRunning)
+    public static string? OptInSkipReason(string? runFlag) =>
+        runFlag == OptIn ? null : $"Set {RunFlagVariable}=1 in an interactive desktop session.";
+
+    /// <summary>The opt-in, plus no live window manager to tile the spawned windows away.</summary>
+    public static string? SessionSkipReason(string? runFlag, Func<bool> windowManagerRunning)
     {
-        if (runFlag != OptIn)
+        if (OptInSkipReason(runFlag) is { } optIn)
         {
-            return $"Set {RunFlagVariable}=1 in an interactive desktop session.";
+            return optIn;
         }
 
-        if (windowManagerRunning)
-        {
-            // A live window manager TILES and ACTIVATES the very windows these facts spawn, so they
-            // fail on geometry that was never theirs. That misleading red cost several rounds of
-            // diagnosis before being recognised, so it is named rather than suffered. An elevated
-            // instance cannot be stopped from a test run: exit it from the tray.
-            return "CosmicWin.App is running and would tile the windows this fact spawns. " +
-                   "Exit it from the tray first.";
-        }
-
-        return null;
+        // A live window manager TILES and ACTIVATES the very windows these facts spawn, so they
+        // fail on geometry that was never theirs. That misleading red cost several rounds of
+        // diagnosis before being recognised, so it is named rather than suffered. An elevated
+        // instance cannot be stopped from a test run: exit it from the tray.
+        return windowManagerRunning()
+            ? "CosmicWin.App is running and would tile the windows this fact spawns. " +
+              "Exit it from the tray first."
+            : null;
     }
 
     /// <summary>
-    /// The session gate plus a spawned terminal. The opt-in is checked FIRST on purpose: telling a
-    /// reader about a missing terminal on a machine that never asked to run desktop facts at all
-    /// sends them after the wrong problem.
+    /// The session gate plus a spawned terminal. The terminal is checked BEFORE the window manager
+    /// so the precedence the attribute has always reported stays byte-identical.
     /// </summary>
-    public static string? TerminalSkipReason(string? runFlag, bool windowManagerRunning, string? terminalPath)
+    public static string? TerminalSkipReason(string? runFlag, Func<bool> windowManagerRunning, string? terminalPath)
     {
-        if (runFlag != OptIn)
+        if (OptInSkipReason(runFlag) is { } optIn)
         {
-            return $"Set {RunFlagVariable}=1 in an interactive desktop session.";
+            return optIn;
         }
 
-        if (string.IsNullOrWhiteSpace(terminalPath))
+        return string.IsNullOrWhiteSpace(terminalPath)
+            ? $"Set {SpawnedAlacrittyWindow.ExecutablePathEnvVar} to the terminal executable path."
+            : SessionSkipReason(runFlag, windowManagerRunning);
+    }
+
+    /// <summary>
+    /// The opt-in plus Administrator, and NOTHING else -- a <c>schtasks</c> round-trip spawns no
+    /// window, so it has no business asking whether a window manager is running.
+    /// </summary>
+    public static string? ElevatedSkipReason(string? runFlag, Func<bool> elevated)
+    {
+        if (OptInSkipReason(runFlag) is { } optIn)
         {
-            return $"Set {SpawnedAlacrittyWindow.ExecutablePathEnvVar} to the terminal executable path.";
+            return optIn;
         }
 
-        return SessionSkipReason(runFlag, windowManagerRunning);
+        return elevated()
+            ? null
+            : "Requires an elevated (Administrator) process -- schtasks /RL HIGHEST needs elevation.";
     }
 
     private static bool WindowManagerRunning() => Process.GetProcessesByName("CosmicWin.App").Length > 0;
+
+    private static bool Elevated() =>
+        new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 }

@@ -5,6 +5,7 @@ using CosmicWin.Interop.Win32;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
+using CosmicWin.Interop.Tests.Win32;
 using Xunit.Abstractions;
 
 namespace CosmicWin.App.Tests.Desktop;
@@ -65,9 +66,9 @@ public sealed class ModalDialogSnapshotDiagnostic(ITestOutputHelper output)
         // Gated in the body rather than by an attribute so this stays a plain [Fact] with no
         // running-app check. A silent pass would be worse than useless for a diagnostic, so the
         // reason is written where its output is read.
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
+        if (DesktopGate.OptInSkipReason() is { } notRun)
         {
-            output.WriteLine("NOT RUN. Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.");
+            output.WriteLine($"NOT RUN. {notRun}");
             return;
         }
 

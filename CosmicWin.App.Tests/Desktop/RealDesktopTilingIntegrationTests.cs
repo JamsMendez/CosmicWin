@@ -61,7 +61,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     /// <summary>: every handle observed so far, used by <see cref="SpawnOwn"/> to verify the spawn host's one-window-per-process property before it is relied on.</summary>
     private readonly HashSet<nint> _seenHandles = [];
 
-    [RequiresDesktopFact]
+    [RequiresDesktopSessionFact]
     public void RealProductionPath_TilesRealWindows_ThroughAddFocusMoveAndClose()
     {
         // Constraints 4/5: resolve and blacklist this session's own process tree BEFORE spawning
@@ -211,7 +211,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
     /// is back on its tile -- re-read independently from the OS, not from the engine''s cache.
     /// </para>
     /// </summary>
-    [RequiresDesktopFact]
+    [RequiresDesktopSessionFact]
     public void WindowThatResizesItselfAfterBeingTiled_IsSnappedBackIntoItsSlot()
     {
         var protectedPids = ResolveProtectedProcessTree();
@@ -433,21 +433,3 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
 }
 
-internal sealed class RequiresDesktopFactAttribute : FactAttribute
-{
-    public RequiresDesktopFactAttribute()
-    {
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
-        {
-            Skip = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
-        }
-        else if (System.Diagnostics.Process.GetProcessesByName("CosmicWin.App").Length > 0)
-        {
-            // A live window manager TILES and ACTIVATES the very windows these facts spawn, so they
-            // fail on geometry that was never theirs. That misleading red cost several rounds of
-            // diagnosis before being recognised, so it is named rather than suffered. An elevated
-            // instance cannot be stopped from a test run: exit it from the tray.
-            Skip = "CosmicWin.App is running and would tile the windows this fact spawns. Exit it from the tray first.";
-        }
-    }
-}

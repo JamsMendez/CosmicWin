@@ -7,7 +7,7 @@ namespace CosmicWin.App.Tests.Input;
 [Collection(Desktop.RealDesktopCollection.Name)]
 public sealed class LowLevelKeyboardHookDesktopTests
 {
-    [RequiresDesktopFact]
+    [RequiresDesktopOptInFact]
     [Trait("Category", "RequiresDesktop")]
     public void StartAndDispose_WithRealNotepadWindow_InstallsAndUninstallsBoundedly()
     {
@@ -54,14 +54,5 @@ public sealed class LowLevelKeyboardHookDesktopTests
             Thread.Sleep(50);
         }
         throw new TimeoutException("Timed out waiting for the Notepad window used by the hook test.");
-    }
-}
-
-internal sealed class RequiresDesktopFactAttribute : FactAttribute
-{
-    public RequiresDesktopFactAttribute()
-    {
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
-            Skip = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
     }
 }
