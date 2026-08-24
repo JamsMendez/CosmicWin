@@ -279,8 +279,20 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            var focusedLeaf = executor.ResolveFocusedLeaf();
+            // Resolved STRICTLY from the real foreground, never through
+            // executor.ResolveFocusedLeaf(). That one deliberately falls back to the last known leaf
+            // when the foreground is untracked -- its remarks name "a dialog or a non-tiled app" --
+            // so a focus chord still works from outside the tiled world instead of being dropped.
+            //
+            // Right for a chord, wrong here. Reported with Sticky Notes, listed in exceptions.conf
+            // and made fullscreen: the fallback kept naming the tiled window underneath, and because
+            // the overlay is topmost the border drew itself across the app in front. A border says
+            // which window is ACTIVE, and when the active one is not tiled the honest answer is to
+            // draw nothing.
+            var foregroundHandle = foreground.GetForegroundHandle();
             if (hook.IsPaused
+                || foregroundHandle == 0
+                || !registry.TryGetLeaf(foregroundHandle, out var focusedLeaf)
                 || focusedLeaf is null
                 || !registry.TryGetWindow(focusedLeaf.Window.Handle, out var focusedWindow)
                 || focusedWindow is not { IsAlive: true })

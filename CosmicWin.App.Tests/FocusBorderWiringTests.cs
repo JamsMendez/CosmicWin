@@ -263,6 +263,45 @@ public sealed class FocusBorderWiringTests
     }
 
     /// <summary>
+    /// An app CosmicWin does not tile taking the foreground means no tiled window is active, and the
+    /// border has to let go of the one behind it.
+    /// </summary>
+    /// <remarks>
+    /// Reported from real use with Sticky Notes, listed in <c>exceptions.conf</c> and made
+    /// fullscreen: the border kept framing the tiled window underneath and, because the overlay is
+    /// topmost, drew itself across the app in front. The border must ask a STRICTER question than
+    /// the chords do. <c>ActionExecutor.ResolveFocusedLeaf</c> deliberately falls back to the last
+    /// known leaf when the foreground is untracked -- its own remarks name "a dialog or a non-tiled
+    /// app" -- because dropping a focus chord there would strand the user outside the tiled world.
+    /// That is right for a chord and wrong for a border, whose whole job is to say which window is
+    /// active right now.
+    /// </remarks>
+    [Fact]
+    public void WhenAnExcludedAppTakesTheForeground_TheBorderLetsGoOfTheWindowBehindIt()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var tiled = new RecordingWindow(new IntPtr(0xB0A), Rectangle.FromSize(0, 0, 1920, 1080));
+            harness.Workspace.RaiseWindowAdded(tiled);
+            harness.Foreground.Handle = tiled.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            harness.Border.Shown.Clear();
+            var hiddenBefore = harness.Border.HideCallCount;
+
+            // Excluded, so it never reaches the workspace and is never registered -- exactly what
+            // the real exception list produces for Sticky Notes.
+            harness.Foreground.Handle = new IntPtr(0xDEAD);
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > hiddenBefore);
+        }
+    }
+
+    /// <summary>
     /// A window the border is NOT on moving is nothing to redraw for. During a reflow every tile
     /// reports a move, and answering all of them is work with nothing to show.
     /// </summary>
