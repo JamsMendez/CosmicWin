@@ -1,33 +1,43 @@
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// Marks a fact that needs an interactive desktop session AND an external terminal binary (see
-/// <see cref="SpawnedAlacrittyWindow.ExecutablePathEnvVar"/>). Mirrors the same gate
-/// <c>CosmicWin.App.Tests</c>' desktop suite already uses, so both projects opt in through one
-/// environment variable rather than two conventions. The <c>RequiresDesktop</c> trait alone is not
-/// enough here: unlike the Notepad-based facts, these spawn a binary that is not present on every
-/// machine, so they must SKIP rather than fail when it is missing.
+/// Marks a fact that needs an interactive desktop session the maintainer opted into, and no live
+/// window manager to tile the windows out from under it.
 /// </summary>
+/// <remarks>
+/// The <c>RequiresDesktop</c> trait is NOT this gate. The trait is what CI filters on; it does
+/// nothing on a developer's machine, where a plain <c>dotnet test</c> still runs the fact against
+/// whatever that desktop happens to have open. Nine facts carried the trait and no gate for exactly
+/// that reason. The decision itself lives in <see cref="DesktopGate"/>, where it can be proven.
+/// </remarks>
+internal sealed class RequiresDesktopSessionFactAttribute : FactAttribute
+{
+    public RequiresDesktopSessionFactAttribute()
+    {
+        if (DesktopGate.SessionSkipReason() is { } reason)
+        {
+            Skip = reason;
+        }
+    }
+}
+
+/// <summary>
+/// The session gate PLUS an external terminal binary (see
+/// <see cref="SpawnedAlacrittyWindow.ExecutablePathEnvVar"/>).
+/// </summary>
+/// <remarks>
+/// Deliberately a separate attribute rather than the only one. Unlike the Notepad-based facts,
+/// these spawn a binary that is not present on every machine, so they must SKIP rather than fail
+/// when it is missing -- but demanding it of a fact that only reads monitors would delete coverage
+/// on machines where that fact runs perfectly well.
+/// </remarks>
 internal sealed class RequiresDesktopFactAttribute : FactAttribute
 {
     public RequiresDesktopFactAttribute()
     {
-        if (Environment.GetEnvironmentVariable("COSMICWIN_RUN_DESKTOP_TESTS") != "1")
+        if (DesktopGate.TerminalSkipReason() is { } reason)
         {
-            Skip = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
-        }
-        else if (string.IsNullOrWhiteSpace(
-            Environment.GetEnvironmentVariable(SpawnedAlacrittyWindow.ExecutablePathEnvVar)))
-        {
-            Skip = $"Set {SpawnedAlacrittyWindow.ExecutablePathEnvVar} to the terminal executable path.";
-        }
-        else if (System.Diagnostics.Process.GetProcessesByName("CosmicWin.App").Length > 0)
-        {
-            // A live window manager TILES and ACTIVATES the very windows these facts spawn, so they
-            // fail on geometry that was never theirs. That misleading red cost several rounds of
-            // diagnosis before being recognised, so it is named rather than suffered. An elevated
-            // instance cannot be stopped from a test run: exit it from the tray.
-            Skip = "CosmicWin.App is running and would tile the windows this fact spawns. Exit it from the tray first.";
+            Skip = reason;
         }
     }
 }

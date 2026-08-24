@@ -17,7 +17,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 [Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeWindowSourceRealWindowTests
 {
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void EnumerateTopLevelWindows_IncludesASpawnedRealWindow()
     {
         using var notepad = SpawnedNotepadWindow.Spawn();
@@ -28,7 +28,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         Assert.Contains(notepad.Handle, handles);
     }
 
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void TryGetWindowInfo_ReturnsRealTitleAndNonEmptyBounds_ForASpawnedWindow()
     {
         using var notepad = SpawnedNotepadWindow.Spawn();
@@ -42,7 +42,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         Assert.True(info.Bounds.Height > 0);
     }
 
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void SetWindowPosition_MovesTheRealWindow_AndSubsequentReadReflectsExactNewBounds()
     {
         using var notepad = SpawnedNotepadWindow.Spawn();
@@ -63,7 +63,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     /// silently disable tiling entirely) survived the full suite. Uses the same spawned, self-owned
     /// window as the other facts in this file -- never asserts against ambient desktop state.
     /// </summary>
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void TryGetWindowInfo_ReturnsRealDescriptorFields_ForASpawnedWindow()
     {
         const uint WsSysMenu = 0x00080000;
@@ -95,7 +95,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     /// stops resolving a handle once its real window is gone -- no shortcut, mock, or reduced
     /// assertion was introduced.
     /// </summary>
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void TryGetWindowInfo_ReturnsFalse_OnceTheRealWindowHasBeenClosed()
     {
         var notepad = SpawnedNotepadWindow.Spawn();
@@ -134,7 +134,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     /// that, the fact holds whatever else is open.
     /// </para>
     /// </remarks>
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void EnumerateTopLevelWindows_ExcludesTheRealExplorerApplicationFrameWindowPhantom()
     {
         var source = new Win32NativeWindowSource();
@@ -169,7 +169,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     /// <c>AttachThreadInput</c> fix actually moves the real OS foreground -- not just that the call
     /// returns a boolean -- against a genuinely external spawned window.
     /// </summary>
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void TryActivateWindow_MovesTheRealForeground_EvenFromABackgroundProcess()
     {
         using var notepad = SpawnedNotepadWindow.Spawn();

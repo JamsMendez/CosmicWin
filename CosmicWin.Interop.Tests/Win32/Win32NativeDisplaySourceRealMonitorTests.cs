@@ -13,7 +13,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 [Collection(RealDesktopCollection.Name)]
 public sealed class Win32NativeDisplaySourceRealMonitorTests
 {
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void EnumerateDisplays_ReturnsAtLeastOnePrimaryDisplay_WithPositiveScalingAndBounds()
     {
         var source = new Win32NativeDisplaySource();
@@ -26,7 +26,7 @@ public sealed class Win32NativeDisplaySourceRealMonitorTests
         Assert.All(displays, d => Assert.True(d.Bounds.Width > 0 && d.Bounds.Height > 0));
     }
 
-    [Fact]
+    [RequiresDesktopSessionFact]
     public void Win32DisplayManager_WiredToTheRealSource_ExposesARealPrimaryDisplay()
     {
         var manager = new Win32DisplayManager(new Win32NativeDisplaySource());
