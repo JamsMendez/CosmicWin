@@ -277,11 +277,17 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 
     /// <summary>
     /// MR-1: pure decision extracted from the two raw Win32 reads in <see cref="IsTrackable(HWND)"/>
-    /// so the phantom-window exclusion is unit-testable without a live cloaked HWND -- DWM
-    /// cloaking cannot be self-triggered by a spawned test window (it is driven entirely by
-    /// OS-internal virtual-desktop switching / UWP suspension). See
+    /// so the phantom-window exclusion is unit-testable without a live cloaked HWND. See
     /// <c>Win32NativeWindowSourceCloakingTests</c>, which pins this against the exact descriptor
     /// shape (unowned, cloaked) measured on a real desktop enumeration.
+    /// <para>
+    /// This used to add that DWM cloaking cannot be self-triggered by a spawned test window, driven
+    /// entirely by OS-internal desktop switching and UWP suspension. That was true when it was
+    /// written and is not any more: <c>Win32VirtualDesktopService.TrySwitchTo</c> switches
+    /// desktops on purpose, and <c>DesktopSwitchVisibilityTests</c> uses it to cloak a real window
+    /// and wait for the cloak to take effect. The pure predicate remains the cheapest level that
+    /// proves this decision, which is reason enough without an impossibility that expired.
+    /// </para>
     /// </summary>
     internal static bool IsTrackable(bool hasOwner, bool isCloaked) => !hasOwner && !isCloaked;
 
