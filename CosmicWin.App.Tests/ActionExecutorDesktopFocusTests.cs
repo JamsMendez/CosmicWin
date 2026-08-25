@@ -1,0 +1,277 @@
+using CosmicWin.App.Input;
+using CosmicWin.App.Tests.TestDoubles;
+using CosmicWin.Interop;
+using CosmicWin.Layout;
+
+namespace CosmicWin.App.Tests;
+
+/// <summary>
+/// Where focus goes after the focused window is sent to another virtual desktop.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Reported from real use: <c>Alt+Shift+N</c> sent a window away and CosmicWin went on treating it
+/// as the focused one, so the next focus chord walked from a tile that was no longer on screen.
+/// </para>
+/// <para>
+/// The cause is that <c>_focused</c>'s only liveness test is <c>IsAlive</c>, and a window parked on
+/// another desktop is perfectly alive -- DWM CLOAKS it, it does not destroy it, and this repository
+/// has already measured that cloaking leaves <c>WS_VISIBLE</c> set. So the cache cannot tell "the
+/// user switched away from this window" from "this window still exists somewhere", and it kept
+/// answering with the one thing that was certainly wrong.
+/// </para>
+/// </remarks>
+public sealed class ActionExecutorDesktopFocusTests
+{
+    private sealed class FakeVirtualDesktops : IVirtualDesktopService
+    {
+        public bool IsSupported => true;
+        public int Count => 2;
+        public int CurrentIndex => 1;
+        public Guid CurrentDesktopId => Guid.Empty;
+        public string? LastError => null;
+
+        /// <summary>Set to false to reproduce a shell that REFUSED the move.</summary>
+        public bool MoveSucceeds { get; set; } = true;
+
+        public List<(nint Handle, int Index)> Moved { get; } = [];
+
+        public bool TrySwitchTo(int oneBasedIndex) => true;
+
+        public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex)
+        {
+            if (!MoveSucceeds)
+            {
+                return false;
+            }
+
+            Moved.Add((windowHandle, oneBasedIndex));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Local rather than shared: every other executor suite declares its own, and the whole type is
+    /// one settable property.
+    /// </summary>
+    private sealed class FakeForegroundWindowSource : IForegroundWindowSource
+    {
+        public nint Handle { get; set; }
+
+        public nint GetForegroundHandle() => Handle;
+    }
+
+    private sealed record Harness(
+        ActionExecutor Executor,
+        FakeVirtualDesktops Desktops,
+        FakeForegroundWindowSource Foreground,
+        RecordingWindow Focused,
+        RecordingWindow Survivor,
+        LayoutTree Tree,
+        LeafNode FocusedLeaf,
+        LeafNode SurvivorLeaf);
+
+    /// <summary>
+    /// Two tiles, with the FOCUSED one deliberately FIRST in the tree. That ordering is the point:
+    /// a survivor search that simply took the tree's first leaf would hand focus straight back to
+    /// the window it just sent away, and this arrangement is what catches that.
+    /// </summary>
+    private static Harness Build(bool withSurvivor = true)
+    {
+        var focusedLeaf = new LeafNode(new WindowRef(new IntPtr(0xF1)));
+        var survivorLeaf = new LeafNode(new WindowRef(new IntPtr(0xF2)));
+
+        var registry = new WindowRegistry();
+        var focused = new RecordingWindow(focusedLeaf.Window.Handle, Rectangle.FromSize(0, 0, 960, 1080));
+        var survivor = new RecordingWindow(survivorLeaf.Window.Handle, Rectangle.FromSize(960, 0, 960, 1080));
+
+        LayoutTree tree;
+        if (withSurvivor)
+        {
+            var group = new GroupNode(SplitAxis.Horizontal) { GroupLength = 1920 };
+            foreach (var leaf in new[] { focusedLeaf, survivorLeaf })
+            {
+                group.Children.Add(leaf);
+                group.Sizes.Add(960);
+                leaf.Parent = group;
+            }
+
+            tree = new LayoutTree(group);
+            registry.Register(focused, focusedLeaf);
+            registry.Register(survivor, survivorLeaf);
+        }
+        else
+        {
+            tree = new LayoutTree(focusedLeaf);
+            registry.Register(focused, focusedLeaf);
+        }
+
+        var display = new FakeDisplay(
+            new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
+        var treeManager = new TreeManager([display], display, registry);
+        treeManager.TryGetTree(display, out var managed);
+        managed!.Root = tree.Root;
+
+        var foreground = new FakeForegroundWindowSource { Handle = focused.Handle };
+        var desktops = new FakeVirtualDesktops();
+        var executor = new ActionExecutor(managed, registry, foreground)
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            TreeManager = treeManager,
+            VirtualDesktops = desktops,
+        };
+
+        // Production wires this to MultiMonitorWorkspaceAdapter.RehomeToDesktop, which takes the
+        // window OUT of the tree it left. Without it here the departed leaf would still be sitting
+        // in the tree the survivor search reads, and these facts would be measuring a world that
+        // does not exist.
+        executor.WindowMovedToDesktop = handle =>
+        {
+            if (registry.TryGetLeaf(handle, out var leaf) && leaf is not null)
+            {
+                managed.Remove(leaf);
+            }
+        };
+
+        return new Harness(
+            executor, desktops, foreground, focused, survivor, managed, focusedLeaf, survivorLeaf);
+    }
+
+    private static Task Send(Harness harness, int desktop = 2) =>
+        harness.Executor
+            .ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveWindowToDesktop, desktop), CancellationToken.None)
+            .AsTask();
+
+    /// <summary>
+    /// The reported defect. Sending the focused window away must hand focus to a window still on
+    /// this desktop -- and NOT back to the one that just left, which is why it is first in the tree.
+    /// </summary>
+    [Fact]
+    public async Task SendingTheFocusedWindowAway_HandsFocusToAWindowStillOnThisDesktop()
+    {
+        var harness = Build();
+
+        await Send(harness);
+
+        Assert.Equal(1, harness.Survivor.TryActivateCallCount);
+        Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// No window left means NO focus. Inventing one would drag the user to a tile they never asked
+    /// for, and there is nothing on this desktop to drag them to anyway.
+    /// </summary>
+    [Fact]
+    public async Task WithNothingLeftOnThisDesktop_NothingIsActivated()
+    {
+        var harness = Build(withSurvivor: false);
+
+        await Send(harness);
+
+        Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// The heart of it, read straight off the cache rather than inferred from a later chord.
+    /// </summary>
+    /// <remarks>
+    /// The cache is SEEDED first, because that is the only state in which the defect exists: a
+    /// chord run while the doomed window held the foreground writes it into <c>_focused</c>, and
+    /// from then on it answers every resolution the OS foreground cannot. The foreground is then
+    /// made untracked, which is exactly what the shell leaves behind once the window it named has
+    /// gone to another desktop -- and that is when the cache does the damage.
+    /// </remarks>
+    [Fact]
+    public async Task AfterTheMove_TheDepartedWindowIsNoLongerTheRememberedFocus()
+    {
+        var harness = Build();
+
+        // Seeds the cache with the doomed window: it holds the foreground, so resolving names it.
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+        harness.Foreground.Handle = new IntPtr(0x404);
+        Assert.Equal(harness.FocusedLeaf, harness.Executor.ResolveFocusedLeaf());
+
+        harness.Foreground.Handle = harness.Focused.Handle;
+        await Send(harness);
+        harness.Foreground.Handle = new IntPtr(0x404);
+
+        Assert.Equal(harness.SurvivorLeaf, harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>
+    /// And with nothing left to hand it to, the honest answer is no focus at all -- not the window
+    /// that just left, still reading as alive because DWM only cloaked it.
+    /// </summary>
+    [Fact]
+    public async Task WithNothingLeftOnThisDesktop_NothingIsRememberedAsFocused()
+    {
+        var harness = Build(withSurvivor: false);
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+        harness.Foreground.Handle = new IntPtr(0x404);
+        Assert.Equal(harness.FocusedLeaf, harness.Executor.ResolveFocusedLeaf());
+
+        harness.Foreground.Handle = harness.Focused.Handle;
+        await Send(harness);
+        harness.Foreground.Handle = new IntPtr(0x404);
+
+        Assert.Null(harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>
+    /// A move the shell REFUSED changes nothing. Handing focus away on a failed move would punish
+    /// the user for the shell's answer, and the window never actually left.
+    /// </summary>
+    [Fact]
+    public async Task AMoveTheShellRefused_LeavesFocusExactlyWhereItWas()
+    {
+        var harness = Build();
+        harness.Desktops.MoveSucceeds = false;
+
+        await Send(harness);
+
+        Assert.Equal(0, harness.Survivor.TryActivateCallCount);
+        Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// The survivor becomes the cache only because activation SUCCEEDED. When it fails, CosmicWin
+    /// must not claim the user is somewhere they are not -- the MR-2 lesson, applied to this path.
+    /// </summary>
+    [Fact]
+    public async Task WhenActivatingTheSurvivorFails_ItDoesNotBecomeTheRememberedFocus()
+    {
+        var harness = Build();
+        harness.Survivor.FailNextActivate();
+
+        await Send(harness);
+        Assert.Equal(1, harness.Survivor.TryActivateCallCount);
+
+        // Untracked foreground, so only the cache can answer -- and it must be empty rather than
+        // holding a window CosmicWin never actually put the user on.
+        harness.Foreground.Handle = new IntPtr(0x404);
+
+        Assert.Null(harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>
+    /// Without a <see cref="TreeManager"/> there is no way to name the tree the user is looking at,
+    /// so no survivor can be chosen -- but dropping the stale cache is still right, and still the
+    /// half that fixes the reported defect. A quiet no-op, never a throw.
+    /// </summary>
+    [Fact]
+    public async Task WithNoTreeManagerWired_TheChordIsStillAQuietNoOp()
+    {
+        var registry = new WindowRegistry();
+        var executor = new ActionExecutor(
+            new LayoutTree(), registry, new FakeForegroundWindowSource { Handle = new IntPtr(0xABC) })
+        {
+            VirtualDesktops = new FakeVirtualDesktops(),
+        };
+
+        await executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.MoveWindowToDesktop, 2), CancellationToken.None);
+    }
+}

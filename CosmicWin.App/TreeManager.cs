@@ -290,6 +290,45 @@ public sealed class TreeManager
         return FocusResult.Found(FirstLeaf(tree.Root));
     }
 
+    /// <summary>
+    /// A leaf on the tree the user is currently LOOKING at on <paramref name="display"/>, other than
+    /// <paramref name="excluding"/>. <see cref="FocusResult.NoMatch"/> when there is none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For handing focus on after the focused window leaves the desktop. It reads the VISIBLE tree
+    /// only, for the same reason <see cref="FocusAdjacentDisplay"/> does: focus may never land on a
+    /// window parked somewhere the user is not looking.
+    /// </para>
+    /// <para>
+    /// The exclusion is not belt-and-braces. The window being handed away is removed from this tree
+    /// by the rehome that runs first, but the ORDER of those two steps is a wiring detail, and a
+    /// survivor search that could return the departing window under any ordering would hand focus
+    /// straight back to it -- the exact defect this exists to fix.
+    /// </para>
+    /// <para>
+    /// Depth-first, matching <see cref="FocusAdjacentDisplay"/>'s first-leaf rule, so "the next
+    /// window" means the same thing everywhere focus falls through.
+    /// </para>
+    /// </remarks>
+    public FocusResult FocusSurvivorOn(IDisplay display, nint excluding)
+    {
+        if (!TryGetTree(display, out var tree) || tree?.Root is null)
+        {
+            return FocusResult.NoMatch;
+        }
+
+        foreach (var leaf in CollectLeaves(tree.Root))
+        {
+            if (leaf.Window.Handle != excluding)
+            {
+                return FocusResult.Found(leaf);
+            }
+        }
+
+        return FocusResult.NoMatch;
+    }
+
     private IDisplay? FindAdjacentDisplay(IDisplay current, Direction direction)
     {
         var (fromX, fromY) = Center(current.Bounds);

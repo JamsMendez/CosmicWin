@@ -223,6 +223,69 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
+    /// Gives focus to a window still on this desktop after the focused one was sent to another.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use: the window went away and CosmicWin went on treating it as focused.
+    /// The cause is that <see cref="_focused"/>'s only liveness test is <c>IsAlive</c>, and a window
+    /// on another virtual desktop is perfectly alive -- DWM CLOAKS it rather than destroying it,
+    /// which this repository has already measured leaves <c>WS_VISIBLE</c> set. The cache therefore
+    /// cannot tell "the user sent this away" from "this still exists", and kept answering with the
+    /// one window that was certainly wrong.
+    /// </para>
+    /// <para>
+    /// So the cache is dropped FIRST and unconditionally, before anything else can fail. Everything
+    /// after it is an improvement on "no focus"; none of it is required for the cache to stop lying.
+    /// </para>
+    /// </remarks>
+    private void HandFocusOnAfterMove(nint movedHandle)
+    {
+        var departed = _focused;
+        _focused = null;
+
+        // Dropped with it. A scope is an ascent from a leaf, and the leaf it ascended from has just
+        // left the desktop -- keeping it would aim the next Move at a group nobody is inside.
+        _focusScope = null;
+
+        // No tree manager means no way to name the tree the user is looking at, so no survivor can
+        // be chosen. Dropping the stale cache above was still right, and is still the half that
+        // fixes the reported defect.
+        if (TreeManager is not { } treeManager)
+        {
+            return;
+        }
+
+        // The window itself is the anchor for WHICH monitor to search, and it answers even now:
+        // the registry spans every desktop, and its bounds are where it was last laid out.
+        var bounds = registry.TryGetWindow(movedHandle, out var moved) && moved is not null
+            ? moved.Bounds
+            : departed is not null
+              && registry.TryGetWindow(departed.Window.Handle, out var cached) && cached is not null
+                ? cached.Bounds
+                : Interop.Rectangle.Empty;
+
+        var display = treeManager.ResolveDisplay(bounds);
+        if (treeManager.FocusSurvivorOn(display, movedHandle) is not
+            { Status: FocusWalkStatus.Found, Leaf: { } survivor })
+        {
+            // An empty desktop is a legitimate answer, not a failure. No window means no focus, and
+            // inventing one would drag the user somewhere they never asked to go.
+            return;
+        }
+
+        if (registry.TryGetWindow(survivor.Window.Handle, out var window)
+            && window is { IsAlive: true }
+            && window.TryActivate())
+        {
+            // The same rule MoveFocus follows, and for the same reason it was written: the cache
+            // advances only on a REAL activation, so a refused one cannot leave CosmicWin claiming
+            // the user is somewhere they are not.
+            _focused = survivor;
+        }
+    }
+
+    /// <summary>
     /// Resolves the leaf currently treated as focused: the leaf the OS foreground actually maps to,
     /// and only if that window is untracked, the last leaf CosmicWin successfully activated.
     /// Returns <see langword="false"/> (no-op, never throws) when neither resolves — e.g. the
@@ -329,6 +392,10 @@ public sealed class ActionExecutor(
         if (ok && action.Kind == HotkeyActionKind.MoveWindowToDesktop)
         {
             WindowMovedToDesktop?.Invoke(foregroundHandle);
+
+            // AFTER the rehome, never before: the survivor is chosen from the tree the departing
+            // window has already left.
+            HandFocusOnAfterMove(foregroundHandle);
         }
         else if (ok && action.Kind == HotkeyActionKind.SwitchDesktop)
         {
