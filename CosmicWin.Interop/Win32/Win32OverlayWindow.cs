@@ -16,6 +16,14 @@ namespace CosmicWin.Interop.Win32;
 /// that must appear on screen.
 /// </para>
 /// <para>
+/// It is deliberately NOT topmost. A topmost overlay outranks every ordinary window on the desktop,
+/// including the dropdowns an application opens -- reported against a browser's customise menu,
+/// which overhangs the window that opened it and had the border drawn across it. The overlay is
+/// placed directly BELOW the window it frames instead: the ring lies entirely outside that window,
+/// so being behind it hides nothing, and a popup always sits above its own owner and therefore above
+/// the border too.
+/// </para>
+/// <para>
 /// The extended styles are not decoration. Without <c>WS_EX_TRANSPARENT</c> the overlay swallows
 /// every click aimed at the window it frames; without <c>WS_EX_NOACTIVATE</c> it steals the
 /// foreground from that same window, and a window manager that fights its own focus is worse than
@@ -25,13 +33,17 @@ namespace CosmicWin.Interop.Win32;
 public static class Win32OverlayWindow
 {
     /// <summary>
-    /// <c>GWL_EXSTYLE</c> and <c>HWND_TOPMOST</c>, declared here rather than imported. CsWin32
-    /// projects the Get/SetWindowLongPtr pair and these sentinel handles inconsistently across
-    /// architectures, and a hand-declared constant with the documented value cannot drift.
+    /// <c>GWL_EXSTYLE</c>, declared here rather than imported. CsWin32 projects the
+    /// Get/SetWindowLongPtr pair inconsistently across architectures, and a hand-declared constant
+    /// with the documented value cannot drift.
     /// </summary>
     private const int GwlExStyle = -20;
 
-    private static readonly HWND Topmost = new(-1);
+    /// <summary>
+    /// <c>HWND_TOP</c>: the front of the ORDINARY band, above no topmost window at all. Used only
+    /// when there is no window to sit behind, which in practice means a caller framing nothing.
+    /// </summary>
+    private static readonly HWND Top = HWND.Null;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern nint GetWindowLongPtrW(HWND hwnd, int index);
@@ -55,13 +67,18 @@ public static class Win32OverlayWindow
     }
 
     /// <summary>
-    /// Places the overlay at <paramref name="bounds"/> in real pixels, above the window it frames
-    /// but without taking the foreground or reordering anything else.
+    /// Places the overlay at <paramref name="bounds"/> in real pixels, directly behind
+    /// <paramref name="framed"/>, without taking the foreground or reordering anything else.
     /// </summary>
-    public static bool Place(nint hwnd, Rectangle bounds) =>
+    /// <remarks>
+    /// Re-asserted on every placement rather than set once, because the z-order moves underneath it:
+    /// the window being framed comes forward every time it is activated, and an overlay left where
+    /// it was would fall behind whatever the user clicked on next.
+    /// </remarks>
+    public static bool Place(nint hwnd, nint framed, Rectangle bounds) =>
         PInvoke.SetWindowPos(
             new HWND(hwnd),
-            Topmost,
+            framed == 0 ? Top : new HWND(framed),
             bounds.Left,
             bounds.Top,
             bounds.Width,

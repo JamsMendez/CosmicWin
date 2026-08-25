@@ -18,7 +18,7 @@ namespace CosmicWin.App.Tests;
 /// </remarks>
 public sealed class FocusBorderWiringTests
 {
-    private sealed record Call(Rectangle Window, double Scaling, int Thickness);
+    private sealed record Call(nint Framed, Rectangle Window, double Scaling, int Thickness);
 
     private sealed class RecordingFocusBorder : IFocusBorder
     {
@@ -26,8 +26,8 @@ public sealed class FocusBorderWiringTests
 
         public int HideCallCount { get; private set; }
 
-        public void ShowAround(Rectangle window, double scaling, int thickness) =>
-            Shown.Add(new Call(window, scaling, thickness));
+        public void ShowAround(nint framed, Rectangle window, double scaling, int thickness) =>
+            Shown.Add(new Call(framed, window, scaling, thickness));
 
         public void Hide() => HideCallCount++;
 
@@ -124,9 +124,42 @@ public sealed class FocusBorderWiringTests
             harness.Scheduler.Fire();
 
             var call = harness.Border.Shown[^1];
+            Assert.Equal(window.Handle, call.Framed);
             Assert.Equal(window.Bounds, call.Window);
             Assert.Equal(1.5, call.Scaling);
             Assert.Equal(BorderGeometry.DefaultThickness, call.Thickness);
+        }
+    }
+
+    /// <summary>
+    /// The border is told WHICH window it frames, not just where.
+    /// </summary>
+    /// <remarks>
+    /// Reported from real use: a browser's dropdown menu overhangs the window that opened it, and
+    /// the border was drawn across it. The overlay was topmost, so it sat above every popup on the
+    /// desktop. The cure is to place it directly BELOW the window it frames -- the ring is entirely
+    /// outside that window, so nothing of it is lost, and an owned popup always sits above its owner
+    /// and therefore above the border too. That placement needs the framed window's handle, which is
+    /// why it travels with the rectangle.
+    /// </remarks>
+    [Fact]
+    public void TheBorderIsToldWhichWindowItFrames_NotOnlyWhere()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var first = new RecordingWindow(new IntPtr(0xB0A), Rectangle.FromSize(0, 0, 960, 1080));
+            var second = new RecordingWindow(new IntPtr(0xB0B), Rectangle.FromSize(960, 0, 960, 1080));
+            harness.Workspace.RaiseWindowAdded(first);
+            harness.Workspace.RaiseWindowAdded(second);
+
+            harness.Foreground.Handle = first.Handle;
+            harness.Scheduler.Fire();
+            Assert.Equal(first.Handle, harness.Border.Shown[^1].Framed);
+
+            harness.Foreground.Handle = second.Handle;
+            harness.Scheduler.Fire();
+            Assert.Equal(second.Handle, harness.Border.Shown[^1].Framed);
         }
     }
 

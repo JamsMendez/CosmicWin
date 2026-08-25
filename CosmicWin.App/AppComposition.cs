@@ -316,10 +316,10 @@ public sealed class AppComposition : IDisposable
             // so a focus chord still works from outside the tiled world instead of being dropped.
             //
             // Right for a chord, wrong here. Reported with Sticky Notes, listed in exceptions.conf
-            // and made fullscreen: the fallback kept naming the tiled window underneath, and because
-            // the overlay is topmost the border drew itself across the app in front. A border says
-            // which window is ACTIVE, and when the active one is not tiled the honest answer is to
-            // draw nothing.
+            // and made fullscreen: the fallback kept naming the tiled window underneath, and the
+            // border went on framing it while another app held the foreground. A border says which
+            // window is ACTIVE, and when the active one is not tiled the honest answer is to draw
+            // nothing.
             var foregroundHandle = foreground.GetForegroundHandle();
             if (hook.IsPaused
                 || foregroundHandle == 0
@@ -352,7 +352,8 @@ public sealed class AppComposition : IDisposable
             RecordBorderDecision(
                 $"around 0x{foregroundHandle:X} [L={framed.Left} T={framed.Top} " +
                 $"W={framed.Width} H={framed.Height}]");
-            focusBorder.ShowAround(framed, onDisplay.Scaling, BorderGeometry.DefaultThickness);
+            focusBorder.ShowAround(
+                focusedWindow.Handle, framed, onDisplay.Scaling, BorderGeometry.DefaultThickness);
         }
 
         // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused

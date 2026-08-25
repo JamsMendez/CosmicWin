@@ -26,11 +26,23 @@ namespace CosmicWin.App;
 /// invisible to CosmicWin's own tiling -- the hooks are installed with
 /// <c>WINEVENT_SKIPOWNPROCESS</c>, and <c>WS_EX_TOOLWINDOW</c> would exclude it anyway.
 /// </para>
+/// <para>
+/// Nor is it in the way of what the framed window itself opens. It sits BEHIND that window rather
+/// than on top of the desktop, which is what keeps a dropdown overhanging its own window -- a
+/// browser's customise menu, as reported -- from being painted over.
+/// </para>
 /// </remarks>
 public interface IFocusBorder : IDisposable
 {
-    /// <summary>Frames <paramref name="window"/>, in real pixels, on a display scaled by <paramref name="scaling"/>.</summary>
-    void ShowAround(Rectangle window, double scaling, int thickness);
+    /// <summary>
+    /// Frames <paramref name="framed"/>, whose rectangle is <paramref name="window"/> in real
+    /// pixels, on a display scaled by <paramref name="scaling"/>.
+    /// </summary>
+    /// <remarks>
+    /// The handle is not redundant with the rectangle. The border is placed directly behind the
+    /// window it frames, and a z-order position can only be named by a window, never by an area.
+    /// </remarks>
+    void ShowAround(nint framed, Rectangle window, double scaling, int thickness);
 
     /// <summary>Draws nothing, without giving up the window it reuses.</summary>
     void Hide();
@@ -55,7 +67,11 @@ public sealed class FocusBorderOverlay : IFocusBorder
             Background = SystemParameters.WindowGlassBrush,
             ShowInTaskbar = false,
             ResizeMode = ResizeMode.NoResize,
-            Topmost = true,
+
+            // NOT topmost, and the placement depends on it. WS_EX_TOPMOST would keep the overlay
+            // above every ordinary window whatever SetWindowPos is asked for, which is the defect
+            // this window used to have: it drew across the dropdowns of the very window it framed.
+            Topmost = false,
             IsHitTestVisible = false,
             ShowActivated = false,
             Left = -32000,
@@ -73,15 +89,15 @@ public sealed class FocusBorderOverlay : IFocusBorder
     }
 
     /// <summary>
-    /// Frames <paramref name="window"/>, in real pixels, on a display scaled by
-    /// <paramref name="scaling"/>.
+    /// Frames <paramref name="framed"/>, whose rectangle is <paramref name="window"/> in real
+    /// pixels, on a display scaled by <paramref name="scaling"/>.
     /// </summary>
     /// <remarks>
     /// The rectangle is placed in real pixels through Win32 while the border is drawn by WPF in
     /// DIPs, so the thickness is divided by the display's scaling -- otherwise a 2px border renders
     /// 3 physical pixels at 150% and eats into the window it is supposed to sit outside of.
     /// </remarks>
-    public void ShowAround(Rectangle window, double scaling, int thickness)
+    public void ShowAround(nint framed, Rectangle window, double scaling, int thickness)
     {
         if (_disposed || thickness <= 0)
         {
@@ -95,7 +111,7 @@ public sealed class FocusBorderOverlay : IFocusBorder
         _ = scaling;
 
         var frame = BorderGeometry.Around(window, thickness);
-        Win32OverlayWindow.Place(_handle, frame);
+        Win32OverlayWindow.Place(_handle, framed, frame);
 
         // Clipped AFTER the move, so the region always describes the size the window now has.
         Win32OverlayWindow.ClipToFrame(
