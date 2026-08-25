@@ -26,7 +26,10 @@ public sealed class ActionExecutorDesktopFocusTests
 {
     private sealed class FakeVirtualDesktops : IVirtualDesktopService
     {
-        public bool IsSupported => true;
+        /// <summary>Set to false to reproduce an unrecognised Windows build.</summary>
+        public bool Supported { get; set; } = true;
+
+        public bool IsSupported => Supported;
         public int Count => 2;
         public int CurrentIndex => 1;
         public Guid CurrentDesktopId { get; set; } = Guid.Empty;
@@ -43,6 +46,13 @@ public sealed class ActionExecutorDesktopFocusTests
 
         public List<(nint Handle, int Index)> Moved { get; } = [];
 
+        /// <summary>
+        /// Runs INSIDE TryMoveWindowTo, before it reports anything. It is how a fact can look at the
+        /// world at the exact instant the window leaves, which is the only way to assert that focus
+        /// had already gone somewhere else by then.
+        /// </summary>
+        public Action? AtTheMoment { get; set; }
+
         public bool TrySwitchTo(int oneBasedIndex)
         {
             if (!SwitchSucceeds)
@@ -58,6 +68,8 @@ public sealed class ActionExecutorDesktopFocusTests
 
         public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex)
         {
+            AtTheMoment?.Invoke();
+
             if (!MoveSucceeds)
             {
                 return false;
@@ -190,6 +202,64 @@ public sealed class ActionExecutorDesktopFocusTests
     }
 
     /// <summary>
+    /// Reported from real use: after sending the focused window away, BOTH it and the newly focused
+    /// window wore an accent border, even with CosmicWin's own border switched off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The border was never CosmicWin's -- nothing in production writes <c>DWMWA_BORDER_COLOR</c>,
+    /// and the overlay was off. It was DWM's own, painted on two windows at once, and the cause was
+    /// ORDER: the window was moved FIRST and focus was handed on afterwards. By then the departing
+    /// window was already on another desktop and cloaked, so it never got a deactivation it could
+    /// repaint while anybody could see it, and it kept wearing its active frame.
+    /// </para>
+    /// <para>
+    /// So focus leaves before the window does. This fact reads the survivor's activation count at
+    /// the exact instant the shell is asked to move anything, which is the only place the ordering
+    /// is observable.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task FocusLeavesTheWindow_BeforeTheWindowLeavesTheDesktop()
+    {
+        var harness = Build();
+        var activationsWhenItLeft = -1;
+        harness.Desktops.AtTheMoment = () => activationsWhenItLeft = harness.Survivor.TryActivateCallCount;
+
+        await Send(harness);
+
+        Assert.Equal(1, activationsWhenItLeft);
+    }
+
+    /// <summary>
+    /// The departing window is never chosen as its own survivor, and now that really is load-bearing
+    /// rather than defensive.
+    /// </summary>
+    /// <remarks>
+    /// Focus is handed on BEFORE the move, so the window being sent away is still sitting in the
+    /// tree the survivor search reads -- and it is deliberately FIRST in that tree. Without the
+    /// exclusion the search would hand focus straight back to the window it is trying to get focus
+    /// off, which would reproduce the reported defect exactly.
+    /// </remarks>
+    [Fact]
+    public async Task TheDepartingWindowIsNeverItsOwnSurvivor_EvenThoughItIsStillInTheTree()
+    {
+        var harness = Build();
+        LeafNode? inTreeWhenItLeft = null;
+        harness.Desktops.AtTheMoment = () =>
+            inTreeWhenItLeft = harness.Tree.Root is GroupNode group
+                ? group.Children.OfType<LeafNode>().FirstOrDefault()
+                : harness.Tree.Root as LeafNode;
+
+        await Send(harness);
+
+        // The premise this fact rests on: the departing window really was still the first leaf.
+        Assert.Equal(harness.FocusedLeaf, inTreeWhenItLeft);
+        Assert.Equal(1, harness.Survivor.TryActivateCallCount);
+        Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
     /// The heart of it, read straight off the cache rather than inferred from a later chord.
     /// </summary>
     /// <remarks>
@@ -239,13 +309,47 @@ public sealed class ActionExecutorDesktopFocusTests
     }
 
     /// <summary>
-    /// A move the shell REFUSED changes nothing. Handing focus away on a failed move would punish
-    /// the user for the shell's answer, and the window never actually left.
+    /// A move the shell REFUSED must leave the user where they were.
     /// </summary>
+    /// <remarks>
+    /// The assertion changed shape when focus started leaving BEFORE the window does. Focus really
+    /// has moved to the survivor by the time the shell is asked, so "nothing was activated" is no
+    /// longer the honest contract and asserting it would pin an implementation that no longer
+    /// exists. What must hold is the END STATE: the window never left, so the user must end up back
+    /// on it. Handing them to a different tile as a souvenir of a refusal would be worse than the
+    /// refusal.
+    /// </remarks>
     [Fact]
-    public async Task AMoveTheShellRefused_LeavesFocusExactlyWhereItWas()
+    public async Task AMoveTheShellRefused_PutsTheUserBackOnTheWindowThatNeverLeft()
     {
         var harness = Build();
+        harness.Desktops.MoveSucceeds = false;
+
+        await Send(harness);
+
+        // EXACT, not "more than zero". This is the one refusal that cannot be predicted without
+        // asking the shell, so it really does cost one activation each way -- and a bound is the
+        // difference between a known cost and an open-ended one.
+        Assert.Equal(1, harness.Survivor.TryActivateCallCount);
+        Assert.Equal(1, harness.Focused.TryActivateCallCount);
+
+        harness.Foreground.Handle = new IntPtr(0x404);
+        Assert.Equal(harness.FocusedLeaf, harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>
+    /// A refusal the service can answer WITHOUT asking the shell costs no activation at all.
+    /// </summary>
+    /// <remarks>
+    /// An unrecognised Windows build reports unsupported and every desktop operation is inert. There
+    /// is nothing to hand focus off FOR, so nothing is handed off and nothing has to be undone --
+    /// the same zero-activation behaviour this path had before focus started leaving early.
+    /// </remarks>
+    [Fact]
+    public async Task AMoveTheBuildCannotDoAtAll_MovesNoFocusAtAll()
+    {
+        var harness = Build();
+        harness.Desktops.Supported = false;
         harness.Desktops.MoveSucceeds = false;
 
         await Send(harness);

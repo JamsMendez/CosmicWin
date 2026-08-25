@@ -304,6 +304,24 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
+    /// Puts focus back on <paramref name="handle"/> after a move the shell refused.
+    /// </summary>
+    /// <remarks>
+    /// The mirror of handing focus on early. Focus really has moved by the time the shell answers,
+    /// so a refusal has to be undone rather than merely not acted on -- and like every other
+    /// activation here, the cache advances only if the activation actually worked.
+    /// </remarks>
+    private void RestoreFocusTo(nint handle)
+    {
+        if (registry.TryGetLeaf(handle, out var leaf) && leaf is not null
+            && registry.TryGetWindow(handle, out var window) && window is { IsAlive: true }
+            && window.TryActivate())
+        {
+            _focused = leaf;
+        }
+    }
+
+    /// <summary>
     /// Hands focus to a window on the desktop now being viewed, for a switch CosmicWin did NOT make.
     /// </summary>
     /// <remarks>
@@ -416,31 +434,67 @@ public sealed class ActionExecutor(
         // focus on there would yank the user off their own window for nothing.
         var desktopBefore = desktops.CurrentDesktopId;
 
-        // The window the user is looking at, straight from the OS. Deliberately not the tracked
-        // leaf: sending an untracked window to another desktop is still a legitimate ask.
-        var ok = action.Kind == HotkeyActionKind.SwitchDesktop
-            ? desktops.TrySwitchTo(action.Argument)
-            : desktops.TryMoveWindowTo(foregroundHandle, action.Argument);
-
-        // Only after the shell confirms the window really moved. Rehoming on a FAILED move would
-        // tear the window out of a layout it never actually left.
-        if (ok && action.Kind == HotkeyActionKind.MoveWindowToDesktop)
+        bool ok;
+        if (action.Kind == HotkeyActionKind.SwitchDesktop)
         {
-            WindowMovedToDesktop?.Invoke(foregroundHandle);
-
-            // AFTER the rehome, never before: the survivor is chosen from the tree the departing
-            // window has already left.
-            HandFocusToVisibleDesktop(foregroundHandle);
-        }
-        else if (ok && action.Kind == HotkeyActionKind.SwitchDesktop)
-        {
-            DesktopSwitched?.Invoke();
-
-            // Only when the view actually moved, and AFTER the arriving layout has been applied:
-            // the tree being searched has to be the one the user is now looking at.
-            if (desktops.CurrentDesktopId != desktopBefore)
+            ok = desktops.TrySwitchTo(action.Argument);
+            if (ok)
             {
-                HandFocusToVisibleDesktop(departingHandle: 0);
+                DesktopSwitched?.Invoke();
+
+                // Only when the view actually moved, and AFTER the arriving layout has been
+                // applied: the tree being searched has to be the one the user is now looking at.
+                if (desktops.CurrentDesktopId != desktopBefore)
+                {
+                    HandFocusToVisibleDesktop(departingHandle: 0);
+                }
+            }
+        }
+        else
+        {
+            // FOCUS LEAVES BEFORE THE WINDOW DOES, and the order is the whole fix.
+            //
+            // Reported from real use: after sending the focused window away, BOTH it and the newly
+            // focused window wore an accent border -- with CosmicWin's own border switched off, so
+            // the paint was DWM's, not ours. Moving first and handing focus on afterwards meant the
+            // departing window was already on another desktop and CLOAKED by the time anything else
+            // was activated. It never received a deactivation it could repaint while anyone could
+            // see it, so it kept wearing its active frame and arrived on the other desktop still
+            // looking focused.
+            //
+            // Handing focus on first costs nothing when the move succeeds. When it does not, it
+            // costs an activation to undo -- so it is only done when the move is not already known
+            // to be impossible. These are exactly the two conditions the service refuses on WITHOUT
+            // asking the shell: an unrecognised Windows build, and no foreground window to send. A
+            // refusal for either of those reasons costs no activation at all, as it did before
+            // focus started leaving early. The window is still in the tree here, which is what
+            // HandFocusToVisibleDesktop's exclusion is for.
+            //
+            // What is left is the shell refusing this PARTICULAR window, which cannot be known
+            // without asking. That refusal does cost one activation each way, and the facts bound
+            // it exactly rather than leaving it open-ended.
+            var handedOff = desktops.IsSupported && foregroundHandle != 0;
+            if (handedOff)
+            {
+                HandFocusToVisibleDesktop(foregroundHandle);
+            }
+
+            // The window the user is looking at, straight from the OS. Deliberately not the tracked
+            // leaf: sending an untracked window to another desktop is still a legitimate ask.
+            ok = desktops.TryMoveWindowTo(foregroundHandle, action.Argument);
+
+            if (ok)
+            {
+                // Only after the shell confirms the window really moved. Rehoming on a FAILED move
+                // would tear the window out of a layout it never actually left.
+                WindowMovedToDesktop?.Invoke(foregroundHandle);
+            }
+            else if (handedOff)
+            {
+                // Undone only if it was actually done. The window never left, so the user must end
+                // up back on it; handing them to a different tile as a souvenir of the shell's
+                // refusal would be worse than the refusal itself.
+                RestoreFocusTo(foregroundHandle);
             }
         }
 
