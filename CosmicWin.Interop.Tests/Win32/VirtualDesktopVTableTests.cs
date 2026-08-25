@@ -22,7 +22,10 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </para>
 /// <para>
 /// Self-cleaning: the desktop it creates is closed again, and the assertions run before that
-/// cleanup so a failure still leaves the machine as it was found.
+/// cleanup so a failure still leaves the desktop SET as it was found. The current desktop is a
+/// different matter -- the shell moves you to the neighbour of the one you close, so a run that did
+/// not start on the last desktop ends somewhere else. That is Windows' behaviour, not a defect, and
+/// the final assertions below are written to the guarantee that actually exists.
 /// </para>
 /// </remarks>
 [Collection(RealDesktopCollection.Name)]
@@ -90,8 +93,25 @@ public sealed class VirtualDesktopVTableTests(ITestOutputHelper output)
         Assert.Contains(before.CurrentDesktopId, withExtra.EnumeratedIds);
         Assert.NotEqual(before.CurrentDesktopId, withExtra.CurrentDesktopId);
 
-        // And the machine is left as it was found.
+        // And the desktop SET is left as it was found. Deliberately NOT the current desktop.
+        //
+        // Closing a virtual desktop moves you to the NEIGHBOUR of the one you closed, never back to
+        // wherever you happened to start. Win+Ctrl+D appends the new desktop at the END, so a run
+        // that starts on the LAST desktop comes back to it and one that starts anywhere else does
+        // not -- through no fault of this code. Asserting the identity of the current desktop made
+        // this fact fail deterministically whenever the machine was not already on the last desktop,
+        // and that was misread as flakiness for days: it survived isolation runs only because
+        // isolation happened to leave the shell on the last desktop, so the real variable was never
+        // recorded in any of the green-rate tallies.
+        //
+        // MEASURED, two runs of this fact seconds apart with nothing touched in between: started on
+        // position 1 of 2 -> ended on position 2, RED; started on position 2 of 2 -> ended on
+        // position 2, GREEN. The first run's own failure left the machine in the state that made the
+        // second pass.
         Assert.Equal(before.Count, after.Count);
-        Assert.Equal(before.CurrentDesktopId, after.CurrentDesktopId);
+
+        // What IS guaranteed and worth asserting: the desktop this run started on still exists, so
+        // the cleanup closed the one it created and nothing of the user's.
+        Assert.Contains(before.CurrentDesktopId, after.EnumeratedIds);
     }
 }
