@@ -102,4 +102,55 @@ public sealed class RealDesktopLockTests
 
         Assert.Contains(FactsOnlyName, thrown.Message);
     }
+
+    /// <summary>
+    /// A named kernel object belongs to ONE type. If anything already holds this name as a
+    /// semaphore, <c>new Mutex(false, name)</c> throws <see cref="WaitHandleCannotBeOpenedException"/>
+    /// -- and that construction runs on the lock's own dedicated thread.
+    /// </summary>
+    /// <remarks>
+    /// An unhandled exception on a dedicated (non-pool) thread TERMINATES THE PROCESS. So a stale
+    /// object under this name does not fail one fixture: it kills the testhost, taking every desktop
+    /// fact in BOTH assemblies with it, and reports nothing a reader could act on. The fixture that
+    /// holds this lock is the one thing every desktop collection depends on, which makes it the
+    /// worst possible place for that shape.
+    /// <para>
+    /// The squatter is a semaphore rather than a mutex on purpose. A second MUTEX of the same name
+    /// is the ordinary contended case these facts already cover; a semaphore is a type collision,
+    /// which is what a stale process from a pre-correction build would actually leave behind.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WhenTheNameIsHeldByAnotherKindOfObject_ItFailsToTakeTheLockInsteadOfKillingTheRun()
+    {
+        const string collidingName = FactsOnlyName + ".TypeCollision";
+        using var squatter = new Semaphore(1, 1, collidingName);
+
+        Assert.False(
+            RealDesktopLock.TryAcquire(Brief, out var held, collidingName),
+            "A name already held as a semaphore cannot be opened as a mutex, so the lock must " +
+            "report that it was not taken.");
+        Assert.Null(held);
+    }
+
+    /// <summary>
+    /// The reason must reach the caller. A lock that answered "not taken" while discarding WHY
+    /// would send a reader hunting for a holder that never existed, which is a quieter version of
+    /// the same failure to communicate as the crash above.
+    /// </summary>
+    [Fact]
+    public void WhenTheHandleCannotBeOpened_AcquireSaysSoInsteadOfBlamingATimeout()
+    {
+        const string collidingName = FactsOnlyName + ".TypeCollisionReported";
+        using var squatter = new Semaphore(1, 1, collidingName);
+
+        var thrown = Assert.ThrowsAny<Exception>(
+            () => RealDesktopLock.Acquire(Brief, collidingName));
+
+        // Never a TimeoutException: nothing was waited for, and saying otherwise would describe a
+        // wait that did not happen.
+        Assert.IsNotType<TimeoutException>(thrown);
+        Assert.IsType<WaitHandleCannotBeOpenedException>(thrown.InnerException);
+        Assert.Contains(collidingName, thrown.Message);
+    }
 }
