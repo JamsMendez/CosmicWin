@@ -153,17 +153,52 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             return ActivationOutcome.Direct;
         }
 
-        var outcome = ActivationOutcome.Failed;
-        var worker = new Thread(() => outcome = ActivateFromAttachedInput(target)) { IsBackground = true };
-        worker.Start();
-        return worker.Join(ActivationTimeout) ? outcome : ActivationOutcome.Failed;
+        return RunBounded(() => ActivateFromAttachedInput(target), ActivationTimeout);
     }
+
+    /// <summary>
+    /// Runs <paramref name="attempt"/> on a dedicated thread and waits at most
+    /// <paramref name="budget"/> for it, reporting the two endings SEPARATELY.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attempt needs its own thread because <c>AttachThreadInput</c> shares INPUT queues and a
+    /// thread-pool thread has none -- MR-2's fourth supervised run recorded 40 chords and 40 failed
+    /// activations before that was understood.
+    /// </para>
+    /// <para>
+    /// The budget bounds a thread that must first be SCHEDULED, so exhausting it says nothing about
+    /// what the OS would have answered. Returning <see cref="ActivationOutcome.Failed"/> there --
+    /// documented as "every rung was refused" -- asserted knowledge this path does not have, and
+    /// made every red activation unattributable. It reports <see cref="ActivationOutcome.TimedOut"/>
+    /// now, so the next red run names its own cause instead of leaving it to be guessed at.
+    /// </para>
+    /// <para>
+    /// Takes the attempt as a delegate so both endings can be forced headlessly, without a desktop
+    /// or a real window. A bound that only the weather can exercise is a bound nobody has tested.
+    /// </para>
+    /// </remarks>
+    internal static ActivationOutcome RunBounded(Func<ActivationOutcome> attempt, TimeSpan budget)
+    {
+        var outcome = ActivationOutcome.Failed;
+        var worker = new Thread(() => outcome = attempt()) { IsBackground = true };
+        worker.Start();
+        return worker.Join(budget) ? outcome : ActivationOutcome.TimedOut;
+    }
+
+    /// <summary>
+    /// Whether an outcome means the OS CONFIRMED the target holds the foreground. Both failing
+    /// endings answer false: a timeout confirms nothing, so the split serves the diagnosis and never
+    /// changes what a caller sees.
+    /// </summary>
+    internal static bool Activated(ActivationOutcome outcome) =>
+        outcome is not (ActivationOutcome.Failed or ActivationOutcome.TimedOut);
 
     /// <summary>
     /// <see cref="INativeWindowSource"/>'s boolean contract, unchanged for callers, now backed by
     /// <see cref="Activate"/>. True means the OS itself confirmed the target holds the foreground.
     /// </summary>
-    public bool TryActivateWindow(nint hwnd) => Activate(hwnd) != ActivationOutcome.Failed;
+    public bool TryActivateWindow(nint hwnd) => Activated(Activate(hwnd));
 
     /// <summary>Asks for the foreground and then CHECKS, rather than believing the return value.</summary>
     private static bool TrySetForeground(HWND target)

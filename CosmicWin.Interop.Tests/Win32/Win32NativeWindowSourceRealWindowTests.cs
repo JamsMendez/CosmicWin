@@ -175,9 +175,14 @@ public sealed class Win32NativeWindowSourceRealWindowTests
         using var notepad = SpawnedNotepadWindow.Spawn();
         var source = new Win32NativeWindowSource();
 
-        var activated = source.TryActivateWindow(notepad.Handle);
+        // Activate rather than TryActivateWindow, for the message alone: the boolean discards which
+        // ending happened, and this is the fact that has failed more often than any other in this
+        // repository. Activated() keeps the assertion identical to the boolean contract.
+        var outcome = source.Activate(notepad.Handle);
 
-        Assert.True(activated);
+        Assert.True(
+            Win32NativeWindowSource.Activated(outcome),
+            $"Activation did not move the foreground -- outcome was {outcome}.");
         WaitUntilTrue(() => PInvoke.GetForegroundWindow() == new HWND(notepad.Handle), TimeSpan.FromSeconds(5));
         Assert.Equal(new HWND(notepad.Handle), PInvoke.GetForegroundWindow());
     }

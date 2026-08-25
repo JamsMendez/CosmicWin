@@ -31,5 +31,17 @@ internal enum ActivationOutcome
     InputUnlocked,
 
     /// <summary>Every rung was refused; the foreground still belongs to someone else.</summary>
-    Failed
+    Failed,
+
+    /// <summary>
+    /// The bounded wait expired before the worker finished. NOT a refusal: on this path no rung was
+    /// evaluated, and under load the worker may never have been scheduled at all.
+    /// </summary>
+    /// <remarks>
+    /// Split out of <see cref="Failed"/> because collapsing the two made every red activation
+    /// unattributable -- the reason this repository's desktop flakiness resisted diagnosis for so
+    /// long. The two readings call for opposite fixes: <see cref="Failed"/> is Windows saying no,
+    /// this is our own budget being too short for the machine it ran on.
+    /// </remarks>
+    TimedOut
 }

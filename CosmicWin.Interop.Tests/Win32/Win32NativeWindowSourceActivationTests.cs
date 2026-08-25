@@ -38,6 +38,20 @@ public sealed class Win32NativeWindowSourceActivationTests
         "by itself. If it does not, nothing here is measurable and the assembly under test is " +
         "irrelevant -- see SPI_GETFOREGROUNDLOCKTIMEOUT";
 
+    /// <summary>
+    /// Asserts the OS confirmed the move, and NAMES the outcome when it did not.
+    /// </summary>
+    /// <remarks>
+    /// Never <c>!= ActivationOutcome.Failed</c>. That spelling silently accepts
+    /// <c>TimedOut</c>, which is not a success -- it is the bounded wait expiring before the worker
+    /// was even scheduled. Reporting the outcome is the entire point: these facts are the ones that
+    /// flake, and "refused" versus "timed out" call for opposite fixes.
+    /// </remarks>
+    private static void AssertActivated(ActivationOutcome outcome) =>
+        Assert.True(
+            Win32NativeWindowSource.Activated(outcome),
+            $"Activation did not move the foreground -- outcome was {outcome}. {ForegroundHint()}");
+
     [RequiresDesktopFact]
     public void Activate_MovesTheRealOsForegroundToTheTarget_FromAnotherProcessesWindow()
     {
@@ -49,7 +63,7 @@ public sealed class Win32NativeWindowSourceActivationTests
         // work to do rather than short-circuiting on AlreadyForeground.
         var outcome = source.Activate(first.Handle);
 
-        Assert.True(outcome != ActivationOutcome.Failed, $"Activation was refused -- {ForegroundHint()}");
+        AssertActivated(outcome);
         Assert.NotEqual(ActivationOutcome.AlreadyForeground, outcome);
         Assert.Equal(first.Handle, Foreground());
     }
@@ -65,13 +79,13 @@ public sealed class Win32NativeWindowSourceActivationTests
         using var second = SpawnedAlacrittyWindow.Spawn();
         var source = new Win32NativeWindowSource();
 
-        Assert.True(source.Activate(first.Handle) != ActivationOutcome.Failed, $"Activation was refused -- {ForegroundHint()}");
+        AssertActivated(source.Activate(first.Handle));
         Assert.Equal(first.Handle, Foreground());
 
-        Assert.NotEqual(ActivationOutcome.Failed, source.Activate(second.Handle));
+        AssertActivated(source.Activate(second.Handle));
         Assert.Equal(second.Handle, Foreground());
 
-        Assert.NotEqual(ActivationOutcome.Failed, source.Activate(first.Handle));
+        AssertActivated(source.Activate(first.Handle));
         Assert.Equal(first.Handle, Foreground());
     }
 
