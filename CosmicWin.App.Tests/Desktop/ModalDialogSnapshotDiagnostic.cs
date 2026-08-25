@@ -69,18 +69,13 @@ public sealed class ModalDialogSnapshotDiagnostic(ITestOutputHelper output)
             ? TimeSpan.FromSeconds(seconds)
             : TimeSpan.Zero;
 
-    [Fact]
+    // The opt-in and nothing more -- deliberately NOT the session gate, since this only watches and
+    // spawns nothing to be tiled. It used to be an `if` in the body that wrote "NOT RUN" and
+    // returned, which is worse than useless for a diagnostic: it reported PASSED having watched
+    // nothing. The attribute skips instead, and a skip carries the same reason where it is read.
+    [RequiresDesktopOptInFact]
     public void ReportEveryWindowThatAppearsWhileWatching()
     {
-        // Gated in the body rather than by an attribute so this stays a plain [Fact] with no
-        // running-app check. A silent pass would be worse than useless for a diagnostic, so the
-        // reason is written where its output is read.
-        if (DesktopGate.OptInSkipReason() is { } notRun)
-        {
-            output.WriteLine($"NOT RUN. {notRun}");
-            return;
-        }
-
         var source = new Win32NativeWindowSource();
 
         output.WriteLine("owner  = has a Win32 owner (GW_OWNER). Decides everything below it.");

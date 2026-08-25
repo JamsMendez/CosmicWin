@@ -210,4 +210,43 @@ public sealed class DesktopGateTests
     {
         Assert.Null(DesktopGate.ElevatedSkipReason("1", Always));
     }
+
+    /// <summary>
+    /// A diagnostic carries a SECOND opt-in of its own, on top of the gate it already sits behind.
+    /// Before this existed the second one was checked in the method body, which could only
+    /// `return` -- so a diagnostic nobody had opted into reported PASSED while doing nothing. A
+    /// green that means nothing is worse than a skip, because a skip says so.
+    /// </summary>
+    [Fact]
+    public void TheOwnOptIn_IsNotEvenConsulted_WhenTheGateBeneathItAlreadySkipped()
+    {
+        var beneath = "Set COSMICWIN_RUN_DESKTOP_TESTS=1 in an interactive desktop session.";
+
+        // The value would pass on its own. The reason underneath must still win, so the reader is
+        // told the FIRST thing that is missing rather than the last one checked.
+        Assert.Equal(beneath, DesktopGate.AlsoRequires(beneath, "1", "never seen", "1"));
+    }
+
+    [Fact]
+    public void TheOwnOptIn_SkipsWithItsOwnReason_WhenTheValueDoesNotMatch()
+    {
+        var mine = "Set COSMICWIN_MEASURE_ADMISSION=1 -- this CLOSES the Settings window.";
+
+        Assert.Equal(mine, DesktopGate.AlsoRequires(null, null, mine, "1"));
+        Assert.Equal(mine, DesktopGate.AlsoRequires(null, "0", mine, "1"));
+        Assert.Equal(mine, DesktopGate.AlsoRequires(null, " 1", mine, "1"));
+        Assert.Equal(mine, DesktopGate.AlsoRequires(null, "TRUE", mine, "1"));
+    }
+
+    [Fact]
+    public void TheOwnOptIn_RunsOnlyOnAnExactMatch_AndAcceptsMoreThanOneSpelling()
+    {
+        Assert.Null(DesktopGate.AlsoRequires(null, "1", "unused", "1"));
+
+        // The border spike takes two: it must be told WHICH direction, never merely that the caller
+        // knows what the variable touches.
+        Assert.Null(DesktopGate.AlsoRequires(null, "paint", "unused", "paint", "restore"));
+        Assert.Null(DesktopGate.AlsoRequires(null, "restore", "unused", "paint", "restore"));
+        Assert.NotNull(DesktopGate.AlsoRequires(null, "Paint", "unused", "paint", "restore"));
+    }
 }

@@ -41,3 +41,52 @@ internal sealed class RequiresDesktopFactAttribute : FactAttribute
         }
     }
 }
+
+/// <summary>
+/// The session gate PLUS this diagnostic's own opt-in, because it CLOSES the user's Settings window
+/// to force a cold launch.
+/// </summary>
+/// <remarks>
+/// An attribute rather than an <c>if</c> in the body. xunit 2 cannot skip from inside a test, so the
+/// body check could only write "NOT RUN" and return -- reporting PASSED for a diagnostic that did
+/// nothing. A skip says it did not run; a green says the opposite of the truth.
+/// </remarks>
+internal sealed class MeasuresAdmissionFactAttribute : FactAttribute
+{
+    /// <summary>This diagnostic's own opt-in, on top of the shared desktop one.</summary>
+    public const string Variable = "COSMICWIN_MEASURE_ADMISSION";
+
+    public MeasuresAdmissionFactAttribute()
+    {
+        Skip = DesktopGate.AlsoRequires(
+            DesktopGate.SessionSkipReason(),
+            Environment.GetEnvironmentVariable(Variable),
+            $"Set {Variable}=1 -- this CLOSES the Settings window to measure a cold launch.",
+            "1");
+    }
+}
+
+/// <summary>
+/// The opt-in PLUS an explicit direction, because this spike PAINTS a DWM attribute onto every
+/// trackable window cross-process and that outlives the run, the testhost and a reboot.
+/// </summary>
+/// <remarks>
+/// Deliberately not the session gate: this reads and paints, it spawns nothing to be tiled. The
+/// direction is demanded rather than defaulted -- five solution-wide runs once painted every border
+/// red and the maintainer reported it as a CosmicWin defect. It was this spike.
+/// </remarks>
+internal sealed class PaintsWindowBordersFactAttribute : FactAttribute
+{
+    /// <summary>Must say WHICH direction; knowing what the variable touches is not enough.</summary>
+    public const string Variable = "COSMICWIN_SPIKE_BORDER";
+
+    public PaintsWindowBordersFactAttribute()
+    {
+        Skip = DesktopGate.AlsoRequires(
+            DesktopGate.OptInSkipReason(),
+            Environment.GetEnvironmentVariable(Variable),
+            $"Set {Variable}=paint to repaint every window's border on this desktop, or =restore to undo it.",
+            "paint",
+            "restore");
+    }
+}

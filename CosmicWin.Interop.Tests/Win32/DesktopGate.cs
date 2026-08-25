@@ -120,6 +120,29 @@ public static class DesktopGate
             : "Requires an elevated (Administrator) process -- schtasks /RL HIGHEST needs elevation.";
     }
 
+    /// <summary>
+    /// Layers a fact's OWN opt-in on top of the gate it already sits behind, so a second
+    /// requirement can SKIP instead of returning early from the method body.
+    /// </summary>
+    /// <param name="beneath">The reason the gate underneath already gave, or <see langword="null"/> to continue.</param>
+    /// <param name="value">The live value of this fact's own variable.</param>
+    /// <param name="reasonWhenAbsent">What to tell a reader who has not opted in. Supplied by the caller because only the fact knows what its variable actually does to the machine.</param>
+    /// <param name="accepted">The exact spellings that count as opting in. Exact, never truthiness.</param>
+    /// <remarks>
+    /// This exists because xunit 2 cannot skip from inside a test body: the second opt-in used to be
+    /// an <c>if</c> that wrote "NOT RUN" and returned, so a diagnostic nobody had asked for reported
+    /// PASSED while doing nothing at all. A green that means nothing is worse than a skip, because a
+    /// skip says so and a green does not.
+    /// <para>
+    /// The reason underneath wins. A reader is told the FIRST thing missing rather than the last one
+    /// checked -- being sent to set a diagnostic's variable while the desktop opt-in is also absent
+    /// would just cost them a second run to discover the rest.
+    /// </para>
+    /// </remarks>
+    public static string? AlsoRequires(
+        string? beneath, string? value, string reasonWhenAbsent, params string[] accepted) =>
+        beneath ?? (Array.IndexOf(accepted, value) >= 0 ? null : reasonWhenAbsent);
+
     private static bool WindowManagerRunning() => Process.GetProcessesByName("CosmicWin.App").Length > 0;
 
     private static bool Elevated() =>

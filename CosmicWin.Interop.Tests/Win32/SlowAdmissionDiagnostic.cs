@@ -47,8 +47,12 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
     /// The same lesson <c>WindowBorderColourSpike</c> taught the hard way in this session: a fact
     /// that mutates the machine must not ride the gate meant for facts that observe it, or an
     /// ordinary <c>dotnet test</c> starts doing things nobody asked for.
+    /// <para>
+    /// Declared by <see cref="MeasuresAdmissionFactAttribute"/>, which is what actually skips on it.
+    /// Named here so the empty-run message and the gate cannot drift apart.
+    /// </para>
     /// </remarks>
-    private const string RunVariable = "COSMICWIN_MEASURE_ADMISSION";
+    private const string RunVariable = MeasuresAdmissionFactAttribute.Variable;
 
     /// <summary>How long the launch is watched. Named once so the wait and the empty-run message cannot drift.</summary>
     private static readonly TimeSpan PumpWindow = TimeSpan.FromSeconds(8);
@@ -71,15 +75,9 @@ public sealed class SlowAdmissionDiagnostic(ITestOutputHelper output)
         [0x8018] = "UNCLOAKED",
     };
 
-    [RequiresDesktopSessionFact]
+    [MeasuresAdmissionFact]
     public void ReportHowLongAUwpWindowTakesToBecomeTrackable()
     {
-        if (Environment.GetEnvironmentVariable(RunVariable) != "1")
-        {
-            output.WriteLine($"NOT RUN. Set {RunVariable}=1 -- this CLOSES the Settings window to measure a cold launch.");
-            return;
-        }
-
         // Settings must be CLOSED first or there is nothing to measure: the protocol handler simply
         // activates an existing window, which was already in the enumeration before the clock
         // started. Measured the hard way -- the first run of this reported no new window at all.

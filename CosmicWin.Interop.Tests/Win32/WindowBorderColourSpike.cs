@@ -40,31 +40,20 @@ namespace CosmicWin.Interop.Tests.Win32;
 [Collection(RealDesktopCollection.Name)]
 public sealed class WindowBorderColourSpike(ITestOutputHelper output)
 {
-    /// <summary>The spike's own opt-in, separate from the shared desktop one (see the remarks).</summary>
-    private const string ModeVariable = "COSMICWIN_SPIKE_BORDER";
+    /// <summary>
+    /// The spike's own opt-in, separate from the shared desktop one (see the remarks). Declared by
+    /// <see cref="PaintsWindowBordersFactAttribute"/>, which is what actually skips on it; named
+    /// here only so the body can read WHICH direction it was told to go.
+    /// </summary>
+    private const string ModeVariable = PaintsWindowBordersFactAttribute.Variable;
 
-    [Fact]
+    // Both opt-ins now live in the attribute, so an absent one SKIPS. They used to be `if`s here
+    // that wrote "NOT RUN" and returned, which reported PASSED for a spike that touched nothing.
+    // The direction is still read below, because only the body cares WHICH way it was told to go.
+    [PaintsWindowBordersFact]
     public void SetTheBorderColourOfEveryTrackableWindowAndReportWhatTheShellSaid()
     {
-        if (DesktopGate.OptInSkipReason() is { } notRun)
-        {
-            output.WriteLine($"NOT RUN. {notRun}");
-            return;
-        }
-
-        // The second opt-in, and the one that matters. Absent, this does NOTHING -- deliberately
-        // including the restore, so the variable means "I know what this touches" rather than
-        // "which direction". Anyone who needs to undo a painting already has to set it.
-        var mode = Environment.GetEnvironmentVariable(ModeVariable);
-        if (mode is not ("paint" or "restore"))
-        {
-            output.WriteLine(
-                $"NOT RUN. Set {ModeVariable}=paint to repaint every window's border on this " +
-                $"machine, or {ModeVariable}=restore to hand them all back to DWM.");
-            return;
-        }
-
-        var restoring = mode == "restore";
+        var restoring = Environment.GetEnvironmentVariable(ModeVariable) == "restore";
 
         // A colour nobody would mistake for an accent, so "did it work" needs no squinting.
         var colour = restoring ? Win32WindowBorder.Default : Win32WindowBorder.ColorRef(255, 0, 0);
