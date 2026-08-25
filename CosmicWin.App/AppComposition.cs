@@ -438,6 +438,11 @@ public sealed class AppComposition : IDisposable
                     lastDesktop = nowOn;
                     lastDesktopIndex = virtualDesktops.CurrentIndex;
                     ApplyArrivingLayout();
+
+                    // The switch chord answers itself; this is the same handover for the switches
+                    // CosmicWin did not make -- Win+Ctrl+arrow, Task View -- which raise nothing we
+                    // subscribe to. AFTER the layout, so the tree it searches is the arriving one.
+                    executor.HandFocusToArrivingDesktop();
                 }
             }
 

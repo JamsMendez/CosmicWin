@@ -223,23 +223,38 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
-    /// Gives focus to a window still on this desktop after the focused one was sent to another.
+    /// Gives focus to a window on the desktop the user is looking at NOW, after the set of windows
+    /// on screen changed desktop. Called for both halves of that: the focused window sent away, and
+    /// the user walking to another desktop.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Reported from real use: the window went away and CosmicWin went on treating it as focused.
-    /// The cause is that <see cref="_focused"/>'s only liveness test is <c>IsAlive</c>, and a window
-    /// on another virtual desktop is perfectly alive -- DWM CLOAKS it rather than destroying it,
-    /// which this repository has already measured leaves <c>WS_VISIBLE</c> set. The cache therefore
-    /// cannot tell "the user sent this away" from "this still exists", and kept answering with the
-    /// one window that was certainly wrong.
+    /// Reported from real use, twice and separately: the window went away and CosmicWin went on
+    /// treating it as focused; then the user switched desktops and focus stayed behind on the one
+    /// they left. One cause. <see cref="_focused"/>'s only liveness test is <c>IsAlive</c>, and a
+    /// window on another virtual desktop is perfectly alive -- DWM CLOAKS it rather than destroying
+    /// it, which this repository has already measured leaves <c>WS_VISIBLE</c> set. The cache
+    /// therefore cannot tell "that desktop is not on screen any more" from "that window still
+    /// exists", and kept answering with the one window that was certainly wrong.
     /// </para>
     /// <para>
     /// So the cache is dropped FIRST and unconditionally, before anything else can fail. Everything
     /// after it is an improvement on "no focus"; none of it is required for the cache to stop lying.
     /// </para>
+    /// <para>
+    /// But for a SWITCH, dropping it is not enough on its own, and that is worth stating plainly:
+    /// the reconciliation tick calls <see cref="ResolveFocusedLeaf"/> every interval, and its OS
+    /// foreground branch wins. The registry spans every desktop, so the cloaked window the user just
+    /// left still resolves to a tracked leaf and would be written straight back into the cache
+    /// within one tick. Activating a window on the ARRIVING desktop is what actually settles it,
+    /// because the OS foreground is the authority and this is the only way to move it.
+    /// </para>
+    /// <para>
+    /// <paramref name="departingHandle"/> is the window being sent away, or 0 when the whole desktop
+    /// changed underneath and nothing in particular is leaving.
+    /// </para>
     /// </remarks>
-    private void HandFocusOnAfterMove(nint movedHandle)
+    private void HandFocusToVisibleDesktop(nint departingHandle)
     {
         var departed = _focused;
         _focused = null;
@@ -256,17 +271,20 @@ public sealed class ActionExecutor(
             return;
         }
 
-        // The window itself is the anchor for WHICH monitor to search, and it answers even now:
-        // the registry spans every desktop, and its bounds are where it was last laid out.
-        var bounds = registry.TryGetWindow(movedHandle, out var moved) && moved is not null
-            ? moved.Bounds
+        // WHICH monitor to search. The departing window answers it when there is one -- the registry
+        // spans every desktop, so it resolves even now, and its bounds are where it was last laid
+        // out. On a switch nothing is departing, so the window the cache just named answers instead:
+        // the user is still looking at the monitor they were on. Neither answering falls through to
+        // ResolveDisplay's documented Primary fail-safe.
+        var bounds = registry.TryGetWindow(departingHandle, out var departing) && departing is not null
+            ? departing.Bounds
             : departed is not null
               && registry.TryGetWindow(departed.Window.Handle, out var cached) && cached is not null
                 ? cached.Bounds
                 : Interop.Rectangle.Empty;
 
         var display = treeManager.ResolveDisplay(bounds);
-        if (treeManager.FocusSurvivorOn(display, movedHandle) is not
+        if (treeManager.FocusSurvivorOn(display, departingHandle) is not
             { Status: FocusWalkStatus.Found, Leaf: { } survivor })
         {
             // An empty desktop is a legitimate answer, not a failure. No window means no focus, and
@@ -284,6 +302,17 @@ public sealed class ActionExecutor(
             _focused = survivor;
         }
     }
+
+    /// <summary>
+    /// Hands focus to a window on the desktop now being viewed, for a switch CosmicWin did NOT make.
+    /// </summary>
+    /// <remarks>
+    /// <c>Win+Ctrl+Left/Right</c> and Task View raise nothing this process subscribes to, so the
+    /// only way to notice them is the reconciliation tick asking. The tick owns that comparison and
+    /// calls this once it has seen the desktop change; the chord path answers itself, immediately,
+    /// without waiting an interval.
+    /// </remarks>
+    public void HandFocusToArrivingDesktop() => HandFocusToVisibleDesktop(departingHandle: 0);
 
     /// <summary>
     /// Resolves the leaf currently treated as focused: the leaf the OS foreground actually maps to,
@@ -381,6 +410,12 @@ public sealed class ActionExecutor(
         var countBefore = desktops.Count;
         var indexBefore = desktops.CurrentIndex;
 
+        // Read BEFORE, because "the switch succeeded" and "the user actually went somewhere" are
+        // different facts. TrySwitchTo reports success for the desktop already shown -- it returns
+        // early rather than paying for a desktop-change animation nobody asked for -- and handing
+        // focus on there would yank the user off their own window for nothing.
+        var desktopBefore = desktops.CurrentDesktopId;
+
         // The window the user is looking at, straight from the OS. Deliberately not the tracked
         // leaf: sending an untracked window to another desktop is still a legitimate ask.
         var ok = action.Kind == HotkeyActionKind.SwitchDesktop
@@ -395,11 +430,18 @@ public sealed class ActionExecutor(
 
             // AFTER the rehome, never before: the survivor is chosen from the tree the departing
             // window has already left.
-            HandFocusOnAfterMove(foregroundHandle);
+            HandFocusToVisibleDesktop(foregroundHandle);
         }
         else if (ok && action.Kind == HotkeyActionKind.SwitchDesktop)
         {
             DesktopSwitched?.Invoke();
+
+            // Only when the view actually moved, and AFTER the arriving layout has been applied:
+            // the tree being searched has to be the one the user is now looking at.
+            if (desktops.CurrentDesktopId != desktopBefore)
+            {
+                HandFocusToVisibleDesktop(departingHandle: 0);
+            }
         }
 
         DesktopTrace?.Record(

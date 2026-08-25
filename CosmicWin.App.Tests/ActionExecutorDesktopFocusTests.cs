@@ -6,7 +6,8 @@ using CosmicWin.Layout;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// Where focus goes after the focused window is sent to another virtual desktop.
+/// Where focus goes when the windows on screen change desktop: the focused one sent away, and the
+/// user walking to another desktop themselves.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,15 +29,32 @@ public sealed class ActionExecutorDesktopFocusTests
         public bool IsSupported => true;
         public int Count => 2;
         public int CurrentIndex => 1;
-        public Guid CurrentDesktopId => Guid.Empty;
+        public Guid CurrentDesktopId { get; set; } = Guid.Empty;
         public string? LastError => null;
 
         /// <summary>Set to false to reproduce a shell that REFUSED the move.</summary>
         public bool MoveSucceeds { get; set; } = true;
 
+        /// <summary>Set to false to reproduce a shell that REFUSED the switch.</summary>
+        public bool SwitchSucceeds { get; set; } = true;
+
+        /// <summary>Where a successful switch lands, so a test can drive the arriving desktop.</summary>
+        public Guid SwitchesTo { get; set; } = Guid.Empty;
+
         public List<(nint Handle, int Index)> Moved { get; } = [];
 
-        public bool TrySwitchTo(int oneBasedIndex) => true;
+        public bool TrySwitchTo(int oneBasedIndex)
+        {
+            if (!SwitchSucceeds)
+            {
+                return false;
+            }
+
+            // The real service VERIFIES the switch landed before reporting success, so the id it
+            // reports afterwards is the ARRIVING desktop. Modelling that is the whole point here.
+            CurrentDesktopId = SwitchesTo;
+            return true;
+        }
 
         public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex)
         {
@@ -254,6 +272,158 @@ public sealed class ActionExecutorDesktopFocusTests
         harness.Foreground.Handle = new IntPtr(0x404);
 
         Assert.Null(harness.Executor.ResolveFocusedLeaf());
+    }
+
+
+    private sealed record SwitchHarness(
+        ActionExecutor Executor,
+        FakeVirtualDesktops Desktops,
+        FakeForegroundWindowSource Foreground,
+        RecordingWindow Here,
+        RecordingWindow There,
+        LeafNode HereLeaf,
+        LeafNode ThereLeaf);
+
+    /// <summary>
+    /// One monitor, two desktops, one window on each -- the smallest world in which "the focused
+    /// window is on the desktop the user just left" can be expressed at all.
+    /// </summary>
+    private static SwitchHarness BuildSwitch(bool arrivingIsEmpty = false)
+    {
+        var here = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var there = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+        var hereLeaf = new LeafNode(new WindowRef(new IntPtr(0xD1)));
+        var thereLeaf = new LeafNode(new WindowRef(new IntPtr(0xD2)));
+
+        var registry = new WindowRegistry();
+        var hereWindow = new RecordingWindow(hereLeaf.Window.Handle, Rectangle.FromSize(0, 0, 1920, 1080));
+        var thereWindow = new RecordingWindow(thereLeaf.Window.Handle, Rectangle.FromSize(0, 0, 1920, 1080));
+        registry.Register(hereWindow, hereLeaf);
+        registry.Register(thereWindow, thereLeaf);
+
+        var display = new FakeDisplay(
+            new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
+
+        var desktops = new FakeVirtualDesktops { CurrentDesktopId = here, SwitchesTo = there };
+        var treeManager = new TreeManager([display], display, registry)
+        {
+            CurrentDesktop = () => desktops.CurrentDesktopId,
+        };
+
+        treeManager.TryGetTree(here, display, out var hereTree);
+        hereTree!.Root = hereLeaf;
+
+        treeManager.TryGetTree(there, display, out var thereTree);
+        thereTree!.Root = arrivingIsEmpty ? null : thereLeaf;
+
+        var foreground = new FakeForegroundWindowSource { Handle = hereWindow.Handle };
+        var executor = new ActionExecutor(hereTree, registry, foreground)
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            TreeManager = treeManager,
+            VirtualDesktops = desktops,
+        };
+
+        return new SwitchHarness(
+            executor, desktops, foreground, hereWindow, thereWindow, hereLeaf, thereLeaf);
+    }
+
+    private static Task Switch(SwitchHarness harness, int desktop = 2) =>
+        harness.Executor
+            .ScheduleAsync(new HotkeyAction(HotkeyActionKind.SwitchDesktop, desktop), CancellationToken.None)
+            .AsTask();
+
+    /// <summary>
+    /// The second reported defect, and the sibling of the first: walking to another desktop left
+    /// focus behind on the one just abandoned.
+    /// </summary>
+    /// <remarks>
+    /// Activating a window on the ARRIVING desktop is the load-bearing half here, not clearing the
+    /// cache. The reconciliation tick calls <c>ResolveFocusedLeaf</c> every interval and the OS
+    /// foreground branch wins there -- the registry spans every desktop, so the cloaked window the
+    /// user just left still resolves to a tracked leaf and would be written straight back into the
+    /// cache. Only changing the real foreground settles it, because the OS is the authority.
+    /// </remarks>
+    [Fact]
+    public async Task SwitchingDesktops_FocusesAWindowOnTheArrivingOne()
+    {
+        var harness = BuildSwitch();
+
+        await Switch(harness);
+
+        Assert.Equal(1, harness.There.TryActivateCallCount);
+        Assert.Equal(0, harness.Here.TryActivateCallCount);
+    }
+
+    /// <summary>The cache follows the user, read off the public resolution rather than inferred.</summary>
+    [Fact]
+    public async Task AfterSwitching_TheWindowLeftBehindIsNoLongerTheRememberedFocus()
+    {
+        var harness = BuildSwitch();
+
+        // Seeds the cache with the window on the desktop about to be left.
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+        harness.Foreground.Handle = new IntPtr(0x404);
+        Assert.Equal(harness.HereLeaf, harness.Executor.ResolveFocusedLeaf());
+
+        harness.Foreground.Handle = harness.Here.Handle;
+        await Switch(harness);
+        harness.Foreground.Handle = new IntPtr(0x404);
+
+        Assert.Equal(harness.ThereLeaf, harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>
+    /// An empty desktop is where the user asked to go. Nothing to focus is the honest answer, not a
+    /// reason to keep pointing at the window they walked away from.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingToAnEmptyDesktop_LeavesNoFocusAtAll()
+    {
+        var harness = BuildSwitch(arrivingIsEmpty: true);
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+        harness.Foreground.Handle = new IntPtr(0x404);
+        Assert.Equal(harness.HereLeaf, harness.Executor.ResolveFocusedLeaf());
+
+        harness.Foreground.Handle = harness.Here.Handle;
+        await Switch(harness);
+        harness.Foreground.Handle = new IntPtr(0x404);
+
+        Assert.Equal(0, harness.There.TryActivateCallCount);
+        Assert.Null(harness.Executor.ResolveFocusedLeaf());
+    }
+
+    /// <summary>A switch the shell REFUSED is not a switch. The user never went anywhere.</summary>
+    [Fact]
+    public async Task ASwitchTheShellRefused_LeavesFocusExactlyWhereItWas()
+    {
+        var harness = BuildSwitch();
+        harness.Desktops.SwitchSucceeds = false;
+
+        await Switch(harness);
+
+        Assert.Equal(0, harness.There.TryActivateCallCount);
+        Assert.Equal(0, harness.Here.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// Switching to the desktop already shown must not shuffle focus. The real service treats that
+    /// as a no-op rather than paying for a desktop-change animation, and so must this.
+    /// </summary>
+    [Fact]
+    public async Task SwitchingToTheDesktopAlreadyShown_DoesNotDisturbFocus()
+    {
+        var harness = BuildSwitch();
+        harness.Desktops.SwitchesTo = harness.Desktops.CurrentDesktopId;
+
+        await Switch(harness, desktop: 1);
+
+        Assert.Equal(0, harness.Here.TryActivateCallCount);
+        Assert.Equal(0, harness.There.TryActivateCallCount);
     }
 
     /// <summary>
