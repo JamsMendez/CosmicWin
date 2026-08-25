@@ -93,13 +93,19 @@ public static class CompositionRoot
     /// cref="ExceptionListFile.Load()"/>) so Reload is testable against an isolated file instead of
     /// the real on-disk exception list -- closes. <paramref name="exit"/>
     /// is Salir's trigger; the caller supplies it (WPF's <c>Application.Shutdown</c>) so this class
-    /// stays WPF-free otherwise.
+    /// stays WPF-free otherwise. <paramref name="getFocusBorder"/>/<paramref name="setFocusBorder"/>
+    /// are MANDATORY for the reason every gate on this factory is: defaulted, a call site that
+    /// dropped them would compile cleanly and silently ignore the user's persisted choice, which is
+    /// the exact failure this factory's other parameters were made mandatory to prevent.
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
-        LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions, Action exit) =>
+        LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
+        Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
+            getFocusBorder,
+            setFocusBorder,
             () => exceptions.Reload(loadExceptions()),
             exit);
 }

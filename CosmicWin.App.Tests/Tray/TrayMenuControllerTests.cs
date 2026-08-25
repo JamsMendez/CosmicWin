@@ -13,7 +13,7 @@ public sealed class TrayMenuControllerTests
     public void TogglePause_FlipsFromFalseToTrue_AndReturnsNewState()
     {
         var paused = false;
-        var controller = new TrayMenuController(() => paused, value => paused = value, () => { }, () => { });
+        var controller = new TrayMenuController(() => paused, value => paused = value, () => true, _ => { }, () => { }, () => { });
 
         var result = controller.TogglePause();
 
@@ -25,7 +25,7 @@ public sealed class TrayMenuControllerTests
     public void TogglePause_CalledTwice_ReturnsToOriginalState()
     {
         var paused = false;
-        var controller = new TrayMenuController(() => paused, value => paused = value, () => { }, () => { });
+        var controller = new TrayMenuController(() => paused, value => paused = value, () => true, _ => { }, () => { }, () => { });
 
         controller.TogglePause();
         var result = controller.TogglePause();
@@ -39,7 +39,7 @@ public sealed class TrayMenuControllerTests
     public void IsPaused_ReflectsInjectedGetter_NotInternalState()
     {
         var paused = false;
-        var controller = new TrayMenuController(() => paused, value => paused = value, () => { }, () => { });
+        var controller = new TrayMenuController(() => paused, value => paused = value, () => true, _ => { }, () => { }, () => { });
         Assert.False(controller.IsPaused);
 
         paused = true;
@@ -51,7 +51,7 @@ public sealed class TrayMenuControllerTests
     public void Reload_InvokesInjectedReloadDelegate_ExactlyOnce()
     {
         var reloadCount = 0;
-        var controller = new TrayMenuController(() => false, _ => { }, () => reloadCount++, () => { });
+        var controller = new TrayMenuController(() => false, _ => { }, () => true, _ => { }, () => reloadCount++, () => { });
 
         controller.Reload();
 
@@ -62,10 +62,75 @@ public sealed class TrayMenuControllerTests
     public void Exit_InvokesInjectedExitDelegate_ExactlyOnce()
     {
         var exitCount = 0;
-        var controller = new TrayMenuController(() => false, _ => { }, () => { }, () => exitCount++);
+        var controller = new TrayMenuController(() => false, _ => { }, () => true, _ => { }, () => { }, () => exitCount++);
 
         controller.Exit();
 
         Assert.Equal(1, exitCount);
+    }
+
+    /// <summary>
+    /// The focus-border item is the same shape as Pausar: it owns nothing, it reports what the
+    /// injected getter says, and flipping it returns the state the caller must now render.
+    /// </summary>
+    [Fact]
+    public void ToggleFocusBorder_FlipsFromTrueToFalse_AndReturnsNewState()
+    {
+        var enabled = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => enabled, value => enabled = value, () => { }, () => { });
+
+        var result = controller.ToggleFocusBorder();
+
+        Assert.False(result);
+        Assert.False(enabled);
+    }
+
+    [Fact]
+    public void ToggleFocusBorder_CalledTwice_ReturnsToOriginalState()
+    {
+        var enabled = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => enabled, value => enabled = value, () => { }, () => { });
+
+        controller.ToggleFocusBorder();
+        var result = controller.ToggleFocusBorder();
+
+        Assert.True(result);
+        Assert.True(enabled);
+    }
+
+    /// <summary>
+    /// No hidden state here either. The setting is persisted to disk and can be changed by something
+    /// other than this menu, so the item has to read the world rather than remember it.
+    /// </summary>
+    [Fact]
+    public void IsFocusBorderEnabled_ReflectsInjectedGetter_NotInternalState()
+    {
+        var enabled = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => enabled, value => enabled = value, () => { }, () => { });
+        Assert.True(controller.IsFocusBorderEnabled);
+
+        enabled = false;
+
+        Assert.False(controller.IsFocusBorderEnabled);
+    }
+
+    /// <summary>The two toggles are independent: neither may move the other.</summary>
+    [Fact]
+    public void TheTwoTogglesDoNotDisturbEachOther()
+    {
+        var paused = false;
+        var enabled = true;
+        var controller = new TrayMenuController(
+            () => paused, value => paused = value, () => enabled, value => enabled = value,
+            () => { }, () => { });
+
+        controller.TogglePause();
+        Assert.True(enabled);
+
+        controller.ToggleFocusBorder();
+        Assert.True(paused);
     }
 }

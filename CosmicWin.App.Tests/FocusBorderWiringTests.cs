@@ -77,9 +77,10 @@ public sealed class FocusBorderWiringTests
     private sealed record Harness(
         AppComposition Composition, FakeWorkspace Workspace, NoForeground Foreground,
         RecordingFocusBorder Border, ImmediateScheduler Scheduler, LowLevelKeyboardHook Hook,
-        FakeKeyboardHookPlatform Platform);
+        FakeKeyboardHookPlatform Platform, TrayMenuController Tray, List<bool> Persisted);
 
-    private static Harness Wire(IVirtualDesktopService? virtualDesktops = null)
+    private static Harness Wire(
+        IVirtualDesktopService? virtualDesktops = null, bool focusBorderEnabled = true)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -91,6 +92,8 @@ public sealed class FocusBorderWiringTests
         var scheduler = new ImmediateScheduler();
         LowLevelKeyboardHook? hook = null;
         var platform = new FakeKeyboardHookPlatform();
+        TrayMenuController? tray = null;
+        var persisted = new List<bool>();
 
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
@@ -104,11 +107,18 @@ public sealed class FocusBorderWiringTests
             },
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
-            buildTray: _ => new NullDisposable(),
+            buildTray: controller =>
+            {
+                tray = controller;
+                return new NullDisposable();
+            },
             focusBorder: border,
-            virtualDesktops: virtualDesktops);
+            virtualDesktops: virtualDesktops,
+            focusBorderEnabled: focusBorderEnabled,
+            persistFocusBorder: persisted.Add);
 
-        return new Harness(composition, workspace, foreground, border, scheduler, hook!, platform);
+        return new Harness(
+            composition, workspace, foreground, border, scheduler, hook!, platform, tray!, persisted);
     }
 
     [Fact]
@@ -160,6 +170,95 @@ public sealed class FocusBorderWiringTests
             harness.Foreground.Handle = second.Handle;
             harness.Scheduler.Fire();
             Assert.Equal(second.Handle, harness.Border.Shown[^1].Framed);
+        }
+    }
+
+    /// <summary>
+    /// Turned off, the border draws nothing at all -- which leaves the window wearing the one
+    /// Windows draws for itself, and that is the whole point of the switch.
+    /// </summary>
+    /// <remarks>
+    /// It HIDES rather than simply skipping. The overlay is created once and reused forever, so a
+    /// switch that only stopped calling ShowAround would strand the last frame it drew on screen.
+    /// </remarks>
+    [Fact]
+    public void WithTheBorderTurnedOff_NothingIsFramed()
+    {
+        var harness = Wire(focusBorderEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xB0C), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > 0);
+        }
+    }
+
+    /// <summary>
+    /// Turning it back on reaches the screen immediately, not on the next tick. A setting the user
+    /// has to wait half a second to see reads as one that did not work.
+    /// </summary>
+    [Fact]
+    public void TurningTheBorderOn_FramesTheFocusedWindowWithoutWaitingForTheTick()
+    {
+        var harness = Wire(focusBorderEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xB0D), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.Empty(harness.Border.Shown);
+
+            harness.Tray.ToggleFocusBorder();
+
+            Assert.Equal(window.Handle, harness.Border.Shown[^1].Framed);
+        }
+    }
+
+    /// <summary>Turning it off from the menu lets go of the frame it was already drawing.</summary>
+    [Fact]
+    public void TurningTheBorderOff_LetsGoOfTheFrameItWasDrawing()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xB0E), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+            var framedBefore = harness.Border.Shown.Count;
+            var hiddenBefore = harness.Border.HideCallCount;
+
+            harness.Tray.ToggleFocusBorder();
+
+            Assert.True(harness.Border.HideCallCount > hiddenBefore);
+
+            // And it STAYS off: the tick must not quietly bring it back.
+            harness.Scheduler.Fire();
+            Assert.Equal(framedBefore, harness.Border.Shown.Count);
+        }
+    }
+
+    /// <summary>
+    /// The choice outlives the process. Without this the menu item would work perfectly and forget
+    /// itself at the next logon, which is worse than not offering it.
+    /// </summary>
+    [Fact]
+    public void TogglingTheBorder_HandsTheNewValueToWhoeverPersistsIt()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            harness.Tray.ToggleFocusBorder();
+            harness.Tray.ToggleFocusBorder();
+
+            Assert.Equal([false, true], harness.Persisted);
         }
     }
 

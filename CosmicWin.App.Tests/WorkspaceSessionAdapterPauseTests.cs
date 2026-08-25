@@ -201,7 +201,8 @@ public sealed class WorkspaceSessionAdapterPauseTests
         using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
         var exceptions = new ExceptionListStore(ExceptionList.Empty);
         var controller = CompositionRoot.BuildTrayMenuController(
-            hook, exceptions, loadExceptions: () => ExceptionList.Empty, exit: () => { });
+            hook, exceptions, loadExceptions: () => ExceptionList.Empty,
+            getFocusBorder: () => true, setFocusBorder: _ => { }, exit: () => { });
         var (_, executor) = CompositionRoot.Build(
             new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
             new Rect(0, 0, 1920, 1080));

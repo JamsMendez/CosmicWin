@@ -117,8 +117,13 @@ public sealed class AppComposition : IDisposable
         Func<nint, Guid>? resolveWindowDesktop = null,
         IWindowShownWatcher? windowShown = null,
         IFocusBorder? focusBorder = null,
-        Action<Action>? scheduleOnOwningThread = null)
+        Action<Action>? scheduleOnOwningThread = null,
+        bool focusBorderEnabled = true,
+        Action<bool>? persistFocusBorder = null)
     {
+        // The live answer to "is the border on", owned here because BOTH the tray item and
+        // UpdateFocusBorder need it and neither may become the other's source of truth.
+        var borderEnabled = focusBorderEnabled;
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
         var workArea = WorkAreaResolver.Resolve(primary);
@@ -256,6 +261,19 @@ public sealed class AppComposition : IDisposable
         // user's installation away.
         var trayController = CompositionRoot.BuildTrayMenuController(
             hook, exceptionStore, loadExceptions,
+            getFocusBorder: () => borderEnabled,
+            setFocusBorder: enabled =>
+            {
+                borderEnabled = enabled;
+
+                // Persisted BEFORE the redraw, so the choice survives even if the refresh throws.
+                persistFocusBorder?.Invoke(enabled);
+
+                // Straight through the ordinary refresh, on the thread that owns the overlay. A
+                // menu click must reach the screen now, not on the next tick -- a setting the user
+                // waits half a second to see reads as one that did not work.
+                onOwningThread(UpdateFocusBorder);
+            },
             exit: () =>
             {
                 disableTaskTrigger();
@@ -307,6 +325,16 @@ public sealed class AppComposition : IDisposable
         {
             if (focusBorder is null)
             {
+                return;
+            }
+
+            // Turned off, it HIDES rather than merely skipping. The overlay is created once and
+            // reused forever, so a switch that only stopped drawing would strand the last frame it
+            // drew on screen -- an outline around a window nobody is on.
+            if (!borderEnabled)
+            {
+                RecordBorderDecision("hidden: the focus border is turned off");
+                focusBorder.Hide();
                 return;
             }
 
@@ -475,6 +503,10 @@ public sealed class AppComposition : IDisposable
 
         var desktops = new Win32VirtualDesktopService();
 
+        // Read ONCE here rather than inside Wire, so every test drives the same composition with the
+        // value stated explicitly instead of whatever this machine's file happens to say.
+        var settings = SettingsFile.Load();
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -491,7 +523,9 @@ public sealed class AppComposition : IDisposable
             resolveWindowDesktop: desktops.ResolveWindowDesktop,
             windowShown: new Win32WindowShownWatcher(),
             focusBorder: new FocusBorderOverlay(),
-            scheduleOnOwningThread: RunOnUiThread);
+            scheduleOnOwningThread: RunOnUiThread,
+            focusBorderEnabled: settings.FocusBorder,
+            persistFocusBorder: enabled => SettingsFile.Save(new Settings(FocusBorder: enabled)));
     }
 
     /// <summary>

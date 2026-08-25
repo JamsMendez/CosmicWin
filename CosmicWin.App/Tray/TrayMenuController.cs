@@ -9,16 +9,36 @@ namespace CosmicWin.App.Tray;
 /// WinForms wrapper that owns the actual notification-area surface).
 /// </summary>
 public sealed class TrayMenuController(
-    Func<bool> getPaused, Action<bool> setPaused, Action reload, Action exit)
+    Func<bool> getPaused, Action<bool> setPaused,
+    Func<bool> getFocusBorder, Action<bool> setFocusBorder,
+    Action reload, Action exit)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
+
+    /// <summary>
+    /// Whether CosmicWin draws its own focus border. Read through the injected getter, never
+    /// remembered, because the setting is persisted to disk and something other than this menu can
+    /// change it.
+    /// </summary>
+    public bool IsFocusBorderEnabled => getFocusBorder();
 
     /// <summary>Spec TC-2 (Pausar/Reanudar): flips the paused flag and returns the new state.</summary>
     public bool TogglePause()
     {
         var next = !getPaused();
         setPaused(next);
+        return next;
+    }
+
+    /// <summary>
+    /// Turns CosmicWin's own focus border on or off, returning the new state so the caller can
+    /// render the tick beside it. Off leaves the window with the thin border DWM draws itself.
+    /// </summary>
+    public bool ToggleFocusBorder()
+    {
+        var next = !getFocusBorder();
+        setFocusBorder(next);
         return next;
     }
 

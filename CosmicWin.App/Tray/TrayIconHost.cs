@@ -39,6 +39,16 @@ public sealed class TrayIconHost : IDisposable
             previous?.Dispose();
         };
 
+        // A TICK rather than a glyph, and deliberately so: a ToolStripMenuItem that carries an
+        // Image renders it INSTEAD of its check mark, so a state this item exists to show would
+        // have been hidden by decorating it. CheckOnClick is left off -- the controller owns the
+        // state, and letting WinForms flip the tick on its own would give it a second owner.
+        var borderItem = new ToolStripMenuItem("Borde de foco")
+        {
+            Checked = controller.IsFocusBorderEnabled,
+        };
+        borderItem.Click += (_, _) => borderItem.Checked = controller.ToggleFocusBorder();
+
         var reloadItem = new ToolStripMenuItem("Reload")
         {
             Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
@@ -56,6 +66,7 @@ public sealed class TrayIconHost : IDisposable
         _menu = new ContextMenuStrip();
         var menu = _menu;
         menu.Items.Add(_pauseItem);
+        menu.Items.Add(borderItem);
         menu.Items.Add(reloadItem);
         menu.Items.Add(exitItem);
 
