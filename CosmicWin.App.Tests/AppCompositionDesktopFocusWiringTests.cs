@@ -189,9 +189,10 @@ public sealed class AppCompositionDesktopFocusWiringTests
         var harness = Wire();
         using (harness.Composition)
         {
-            // One quiet tick first, so the composition's idea of "the desktop we are on" is settled
-            // and the next tick is reacting to a real change rather than to start-up state.
-            harness.Scheduler.Fire();
+            // No warm-up tick. An earlier version fired one "so the composition's idea of the
+            // desktop we are on is settled", which it never did: the composition reads the current
+            // desktop when it is WIRED, so there is nothing left for a tick to settle and firing
+            // one changed nothing measurable. The baseline below stands on its own.
             Assert.Equal(0, harness.There.TryActivateCallCount);
 
             // Win+Ctrl+Right, or a click in Task View. Nothing raises an event; the id just changes.
@@ -216,9 +217,8 @@ public sealed class AppCompositionDesktopFocusWiringTests
         var harness = Wire();
         using (harness.Composition)
         {
-            harness.Scheduler.Fire();
-            harness.Log.Clear();
-
+            // MEASURED, not assumed: the log is empty both after wiring and after a tick that sees
+            // no desktop change, so the fire-then-clear that used to stand here discarded nothing.
             harness.Desktops.CurrentDesktopId = harness.ThereId;
             harness.Scheduler.Fire();
 
@@ -262,8 +262,6 @@ public sealed class AppCompositionDesktopFocusWiringTests
         var harness = Wire(arrivingIsEmpty: true);
         using (harness.Composition)
         {
-            harness.Scheduler.Fire();
-
             harness.Desktops.CurrentDesktopId = harness.ThereId;
             harness.Scheduler.Fire();
 
@@ -281,7 +279,6 @@ public sealed class AppCompositionDesktopFocusWiringTests
         var harness = Wire();
         using (harness.Composition)
         {
-            harness.Scheduler.Fire();
             harness.Desktops.CurrentDesktopId = harness.ThereId;
             harness.Scheduler.Fire();
             Assert.Equal(1, harness.There.TryActivateCallCount);
