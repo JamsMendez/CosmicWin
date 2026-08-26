@@ -111,6 +111,65 @@ public sealed class CompositionRootTests
     /// <see cref="CompositionRoot.BuildSessionAdapter"/> (same seam pattern as <c>workArea</c>) so
     /// this joint is testable outside the untestable WPF <see cref="App"/> class.
     /// </summary>
+    /// <summary>
+    /// The failure sink reaches the dispatcher, so a chord that throws is REPORTED and not merely
+    /// survived.
+    /// </summary>
+    /// <remarks>
+    /// This suite already learned the lesson this fact exists for: a proven mechanism nobody proved
+    /// was CALLED is half a feature. The pump surviving a throw has its own facts; without this one,
+    /// nothing says the composition ever handed it somewhere to report the throw TO, and a silent
+    /// drop looks exactly like a chord the user imagined pressing.
+    /// </remarks>
+    [Fact]
+    public async Task Build_PassesTheFailureSinkToTheDispatcher()
+    {
+        // A TRACKED foreground, or the chord is dropped before it ever reaches the engine and this
+        // fact would pass an empty list off as proof of nothing.
+        const nint focusedHandle = 0xC1;
+        var registry = new WindowRegistry();
+        registry.Register(
+            new RecordingWindow(focusedHandle, Rectangle.Empty), new LeafNode(new WindowRef(focusedHandle)));
+
+        var failures = new List<HotkeyAction>();
+        var (dispatcher, _) = CompositionRoot.Build(
+            new ThrowingTilingEngine(), registry, new StaticForegroundWindowSource(focusedHandle),
+            workArea: new Rect(0, 0, 1920, 1080),
+            onActionFailed: (action, _) => failures.Add(action));
+
+        await using (dispatcher)
+        {
+            dispatcher.Writer.TryWrite(new(HotkeyActionKind.ToggleOrientation));
+            dispatcher.Writer.Complete();
+            await dispatcher.RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(HotkeyActionKind.ToggleOrientation, Assert.Single(failures).Kind);
+    }
+
+    /// <summary>
+    /// Blows up the moment the executor touches the tree, standing in for the real throw sites --
+    /// <c>TreeManager</c>'s unknown-node-type and empty-group guards, which the desktop path walks
+    /// through on every chord.
+    /// </summary>
+    private sealed class ThrowingTilingEngine : ITilingEngine
+    {
+        private static Exception Corrupt() => new InvalidOperationException("Unknown node type");
+
+        public FocusResult NextFocus(Direction direction, LeafNode focused) => throw Corrupt();
+
+        public bool MoveNode(Direction direction, Node focused) => throw Corrupt();
+
+        public bool ToggleAxis(Node focused) => throw Corrupt();
+
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep) =>
+            throw Corrupt();
+
+        public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) => throw Corrupt();
+
+        public bool Remove(Node focused) => throw Corrupt();
+    }
+
     [Fact]
     public void BuildSessionAdapter_ReadsExceptionStoreCurrent_ExcludingManuallyListedWindow()
     {

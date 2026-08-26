@@ -128,7 +128,13 @@ public sealed class AppComposition : IDisposable
         treeManager.TryGetTree(primary, out var primaryTree);
         var workArea = WorkAreaResolver.Resolve(primary);
 
-        var (dispatcher, executor) = CompositionRoot.Build(primaryTree!, registry, foreground, workArea);
+        // A chord that throws no longer kills the pump; this is where it says so. Without a sink
+        // the manager would drop the chord in silence and look perfectly healthy doing it.
+        var (dispatcher, executor) = CompositionRoot.Build(
+            primaryTree!, registry, foreground, workArea,
+            onActionFailed: (action, error) => desktopTrace?.Record(
+                $"action-failed {action.Kind} arg={action.Argument} " +
+                $"{error.GetType().Name}: {error.Message}"));
         executor.TreeManager = treeManager;
         executor.FocusTrace = focusTrace;
         executor.VirtualDesktops = virtualDesktops;

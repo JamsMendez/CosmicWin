@@ -28,11 +28,19 @@ public static class CompositionRoot
     /// <see cref="ActionExecutor.WorkArea"/> as the single source of truth for any other component
     /// (e.g. <see cref="WorkspaceSessionAdapter"/>) that also needs to arrange the tree.
     /// </summary>
+    /// <param name="onActionFailed">
+    /// Where a chord that THREW is reported. Optional, and the pump survives either way -- but a
+    /// composition that leaves it null gets a window manager that drops a chord in total silence,
+    /// which is the failure this repository has paid to diagnose more than once. Passed at
+    /// construction rather than assigned afterwards so a dispatcher cannot exist, however briefly,
+    /// in a state where a failure would go unreported.
+    /// </param>
     public static (ActionDispatcher Dispatcher, ActionExecutor Executor) Build(
-        ITilingEngine engine, WindowRegistry registry, IForegroundWindowSource foreground, Rect workArea)
+        ITilingEngine engine, WindowRegistry registry, IForegroundWindowSource foreground, Rect workArea,
+        Action<HotkeyAction, Exception>? onActionFailed = null)
     {
         var executor = new ActionExecutor(engine, registry, foreground) { WorkArea = workArea };
-        var dispatcher = new ActionDispatcher(executor);
+        var dispatcher = new ActionDispatcher(executor) { OnActionFailed = onActionFailed };
         return (dispatcher, executor);
     }
 
