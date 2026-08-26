@@ -120,7 +120,8 @@ public sealed class ActionExecutorDesktopFocusTests
         LayoutTree Tree,
         LeafNode FocusedLeaf,
         LeafNode SurvivorLeaf,
-        RecordingDesktopTrace Trace);
+        RecordingDesktopTrace Trace,
+        List<nint> ActivationOrder);
 
     /// <summary>
     /// Two tiles, with the FOCUSED one deliberately FIRST in the tree. That ordering is the point:
@@ -167,6 +168,12 @@ public sealed class ActionExecutorDesktopFocusTests
         var desktops = new FakeVirtualDesktops();
         var trace = new RecordingDesktopTrace();
 
+        // Shared by both windows, so the ORDER activations happened in is readable. Counts answer
+        // "how many"; anything that walks a set of windows is only correct if it also ends in the
+        // right place, and that is a question only an ordered log can answer.
+        var activationOrder = new List<nint>();
+        focused.ActivationLog = activationOrder;
+        survivor.ActivationLog = activationOrder;
         var executor = new ActionExecutor(managed, registry, foreground)
         {
             WorkArea = new Rect(0, 0, 1920, 1080),
@@ -189,7 +196,28 @@ public sealed class ActionExecutorDesktopFocusTests
 
         return new Harness(
             executor, desktops, foreground, focused, survivor, managed, focusedLeaf, survivorLeaf,
-            trace);
+            trace, activationOrder);
+    }
+
+    /// <summary>Two desktops with stable identities, so a fact can walk between them and back.</summary>
+    private static readonly Guid DesktopOne = new("11111111-1111-1111-1111-111111111111");
+
+    private static readonly Guid DesktopTwo = new("22222222-2222-2222-2222-222222222222");
+
+    /// <summary>
+    /// Walks the user from <paramref name="from"/> to <paramref name="to"/> with the switch chord,
+    /// the way the real one does: the executor reads the foreground FIRST, which is what records
+    /// who was left behind.
+    /// </summary>
+    private static async Task Switch(Harness harness, Guid from, Guid to, nint focusedThere)
+    {
+        harness.Desktops.CurrentDesktopId = from;
+        harness.Desktops.SwitchesTo = to;
+        harness.Foreground.Handle = focusedThere;
+
+        await harness.Executor
+            .ScheduleAsync(new HotkeyAction(HotkeyActionKind.SwitchDesktop, 1), CancellationToken.None)
+            .AsTask();
     }
 
     private static Task Send(Harness harness, int desktop = 2) =>
@@ -515,6 +543,104 @@ public sealed class ActionExecutorDesktopFocusTests
         var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
         Assert.Contains(
             $"survivor-thread-active=0x{harness.Survivor.Handle:X}", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Sending a window away is NOT an arrival, and does NOT sweep.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The user has not gone anywhere; the window has. The desktop they are looking at is the one
+    /// they were already on, and its windows were never cloaked, so none of them is carrying the
+    /// undelivered deactivation the sweep exists to fix. Sweeping here would activate every tile in
+    /// view -- including, one moment before the shell takes it away, the very window being sent.
+    /// </para>
+    /// <para>
+    /// <c>arriving</c> is passed EXPLICITLY rather than inferred from the departing handle being
+    /// zero. The two coincide today, and relying on exactly that coincidence is what left the first
+    /// thread reading blank on the arriving path.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SendingAWindowAway_DoesNotSweep()
+    {
+        var harness = Build();
+
+        await Send(harness);
+
+        Assert.Equal([harness.Survivor.Handle], harness.ActivationOrder);
+    }
+
+    /// <summary>
+    /// The arrival sweep: touch every window on the desktop, and END on the one focus is meant to
+    /// land on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Aimed at a MEASURED behaviour, not a guess. Switching away from a desktop never deactivates
+    /// the window that held focus there -- Windows cloaks it, it is never told it lost anything --
+    /// so an application that paints its own frame from thread-local activation state keeps drawing
+    /// itself active. This repository has already measured the recipe that clears it: focusing that
+    /// window and then leaving it. Changing focus to something else does NOT.
+    /// </para>
+    /// <para>
+    /// A sweep automates exactly that recipe across every window on the arriving desktop. Landing on
+    /// the survivor LAST is not a detail -- it is what makes the sweep a sweep rather than a focus
+    /// change, because the last window visited is the only one that does not get left.
+    /// </para>
+    /// <para>
+    /// The order is asserted whole rather than by counting. A sweep that visited everything and
+    /// finished on the wrong window would satisfy every count and strand the user's focus on
+    /// whichever tile happened to be last in the tree.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheArrivalSweep_VisitsEveryWindowOnTheDesktop_AndLandsOnTheSurvivorLast()
+    {
+        var harness = Build();
+
+        harness.Executor.HandFocusToArrivingDesktop();
+
+        // The survivor search takes the tree's first leaf, so Focused is the landing spot here.
+        Assert.Equal(
+            [harness.Survivor.Handle, harness.Focused.Handle],
+            harness.ActivationOrder);
+    }
+
+    /// <summary>The sweep says what it swept, or it is another silent thing to guess about.</summary>
+    [Fact]
+    public void TheArrivalSweep_RecordsEveryWindowItVisited_AndTheRungEachReported()
+    {
+        var harness = Build();
+        harness.Survivor.NextActivation = ActivationOutcome.AttachedInput;
+
+        harness.Executor.HandFocusToArrivingDesktop();
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("sweep ", StringComparison.Ordinal));
+        Assert.Contains($"0x{harness.Survivor.Handle:X}:AttachedInput", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A window the sweep could not activate does not stop the sweep, and does not stop the landing.
+    /// </summary>
+    /// <remarks>
+    /// A refused activation mid-sweep is ordinary: the window may be protected, or Windows may
+    /// simply say no. Abandoning the walk there would leave focus parked on whichever window the
+    /// sweep happened to reach, which is a worse outcome than the border it set out to clear.
+    /// </remarks>
+    [Fact]
+    public void WhenASweptWindowRefusesActivation_TheSweepCarriesOn_AndStillLands()
+    {
+        var harness = Build();
+        harness.Survivor.FailNextActivate();
+
+        harness.Executor.HandFocusToArrivingDesktop();
+
+        Assert.Equal(
+            [harness.Survivor.Handle, harness.Focused.Handle],
+            harness.ActivationOrder);
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains("activated=True", line, StringComparison.Ordinal);
     }
 
     /// <summary>

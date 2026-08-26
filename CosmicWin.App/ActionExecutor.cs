@@ -255,7 +255,15 @@ public sealed class ActionExecutor(
     /// changed underneath and nothing in particular is leaving.
     /// </para>
     /// </remarks>
-    private void HandFocusToVisibleDesktop(nint departingHandle)
+    /// <param name="arriving">
+    /// Whether the user has WALKED to another desktop, as opposed to a window having been sent away
+    /// while they stayed put. Passed explicitly rather than inferred from
+    /// <paramref name="departingHandle"/> being zero: those two happen to coincide today, and the
+    /// first version of the thread reading was silently blank on the arriving path for exactly that
+    /// reason. Only an arrival revives anything -- on a send, the record for the desktop in view
+    /// names the window being sent away at this very instant.
+    /// </param>
+    private void HandFocusToVisibleDesktop(nint departingHandle, bool arriving)
     {
         // Read from the OS, not from the cache. The cache is what is being distrusted here, and the
         // pair of readings around the activation is the only thing that separates "the foreground
@@ -307,6 +315,14 @@ public sealed class ActionExecutor(
             return;
         }
 
+        // ARRIVAL only. On a send the user has not gone anywhere -- the window has -- so the desktop
+        // in view is the one they were already on, and sweeping it would activate every tile on it
+        // including, one moment before the shell takes it away, the window being sent.
+        if (arriving)
+        {
+            SweepDesktop(display, landingOn: survivor.Window.Handle);
+        }
+
         // The OUTCOME, not the bool. Null distinguishes the third case the bool could not express:
         // nobody was asked at all, because the survivor is untracked or already dead. Reporting that
         // as a refusal would blame Windows for a decision taken right here.
@@ -354,6 +370,74 @@ public sealed class ActionExecutor(
     }
 
     /// <summary>
+    /// Activates every window on <paramref name="display"/> except <paramref name="landingOn"/>, so
+    /// each one is focused and then LEFT — the measured recipe for making a window that paints its
+    /// own frame notice it is not active any more.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The defect it cures, measured rather than argued: switching away from a desktop never
+    /// deactivates the window that held focus there. Windows CLOAKS it and delivers no
+    /// <c>WM_NCACTIVATE(FALSE)</c>, so an application that paints its own non-client frame from
+    /// thread-local activation state keeps drawing itself active and comes back wearing a focus
+    /// border that belongs to nobody. The discriminator: leave the desktop with that window focused
+    /// and its border strands; leave it with a DIFFERENT window focused and it comes back clean.
+    /// Seven other suspects were refuted before this one, several of them on hardware.
+    /// </para>
+    /// <para>
+    /// Swept rather than aimed at the single window that needs it, and that is a deliberate reversal.
+    /// The aimed version has to REMEMBER which window held focus on each desktop, and the moment
+    /// between a switch landing and focus being handed on -- where the current desktop id and the OS
+    /// foreground disagree about which desktop anything belongs to -- made that record wrong: every
+    /// handover line reported the remembered window as living elsewhere, and it never fired once.
+    /// The sweep remembers nothing, so it has nothing to key wrong. Its measured cost is one or two
+    /// activations reporting <c>Direct</c> or <c>AttachedInput</c>, never the synthetic-Alt rung.
+    /// </para>
+    /// <para>
+    /// <paramref name="landingOn"/> is skipped rather than visited early, because the caller
+    /// activates it immediately afterwards. Visiting it here would activate it twice and, worse,
+    /// would leave it as a window the sweep departed from — the exact state this is trying to
+    /// clear.
+    /// </para>
+    /// <para>
+    /// A refusal never stops the walk. Windows says no to activation for ordinary reasons, and
+    /// abandoning the sweep at the first one would strand the user's focus on whichever window it
+    /// reached — a worse outcome than the border it set out to clear.
+    /// </para>
+    /// </remarks>
+    private void SweepDesktop(IDisplay display, nint landingOn)
+    {
+        if (TreeManager is not { } treeManager)
+        {
+            return;
+        }
+
+        var visited = new List<string>();
+        foreach (var leaf in treeManager.LeavesOn(display))
+        {
+            var handle = leaf.Window.Handle;
+            if (handle == landingOn)
+            {
+                continue;
+            }
+
+            if (!registry.TryGetWindow(handle, out var window) || window is not { IsAlive: true })
+            {
+                visited.Add($"0x{handle:X}:untracked");
+                continue;
+            }
+
+            visited.Add($"0x{handle:X}:{window.Activate()}");
+        }
+
+        // Recorded even when it swept nothing. A sweep that visited an empty set and a sweep that
+        // never ran look identical from a log that only speaks up when it has something to say.
+        DesktopTrace?.Record(
+            $"sweep display=0x{display.Handle:X} landing=0x{landingOn:X} " +
+            $"count={visited.Count} {string.Join(" ", visited)}");
+    }
+
+    /// <summary>
     /// Puts focus back on <paramref name="handle"/> after a move the shell refused.
     /// </summary>
     /// <remarks>
@@ -380,7 +464,7 @@ public sealed class ActionExecutor(
     /// calls this once it has seen the desktop change; the chord path answers itself, immediately,
     /// without waiting an interval.
     /// </remarks>
-    public void HandFocusToArrivingDesktop() => HandFocusToVisibleDesktop(departingHandle: 0);
+    public void HandFocusToArrivingDesktop() => HandFocusToVisibleDesktop(departingHandle: 0, arriving: true);
 
     /// <summary>
     /// Resolves the leaf currently treated as focused: the leaf the OS foreground actually maps to,
@@ -501,7 +585,7 @@ public sealed class ActionExecutor(
                 // applied: the tree being searched has to be the one the user is now looking at.
                 if (desktops.CurrentDesktopId != desktopBefore)
                 {
-                    HandFocusToVisibleDesktop(departingHandle: 0);
+                    HandFocusToVisibleDesktop(departingHandle: 0, arriving: true);
                 }
             }
         }
@@ -531,7 +615,7 @@ public sealed class ActionExecutor(
             var handedOff = desktops.IsSupported && foregroundHandle != 0;
             if (handedOff)
             {
-                HandFocusToVisibleDesktop(foregroundHandle);
+                HandFocusToVisibleDesktop(foregroundHandle, arriving: false);
             }
 
             // The window the user is looking at, straight from the OS. Deliberately not the tracked

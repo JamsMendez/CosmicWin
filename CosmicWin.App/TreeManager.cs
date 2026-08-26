@@ -223,6 +223,19 @@ public sealed class TreeManager
         source.Root = null;
     }
 
+    /// <summary>
+    /// Every leaf on <paramref name="display"/>'s current tree, in tree order. Empty when that
+    /// display has no tree or an empty one.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FocusSurvivorOn"/> answers "which ONE window", which is the only question the
+    /// focus path used to have. Anything that has to visit them all needs the set, and rebuilding it
+    /// by walking <c>Root</c> from outside would duplicate the node-type handling that already lives
+    /// here — including the throw for a node kind this class does not know.
+    /// </remarks>
+    public IReadOnlyList<LeafNode> LeavesOn(IDisplay display) =>
+        TryGetTree(display, out var tree) && tree?.Root is { } root ? CollectLeaves(root) : [];
+
     private static List<LeafNode> CollectLeaves(Node? node) => node switch
     {
         null => [],
