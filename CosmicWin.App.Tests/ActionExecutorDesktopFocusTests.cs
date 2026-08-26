@@ -743,6 +743,34 @@ public sealed class ActionExecutorDesktopFocusTests
     }
 
     /// <summary>
+    /// The OTHER free refusal: nothing is focused, so there is no window to send.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The hand-off guard rests on TWO conditions and only one of them was driven by a fact. The
+    /// untested half is the one a real desktop reaches most easily -- click the wallpaper and the
+    /// foreground belongs to the shell, which reports as no trackable window at all.
+    /// </para>
+    /// <para>
+    /// It costs nothing here for the same reason the unsupported build does: the service refuses a
+    /// zero handle outright, so handing focus off first would buy an activation for a move that was
+    /// never going to happen, and then a second one to undo it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AMoveWithNothingToSend_MovesNoFocusAtAll()
+    {
+        var harness = Build();
+        harness.Foreground.Handle = 0;
+        harness.Desktops.MoveSucceeds = false;
+
+        await Send(harness);
+
+        Assert.Equal(0, harness.Survivor.TryActivateCallCount);
+        Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
     /// The survivor becomes the cache only because activation SUCCEEDED. When it fails, CosmicWin
     /// must not claim the user is somewhere they are not -- the MR-2 lesson, applied to this path.
     /// </summary>

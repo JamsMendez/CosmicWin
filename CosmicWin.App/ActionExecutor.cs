@@ -603,11 +603,22 @@ public sealed class ActionExecutor(
             //
             // Handing focus on first costs nothing when the move succeeds. When it does not, it
             // costs an activation to undo -- so it is only done when the move is not already known
-            // to be impossible. These are exactly the two conditions the service refuses on WITHOUT
-            // asking the shell: an unrecognised Windows build, and no foreground window to send. A
-            // refusal for either of those reasons costs no activation at all, as it did before
-            // focus started leaving early. The window is still in the tree here, which is what
+            // to be impossible. The window is still in the tree here, which is what
             // HandFocusToVisibleDesktop's exclusion is for.
+            //
+            // The service refuses THREE things without asking the shell: an unrecognised Windows
+            // build, no foreground window to send, and an index outside 1..MaxIndex. Only the first
+            // two are tested here, because the third cannot happen -- every desktop chord carries
+            // 1..9 and MaxIndex is 9. That is an invariant across two files rather than a property
+            // of either, so it is pinned by a fact
+            // (DesktopChordTests.EveryDesktopChord_CarriesAnArgumentTheServiceWillNotRefuseOnRange)
+            // instead of being asserted here. Add a chord for a tenth desktop and that fact fails
+            // before this guard silently starts paying two activations for an impossible move.
+            //
+            // NOT a free refusal, and the reason an earlier version of this comment was wrong: an
+            // index beyond the number of desktops that currently EXIST. The service creates
+            // desktops until the index exists, by design, so Alt+Shift+5 on a two-desktop machine
+            // is an ordinary successful move.
             //
             // What is left is the shell refusing this PARTICULAR window, which cannot be known
             // without asking. That refusal does cost one activation each way, and the facts bound

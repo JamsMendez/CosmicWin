@@ -43,6 +43,64 @@ public sealed class DesktopChordTests
         public nint GetForegroundHandle() => handle;
     }
 
+    /// <summary>
+    /// No desktop chord can carry an argument the service refuses on RANGE alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ActionExecutor</c> hands focus off BEFORE asking the shell to move a window, and only when
+    /// the move is not already known to be impossible for free. That guard tests two things -- a
+    /// supported build and a foreground window to send -- and skips the service's third free
+    /// refusal, an index outside <c>1..MaxIndex</c>. Skipping it is correct only while no chord can
+    /// produce such an index, and that is an invariant across two files rather than a property of
+    /// either, so it is pinned here rather than asserted in a comment.
+    /// </para>
+    /// <para>
+    /// Note what is NOT a free refusal: an index larger than the number of desktops that currently
+    /// exist. The service CREATES desktops until the index exists, by design, so
+    /// <c>Alt+Shift+5</c> on a two-desktop machine is an ordinary successful move and not a refusal
+    /// at all.
+    /// </para>
+    /// <para>
+    /// If a chord for a tenth desktop is ever added, this fails first and says why: the executor's
+    /// guard has to grow with it or that chord pays two activations for a move that cannot happen.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void EveryDesktopChord_CarriesAnArgumentTheServiceWillNotRefuseOnRange()
+    {
+        // The range Win32VirtualDesktopService.TryResolve accepts, restated on the side that has to
+        // stay inside it. Interop's copy is internal, so this cannot reference the constant itself.
+        const int maxIndex = 9;
+
+        // The WHOLE key and modifier space the table can hold, not the declared members of
+        // KeyboardKey. A tenth desktop chord would be registered as `D1 + 9`, a byte with no name in
+        // that enum, so a sweep over Enum.GetValues would walk straight past the one registration
+        // this fact exists to catch -- confirmed by mutation, it passed happily with the tenth
+        // chord in place. The table is a flat 256 x 8 array and TryMatch takes any byte, so the
+        // exhaustive sweep costs nothing and cannot be outflanked by an unnamed key.
+        var found = 0;
+        for (var key = 0; key <= byte.MaxValue; key++)
+        {
+            for (var modifiers = 0; modifiers < 8; modifiers++)
+            {
+                if (!ChordTable.Default.TryMatch((ModifierKeys)modifiers, (KeyboardKey)key, out var action)
+                    || action.Kind is not (HotkeyActionKind.SwitchDesktop or HotkeyActionKind.MoveWindowToDesktop))
+                {
+                    continue;
+                }
+
+                Assert.InRange(action.Argument, 1, maxIndex);
+                found++;
+            }
+        }
+
+        // Exact, not a lower bound. A sweep that matched nothing would pass every assertion above
+        // while asserting nothing at all, and an exact count also fails on a tenth chord a second
+        // way -- belt and braces on the one fact that has to notice a chord nobody told it about.
+        Assert.Equal(18, found);
+    }
+
     [Theory]
     [InlineData(KeyboardKey.D1, 1)]
     [InlineData(KeyboardKey.D5, 5)]
