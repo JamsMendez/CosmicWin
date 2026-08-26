@@ -55,11 +55,32 @@ public interface IWindow : IEquatable<IWindow>
     void SetPosition(Rectangle bounds);
 
     /// <summary>
-    /// Brings this window to the foreground. Implementations MUST NOT throw when activation is
-    /// refused or fails (e.g. a higher-integrity/protected window, or one owned by a process that
-    /// currently blocks foreground changes) — returns <see langword="false"/> instead. Callers
-    /// (the App-layer executor) MUST NOT retry on a returned <see langword="false"/>.
+    /// Brings this window to the foreground and reports WHICH rung of the activation escalation
+    /// answered. Implementations MUST NOT throw when activation is refused or fails (e.g. a
+    /// higher-integrity/protected window, or one owned by a process that currently blocks
+    /// foreground changes) — they report <see cref="ActivationOutcome.Failed"/> or
+    /// <see cref="ActivationOutcome.TimedOut"/> instead. Callers MUST NOT retry on either.
     /// </summary>
+    /// <remarks>
+    /// The activation path distinguishes six endings, three of them successes with completely
+    /// different consequences for the machine — a plain <c>SetForegroundWindow</c> does not touch
+    /// another process's input state, an <c>AttachThreadInput</c>-backed retry does. Collapsing
+    /// them here was the reason a reported focus defect could be argued about but never read off a
+    /// log.
+    /// </remarks>
+    ActivationOutcome Activate();
+
+    /// <summary>
+    /// Brings this window to the foreground; <see langword="true"/> when the OS confirmed it holds
+    /// the foreground afterwards. The DERIVED reading of <see cref="Activate"/>, for the many
+    /// callers that only need "did focus move".
+    /// </summary>
+    /// <remarks>
+    /// Implementations MUST answer exactly <c>Activate().Confirmed()</c> and MUST NOT activate a
+    /// second time to answer it — two activation methods free to disagree would be strictly worse
+    /// than the single flattened one this replaced, because the log and the behaviour would then
+    /// come from different code. Pinned by <c>IWindowContractTests</c>.
+    /// </remarks>
     bool TryActivate();
 
     /// <summary>Raw <c>GetClassName</c> value, uninterpreted by Interop. Empty once dead.</summary>

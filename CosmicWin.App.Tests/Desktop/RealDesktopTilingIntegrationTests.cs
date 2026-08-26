@@ -131,7 +131,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         // activate (LE-2's risk surface) and that the desktop actually followed.
         var foregroundSource = new Win32ForegroundWindowSource();
         Assert.True(
-            nativeSource.TryActivateWindow(window1.Handle),
+            nativeSource.Activate(window1.Handle).Confirmed(),
             "Could not put the leftmost window in the real foreground to start the focus walk from.");
         Thread.Sleep(Settle);
 
@@ -405,7 +405,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
     /// <summary>
     /// Delegates every member to <paramref name="inner"/> unmodified
-    /// -- the real Win32 call still fires, best-effort -- except <see cref="TryActivateWindow"/>,
+    /// -- the real Win32 call still fires, best-effort -- except <see cref="Activate"/>,
     /// which additionally RECORDS the targeted handle before delegating. This is what lets step 4
     /// assert WHICH window CosmicWin's own focus path attempts to activate without depending on
     /// Windows' foreground-lock policy, which governs only whether that attempt is actually granted.
@@ -424,10 +424,10 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public IDisposable SubscribeShownWindows(Action<nint> callback) => inner.SubscribeShownWindows(callback);
 
-        public bool TryActivateWindow(nint hwnd)
+        public ActivationOutcome Activate(nint hwnd)
         {
             LastActivateAttempt = hwnd;
-            return inner.TryActivateWindow(hwnd);
+            return inner.Activate(hwnd);
         }
     }
 

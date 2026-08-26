@@ -82,22 +82,34 @@ internal sealed class RecordingWindow : IWindow
         LastSetPosition = bounds;
     }
 
-    public bool TryActivate()
+    /// <summary>
+    /// Which rung a successful activation reports. <see cref="ActivationOutcome.Direct"/> by
+    /// default, so every fact written before the rung existed keeps meaning what it meant.
+    /// </summary>
+    public ActivationOutcome NextActivation { get; set; } = ActivationOutcome.Direct;
+
+    /// <summary>
+    /// Counted HERE rather than in <see cref="TryActivate"/>, so one activation is one count no
+    /// matter which of the two readings the caller asked for.
+    /// </summary>
+    public ActivationOutcome Activate()
     {
         TryActivateCallCount++;
         if (!IsAlive)
         {
-            return false;
+            return ActivationOutcome.Failed;
         }
 
         if (_failNextActivate)
         {
             _failNextActivate = false;
-            return false;
+            return ActivationOutcome.Failed;
         }
 
-        return true;
+        return NextActivation;
     }
+
+    public bool TryActivate() => Activate().Confirmed();
 
     /// <summary>Makes the next <see cref="SetPosition"/> call fail (threat matrix precedent).</summary>
     public void FailNextSetPosition() => _failNextSetPosition = true;

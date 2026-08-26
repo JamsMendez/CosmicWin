@@ -62,6 +62,57 @@ public sealed class ActionExecutorFocusTraceTests
         Assert.Equal(FocusTraceOutcome.Activated, entry.Outcome);
     }
 
+    /// <summary>
+    /// An ordinary same-desktop focus chord names its rung too — this is the CONTROL GROUP.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The desktop handover recording its rung is only half a measurement. The standing question is
+    /// why a defect attributed to the activation escalation does not appear on every focus change,
+    /// and the answer is a comparison: if the desktop chord reports
+    /// <see cref="ActivationOutcome.AttachedInput"/> while this path reports
+    /// <see cref="ActivationOutcome.Direct"/>, the difference is the finding. One number without
+    /// the other is just a number.
+    /// </para>
+    /// <para>
+    /// Two rungs asserted rather than one, so the field cannot pass by being hard-coded to whatever
+    /// the first fact happened to expect.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(ActivationOutcome.Direct)]
+    [InlineData(ActivationOutcome.AttachedInput)]
+    public async Task FocusRight_RecordsWhichActivationRungRan(ActivationOutcome rung)
+    {
+        var (executor, _, _, trace, _, windowB) = BuildTwoLeafRow();
+        windowB.NextActivation = rung;
+
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
+
+        var entry = Assert.Single(trace.Entries);
+        Assert.Equal(rung, entry.Activation);
+    }
+
+    /// <summary>
+    /// A chord that never reached an activation records NO rung, rather than a plausible-looking
+    /// default.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ActivationOutcome"/>'s zero value is
+    /// <see cref="ActivationOutcome.AlreadyForeground"/>, which on a boundary chord would read as
+    /// "the target already had focus" -- a complete fabrication about a target that was never
+    /// found. Null is the only honest answer for a question nobody asked.
+    /// </remarks>
+    [Fact]
+    public async Task FocusLeft_AtLeftBoundary_RecordsNoRung_BecauseNothingWasActivated()
+    {
+        var (executor, _, _, trace, _, _) = BuildTwoLeafRow();
+
+        await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusLeft), CancellationToken.None);
+
+        Assert.Null(Assert.Single(trace.Entries).Activation);
+    }
+
     [Fact]
     public async Task FocusLeft_AtLeftBoundary_RecordsNoMatch_WithNoTargetHandle()
     {

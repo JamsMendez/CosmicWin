@@ -83,4 +83,57 @@ public class IWindowContractTests
         Assert.Null(exception);
         Assert.False(activated);
     }
+
+    /// <summary>
+    /// <see cref="IWindow.TryActivate"/> is the DERIVED reading of <see cref="IWindow.Activate"/>,
+    /// never an independent one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The bool survives because dozens of call sites legitimately only need "did focus move".
+    /// What must not survive is an implementation free to answer it separately: two activation
+    /// methods that can disagree is strictly worse than the single flattened one this replaces,
+    /// because then the log and the behaviour come from different code.
+    /// </para>
+    /// <para>
+    /// Pinned as a contract rather than left to a comment, because the rule is only worth anything
+    /// if the next implementation of <see cref="IWindow"/> inherits it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TryActivate_IsExactly_ActivateConfirmed()
+    {
+        var window = new FakeWindow(new IntPtr(12), "Notepad", Rectangle.FromSize(0, 0, 400, 300));
+
+        foreach (var outcome in Enum.GetValues<ActivationOutcome>())
+        {
+            window.NextActivation = outcome;
+            var reported = window.Activate();
+
+            window.NextActivation = outcome;
+            Assert.Equal(reported.Confirmed(), window.TryActivate());
+        }
+    }
+
+    /// <summary>
+    /// Which outcomes count as the foreground having genuinely moved -- the one place that judgement
+    /// is made, so it cannot drift between the Win32 source and anything else that reads an outcome.
+    /// </summary>
+    /// <remarks>
+    /// A timeout confirms NOTHING. It is not the OS refusing; it is our own budget expiring before
+    /// the worker was scheduled, so it answers false for the same reason a refusal does while
+    /// staying a different fact on the line above.
+    /// </remarks>
+    [Theory]
+    [InlineData(ActivationOutcome.AlreadyForeground, true)]
+    [InlineData(ActivationOutcome.Direct, true)]
+    [InlineData(ActivationOutcome.AttachedInput, true)]
+    [InlineData(ActivationOutcome.InputUnlocked, true)]
+    [InlineData(ActivationOutcome.Failed, false)]
+    [InlineData(ActivationOutcome.TimedOut, false)]
+    public void Confirmed_IsTrue_OnlyWhenTheOsConfirmedTheForegroundMoved(
+        ActivationOutcome outcome, bool expected)
+    {
+        Assert.Equal(expected, outcome.Confirmed());
+    }
 }

@@ -88,7 +88,27 @@ public sealed class ActionExecutorDesktopFocusTests
     {
         public nint Handle { get; set; }
 
+        /// <summary>
+        /// What each window's OWNING UI THREAD believes is active, keyed by that window's handle.
+        /// Deliberately separate from <see cref="Handle"/>: the two disagreeing is not a bug in this
+        /// double, it is the exact state under investigation -- a thread left holding activation
+        /// after an <c>AttachThreadInput</c> detach, still painting itself active while the OS
+        /// foreground belongs to someone else.
+        /// </summary>
+        public Dictionary<nint, nint> ThreadActiveWindow { get; } = [];
+
         public nint GetForegroundHandle() => Handle;
+
+        public nint GetActiveWindowOfThreadOwning(nint hwnd) =>
+            ThreadActiveWindow.TryGetValue(hwnd, out var active) ? active : 0;
+    }
+
+    /// <summary>Collects the desktop-trace lines a fact wants to read back.</summary>
+    private sealed class RecordingDesktopTrace : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
     }
 
     private sealed record Harness(
@@ -99,7 +119,8 @@ public sealed class ActionExecutorDesktopFocusTests
         RecordingWindow Survivor,
         LayoutTree Tree,
         LeafNode FocusedLeaf,
-        LeafNode SurvivorLeaf);
+        LeafNode SurvivorLeaf,
+        RecordingDesktopTrace Trace);
 
     /// <summary>
     /// Two tiles, with the FOCUSED one deliberately FIRST in the tree. That ordering is the point:
@@ -144,11 +165,14 @@ public sealed class ActionExecutorDesktopFocusTests
 
         var foreground = new FakeForegroundWindowSource { Handle = focused.Handle };
         var desktops = new FakeVirtualDesktops();
+        var trace = new RecordingDesktopTrace();
+
         var executor = new ActionExecutor(managed, registry, foreground)
         {
             WorkArea = new Rect(0, 0, 1920, 1080),
             TreeManager = treeManager,
             VirtualDesktops = desktops,
+            DesktopTrace = trace,
         };
 
         // Production wires this to MultiMonitorWorkspaceAdapter.RehomeToDesktop, which takes the
@@ -164,7 +188,8 @@ public sealed class ActionExecutorDesktopFocusTests
         };
 
         return new Harness(
-            executor, desktops, foreground, focused, survivor, managed, focusedLeaf, survivorLeaf);
+            executor, desktops, foreground, focused, survivor, managed, focusedLeaf, survivorLeaf,
+            trace);
     }
 
     private static Task Send(Harness harness, int desktop = 2) =>
@@ -257,6 +282,239 @@ public sealed class ActionExecutorDesktopFocusTests
         Assert.Equal(harness.FocusedLeaf, inTreeWhenItLeft);
         Assert.Equal(1, harness.Survivor.TryActivateCallCount);
         Assert.Equal(0, harness.Focused.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// The handover says what it did, on every outcome.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Written because a reported defect could not be diagnosed without it. The handover picks a
+    /// survivor and activates it, and from outside NONE of that is visible: whether a survivor was
+    /// found, which window it was, or whether the activation was refused. Twice in one session that
+    /// gap forced a guess where a fact would have done.
+    /// </para>
+    /// <para>
+    /// This is the repository's own standing rule, already written on FileDesktopTrace after the
+    /// desktop chords reported "Alt+N does nothing" with no way to tell why: instrument before
+    /// guessing, because a window manager's failures are invisible by nature.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task TheHandover_RecordsTheSurvivorItChoseAndWhetherActivationWorked()
+    {
+        var harness = Build();
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains($"departing=0x{harness.Focused.Handle:X}", line, StringComparison.Ordinal);
+        Assert.Contains($"survivor=0x{harness.Survivor.Handle:X}", line, StringComparison.Ordinal);
+        Assert.Contains("activated=True", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The line carries the OS foreground from BEFORE and AFTER the handover.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This pins the SHAPE, because a fake window cannot move a real foreground; what the two
+    /// readings are worth only shows on hardware. But the shape is what makes the diagnosis
+    /// possible at all: <c>activated</c> is <see cref="IWindow.TryActivate"/>'s bool, and a bool
+    /// cannot tell a genuine foreground change from <c>AlreadyForeground</c> -- the short-circuit
+    /// that reports success while nothing moved on screen, which is exactly how MR-2 hid for four
+    /// supervised runs.
+    /// </para>
+    /// <para>
+    /// Read back from the injected foreground source rather than assumed, so a handover that
+    /// believed it worked and a handover that actually worked stop looking identical in the log.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task TheHandover_RecordsTheForegroundBeforeAndAfterItself()
+    {
+        var harness = Build();
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains($"fg-before=0x{harness.Focused.Handle:X}", line, StringComparison.Ordinal);
+        Assert.Contains("fg-after=0x", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A REFUSED activation is the outcome the trace exists for: focus silently stayed where it was,
+    /// and nothing else on the machine says so.
+    /// </summary>
+    [Fact]
+    public async Task WhenActivationIsRefused_TheHandoverSaysSo()
+    {
+        var harness = Build();
+        harness.Survivor.FailNextActivate();
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains("activated=False", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>An empty desktop is a legitimate answer, and it has to be legible as one.</summary>
+    [Fact]
+    public async Task WithNoSurvivor_TheHandoverSaysThatToo()
+    {
+        var harness = Build(withSurvivor: false);
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains("no survivor", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The handover names WHICH RUNG of the activation escalation ran, not merely that something
+    /// worked.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Win32NativeWindowSource.Activate</c> distinguishes six endings -- already foreground, a
+    /// plain <c>SetForegroundWindow</c>, an <c>AttachThreadInput</c>-backed retry, synthetic Alt
+    /// taps, a flat refusal, and a timed-out worker -- and every one of them was being collapsed
+    /// into one <see cref="bool"/> before it reached anybody who could read it. Three of those
+    /// endings are successes with completely different consequences for the machine, so the bool
+    /// answers the one question nobody was asking.
+    /// </para>
+    /// <para>
+    /// The rung matters because <c>AttachThreadInput</c> is the only one that touches another
+    /// process's input state, and a departing handover runs while the window being sent away still
+    /// holds the foreground. If the desktop chord reports an attached rung while an ordinary
+    /// same-desktop focus change reports <see cref="ActivationOutcome.Direct"/>, that difference is
+    /// the whole diagnosis; with a bool it is unreadable either way.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task TheHandover_RecordsWhichActivationRungRan()
+    {
+        var harness = Build();
+        harness.Survivor.NextActivation = ActivationOutcome.InputUnlocked;
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains("activation=InputUnlocked", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A refused activation names its ending too, and the two refusals stay distinguishable.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ActivationOutcome.Failed"/> is Windows saying no; <see
+    /// cref="ActivationOutcome.TimedOut"/> is our own budget expiring before the worker was even
+    /// scheduled, which answers nothing about what Windows would have said. They call for opposite
+    /// fixes, and the bool spelled both of them <c>false</c>.
+    /// </remarks>
+    [Fact]
+    public async Task WhenActivationTimesOut_TheHandoverSaysThat_NotMerelyThatItFailed()
+    {
+        var harness = Build();
+        harness.Survivor.NextActivation = ActivationOutcome.TimedOut;
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains("activation=TimedOut", line, StringComparison.Ordinal);
+        Assert.Contains("activated=False", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The line carries what the DEPARTING window's own UI thread still believes is active.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the second reading, and the one that can turn the standing hypothesis into a
+    /// measurement. Windows keeps activation state per input queue as well as globally, and a
+    /// thread that was attached to ours and then detached is not reliably told it lost the
+    /// foreground. Chromium paints its non-client frame from that thread-local state, which is why
+    /// a window sent to another desktop can keep wearing an active border while
+    /// <c>GetForegroundWindow</c> names somebody else entirely.
+    /// </para>
+    /// <para>
+    /// Recorded beside <c>fg-after</c> on purpose: neither reading proves anything alone. The two
+    /// DISAGREEING is the finding -- the departing thread naming itself while the OS names the
+    /// survivor -- and that comparison is only possible if both are on the same line.
+    /// </para>
+    /// <para>
+    /// A fake cannot own a real input queue, so this pins the SHAPE. What the reading is worth
+    /// shows only on hardware; what it costs to be missing has already been paid twice.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task TheHandover_RecordsWhatTheDepartingWindowsOwnThreadStillBelievesIsActive()
+    {
+        var harness = Build();
+        harness.Foreground.ThreadActiveWindow[harness.Focused.Handle] = harness.Focused.Handle;
+
+        await Send(harness);
+
+        // On the SEND path fg-before and the departing handle are the same window, which is why one
+        // reading serves both paths -- see the arriving-path fact below for the case where they are
+        // not.
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains(
+            $"fg-before-thread-active=0x{harness.Focused.Handle:X}", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The thread reading is keyed to the window that ACTUALLY held focus, which on a plain desktop
+    /// switch is not the departing handle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured gap in the first version of this instrument. <c>HandFocusToArrivingDesktop</c> calls
+    /// in with <c>departingHandle: 0</c> -- nothing is being sent anywhere, the user simply walked
+    /// to another desktop -- so a reading keyed to that handle asked the OS about window zero and
+    /// faithfully recorded nothing. Every arriving-path line in the supervised run read
+    /// <c>departing-thread-active=0x0</c>.
+    /// </para>
+    /// <para>
+    /// That is precisely the path the reported defect reproduces on, so the one reading built to
+    /// catch it was blank exactly where it was needed. <c>fg-before</c> names the real window on
+    /// BOTH paths -- on a send it equals the departing handle anyway -- so it is the correct key.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void OnAPlainDesktopSwitch_TheThreadReadingStillNamesTheWindowThatHeldFocus()
+    {
+        var harness = Build();
+        harness.Foreground.Handle = harness.Focused.Handle;
+        harness.Foreground.ThreadActiveWindow[harness.Focused.Handle] = harness.Focused.Handle;
+
+        harness.Executor.HandFocusToArrivingDesktop();
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains(
+            $"fg-before-thread-active=0x{harness.Focused.Handle:X}", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// And what the ARRIVING window's thread believes, so the pair can be compared rather than
+    /// weighed one at a time.
+    /// </summary>
+    /// <remarks>
+    /// A survivor whose own thread does NOT name itself, after an activation the OS confirmed, is a
+    /// different defect from a departing thread that will not let go. Without both readings the two
+    /// look identical from the log: one border on screen, one line saying <c>activated=True</c>.
+    /// </remarks>
+    [Fact]
+    public async Task TheHandover_RecordsWhatTheSurvivorsOwnThreadBelievesToo()
+    {
+        var harness = Build();
+        harness.Foreground.ThreadActiveWindow[harness.Survivor.Handle] = harness.Survivor.Handle;
+
+        await Send(harness);
+
+        var line = Assert.Single(harness.Trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal));
+        Assert.Contains(
+            $"survivor-thread-active=0x{harness.Survivor.Handle:X}", line, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -102,15 +102,19 @@ public sealed class Win32NativeWindowSourceActivationTests
         Assert.True(outcome == ActivationOutcome.AlreadyForeground, $"Expected AlreadyForeground -- {ForegroundHint()}");
     }
 
-    /// <summary><c>TryActivateWindow</c> stays the boolean <see cref="INativeWindowSource"/> contract, now backed by the escalating implementation.</summary>
+    /// <summary>
+    /// The boolean reading stays available as <c>Confirmed()</c> over the outcome the interface now
+    /// carries, and still means what it always meant: the OS confirmed the target holds the
+    /// foreground.
+    /// </summary>
     [RequiresDesktopFact]
-    public void TryActivateWindow_ReportsTrue_WhenTheForegroundGenuinelyMoved()
+    public void TheBooleanReading_ReportsTrue_WhenTheForegroundGenuinelyMoved()
     {
         using var first = SpawnedAlacrittyWindow.Spawn();
         using var second = SpawnedAlacrittyWindow.Spawn();
         INativeWindowSource source = new Win32NativeWindowSource();
 
-        var activated = source.TryActivateWindow(first.Handle);
+        var activated = source.Activate(first.Handle).Confirmed();
 
         Assert.True(activated, $"Activation was refused -- {ForegroundHint()}");
         Assert.Equal(first.Handle, Foreground());

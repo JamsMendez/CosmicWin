@@ -84,23 +84,31 @@ internal sealed class FakeWindow : IWindow
     /// <summary>Makes the next <see cref="SetPosition"/> call fail (threat matrix: cross-process window manipulation).</summary>
     public void FailNextSetPosition() => _failNextSetPosition = true;
 
-    public bool TryActivate()
+    /// <summary>
+    /// Which rung a successful activation reports. <see cref="ActivationOutcome.Direct"/> by
+    /// default, so every fact written before the rung existed keeps meaning what it meant.
+    /// </summary>
+    public ActivationOutcome NextActivation { get; set; } = ActivationOutcome.Direct;
+
+    public ActivationOutcome Activate()
     {
         if (!IsAlive)
         {
-            return false;
+            return ActivationOutcome.Failed;
         }
 
         if (_failNextActivate)
         {
             _failNextActivate = false;
-            return false;
+            return ActivationOutcome.Failed;
         }
 
-        return true;
+        return NextActivation;
     }
 
-    /// <summary>Makes the next <see cref="TryActivate"/> call fail without throwing.</summary>
+    public bool TryActivate() => Activate().Confirmed();
+
+    /// <summary>Makes the next <see cref="Activate"/> call fail without throwing.</summary>
     public void FailNextActivate() => _failNextActivate = true;
 
     public void Rename(string title) => _title = title;

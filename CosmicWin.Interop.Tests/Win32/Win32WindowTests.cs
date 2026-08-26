@@ -99,6 +99,45 @@ public class Win32WindowTests
         Assert.False(activated);
     }
 
+    /// <summary>
+    /// <see cref="Win32Window.Activate"/> hands the native source's outcome UP unflattened.
+    /// </summary>
+    /// <remarks>
+    /// This class sat directly on top of an escalation that reports six distinct endings and
+    /// forwarded exactly one bit of it. Everything above -- the executor, the desktop trace, the
+    /// person reading the log afterwards -- inherited that loss, and no amount of instrumenting
+    /// further up could recover what was discarded here.
+    /// </remarks>
+    [Theory]
+    [InlineData(ActivationOutcome.AlreadyForeground)]
+    [InlineData(ActivationOutcome.Direct)]
+    [InlineData(ActivationOutcome.AttachedInput)]
+    [InlineData(ActivationOutcome.InputUnlocked)]
+    [InlineData(ActivationOutcome.Failed)]
+    [InlineData(ActivationOutcome.TimedOut)]
+    public void Activate_ForwardsTheNativeSourcesOutcome_Unflattened(ActivationOutcome outcome)
+    {
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(7), "Notepad", Rectangle.FromSize(0, 0, 100, 100));
+        native.ActivateAs(new IntPtr(7), outcome);
+        var window = new Win32Window(new IntPtr(7), "Notepad", Rectangle.FromSize(0, 0, 100, 100), native);
+
+        Assert.Equal(outcome, window.Activate());
+    }
+
+    /// <summary>A dead window is never activated, and never asks the OS about it either.</summary>
+    [Fact]
+    public void Activate_OnADeadWindow_RefusesWithoutTouchingTheNativeSource()
+    {
+        var native = new FakeNativeWindowSource();
+        native.SeedExistingWindow(new IntPtr(8), "Gone", Rectangle.FromSize(0, 0, 100, 100));
+        var window = new Win32Window(new IntPtr(8), "Gone", Rectangle.FromSize(0, 0, 100, 100), native);
+        window.MarkDead();
+
+        Assert.Equal(ActivationOutcome.Failed, window.Activate());
+        Assert.Equal(0, native.ActivationAttemptCount(new IntPtr(8)));
+    }
+
     // 5 pass-through facts pinning IWindow's new raw-descriptor surface (ClassName,
     // ProcessName, Style, ExStyle, IsOwned), added so an App-layer adapter can build a Layout
     // WindowDescriptor from an IWindow without CosmicWin.Layout ever referencing Win32 (design

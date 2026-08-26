@@ -1,5 +1,6 @@
 using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
+using CosmicWin.Interop;
 using CosmicWin.Layout;
 
 namespace CosmicWin.App;
@@ -256,6 +257,12 @@ public sealed class ActionExecutor(
     /// </remarks>
     private void HandFocusToVisibleDesktop(nint departingHandle)
     {
+        // Read from the OS, not from the cache. The cache is what is being distrusted here, and the
+        // pair of readings around the activation is the only thing that separates "the foreground
+        // really moved" from "we were told it did" -- Activate reports FIVE outcomes and
+        // IWindow.TryActivate flattens them all to one bool, AlreadyForeground included.
+        var foregroundBefore = foreground.GetForegroundHandle();
+
         var departed = _focused;
         _focused = null;
 
@@ -268,6 +275,9 @@ public sealed class ActionExecutor(
         // fixes the reported defect.
         if (TreeManager is not { } treeManager)
         {
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"-- no tree manager");
             return;
         }
 
@@ -289,18 +299,58 @@ public sealed class ActionExecutor(
         {
             // An empty desktop is a legitimate answer, not a failure. No window means no focus, and
             // inventing one would drag the user somewhere they never asked to go.
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"display=0x{display.Handle:X} " +
+                $"fg-before-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(foregroundBefore):X} " +
+                $"-- no survivor");
             return;
         }
 
-        if (registry.TryGetWindow(survivor.Window.Handle, out var window)
-            && window is { IsAlive: true }
-            && window.TryActivate())
+        // The OUTCOME, not the bool. Null distinguishes the third case the bool could not express:
+        // nobody was asked at all, because the survivor is untracked or already dead. Reporting that
+        // as a refusal would blame Windows for a decision taken right here.
+        ActivationOutcome? outcome =
+            registry.TryGetWindow(survivor.Window.Handle, out var window) && window is { IsAlive: true }
+                ? window.Activate()
+                : null;
+        var activated = outcome?.Confirmed() ?? false;
+
+        if (activated)
         {
             // The same rule MoveFocus follows, and for the same reason it was written: the cache
             // advances only on a REAL activation, so a refused one cannot leave CosmicWin claiming
             // the user is somewhere they are not.
             _focused = survivor;
         }
+
+        // Recorded on EVERY outcome, not only the interesting one. The whole reason this line
+        // exists is that a handover which quietly did nothing is indistinguishable, from outside,
+        // from one that worked -- and a reported defect was already diagnosed twice from guesswork
+        // because of it. This is the repository's own standing rule, written on FileDesktopTrace:
+        // instrument before guessing, because a window manager's failures are invisible by nature.
+        // fg-after is the whole point of this line. `activated` is the derived bool, and a bool
+        // cannot tell a real foreground change from AlreadyForeground -- the exact short-circuit
+        // MR-2 was caught by, which reported success while nothing moved on screen. Reading the OS
+        // back says which of the two happened, and it is the only reading that can.
+        // `activation` names the RUNG, which is the other half: a plain SetForegroundWindow and an
+        // AttachThreadInput-backed retry both spell success, and only the second one touches
+        // another process's input state.
+        // The two thread readings are taken AFTER the handover on purpose. What the system believes
+        // and what a given UI thread believes are separate pieces of state, and the case worth
+        // catching is them DISAGREEING -- the departing thread still naming itself while fg-after
+        // names the survivor. Neither reading proves anything alone, which is why they share a line.
+        DesktopTrace?.Record(
+            $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+            $"display=0x{display.Handle:X} survivor=0x{survivor.Window.Handle:X} " +
+            $"activation={outcome?.ToString() ?? "not-asked"} activated={activated} " +
+            $"fg-after=0x{foreground.GetForegroundHandle():X} " +
+            // Keyed to fg-before, NOT to departingHandle. The arriving path calls in with a
+            // departing handle of zero -- nothing is being sent anywhere -- so a reading keyed to it
+            // asked the OS about window zero and recorded nothing, on exactly the path the defect
+            // reproduces on. fg-before names the real window on both paths.
+            $"fg-before-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(foregroundBefore):X} " +
+            $"survivor-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(survivor.Window.Handle):X}");
     }
 
     /// <summary>
@@ -394,7 +444,11 @@ public sealed class ActionExecutor(
         // The cache advances only on a REAL activation. Moving it first
         // as this method used to -- meant a rejected SetForegroundWindow still relocated CosmicWin's
         // idea of focus, and nothing ever moved it back.
-        var activated = window.TryActivate();
+        // The RUNG, not just the bool. This is the ordinary same-desktop path, so its rung is what
+        // the desktop handover's rung gets compared against -- and that comparison is the cheapest
+        // way there is to falsify a hypothesis about the activation escalation.
+        var outcome = window.Activate();
+        var activated = outcome.Confirmed();
         if (activated)
         {
             _focused = result.Leaf;
@@ -404,7 +458,8 @@ public sealed class ActionExecutor(
         }
 
         Trace(direction, foregroundHandle, origin, target,
-            activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed);
+            activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed,
+            outcome);
     }
 
     /// <summary>
@@ -506,9 +561,16 @@ public sealed class ActionExecutor(
         return true;
     }
 
+    /// <summary>
+    /// <paramref name="activation"/> defaults to null for every path that never asked a window to
+    /// activate -- an unresolved focus, a tree walk with no match, an untracked target. Those lines
+    /// must not carry a rung, because there was none.
+    /// </summary>
     private void Trace(
-        Direction direction, nint foregroundHandle, nint focusedHandle, nint targetHandle, FocusTraceOutcome outcome) =>
-        FocusTrace?.Record(new FocusTraceEntry(direction, foregroundHandle, focusedHandle, targetHandle, outcome));
+        Direction direction, nint foregroundHandle, nint focusedHandle, nint targetHandle,
+        FocusTraceOutcome outcome, ActivationOutcome? activation = null) =>
+        FocusTrace?.Record(new FocusTraceEntry(
+            direction, foregroundHandle, focusedHandle, targetHandle, outcome, activation));
 
     /// <summary>The direction a FOCUS chord carries, or null for every other action kind.</summary>
     private static Direction? FocusDirectionOf(HotkeyActionKind kind) => kind switch

@@ -88,10 +88,15 @@ internal interface INativeWindowSource
     IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback);
 
     /// <summary>
-    /// Brings the given window to the foreground. Returns <c>false</c> (rather than throwing) if
-    /// the native call fails — e.g. activation is refused for a higher-integrity/protected window.
+    /// Brings the given window to the foreground, reporting WHICH rung of the escalation answered.
+    /// Never throws: a refused activation is <see cref="ActivationOutcome.Failed"/>, an expired
+    /// budget is <see cref="ActivationOutcome.TimedOut"/>.
     /// </summary>
-    bool TryActivateWindow(nint hwnd);
+    /// <remarks>
+    /// Carries the outcome rather than a boolean because this is where the six endings are known.
+    /// A boolean here could not be un-flattened by anything above it, however well instrumented.
+    /// </remarks>
+    ActivationOutcome Activate(nint hwnd);
 
     /// <summary>
     /// Subscribes to every top-level window being SHOWN, with NO trackability filtering. Disposing

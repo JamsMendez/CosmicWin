@@ -1,5 +1,6 @@
 using System.IO;
 using CosmicWin.App.Diagnostics;
+using CosmicWin.Interop;
 using CosmicWin.Layout;
 
 namespace CosmicWin.App.Tests.Diagnostics;
@@ -22,8 +23,9 @@ public sealed class FileFocusTraceTests : IDisposable
         nint foreground = 1,
         nint focused = 1,
         nint target = 2,
-        FocusTraceOutcome outcome = FocusTraceOutcome.Activated) =>
-        new(direction, foreground, focused, target, outcome);
+        FocusTraceOutcome outcome = FocusTraceOutcome.Activated,
+        ActivationOutcome? activation = ActivationOutcome.Direct) =>
+        new(direction, foreground, focused, target, outcome, activation);
 
     [Fact]
     public void Record_WritesEveryFieldTheTwoMr2CandidatesDifferOn()
@@ -39,6 +41,35 @@ public sealed class FileFocusTraceTests : IDisposable
         Assert.Contains("focused=0x1A2B", line);
         Assert.Contains("target=0x3C4D", line);
         Assert.Contains("ActivateFailed", line);
+    }
+
+    /// <summary>
+    /// The rung reaches DISK, because the file is the only thing that survives a supervised run.
+    /// </summary>
+    /// <remarks>
+    /// A field recorded in memory and dropped at the sink is a field nobody will ever read. This is
+    /// the same lesson the outcome field taught: the trace is worth exactly what comes back out of
+    /// <c>%LOCALAPPDATA%\CosmicWin\focus-trace.log</c> afterwards.
+    /// </remarks>
+    [Fact]
+    public void Record_WritesTheActivationRung_SoASupervisedRunCanCompareItAgainstTheDesktopChord()
+    {
+        var trace = new FileFocusTrace(Path_);
+
+        trace.Record(Entry(activation: ActivationOutcome.AttachedInput));
+
+        Assert.Contains("activation=AttachedInput", Assert.Single(File.ReadAllLines(Path_)));
+    }
+
+    /// <summary>A chord that activated nothing writes no rung, rather than an invented one.</summary>
+    [Fact]
+    public void Record_WhenNothingWasActivated_WritesNoRung()
+    {
+        var trace = new FileFocusTrace(Path_);
+
+        trace.Record(Entry(outcome: FocusTraceOutcome.NoMatch, target: 0, activation: null));
+
+        Assert.Contains("activation=none", Assert.Single(File.ReadAllLines(Path_)));
     }
 
     [Fact]

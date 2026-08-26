@@ -82,7 +82,20 @@ internal sealed class Win32Window : IWindow
         _bounds = bounds;
     }
 
-    public bool TryActivate() => IsAlive && _nativeSource.TryActivateWindow(Handle);
+    /// <summary>
+    /// Forwards the native source's outcome UP unflattened.
+    /// </summary>
+    /// <remarks>
+    /// A dead window reports <see cref="ActivationOutcome.Failed"/> WITHOUT asking the OS: there is
+    /// no window left to give the foreground to, so every rung would be refused anyway, and calling
+    /// is the one thing that could produce a surprise. It is the honest answer of the six —
+    /// <see cref="ActivationOutcome.TimedOut"/> would claim a worker ran, and every success value
+    /// would be a lie.
+    /// </remarks>
+    public ActivationOutcome Activate() =>
+        IsAlive ? _nativeSource.Activate(Handle) : ActivationOutcome.Failed;
+
+    public bool TryActivate() => Activate().Confirmed();
 
     internal void Refresh(string title, Rectangle bounds, string className, string processName, uint style, uint exStyle, bool isOwned)
     {

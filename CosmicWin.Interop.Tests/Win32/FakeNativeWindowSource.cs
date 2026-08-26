@@ -83,16 +83,36 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// <summary>Number of times <see cref="SetWindowPosition"/> was called for this handle.</summary>
     public int SetPositionAttemptCount(nint hwnd) => _setPositionAttempts.GetValueOrDefault(hwnd);
 
-    public bool TryActivateWindow(nint hwnd)
+    private readonly Dictionary<nint, ActivationOutcome> _activationOutcomes = new();
+
+    public ActivationOutcome Activate(nint hwnd)
     {
         _activationAttempts[hwnd] = _activationAttempts.GetValueOrDefault(hwnd) + 1;
-        return !_failingActivationHandles.Contains(hwnd);
+
+        if (_failingActivationHandles.Contains(hwnd))
+        {
+            return ActivationOutcome.Failed;
+        }
+
+        return _activationOutcomes.GetValueOrDefault(hwnd, ActivationOutcome.Direct);
     }
 
-    /// <summary>Makes every subsequent <see cref="TryActivateWindow"/> call for this handle fail.</summary>
+    /// <summary>
+    /// The boolean reading, for the facts that only care whether focus moved. Derived rather than
+    /// answered separately, exactly as the real source derives it.
+    /// </summary>
+    public bool TryActivateWindow(nint hwnd) => Activate(hwnd).Confirmed();
+
+    /// <summary>
+    /// Makes every subsequent <see cref="Activate"/> call for this handle report
+    /// <paramref name="outcome"/> — the rung, not just success or refusal.
+    /// </summary>
+    public void ActivateAs(nint hwnd, ActivationOutcome outcome) => _activationOutcomes[hwnd] = outcome;
+
+    /// <summary>Makes every subsequent <see cref="Activate"/> call for this handle fail.</summary>
     public void FailActivationFor(nint hwnd) => _failingActivationHandles.Add(hwnd);
 
-    /// <summary>Number of times <see cref="TryActivateWindow"/> was called for this handle.</summary>
+    /// <summary>Number of times <see cref="Activate"/> was called for this handle.</summary>
     public int ActivationAttemptCount(nint hwnd) => _activationAttempts.GetValueOrDefault(hwnd);
 
     public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback)

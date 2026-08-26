@@ -1,7 +1,7 @@
-namespace CosmicWin.Interop.Win32;
+namespace CosmicWin.Interop;
 
 /// <summary>
-/// Which rung of <see cref="Win32NativeWindowSource.Activate"/>'s escalation actually moved the OS
+/// Which rung of <c>Win32NativeWindowSource.Activate</c>'s escalation actually moved the OS
 /// foreground. Recorded rather than collapsed to a boolean so a later run can tell which rung is
 /// doing the work.
 ///
@@ -12,11 +12,20 @@ namespace CosmicWin.Interop.Win32;
 /// exactly where MR-2 left it. Re-measure before deleting any rung.
 /// </summary>
 /// <remarks>
-/// Every non-<see cref="Failed"/> value means the same verified thing: <c>GetForegroundWindow</c>
-/// reported the target AFTER the attempt. A bare <c>SetForegroundWindow</c> return value is not
-/// trusted — MR-2's fourth supervised run showed that call reporting success while nothing moved.
+/// <para>
+/// Every <see cref="ActivationOutcomeExtensions.Confirmed"/> value means the same verified thing:
+/// <c>GetForegroundWindow</c> reported the target AFTER the attempt. A bare
+/// <c>SetForegroundWindow</c> return value is not trusted — MR-2's fourth supervised run showed
+/// that call reporting success while nothing moved.
+/// </para>
+/// <para>
+/// PUBLIC, and in <c>CosmicWin.Interop</c> rather than <c>CosmicWin.Interop.Win32</c>, because
+/// <see cref="IWindow.Activate"/> now carries it out of the assembly. It stopped being a Win32
+/// implementation detail the moment the App layer needed to write it into a trace: which rung ran
+/// is the diagnosis, and an internal enum could only ever reach the log as a boolean.
+/// </para>
 /// </remarks>
-internal enum ActivationOutcome
+public enum ActivationOutcome
 {
     /// <summary>Nothing to do: the target already held the foreground.</summary>
     AlreadyForeground,
@@ -44,4 +53,20 @@ internal enum ActivationOutcome
     /// this is our own budget being too short for the machine it ran on.
     /// </remarks>
     TimedOut
+}
+
+/// <summary>Reads an <see cref="ActivationOutcome"/> the way a caller who only needs a yes/no does.</summary>
+public static class ActivationOutcomeExtensions
+{
+    /// <summary>
+    /// Whether the OS CONFIRMED the target holds the foreground.
+    /// </summary>
+    /// <remarks>
+    /// The single place that judgement is made, so the boolean every caller still uses and the rung
+    /// the trace records can never come from different code. Both failing endings answer
+    /// <see langword="false"/>: a timeout confirms nothing, so the split serves the diagnosis and
+    /// never changes what a caller sees.
+    /// </remarks>
+    public static bool Confirmed(this ActivationOutcome outcome) =>
+        outcome is not (ActivationOutcome.Failed or ActivationOutcome.TimedOut);
 }

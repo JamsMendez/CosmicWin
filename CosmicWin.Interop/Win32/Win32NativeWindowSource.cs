@@ -191,14 +191,17 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// endings answer false: a timeout confirms nothing, so the split serves the diagnosis and never
     /// changes what a caller sees.
     /// </summary>
-    internal static bool Activated(ActivationOutcome outcome) =>
-        outcome is not (ActivationOutcome.Failed or ActivationOutcome.TimedOut);
+    internal static bool Activated(ActivationOutcome outcome) => outcome.Confirmed();
 
     /// <summary>
-    /// <see cref="INativeWindowSource"/>'s boolean contract, unchanged for callers, now backed by
+    /// The boolean reading, unchanged for callers that only need "did focus move", now backed by
     /// <see cref="Activate"/>. True means the OS itself confirmed the target holds the foreground.
     /// </summary>
-    public bool TryActivateWindow(nint hwnd) => Activated(Activate(hwnd));
+    /// <remarks>
+    /// No longer part of <see cref="INativeWindowSource"/>: the interface carries the outcome, and
+    /// a boolean member beside it would just reintroduce the flattening one layer down.
+    /// </remarks>
+    public bool TryActivateWindow(nint hwnd) => Activate(hwnd).Confirmed();
 
     /// <summary>Asks for the foreground and then CHECKS, rather than believing the return value.</summary>
     private static bool TrySetForeground(HWND target)

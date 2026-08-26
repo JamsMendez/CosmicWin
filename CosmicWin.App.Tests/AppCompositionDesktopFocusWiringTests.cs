@@ -64,12 +64,14 @@ public sealed class AppCompositionDesktopFocusWiringTests
             log.Add($"position:0x{Handle:X}");
         }
 
-        public bool TryActivate()
+        public ActivationOutcome Activate()
         {
             TryActivateCallCount++;
             log.Add($"activate:0x{Handle:X}");
-            return true;
+            return ActivationOutcome.Direct;
         }
+
+        public bool TryActivate() => Activate().Confirmed();
 
         public bool Equals(IWindow? other) => other is not null && Handle == other.Handle;
 
