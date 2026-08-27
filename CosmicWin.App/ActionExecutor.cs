@@ -1,4 +1,4 @@
-using CosmicWin.App.Diagnostics;
+﻿using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
@@ -390,8 +390,22 @@ public sealed class ActionExecutor(
     /// between a switch landing and focus being handed on -- where the current desktop id and the OS
     /// foreground disagree about which desktop anything belongs to -- made that record wrong: every
     /// handover line reported the remembered window as living elsewhere, and it never fired once.
-    /// The sweep remembers nothing, so it has nothing to key wrong. Its measured cost is one or two
-    /// activations reporting <c>Direct</c> or <c>AttachedInput</c>, never the synthetic-Alt rung.
+    /// The sweep remembers nothing, so it has nothing to key wrong.
+    /// </para>
+    /// <para>
+    /// What it COSTS was written here as "one or two activations reporting <c>Direct</c> or
+    /// <c>AttachedInput</c>, never the synthetic-Alt rung". The first trace of a real session
+    /// refuted every part of that: across roughly thirty swept activations, five were free
+    /// (<c>Direct</c>/<c>AlreadyForeground</c>), about twenty took the input-attach rung, and
+    /// EIGHT reported <c>InputUnlocked</c> -- the synthetic-Alt rung, real <c>VK_MENU</c> traffic
+    /// on the user's desktop, which the interop's own doc warns can trip menu accelerators. One
+    /// sweep visited three windows, not "one or two".
+    /// </para>
+    /// <para>
+    /// The expensive rung is load-bearing and is NOT capped: a window has to GAIN the foreground
+    /// before it can lose it, and losing it is the whole repaint this exists to cause. Refusing to
+    /// escalate would leave roughly a quarter of them still painted active, which is the defect.
+    /// What is capped is the total: see <see cref="SweepBudget"/>.
     /// </para>
     /// <para>
     /// <paramref name="landingOn"/> is skipped rather than visited early, because the caller
@@ -405,6 +419,30 @@ public sealed class ActionExecutor(
     /// reached — a worse outcome than the border it set out to clear.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// How long the whole arrival sweep may spend STARTING activations, however many tiles it has.
+    /// </summary>
+    /// <remarks>
+    /// Per-sweep rather than per-window, which is the bound that was missing. Each activation is
+    /// already bounded on its own (the interop's 250 ms), but N of them in a row are not, and this
+    /// walk runs on the WPF UI thread -- the reconciliation tick is a <c>DispatcherTimer</c>, chosen
+    /// so it serialises with the focus border rather than racing it. A desktop of tiles whose
+    /// activations all time out would freeze every one of those for the sum.
+    /// <para>
+    /// Never observed: the first real trace recorded zero timeouts. This bounds the tail, it does
+    /// not fix a measured freeze -- and the honest bound is the budget PLUS one activation's own,
+    /// since the check is what gates STARTING the next one, not interrupting the one in flight.
+    /// </para>
+    /// </remarks>
+    public static readonly TimeSpan SweepBudget = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>Reads the current time for <see cref="SweepBudget"/>. Replaceable so the bound is testable.</summary>
+    /// <remarks>
+    /// A bound that only a slow machine can exercise is a bound nobody has tested -- the same
+    /// reasoning that made the interop take its attempt as a delegate.
+    /// </remarks>
+    public Func<DateTimeOffset> Clock { get; set; } = () => DateTimeOffset.UtcNow;
+
     private void SweepDesktop(IDisplay display, nint landingOn)
     {
         if (TreeManager is not { } treeManager)
@@ -413,11 +451,25 @@ public sealed class ActionExecutor(
         }
 
         var visited = new List<string>();
+        var startedAt = Clock();
+        var abandoned = 0;
         foreach (var leaf in treeManager.LeavesOn(display))
         {
             var handle = leaf.Window.Handle;
             if (handle == landingOn)
             {
+                continue;
+            }
+
+            // Checked before STARTING one, never to interrupt one in flight: a half-done activation
+            // is the state this walk exists to clear, so abandoning inside one would manufacture
+            // the defect. Stopping between them costs the windows not reached their repaint -- they
+            // keep the stale border they already had -- which is strictly what we came to fix
+            // failing to help, not a new harm. Focus is unaffected either way: the caller activates
+            // the landing window after this returns, swept or not.
+            if (Clock() - startedAt >= SweepBudget)
+            {
+                abandoned++;
                 continue;
             }
 
@@ -434,7 +486,8 @@ public sealed class ActionExecutor(
         // never ran look identical from a log that only speaks up when it has something to say.
         DesktopTrace?.Record(
             $"sweep display=0x{display.Handle:X} landing=0x{landingOn:X} " +
-            $"count={visited.Count} {string.Join(" ", visited)}");
+            $"count={visited.Count} {string.Join(" ", visited)}" +
+            (abandoned > 0 ? $" budget-exhausted={abandoned}" : string.Empty));
     }
 
     /// <summary>

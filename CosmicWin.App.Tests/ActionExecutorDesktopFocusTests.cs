@@ -1,4 +1,4 @@
-using CosmicWin.App.Input;
+﻿using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
@@ -122,6 +122,88 @@ public sealed class ActionExecutorDesktopFocusTests
         LeafNode SurvivorLeaf,
         RecordingDesktopTrace Trace,
         List<nint> ActivationOrder);
+
+    /// <summary>
+    /// The sweep is bounded as a WHOLE, not per window. Each activation already has its own bound
+    /// in the interop; N of them in a row had none, and this walk runs on the WPF UI thread.
+    /// </summary>
+    /// <remarks>
+    /// The budget gates STARTING the next activation rather than interrupting one in flight, so the
+    /// windows past the line keep the stale border they already had -- what we came to fix failing
+    /// to help, never a new harm. Focus is untouched either way, which this pins by asserting the
+    /// landing window is still activated LAST after the walk gave up.
+    /// </remarks>
+    [Fact]
+    public void TheArrivalSweep_IsBoundedForTheWholeWalk_NotPerWindow()
+    {
+        var (executor, order, trace, handles) = BuildWideDesktop(tiles: 4);
+
+        // 200ms per reading: the first swept window fits inside the 250ms budget, the rest do not.
+        var readings = 0;
+        var origin = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        executor.Clock = () => origin.AddMilliseconds(200 * readings++);
+
+        executor.HandFocusToArrivingDesktop();
+
+        // One swept, then the landing window -- NOT all four.
+        Assert.Equal([handles[1], handles[0]], order);
+        Assert.Contains("budget-exhausted=2", Assert.Single(trace.Lines, l => l.StartsWith("sweep ", StringComparison.Ordinal)), StringComparison.Ordinal);
+    }
+
+    /// <summary>The same desktop with a clock that never advances sweeps every tile, so the bound is what stopped it.</summary>
+    [Fact]
+    public void TheArrivalSweep_WithinBudget_StillVisitsEveryWindow()
+    {
+        var (executor, order, trace, handles) = BuildWideDesktop(tiles: 4);
+        executor.Clock = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        executor.HandFocusToArrivingDesktop();
+
+        Assert.Equal([handles[1], handles[2], handles[3], handles[0]], order);
+        Assert.DoesNotContain("budget-exhausted", Assert.Single(trace.Lines, l => l.StartsWith("sweep ", StringComparison.Ordinal)), StringComparison.Ordinal);
+    }
+
+    /// <summary>A row of <paramref name="tiles"/> windows; the first is where focus lands.</summary>
+    private static (ActionExecutor Executor, List<nint> Order, RecordingDesktopTrace Trace, nint[] Handles)
+        BuildWideDesktop(int tiles)
+    {
+        var registry = new WindowRegistry();
+        var group = new GroupNode(SplitAxis.Horizontal) { GroupLength = 1920 };
+        var order = new List<nint>();
+        var handles = new nint[tiles];
+
+        for (var index = 0; index < tiles; index++)
+        {
+            var handle = new IntPtr(0xE0 + index);
+            handles[index] = handle;
+            var leaf = new LeafNode(new WindowRef(handle)) { Parent = group };
+            group.Children.Add(leaf);
+            group.Sizes.Add(1920 / tiles);
+            var window = new RecordingWindow(handle, Rectangle.FromSize(0, 0, 1920 / tiles, 1080))
+            {
+                ActivationLog = order,
+            };
+            registry.Register(window, leaf);
+        }
+
+        var display = new FakeDisplay(
+            new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
+        var treeManager = new TreeManager([display], display, registry);
+        treeManager.TryGetTree(display, out var managed);
+        managed!.Root = group;
+
+        var trace = new RecordingDesktopTrace();
+        var executor = new ActionExecutor(
+            managed, registry, new FakeForegroundWindowSource { Handle = handles[0] })
+        {
+            WorkArea = new Rect(0, 0, 1920, 1080),
+            TreeManager = treeManager,
+            VirtualDesktops = new FakeVirtualDesktops(),
+            DesktopTrace = trace,
+        };
+
+        return (executor, order, trace, handles);
+    }
 
     /// <summary>
     /// Two tiles, with the FOCUSED one deliberately FIRST in the tree. That ordering is the point:
