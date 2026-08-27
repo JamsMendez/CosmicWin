@@ -577,6 +577,94 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(Rectangle.FromSize(0, 0, 640, 1080), windowA.LastSetPosition);
     }
 
+    /// <summary>
+    /// The feature asked for: drop one tiled window onto another and they exchange slots.
+    /// </summary>
+    /// <remarks>
+    /// Narrows an earlier decision a second time, on the same seam the resize used. That rule
+    /// snapped a dragged window back wholesale; the size half was given to the user first, and this
+    /// is the position half. Every bounds change that is NOT the user's own drag still snaps back,
+    /// which is why the facts above this one did not have to change.
+    /// </remarks>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnASiblingsTile_ExchangesTheirSlots()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4081), new IntPtr(4082));
+
+        // Same size, moved onto B's half: a drag that MOVES, not one that resizes.
+        windowA.SimulateExternalMove(Rectangle.FromSize(940, 0, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
+
+        // And the swap is applied on screen, not just in the tree.
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowB.LastSetPosition);
+        Assert.Equal([960, 960], group.Sizes);
+    }
+
+    /// <summary>A drop that lands back on its own tile is a drag the user changed their mind about.</summary>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnItsOwnTile_SnapsBackAndChangesNothing()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4091), new IntPtr(4092));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(40, 30, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>
+    /// A drop past every tile on this display finds nothing to exchange with, so the window returns
+    /// to its slot -- which is what keeps a drag that leaves the monitor from being read as a drop.
+    /// </summary>
+    /// <remarks>
+    /// The SECOND window is the one dragged, and that is the point of the fact. Dragging the first
+    /// left it green under a hit test that stopped testing the point at all -- a broken test
+    /// returns the leading leaf, which for the first window is itself, and "dropped on its own
+    /// tile" snaps back for entirely the wrong reason. Caught by mutation.
+    /// </remarks>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOutsideEveryTile_SnapsBack()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4101), new IntPtr(4102));
+
+        windowB.SimulateExternalMove(Rectangle.FromSize(3000, 0, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowB, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
+        Assert.Equal(new WindowRef(windowB.Handle), Assert.IsType<LeafNode>(group.Children[1]).Window);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>
+    /// The seam this rests on: a move the user did NOT perform is still snapped back untouched, so
+    /// an app repositioning itself can never reorder the layout.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_MovedOntoASiblingButNotByTheUser_StillSnapsBack()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4111), new IntPtr(4112));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(940, 0, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+    }
+
     /// <summary>Two windows tiled 1/2 - 1/2 across one 1920x1080 display.</summary>
     private static (Setup S, RecordingWindow A, RecordingWindow B) SideBySide(nint handleA, nint handleB)
     {

@@ -443,19 +443,27 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (e.IsUserGesture && !maximized &&
             _registry.TryGetLeaf(handle, out var dragged) && dragged is not null)
         {
-            var slot = dragged.LastGeometry;
-            var applied = TreeArranger.TryApplyUserResize(dragged, window.Bounds);
+            var tile = TreeArranger.TileOf(dragged);
+            var dropped = window.Bounds;
+
+            // A gesture that changed the LENGTH moved a boundary; one that did not moved the whole
+            // window. They are different questions and only one of them is a resize, so they are
+            // separated here rather than inferred from a resize that declined to apply.
+            var resized = dropped.Width != tile.Width || dropped.Height != tile.Height;
+            var outcome = resized
+                ? TreeArranger.TryApplyUserResize(dragged, dropped) ? "tree resized" : "nothing to resize on either axis"
+                : TrySwapOnDrop(display, dragged, dropped);
 
             // The tile it was measured AGAINST, not just the verdict. The one thing no test can
             // answer is whether a real Win32 drop lines up with the tile actually placed once the
             // gap is on -- a drag that reads as a few phantom pixels of movement is indistinguishable
             // from one the user really made, and both come out of here as "resized".
+            var slot = dragged.LastGeometry;
             Trace?.Record(
                 $"drag hwnd=0x{handle:X} class={window.ClassName} " +
                 $"slot=[X={slot.X} Y={slot.Y} W={slot.Width} H={slot.Height}] gap={TreeArranger.Gap} " +
-                $"dropped=[L={window.Bounds.Left} T={window.Bounds.Top} " +
-                $"W={window.Bounds.Width} H={window.Bounds.Height}] -- " +
-                (applied ? "tree resized" : "nothing to resize on either axis"));
+                $"dropped=[L={dropped.Left} T={dropped.Top} " +
+                $"W={dropped.Width} H={dropped.Height}] -- {outcome}");
         }
 
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
@@ -473,6 +481,55 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         {
             _owners.Remove(handle);
         }
+    }
+
+    /// <summary>
+    /// Exchanges the dropped window's slot with whichever tile it was dropped ONTO. Reports what
+    /// happened, for the trace.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Narrows an earlier decision a second time. That rule made a dragged window snap back
+    /// wholesale; the size half was already given to the user, and this is the position half. It
+    /// still applies to every bounds change that is NOT the user's own drag -- an app moving
+    /// itself, a restore, a shell nudge -- which is why nothing about those changed.
+    /// </para>
+    /// <para>
+    /// SWAP rather than insert-at-the-drop-edge, chosen by the maintainer. It cannot leave the tree
+    /// in a shape nobody asked for: no group is created, none is emptied, no size moves. The
+    /// tempting richer version -- splitting the target on the edge you dropped against -- needs a
+    /// prune of the group the window vacated and a new "which edge" concept, and is a separate
+    /// decision rather than a bigger version of this one.
+    /// </para>
+    /// <para>
+    /// Aimed with the dropped window's CENTRE. The cursor is what the user actually aims with, but
+    /// reading it needs interop this does not have yet, and a swap targets a whole tile rather than
+    /// an edge of one, so the two agree for anything but a large window dropped on a small tile.
+    /// Worth revisiting if that case is ever felt.
+    /// </para>
+    /// </remarks>
+    private string TrySwapOnDrop(IDisplay display, LeafNode dragged, Rectangle dropped)
+    {
+        var target = _treeManager.LeafAt(
+            display,
+            dropped.Left + (dropped.Width / 2),
+            dropped.Top + (dropped.Height / 2));
+
+        // Dropped on nothing this display holds -- most often because the drag left the monitor.
+        // The window goes back to its slot, exactly as it did before any of this existed.
+        if (target is null)
+        {
+            return "dropped outside every tile";
+        }
+
+        if (ReferenceEquals(target, dragged))
+        {
+            return "dropped on its own tile";
+        }
+
+        return LayoutTree.SwapLeaves(dragged, target)
+            ? $"swapped with 0x{target.Window.Handle:X}"
+            : "swap refused";
     }
 
     public void Dispose()

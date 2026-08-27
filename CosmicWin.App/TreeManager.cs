@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
 
@@ -235,6 +235,34 @@ public sealed class TreeManager
     /// </remarks>
     public IReadOnlyList<LeafNode> LeavesOn(IDisplay display) =>
         TryGetTree(display, out var tree) && tree?.Root is { } root ? CollectLeaves(root) : [];
+
+    /// <summary>
+    /// The leaf whose slot contains the given point on <paramref name="display"/>, or
+    /// <see langword="null"/> when the point is outside every one of them.
+    /// </summary>
+    /// <remarks>
+    /// Tested against <see cref="Node.LastGeometry"/> -- the slot the arrange pass handed out --
+    /// rather than the window's real rectangle. The slots tile the work area with no seams between
+    /// them, so every point inside it belongs to exactly one; the drawn tiles are inset by the gap
+    /// and would leave the gutters answering nobody.
+    /// <para>
+    /// Scoped to ONE display on purpose. A point on another monitor finds nothing here, which is
+    /// what keeps a drag that leaves the monitor from being read as a drop.
+    /// </para>
+    /// </remarks>
+    public LeafNode? LeafAt(IDisplay display, int x, int y)
+    {
+        foreach (var leaf in LeavesOn(display))
+        {
+            var slot = leaf.LastGeometry;
+            if (x >= slot.X && x < slot.X + slot.Width && y >= slot.Y && y < slot.Y + slot.Height)
+            {
+                return leaf;
+            }
+        }
+
+        return null;
+    }
 
     private static List<LeafNode> CollectLeaves(Node? node) => node switch
     {

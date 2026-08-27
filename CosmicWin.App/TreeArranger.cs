@@ -159,9 +159,22 @@ internal static class TreeArranger
         TryApplyUserResize(leaf, dragged, Gap);
 
     /// <summary>Explicit-spacing overload, for the same reason the arrange one has one.</summary>
+    /// <summary>
+    /// The rectangle a leaf's window was actually PLACED on: its slot, inset by half the gap the
+    /// way <see cref="Apply"/> insets it.
+    /// </summary>
+    /// <remarks>
+    /// Exposed because two questions need it and neither may re-derive it: how far an edge was
+    /// dragged, and whether a drag changed the size at all or only moved the window.
+    /// </remarks>
+    public static Rect TileOf(Node leaf) => TileOf(leaf, Gap);
+
+    /// <summary>Explicit-spacing overload, for the same reason the arrange one has one.</summary>
+    public static Rect TileOf(Node leaf, int gap) => Deflate(leaf.LastGeometry, Math.Max(0, gap) / 2);
+
     public static bool TryApplyUserResize(Node leaf, Rectangle dragged, int gap)
     {
-        var placed = Deflate(leaf.LastGeometry, Math.Max(0, gap) / 2);
+        var placed = TileOf(leaf, gap);
 
         // A leaf that has never been arranged has no tile to have been dragged away FROM, so there
         // is no delta to read -- only a rectangle-shaped guess at one.
