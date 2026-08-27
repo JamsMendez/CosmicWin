@@ -673,25 +673,60 @@ public sealed class LayoutTree : ITilingEngine
         // zero delta and costs nothing.
         if (current.Width != previous.Width)
         {
-            changed |= TransferAcross(Direction.Left, focused, previous.X - current.X, minRatio);
-            changed |= TransferAcross(
+            changed |= TransferAxis(
+                Direction.Left,
                 Direction.Right,
                 focused,
+                previous.X - current.X,
                 current.X + current.Width - (previous.X + previous.Width),
                 minRatio);
         }
 
         if (current.Height != previous.Height)
         {
-            changed |= TransferAcross(Direction.Up, focused, previous.Y - current.Y, minRatio);
-            changed |= TransferAcross(
+            changed |= TransferAxis(
+                Direction.Up,
                 Direction.Down,
                 focused,
+                previous.Y - current.Y,
                 current.Y + current.Height - (previous.Y + previous.Height),
                 minRatio);
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// Applies one axis of a drag, but only when the gesture ANCHORED one of its two edges.
+    /// </summary>
+    /// <remarks>
+    /// That is the shape of a resize: Windows' own resize handles move one side and leave the
+    /// opposite one where it was, so exactly one of the two deltas is zero. A gesture that moves
+    /// BOTH is not someone dragging a boundary -- it is Aero Snap, which moves and resizes the
+    /// window in a single drop, and it reports the same MOVESIZEEND a real drag does.
+    /// <para>
+    /// Reported: dragging a tiled window's title bar to a screen edge squeezed its neighbour to
+    /// the minimum. Two tiles of 960 on 1920 came back [1728, 192], because a snap's whole-display
+    /// width read as one enormous boundary drag. Measured over twelve real drags before this,
+    /// every one of them anchored an edge exactly -- the untouched delta was 0, never a few
+    /// pixels off -- so the rule costs a genuine drag nothing.
+    /// </para>
+    /// </remarks>
+    private static bool TransferAxis(
+        Direction towardStart,
+        Direction towardEnd,
+        Node focused,
+        int startGrowth,
+        int endGrowth,
+        double minRatio)
+    {
+        if (startGrowth != 0 && endGrowth != 0)
+        {
+            return false;
+        }
+
+        var changed = TransferAcross(towardStart, focused, startGrowth, minRatio);
+        return TransferAcross(towardEnd, focused, endGrowth, minRatio) || changed;
     }
 
     /// <summary>

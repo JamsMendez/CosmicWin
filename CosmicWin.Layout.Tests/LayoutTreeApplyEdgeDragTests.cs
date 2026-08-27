@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 
 namespace CosmicWin.Layout.Tests;
 
@@ -181,6 +181,63 @@ public class LayoutTreeApplyEdgeDragTests
 
         Assert.True(applied);
         Assert.Equal([300, 350, 250], group.Sizes);
+    }
+
+    /// <summary>
+    /// A resize gesture ANCHORS one edge -- Windows' own resize handles move one side and leave
+    /// the opposite one where it was. A gesture that moves BOTH edges of an axis is therefore not
+    /// someone dragging a boundary, it is the window being relocated and resized at once, which is
+    /// what Aero Snap does: drag the title bar to a screen edge and the window is moved AND
+    /// resized in one drop. Read as a boundary drag it hands the neighbour's space away.
+    /// </summary>
+    [Fact]
+    public void ApplyEdgeDrag_BothEdgesOfAnAxisMoved_IsNotAnEdgeDrag()
+    {
+        var group = Group(SplitAxis.Horizontal, 1920, 960, 960);
+
+        // The right-half snap: the tile was inset by half a gap, the snap lands flush.
+        var applied = LayoutTree.ApplyEdgeDrag(
+            group.Children[0],
+            new Rect(4, 4, 952, 1072),
+            new Rect(960, 0, 960, 1080));
+
+        Assert.False(applied);
+        Assert.Equal([960, 960], group.Sizes);
+    }
+
+    /// <summary>The maximise is the same shape: every edge travels, so no boundary was dragged.</summary>
+    [Fact]
+    public void ApplyEdgeDrag_MaximizeShape_IsNotAnEdgeDrag()
+    {
+        var group = Group(SplitAxis.Horizontal, 1920, 960, 960);
+
+        var applied = LayoutTree.ApplyEdgeDrag(
+            group.Children[0],
+            new Rect(4, 4, 952, 1072),
+            new Rect(0, 0, 1920, 1080));
+
+        Assert.False(applied);
+        Assert.Equal([960, 960], group.Sizes);
+    }
+
+    /// <summary>
+    /// The anchor rule is per AXIS, not per gesture: a corner drag anchors one edge on each of the
+    /// two axes, and both still count.
+    /// </summary>
+    [Fact]
+    public void ApplyEdgeDrag_OneAxisAnchoredAndTheOtherNot_AppliesOnlyTheAnchoredAxis()
+    {
+        var (root, row) = NestedRowInsideColumn();
+
+        // Right edge anchored on neither (both X and right travel), bottom edge dragged cleanly.
+        var applied = LayoutTree.ApplyEdgeDrag(
+            row.Children[0],
+            new Rect(0, 0, 500, 400),
+            new Rect(60, 0, 560, 460));
+
+        Assert.True(applied);
+        Assert.Equal([500, 500], row.Sizes);   // horizontal axis refused: neither edge anchored
+        Assert.Equal([460, 340], root.Sizes);  // vertical axis applied: top anchored
     }
 
     /// <summary>A column of 500/400 inside a row of 500/500, i.e. one window with both a side and a floor.</summary>
