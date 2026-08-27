@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -192,6 +192,45 @@ public class Win32WorkspaceTests
 
         var reported = Assert.Single(settled);
         Assert.Equal(Rectangle.FromSize(120, 90, 400, 300), reported);
+    }
+
+    /// <summary>
+    /// Which of the two it was survives onto the event. The drop and an app moving itself are the
+    /// same fact about geometry and a completely different one about intent -- only the drop is the
+    /// user answering "how big should this be" -- and the App layer resizes the tree from exactly
+    /// one of them.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_AtTheDropOfADrag_IsFlaggedAsTheUsersOwnGesture()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "resized", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var gestures = new List<bool>();
+        workspace.WindowBoundsChanged += (_, e) => gestures.Add(e.IsUserGesture);
+        workspace.Open();
+
+        source.SimulateMoveSizeStart(new IntPtr(1));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(0, 0, 520, 300));
+        source.SimulateMoveSizeEnd(new IntPtr(1));
+
+        Assert.True(Assert.Single(gestures));
+    }
+
+    /// <summary>The mirror: a window that moves on its own carries no such claim.</summary>
+    [Fact]
+    public void WindowBoundsChanged_OutsideADrag_IsNotFlaggedAsAUserGesture()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "self-mover", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var gestures = new List<bool>();
+        workspace.WindowBoundsChanged += (_, e) => gestures.Add(e.IsUserGesture);
+        workspace.Open();
+
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(0, 0, 520, 300));
+
+        Assert.False(Assert.Single(gestures));
     }
 
     /// <summary>A move the user did NOT drag -- an app repositioning itself -- is still reported at once.</summary>

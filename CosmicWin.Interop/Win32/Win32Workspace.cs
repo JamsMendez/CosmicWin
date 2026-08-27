@@ -1,4 +1,4 @@
-namespace CosmicWin.Interop.Win32;
+﻿namespace CosmicWin.Interop.Win32;
 
 /// <summary>
 /// WT-1: enumerates top-level windows at startup and tracks create/destroy/move/resize via a
@@ -148,7 +148,10 @@ public sealed class Win32Workspace : IWorkspace
             case NativeWindowEventKind.MoveSizeEnded:
                 if (_beingDragged.Remove(hwnd))
                 {
-                    UpdateBounds(hwnd);
+                    // The ONE bounds change the user performed on purpose. Flagged as such because
+                    // the drop is indistinguishable from every other move once it is a rectangle,
+                    // and only this one may be read as a request to change the layout.
+                    UpdateBounds(hwnd, isUserGesture: true);
                 }
 
                 break;
@@ -190,7 +193,7 @@ public sealed class Win32Workspace : IWorkspace
         WindowRemoved?.Invoke(this, new WindowEventArgs(window));
     }
 
-    private void UpdateBounds(nint hwnd)
+    private void UpdateBounds(nint hwnd, bool isUserGesture = false)
     {
         if (!_windows.TryGetValue(hwnd, out var window))
         {
@@ -211,7 +214,7 @@ public sealed class Win32Workspace : IWorkspace
 
         if (boundsChanged)
         {
-            WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
+            WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture));
         }
     }
 
