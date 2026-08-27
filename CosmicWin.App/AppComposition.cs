@@ -424,7 +424,30 @@ public sealed class AppComposition : IDisposable
         }
 
         var watchTick = 0;
+
+        // The tick drives the same tiling and focus work a CHORD does -- workspace polling, the
+        // arrange pass, the arrival handover, a WPF redraw -- and a chord's throw is caught, one
+        // action at a time, by ActionDispatcher. This one was not. It runs on a DispatcherTimer, so
+        // anything it raised was an unhandled exception on the WPF UI thread: the whole process,
+        // not one dropped chord. The asymmetry is the argument -- the two entry points reach the
+        // same executor and the same TreeManager, and only one of them was allowed to fail.
+        //
+        // Recorded rather than swallowed, for the reason written on FileDesktopTrace: this
+        // repository has twice paid for failures that left no trace. A tick that quietly does
+        // nothing is indistinguishable, from outside, from one that worked.
         var reconcile = scheduleReconcile(WatchInterval, () =>
+        {
+            try
+            {
+                ReconcileOnce();
+            }
+            catch (Exception error)
+            {
+                desktopTrace?.Record($"tick-failed {error.GetType().Name}: {error.Message}");
+            }
+        });
+
+        void ReconcileOnce()
         {
             if (++watchTick >= PollEveryNthWatch)
             {
@@ -466,7 +489,7 @@ public sealed class AppComposition : IDisposable
             // hotkey on (LE-4 placement). One native read, so it belongs on the cheap tick.
             executor.ResolveFocusedLeaf();
             UpdateFocusBorder();
-        });
+        }
 
         // A separate path on purpose, sharing only the pause flag. Modal dialogs never reach the
         // workspace above -- its trackability gate drops every owned window, which is what keeps

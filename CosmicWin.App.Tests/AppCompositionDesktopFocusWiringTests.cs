@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.App.Tray;
@@ -112,10 +112,29 @@ public sealed class AppCompositionDesktopFocusWiringTests
         public bool IsSupported => true;
         public int Count => 2;
         public int CurrentIndex { get; set; } = 1;
-        public Guid CurrentDesktopId { get; set; } = current;
+        /// <summary>
+        /// Models the escape the interop's own guard leaves open: <c>IsInteropFailure</c> filters
+        /// COMException, InvalidCastException, NotSupportedException and ArgumentException, so a
+        /// shell that fails any other way -- an SEHException out of the COM boundary, say -- comes
+        /// straight back up through the tick.
+        /// </summary>
+        public Exception? ThrowOnRead { get; set; }
+
+        private Guid _current = current;
+
+        public Guid CurrentDesktopId
+        {
+            get => ThrowOnRead is null ? _current : throw ThrowOnRead;
+            set => _current = value;
+        }
         public string? LastError => null;
         public bool TrySwitchTo(int oneBasedIndex) => true;
         public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex) => true;
+    }
+
+    private sealed class CollectingTrace(List<string> lines) : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public void Record(string line) => lines.Add(line);
     }
 
     private sealed record Harness(
@@ -126,7 +145,8 @@ public sealed class AppCompositionDesktopFocusWiringTests
         TracedWindow Here,
         TracedWindow There,
         Guid ThereId,
-        List<string> Log);
+        List<string> Log,
+        List<string> Trace);
 
     private static readonly Guid HereId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid ThereIdValue = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -138,6 +158,7 @@ public sealed class AppCompositionDesktopFocusWiringTests
     /// </summary>
     private static Harness Wire(bool arrivingIsEmpty = false)
     {
+        var traceLines = new List<string>();
         var log = new List<string>();
         var display = new FakeDisplay(
             new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -173,10 +194,62 @@ public sealed class AppCompositionDesktopFocusWiringTests
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullDisposable(),
-            virtualDesktops: desktops);
+            virtualDesktops: desktops,
+            desktopTrace: new CollectingTrace(traceLines));
 
         return new Harness(
-            composition, desktops, scheduler, foreground, here, there, ThereIdValue, log);
+            composition, desktops, scheduler, foreground, here, there, ThereIdValue, log, traceLines);
+    }
+
+    /// <summary>
+    /// The reconciliation tick drives the same tiling and focus work a chord does, and a chord's
+    /// throw is caught. The tick's was not: it runs on a DispatcherTimer, so anything it raised was
+    /// an unhandled exception on the WPF UI thread -- the whole process, not one dropped chord.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The asymmetry is the argument, not a guess about which call throws. Both entry points reach
+    /// the same executor, the same TreeManager and the same arrange path; only one of them was
+    /// allowed to fail. A review naming TreeManager's unknown-node arm as the trigger was pointing
+    /// at a dead one -- Node has exactly two subtypes and both are sealed -- but the surface behind
+    /// the tick is workspace polling, desktop reconciliation, the arrange pass, the arrival
+    /// handover and a WPF redraw.
+    /// </para>
+    /// <para>
+    /// Modelled on the escape the interop's own guard leaves open rather than an invented throw:
+    /// <c>IsInteropFailure</c> filters four exception types, and the shell can fail in others.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AThrowInsideTheTick_IsRecordedAndDoesNotTakeTheProcessDown()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            harness.Desktops.ThrowOnRead = new InvalidOperationException("the shell went away");
+
+            harness.Scheduler.Fire();
+
+            Assert.Contains(harness.Trace, l => l.StartsWith("tick-failed ", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>And it keeps ticking: a swallowed tick must not become a stopped one.</summary>
+    [Fact]
+    public void AThrowInsideTheTick_LeavesTheNextTickRunning()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            harness.Desktops.ThrowOnRead = new InvalidOperationException("the shell went away");
+            harness.Scheduler.Fire();
+
+            harness.Desktops.ThrowOnRead = null;
+            harness.Desktops.CurrentDesktopId = harness.ThereId;
+            harness.Scheduler.Fire();
+
+            Assert.Equal(1, harness.There.TryActivateCallCount);
+        }
     }
 
     /// <summary>
