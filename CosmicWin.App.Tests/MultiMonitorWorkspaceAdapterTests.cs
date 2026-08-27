@@ -523,6 +523,60 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
     }
 
+    /// <summary>
+    /// REPRO for a review finding, red on purpose. Aero Snap: the user drags the TITLE BAR to the
+    /// top edge and Windows maximises the window. That is one drag gesture, so it ends in
+    /// MOVESIZEEND and arrives flagged as the user's own -- and the size change is the whole
+    /// display, not a boundary anybody dragged. Read as an edge drag it hands the neighbour's
+    /// space away down to the 10% floor.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DragToEdgeMaximize_MustNotSqueezeTheNeighborToTheFloor()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4061), new IntPtr(4062));
+
+        windowA.SimulateMaximize(Rectangle.FromSize(0, 0, 1920, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([960, 960], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>
+    /// The sibling gesture, and the one the review did not name: dragging the title bar to a SIDE
+    /// snaps the window to half the screen without ever setting WS_MAXIMIZE. It moves and resizes
+    /// in one drop, so neither edge of the horizontal axis is anchored -- which is what refuses it.
+    /// <para>
+    /// THREE tiles, not two, and that is the whole point of the fact. With two equal halves the
+    /// snap target is exactly the tile's own size, so nothing resizes and the gesture is refused as
+    /// an ordinary move -- the fact would pass without the rule it claims to pin. Caught by
+    /// mutation: disabling the anchor rule left a two-tile version of this green. At 640 wide the
+    /// snap to 960 is a real size change, and without the rule the middle tile is squeezed to the
+    /// 10% floor.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DragToSideSnap_MustNotSqueezeTheNeighborToTheFloor()
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
+        var windowA = new RecordingWindow(new IntPtr(4071), Rectangle.FromSize(100, 100, 400, 300));
+        var windowB = new RecordingWindow(new IntPtr(4072), Rectangle.FromSize(100, 100, 400, 300));
+        var windowC = new RecordingWindow(new IntPtr(4073), Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+        s.Workspace.RaiseWindowAdded(windowC);
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([640, 640, 640], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(960, 0, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        Assert.Equal([640, 640, 640], Assert.IsType<GroupNode>(tree.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 640, 1080), windowA.LastSetPosition);
+    }
+
     /// <summary>Two windows tiled 1/2 - 1/2 across one 1920x1080 display.</summary>
     private static (Setup S, RecordingWindow A, RecordingWindow B) SideBySide(nint handleA, nint handleB)
     {

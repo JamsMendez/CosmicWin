@@ -433,7 +433,14 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // part of this one the tree cannot express: a drag on an axis where the window has no
         // neighbour has no boundary to move, and ApplyEdgeDrag leaves it alone rather than
         // approximating one.
-        if (e.IsUserGesture &&
+        // A MAXIMISED window is not asking for a boundary to move, whatever its rectangle says.
+        // The shape rule in ApplyEdgeDrag catches a maximise that travels on both edges, but a
+        // window already flush against the work-area corner leaves that edge anchored and slips
+        // through -- and whether it is flush depends on the gap, which is not something the
+        // correctness of this may rest on. The state bit does not care about geometry at all.
+        var maximized = (window.Style & Layout.Filters.WindowStyleFlags.Maximized) != 0;
+
+        if (e.IsUserGesture && !maximized &&
             _registry.TryGetLeaf(handle, out var dragged) && dragged is not null)
         {
             var slot = dragged.LastGeometry;

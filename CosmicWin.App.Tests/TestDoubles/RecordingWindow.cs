@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.App.Tests.TestDoubles;
@@ -132,6 +132,17 @@ internal sealed class RecordingWindow : IWindow
     /// it did.
     /// </summary>
     public void SimulateExternalMove(Rectangle bounds) => Bounds = bounds;
+
+    /// <summary>
+    /// Sets <c>WS_MAXIMIZE</c> and fills <paramref name="workArea"/>, so a test can reproduce a
+    /// real Aero Snap maximise -- one drag gesture that ends in MOVESIZEEND like any other -- and
+    /// not merely a window that happens to be screen-sized.
+    /// </summary>
+    public void SimulateMaximize(Rectangle workArea)
+    {
+        Style |= 0x01000000u;
+        Bounds = workArea;
+    }
 
     /// <summary>
     /// Sets/clears <c>WS_MINIMIZE</c> and parks the window at Win32's canonical minimized spot,

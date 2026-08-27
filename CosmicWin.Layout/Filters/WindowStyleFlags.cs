@@ -1,4 +1,4 @@
-namespace CosmicWin.Layout.Filters;
+﻿namespace CosmicWin.Layout.Filters;
 
 /// <summary>
 /// Win32 window style/extended-style bit values needed by <see cref="WindowFilters"/> (spec
@@ -19,6 +19,14 @@ public static class WindowStyleFlags
 
     /// <summary>GWL_STYLE bit: <c>WS_SYSMENU</c>.</summary>
     public const uint SystemMenu = 0x00080000;
+
+    /// <summary>
+    /// GWL_STYLE bit: <c>WS_MAXIMIZE</c>. Like <see cref="Minimized"/> it is TRANSIENT -- Windows
+    /// sets it while the window is maximised and clears it on restore. Unlike it, this bit is not
+    /// an exclusion: a maximised window keeps its tile. It marks the one thing a maximised window
+    /// is NOT doing, which is asking for a boundary between two tiles to move.
+    /// </summary>
+    public const uint Maximized = 0x01000000;
 
     /// <summary>
     /// GWL_STYLE bit: <c>WS_MINIMIZE</c> (a.k.a. <c>WS_ICONIC</c>). Set by Windows for as long as
