@@ -259,13 +259,20 @@ public sealed class AppComposition : IDisposable
         }
         executor.WindowMovedToDesktop = sessionAdapter.RehomeToDesktop;
 
-        // The WORKSPACE, not the registry: the registry holds tiled leaves, and the window this has
-        // to reach is by definition not one. Snapshot is walked rather than indexed because this
-        // runs once, on a move the shell refused, and a dictionary kept in step for that would be
-        // more state to get wrong than the walk costs.
-        executor.ActivateUntrackedWindow = handle =>
-            workspace.Snapshot.FirstOrDefault(candidate => candidate.Handle == handle)
-                is { IsAlive: true } untracked && untracked.TryActivate();
+        // Registry first, workspace second. The registry answers for a tiled window immediately;
+        // the workspace tracks every top-level window, which is the only place a NON-tiled one can
+        // be found. Snapshot is walked rather than indexed because these run once per chord, and a
+        // dictionary kept in step would be more state to get wrong than the walk costs.
+        IWindow? resolveAnyWindow(nint handle) =>
+            registry.TryGetWindow(handle, out var tracked) && tracked is { IsAlive: true }
+                ? tracked
+                : workspace.Snapshot.FirstOrDefault(candidate => candidate.Handle == handle)
+                    is { IsAlive: true } other ? other : null;
+
+        // One lookup, two verbs -- put back on a window whose move the shell refused, and asked to
+        // close by Alt+Q. Both have to reach windows the tree does not contain.
+        executor.ActivateUntrackedWindow = handle => resolveAnyWindow(handle)?.TryActivate() ?? false;
+        executor.CloseWindowAt = handle => resolveAnyWindow(handle)?.TryClose() ?? false;
         workspace.Open();
         hook.Start();
 

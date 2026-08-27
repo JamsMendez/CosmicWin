@@ -113,6 +113,14 @@ public sealed class ActionExecutor(
             return;
         }
 
+        // Same reasoning, one chord later: this is about the window the user is looking at, not
+        // about the tree. Letting it fall through to the tiling path would aim it at the last
+        // tracked leaf instead -- closing a window the user is not even looking at.
+        if (TryDispatchClose(action, foregroundHandle))
+        {
+            return;
+        }
+
         // A chord that MOVES a window acts on the window the user is looking at, or on nothing in the
         // tree at all. TryResolveFocused deliberately falls back to the last known leaf when the
         // foreground is untracked, and that is right for a FOCUS chord -- it is how a user returns to
@@ -173,6 +181,18 @@ public sealed class ActionExecutor(
     /// only the tiled ones, so production resolves it from there.
     /// </remarks>
     public Func<nint, bool>? ActivateUntrackedWindow { get; set; }
+
+    /// <summary>
+    /// Asks the window at this handle to close, reporting whether the ask was DELIVERED. Unset --
+    /// as in every test that predates it -- no chord ever closes anything.
+    /// </summary>
+    /// <remarks>
+    /// A delegate rather than a registry lookup for the same reason the desktop chords read the OS
+    /// foreground: closing a window CosmicWin does not tile is an ordinary thing to want, and the
+    /// registry holds tiled leaves only. Production resolves the registry first and the workspace
+    /// second.
+    /// </remarks>
+    public Func<nint, bool>? CloseWindowAt { get; set; }
 
     /// <summary>
     /// Invoked after every chord this executor answers, whatever it did.
@@ -627,6 +647,33 @@ public sealed class ActionExecutor(
     /// service is wired or the build is unsupported -- the chord is then simply consumed, which is
     /// what the user already sees for any action the tree cannot satisfy.
     /// </summary>
+    /// <summary>
+    /// Asks the foreground window to close. Answers the chord whether or not anything can act on
+    /// it, so it never falls through to a path aimed at a different window.
+    /// </summary>
+    /// <remarks>
+    /// The tree is deliberately NOT touched. <c>WM_CLOSE</c> is a request an application may
+    /// refuse -- an unsaved document puts up its own dialog and stays exactly where it is -- so
+    /// removing the leaf here would desync the layout from the screen on every refusal, and there
+    /// is no event to put it back. The window actually leaving arrives on its own, through the
+    /// destroy/hide path that already reflows the survivors.
+    /// </remarks>
+    private bool TryDispatchClose(HotkeyAction action, nint foregroundHandle)
+    {
+        if (action.Kind is not HotkeyActionKind.CloseWindow)
+        {
+            return false;
+        }
+
+        if (foregroundHandle != 0)
+        {
+            var asked = CloseWindowAt?.Invoke(foregroundHandle) ?? false;
+            DesktopTrace?.Record($"close hwnd=0x{foregroundHandle:X} asked={asked}");
+        }
+
+        return true;
+    }
+
     private bool TryDispatchDesktop(HotkeyAction action, nint foregroundHandle)
     {
         if (action.Kind is not (HotkeyActionKind.SwitchDesktop or HotkeyActionKind.MoveWindowToDesktop))

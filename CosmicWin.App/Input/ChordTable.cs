@@ -1,4 +1,4 @@
-namespace CosmicWin.App.Input;
+﻿namespace CosmicWin.App.Input;
 
 public sealed class ChordTable
 {
@@ -57,6 +57,7 @@ public sealed class ChordTable
         table.Register(ModifierKeys.Alt, KeyboardKey.CloseBracket, HotkeyActionKind.FocusIn);
         table.Register(ModifierKeys.Alt, KeyboardKey.OpenBracket, HotkeyActionKind.FocusOut);
         table.Register(ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation);
+        table.Register(ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow);
         table.RegisterDesktopDigits();
         return table;
     }

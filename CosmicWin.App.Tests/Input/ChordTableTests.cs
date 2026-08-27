@@ -1,4 +1,4 @@
-using CosmicWin.App.Input;
+﻿using CosmicWin.App.Input;
 
 namespace CosmicWin.App.Tests.Input;
 
@@ -25,6 +25,7 @@ public sealed class ChordTableTests
         { ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.J, HotkeyActionKind.MoveDown },
         { ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Down, HotkeyActionKind.MoveDown },
         { ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation },
+        { ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow },
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.H, HotkeyActionKind.ResizeLeft },
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.Left, HotkeyActionKind.ResizeLeft },
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.L, HotkeyActionKind.ResizeRight },
