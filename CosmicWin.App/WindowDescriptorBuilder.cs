@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Layout;
 
 namespace CosmicWin.App;
@@ -7,5 +7,6 @@ namespace CosmicWin.App;
 public static class WindowDescriptorBuilder
 {
     public static WindowDescriptor Build(IWindow window) =>
-        new(window.ClassName, window.ProcessName, window.Title, window.ExStyle, window.Style, window.IsOwned);
+        new(window.ClassName, window.ProcessName, window.Title, window.ExStyle, window.Style,
+            window.IsOwned, window.Bounds.Width, window.Bounds.Height);
 }

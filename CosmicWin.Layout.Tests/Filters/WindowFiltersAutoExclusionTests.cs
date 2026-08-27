@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.Layout.Tests.Filters;
@@ -16,7 +16,50 @@ public class WindowFiltersAutoExclusionTests
         Title: "Untitled - Notepad",
         ExStyle: 0,
         Style: WindowStyleFlags.SystemMenu | WindowStyleFlags.MaximizeBox | WindowStyleFlags.MinimizeBox,
-        IsOwned: false);
+        IsOwned: false,
+        Width: 800,
+        Height: 600);
+
+    /// <summary>
+    /// Measured with Windows 11 Notepad, which put TWO tiles on screen for one editor. The second
+    /// is <c>InputNonClientPointerSource</c>: the OS's own input plumbing for a custom title bar,
+    /// visible, unowned, uncloaked and carrying an ordinary window style -- so it passed every
+    /// other test here and took a full share of the work area, then fought seventeen reflows
+    /// snapping back to nothing each time it was given a size.
+    /// </summary>
+    /// <remarks>
+    /// Stated as AREA rather than as that class name on purpose: every WinUI app with a custom
+    /// title bar has one, and naming them one at a time is a list that is always one release
+    /// behind. Nothing a user can see or click has zero area.
+    /// </remarks>
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(0, 600)]
+    [InlineData(800, 0)]
+    public void IsAutoExcluded_WindowWithNoArea_IsExcludedWhateverItsStyleSays(int width, int height)
+    {
+        var plumbing = Normal() with
+        {
+            ClassName = "InputNonClientPointerSource",
+            Width = width,
+            Height = height,
+        };
+
+        Assert.True(WindowFilters.IsAutoExcluded(plumbing));
+    }
+
+    /// <summary>
+    /// The pairing this rule depends on: size is TRANSIENT, like WS_MINIMIZE, so a window that
+    /// gains one must read as tileable again. The re-admission itself lives in the adapter's
+    /// bounds-changed path; this pins that the filter stops objecting.
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_WindowThatGainsArea_IsTileableAgain()
+    {
+        var grown = Normal() with { Width = 1, Height = 1 };
+
+        Assert.False(WindowFilters.IsAutoExcluded(grown));
+    }
 
     [Fact]
     public void IsAutoExcluded_NormalTopLevelWindow_ReturnsFalse()

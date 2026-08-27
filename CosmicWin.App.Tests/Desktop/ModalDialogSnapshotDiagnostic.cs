@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
@@ -182,7 +182,8 @@ public sealed class ModalDialogSnapshotDiagnostic(ITestOutputHelper output)
     {
         var info = entry.Info;
         var descriptor = new WindowDescriptor(
-            info.ClassName, info.ProcessName, info.Title, info.ExStyle, info.Style, info.IsOwned);
+            info.ClassName, info.ProcessName, info.Title, info.ExStyle, info.Style, info.IsOwned,
+            info.Bounds.Width, info.Bounds.Height);
 
         return
             $"0x{entry.Handle:X8} owner={Yes(info.IsOwned)} " +

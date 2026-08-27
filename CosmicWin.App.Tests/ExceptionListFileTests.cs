@@ -1,4 +1,4 @@
-namespace CosmicWin.App.Tests;
+﻿namespace CosmicWin.App.Tests;
 
 /// <summary><see cref="ExceptionListFile"/> owns the on-disk manual exception-list read. Plain BCL file I/O, no fake needed.</summary>
 public sealed class ExceptionListFileTests
@@ -10,7 +10,7 @@ public sealed class ExceptionListFileTests
 
         var exceptions = ExceptionListFile.Load(missingPath);
 
-        Assert.False(exceptions.Matches(new CosmicWin.Layout.WindowDescriptor("AnyClass", "anything.exe", "Any Title", 0u, 0u, false)));
+        Assert.False(exceptions.Matches(new CosmicWin.Layout.WindowDescriptor("AnyClass", "anything.exe", "Any Title", 0u, 0u, false, 800, 600)));
     }
 
     [Fact]
@@ -22,8 +22,8 @@ public sealed class ExceptionListFileTests
         {
             var exceptions = ExceptionListFile.Load(path);
 
-            var matchingDescriptor = new CosmicWin.Layout.WindowDescriptor("AnyClass", "Spotify.exe", "Any Title", 0u, 0u, false);
-            var nonMatchingDescriptor = new CosmicWin.Layout.WindowDescriptor("AnyClass", "Notepad.exe", "Any Title", 0u, 0u, false);
+            var matchingDescriptor = new CosmicWin.Layout.WindowDescriptor("AnyClass", "Spotify.exe", "Any Title", 0u, 0u, false, 800, 600);
+            var nonMatchingDescriptor = new CosmicWin.Layout.WindowDescriptor("AnyClass", "Notepad.exe", "Any Title", 0u, 0u, false, 800, 600);
             Assert.True(exceptions.Matches(matchingDescriptor));
             Assert.False(exceptions.Matches(nonMatchingDescriptor));
         }

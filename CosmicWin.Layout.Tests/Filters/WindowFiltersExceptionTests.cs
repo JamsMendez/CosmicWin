@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.Layout.Tests.Filters;
@@ -15,7 +15,9 @@ public class WindowFiltersExceptionTests
         Title: "Spotify Premium",
         ExStyle: 0,
         Style: WindowStyleFlags.SystemMenu | WindowStyleFlags.MaximizeBox | WindowStyleFlags.MinimizeBox,
-        IsOwned: false);
+        IsOwned: false,
+        Width: 800,
+        Height: 600);
 
     [Fact]
     public void IsExcluded_NormalWindow_NotAutoExcluded_NoExceptionMatch_ReturnsFalse()

@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.Layout.Tests.Filters;
@@ -25,7 +25,7 @@ public sealed class ModalDialogTests
 
     private static WindowDescriptor Descriptor(
         uint style = SysMenu, uint exStyle = 0u, bool isOwned = true) =>
-        new("#32770", "app", "Save changes?", exStyle, style, isOwned);
+        new("#32770", "app", "Save changes?", exStyle, style, isOwned, 400, 200);
 
     [Fact]
     public void AnOwnedWindowWithACloseButtonAndNoMaximiseOrMinimise_IsAModalDialog()

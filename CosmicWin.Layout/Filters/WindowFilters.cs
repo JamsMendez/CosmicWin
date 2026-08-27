@@ -1,4 +1,4 @@
-namespace CosmicWin.Layout.Filters;
+﻿namespace CosmicWin.Layout.Filters;
 
 /// <summary>
 /// WE-1 automatic exclusion heuristics, evaluated against a Win32-free <see cref="WindowDescriptor"/>
@@ -30,6 +30,24 @@ public static class WindowFilters
         // work area to something nothing is drawn into -- measured as "the terminal only
         // expanded to half the screen", with a minimized browser holding the other half.
         if ((descriptor.Style & WindowStyleFlags.Minimized) != 0)
+        {
+            return true;
+        }
+
+        // A window with no AREA is not a tile, whatever its style bits say it is. Measured with
+        // Windows 11 Notepad: it creates a second, visible, unowned, uncloaked top-level window of
+        // class InputNonClientPointerSource at 0x0 -- the OS's own input plumbing for a custom
+        // title bar -- which passed every test above and took a full share of the work area. One
+        // Notepad, two tiles, and seventeen reflows fighting a window that snapped back to nothing
+        // every time it was given a size.
+        //
+        // Stated as area rather than as that class name on purpose: every WinUI app with a custom
+        // title bar has one of these, and naming them one at a time is a list that is always one
+        // release behind. Nothing the user can see or click has zero area.
+        //
+        // TRANSIENT, exactly like WS_MINIMIZE above, so it depends on the same re-admission: a
+        // window that later gains a size arrives back through the bounds-changed path.
+        if (descriptor.Width <= 0 || descriptor.Height <= 0)
         {
             return true;
         }

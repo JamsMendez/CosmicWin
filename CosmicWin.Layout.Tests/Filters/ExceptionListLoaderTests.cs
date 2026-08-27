@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
 namespace CosmicWin.Layout.Tests.Filters;
@@ -14,7 +14,9 @@ public class ExceptionListLoaderTests
         Title: "Spotify Premium",
         ExStyle: 0,
         Style: WindowStyleFlags.SystemMenu | WindowStyleFlags.MaximizeBox | WindowStyleFlags.MinimizeBox,
-        IsOwned: false);
+        IsOwned: false,
+        Width: 800,
+        Height: 600);
 
     [Fact]
     public void Parse_ProcessLine_ProducesMatchingExceptionList()
