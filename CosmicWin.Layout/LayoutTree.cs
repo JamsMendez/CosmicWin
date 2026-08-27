@@ -647,6 +647,46 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
+    /// Exchanges the SLOTS two nodes occupy. The shape of the tree is untouched: same groups, same
+    /// axes, same sizes -- only which subtree sits in which slot changes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what dropping one tiled window onto another means. Sizes deliberately stay with the
+    /// SLOT rather than travelling with the node: a swap is not a resize, and carrying the width
+    /// along would drift the layout a little on every drop even though the user only reordered.
+    /// </para>
+    /// <para>
+    /// Takes <see cref="Node"/> rather than <see cref="LeafNode"/> because the operation is about
+    /// slots, not windows -- a whole split can be exchanged with a single tile and the result is
+    /// still a well-formed tree. A node with no parent IS the whole tree, so it has no slot to
+    /// exchange; that is refused rather than left to fail on a null.
+    /// </para>
+    /// </remarks>
+    public static bool SwapLeaves(Node first, Node second)
+    {
+        if (ReferenceEquals(first, second)
+            || first.Parent is not GroupNode firstParent
+            || second.Parent is not GroupNode secondParent)
+        {
+            return false;
+        }
+
+        int firstIndex = firstParent.Children.IndexOf(first);
+        int secondIndex = secondParent.Children.IndexOf(second);
+        if (firstIndex < 0 || secondIndex < 0)
+        {
+            return false;
+        }
+
+        firstParent.Children[firstIndex] = second;
+        secondParent.Children[secondIndex] = first;
+        first.Parent = secondParent;
+        second.Parent = firstParent;
+        return true;
+    }
+
+    /// <summary>
     /// Translates one finished mouse edge-drag into the tree: every boundary the user actually
     /// moved transfers exactly the pixels it was dragged, so the reflow that follows lands the new
     /// proportions instead of undoing them.
