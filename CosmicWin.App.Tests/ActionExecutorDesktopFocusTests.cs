@@ -136,7 +136,7 @@ public sealed class ActionExecutorDesktopFocusTests
     [Fact]
     public void TheArrivalSweep_IsBoundedForTheWholeWalk_NotPerWindow()
     {
-        var (executor, order, trace, handles) = BuildWideDesktop(tiles: 4);
+        var (executor, order, trace, handles, _) = BuildWideDesktop(tiles: 4);
 
         // 200ms per reading: the first swept window fits inside the 250ms budget, the rest do not.
         var readings = 0;
@@ -150,11 +150,53 @@ public sealed class ActionExecutorDesktopFocusTests
         Assert.Contains("budget-exhausted=2", Assert.Single(trace.Lines, l => l.StartsWith("sweep ", StringComparison.Ordinal)), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// What a REFUSED survivor activation leaves behind once a sweep has run. Pinned deliberately,
+    /// because the sweep changed it and nothing said so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Before the sweep, a refused handover left the foreground exactly where the shell had put it
+    /// -- which, on the arriving path, is the defect this whole area exists to fix: focus left
+    /// behind on the desktop just abandoned. After the sweep it lands on the last window the sweep
+    /// reached, which is an arbitrary tile of the RIGHT desktop. That is a strictly better failure
+    /// than the one it replaced, and a review reading it as a regression had the direction backwards.
+    /// </para>
+    /// <para>
+    /// Never observed: thirty-five traced handovers, thirty-five confirmed. This is a contract for
+    /// the case the machine has not produced yet, not a repair.
+    /// </para>
+    /// <para>
+    /// This pins WHERE the walk ended, and nothing else. The other half -- that a refused
+    /// activation must not advance the remembered focus -- is already held by
+    /// <see cref="WhenActivatingTheSurvivorFails_ItDoesNotBecomeTheRememberedFocus"/>, and this
+    /// fact does NOT hold it: <c>activated=False</c> is traced either way, so the assertion below
+    /// stays green with that rule broken. Verified by mutation rather than assumed, after the doc
+    /// here first claimed the opposite.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheArrivalSweep_SurvivorRefused_EndsOnTheLastSweptWindow_AndClaimsNothing()
+    {
+        var (executor, order, trace, handles, windows) = BuildWideDesktop(tiles: 3);
+        executor.Clock = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        windows[0].NextActivation = ActivationOutcome.Failed;
+
+        executor.HandFocusToArrivingDesktop();
+
+        // The survivor was asked LAST and said no, so the last activation that took is the sweep's.
+        Assert.Equal([handles[1], handles[2], handles[0]], order);
+        Assert.Contains(
+            "activation=Failed activated=False",
+            Assert.Single(trace.Lines, l => l.StartsWith("handover ", StringComparison.Ordinal)),
+            StringComparison.Ordinal);
+    }
+
     /// <summary>The same desktop with a clock that never advances sweeps every tile, so the bound is what stopped it.</summary>
     [Fact]
     public void TheArrivalSweep_WithinBudget_StillVisitsEveryWindow()
     {
-        var (executor, order, trace, handles) = BuildWideDesktop(tiles: 4);
+        var (executor, order, trace, handles, _) = BuildWideDesktop(tiles: 4);
         executor.Clock = () => new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         executor.HandFocusToArrivingDesktop();
@@ -164,13 +206,14 @@ public sealed class ActionExecutorDesktopFocusTests
     }
 
     /// <summary>A row of <paramref name="tiles"/> windows; the first is where focus lands.</summary>
-    private static (ActionExecutor Executor, List<nint> Order, RecordingDesktopTrace Trace, nint[] Handles)
+    private static (ActionExecutor Executor, List<nint> Order, RecordingDesktopTrace Trace, nint[] Handles, RecordingWindow[] Windows)
         BuildWideDesktop(int tiles)
     {
         var registry = new WindowRegistry();
         var group = new GroupNode(SplitAxis.Horizontal) { GroupLength = 1920 };
         var order = new List<nint>();
         var handles = new nint[tiles];
+        var windows = new RecordingWindow[tiles];
 
         for (var index = 0; index < tiles; index++)
         {
@@ -183,6 +226,7 @@ public sealed class ActionExecutorDesktopFocusTests
             {
                 ActivationLog = order,
             };
+            windows[index] = window;
             registry.Register(window, leaf);
         }
 
@@ -202,7 +246,7 @@ public sealed class ActionExecutorDesktopFocusTests
             DesktopTrace = trace,
         };
 
-        return (executor, order, trace, handles);
+        return (executor, order, trace, handles, windows);
     }
 
     /// <summary>
