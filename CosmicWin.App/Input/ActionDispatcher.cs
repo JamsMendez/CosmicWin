@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 
 namespace CosmicWin.App.Input;
 
@@ -78,11 +78,44 @@ public sealed class ActionDispatcher : IAsyncDisposable
                 }
                 catch (Exception error)
                 {
-                    OnActionFailed?.Invoke(action, error);
+                    ReportFailure(action, error);
                 }
             }
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+    }
+
+    /// <summary>
+    /// Reports one action's failure without ever letting the report become the next failure.
+    /// </summary>
+    /// <remarks>
+    /// This was the single line in the catch with no protection of its own. A sink that threw
+    /// unwound the <c>await foreach</c> and ended dispatch for good -- the exact silent death the
+    /// catch exists to prevent, reintroduced by the line written to make failures VISIBLE.
+    /// <para>
+    /// Swallowed rather than rethrown or reported onward, because there is nowhere left to report
+    /// to: the reporter is what just failed. This is the one place in the pump where losing the
+    /// detail is the correct trade -- a dropped chord and a lost line, against a window manager
+    /// that looks alive and never answers the keyboard again.
+    /// </para>
+    /// <para>
+    /// Production was safe only by accident before this: the sink is wired to the desktop trace,
+    /// and <c>FileDesktopTrace.Record</c> swallows its own IO failures. Any other sink was one
+    /// throw from killing dispatch, and <see cref="OnActionFailed"/>'s own doc already promised
+    /// otherwise.
+    /// </para>
+    /// </remarks>
+    private void ReportFailure(HotkeyAction action, Exception error)
+    {
+        try
+        {
+            OnActionFailed?.Invoke(action, error);
+        }
+        catch
+        {
+            // Deliberately empty, and deliberately unfiltered: whatever the sink managed to throw,
+            // the pump outlives it.
+        }
     }
 
     public ValueTask DisposeAsync()

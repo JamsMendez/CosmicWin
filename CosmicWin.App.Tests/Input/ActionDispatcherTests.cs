@@ -1,4 +1,4 @@
-using CosmicWin.App.Input;
+﻿using CosmicWin.App.Input;
 
 namespace CosmicWin.App.Tests.Input;
 
@@ -152,6 +152,39 @@ public sealed class ActionDispatcherTests
     }
 
     /// <summary>Throws for one chosen action kind and records every action it was handed.</summary>
+    /// <summary>
+    /// A sink that throws must not become the next failure. It was the one line in the catch with
+    /// no protection of its own, so a report that threw unwound the <c>await foreach</c> and ended
+    /// dispatch for good -- reintroducing, through the line written to make failures VISIBLE, the
+    /// exact silent death the catch exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// Production is safe today only by accident: the sink is wired to the desktop trace, and
+    /// <c>FileDesktopTrace.Record</c> swallows its own IO failures. The property's doc promises
+    /// more than that -- "Null discards the detail but never the survival: the pump carries on
+    /// either way" -- and it is the CODE that is brought up to the doc here, not the doc trimmed
+    /// down to the code.
+    /// </remarks>
+    [Fact]
+    public async Task RunAsync_WhenTheFailureSinkItselfThrows_KeepsDispatching()
+    {
+        var scheduler = new ThrowingScheduler(HotkeyActionKind.ToggleOrientation);
+        await using var dispatcher = new ActionDispatcher(scheduler)
+        {
+            OnActionFailed = (_, _) => throw new InvalidOperationException("the reporter is broken too"),
+        };
+        dispatcher.Writer.TryWrite(new(HotkeyActionKind.ToggleOrientation));
+        dispatcher.Writer.TryWrite(new(HotkeyActionKind.FocusLeft));
+        dispatcher.Writer.Complete();
+
+        await dispatcher.RunAsync(CancellationToken.None);
+
+        // The chord AFTER the one whose report blew up is the whole question.
+        Assert.Equal(
+            [HotkeyActionKind.ToggleOrientation, HotkeyActionKind.FocusLeft],
+            scheduler.Seen.Select(a => a.Kind));
+    }
+
     private sealed class ThrowingScheduler(HotkeyActionKind throwOn, Exception? error = null) : IActionScheduler
     {
         public List<HotkeyAction> Seen { get; } = [];
