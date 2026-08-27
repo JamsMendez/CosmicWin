@@ -346,6 +346,57 @@ public sealed class ActionExecutorDesktopFocusTests
             .AsTask();
     }
 
+    /// <summary>
+    /// A refused move must put the user back on the window they were on -- INCLUDING one the tree
+    /// never held. The chord path sends an untracked window on purpose ("sending an untracked
+    /// window to another desktop is still a legitimate ask"), so the hand-off fires for it, and the
+    /// undo had nothing to reach it with.
+    /// </summary>
+    /// <remarks>
+    /// The code already said what it wanted: "handing them to a different tile as a souvenir of the
+    /// shell's refusal would be worse than the refusal itself". RestoreFocusTo resolves through the
+    /// registry, which holds tiled leaves only, so for an untracked window it silently did nothing
+    /// and the souvenir tile is exactly what the user got. Never observed -- six traced moves, six
+    /// confirmed -- but the promise was in a comment a later reader would trust.
+    /// </remarks>
+    [Fact]
+    public async Task SendingAnUntrackedWindow_WhenTheShellRefuses_PutsFocusBackOnIt()
+    {
+        var harness = Build();
+        var untracked = new IntPtr(0xDEAD);
+        harness.Foreground.Handle = untracked;
+        harness.Desktops.MoveSucceeds = false;
+        var restored = new List<nint>();
+        harness.Executor.ActivateUntrackedWindow = handle =>
+        {
+            restored.Add(handle);
+            return true;
+        };
+
+        await Send(harness);
+
+        Assert.Equal([untracked], restored);
+    }
+
+    /// <summary>A TRACKED window still goes back the way it always did, never through the new path.</summary>
+    [Fact]
+    public async Task SendingATrackedWindow_WhenTheShellRefuses_DoesNotUseTheUntrackedPath()
+    {
+        var harness = Build();
+        harness.Desktops.MoveSucceeds = false;
+        var restored = new List<nint>();
+        harness.Executor.ActivateUntrackedWindow = handle =>
+        {
+            restored.Add(handle);
+            return true;
+        };
+
+        await Send(harness);
+
+        Assert.Empty(restored);
+        Assert.Contains(harness.Focused.Handle, harness.ActivationOrder);
+    }
+
     private static Task Send(Harness harness, int desktop = 2) =>
         harness.Executor
             .ScheduleAsync(new HotkeyAction(HotkeyActionKind.MoveWindowToDesktop, desktop), CancellationToken.None)

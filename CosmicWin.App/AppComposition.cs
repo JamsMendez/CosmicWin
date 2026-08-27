@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Threading.Channels;
 using System.Windows.Threading;
 using CosmicWin.App.Diagnostics;
@@ -258,6 +258,14 @@ public sealed class AppComposition : IDisposable
             };
         }
         executor.WindowMovedToDesktop = sessionAdapter.RehomeToDesktop;
+
+        // The WORKSPACE, not the registry: the registry holds tiled leaves, and the window this has
+        // to reach is by definition not one. Snapshot is walked rather than indexed because this
+        // runs once, on a move the shell refused, and a dictionary kept in step for that would be
+        // more state to get wrong than the walk costs.
+        executor.ActivateUntrackedWindow = handle =>
+            workspace.Snapshot.FirstOrDefault(candidate => candidate.Handle == handle)
+                is { IsAlive: true } untracked && untracked.TryActivate();
         workspace.Open();
         hook.Start();
 

@@ -161,6 +161,20 @@ public sealed class ActionExecutor(
     public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
 
     /// <summary>
+    /// Puts focus back on a window the TREE does not hold, reporting whether it took. Unset -- as
+    /// in every test that predates it -- nothing untracked is ever restored.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RestoreFocusTo"/> reaches a window through the registry, which holds only tiled
+    /// leaves. Sending an UNTRACKED window to another desktop is a legitimate ask and the chord
+    /// path says so explicitly, so the hand-off fires for it too -- and then had nothing to undo
+    /// with when the shell refused, silently leaving the user on a tile they never chose. The
+    /// window is still known to the WORKSPACE, which tracks every top-level window rather than
+    /// only the tiled ones, so production resolves it from there.
+    /// </remarks>
+    public Func<nint, bool>? ActivateUntrackedWindow { get; set; }
+
+    /// <summary>
     /// Invoked after every chord this executor answers, whatever it did.
     /// </summary>
     /// <remarks>
@@ -500,12 +514,21 @@ public sealed class ActionExecutor(
     /// </remarks>
     private void RestoreFocusTo(nint handle)
     {
-        if (registry.TryGetLeaf(handle, out var leaf) && leaf is not null
-            && registry.TryGetWindow(handle, out var window) && window is { IsAlive: true }
-            && window.TryActivate())
+        if (registry.TryGetLeaf(handle, out var leaf) && leaf is not null)
         {
-            _focused = leaf;
+            if (registry.TryGetWindow(handle, out var window) && window is { IsAlive: true }
+                && window.TryActivate())
+            {
+                _focused = leaf;
+            }
+
+            return;
         }
+
+        // Untracked: no leaf, and so no IWindow either -- the whole path above cannot reach it.
+        // The cache is deliberately NOT touched on the way out: it names a tile, and this window
+        // has none, so writing anything here would be a claim the tree cannot back.
+        ActivateUntrackedWindow?.Invoke(handle);
     }
 
     /// <summary>
