@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 
 namespace CosmicWin.App.Tests.TestDoubles;
 
@@ -35,7 +35,13 @@ internal sealed class FakeWorkspace : IWorkspace
     public void RaiseWindowRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
 
     /// <summary>Simulates the real <c>Win32Workspace</c> raising <see cref="WindowBoundsChanged"/> after an out-of-band move.</summary>
-    public void RaiseWindowBoundsChanged(IWindow window) => WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window));
+    /// <param name="isUserGesture">
+    /// Whether this is the settled result of the user's own drag or resize, which is what the real
+    /// workspace reports from MOVESIZEEND and the only bounds change allowed to reshape the tree.
+    /// Defaults to the out-of-band case every caller before it meant.
+    /// </param>
+    public void RaiseWindowBoundsChanged(IWindow window, bool isUserGesture = false) =>
+        WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture));
 
     public void Dispose()
     {

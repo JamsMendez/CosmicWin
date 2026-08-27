@@ -1,4 +1,4 @@
-using CosmicWin.App.Input;
+﻿using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
@@ -411,6 +411,128 @@ public sealed class MultiMonitorWorkspaceAdapterTests
 
         Assert.Equal(0, windowB.TryActivateCallCount);
         Assert.Equal(0, windowA.TryActivateCallCount);
+    }
+
+    /// <summary>
+    /// Reported from real use: a window resized with the mouse springs back to its tree size on
+    /// drop. Narrows an earlier decision to POSITION -- the size the user dragged names a boundary
+    /// between two tiles, which the tree can hold exactly, so it is recorded and the reflow lands it.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_UserDraggedTheSharedEdge_TreeKeepsTheNewSizes()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4001), new IntPtr(4002));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(0, 0, 1200, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([1200, 720], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1200, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1200, 0, 720, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>The neighbour's own edge is the same boundary, dragged from the other side.</summary>
+    [Fact]
+    public void WindowBoundsChanged_NeighborDraggedItsOwnLeadingEdge_MovesTheSameBoundary()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4011), new IntPtr(4012));
+
+        windowB.SimulateExternalMove(Rectangle.FromSize(700, 0, 1220, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowB, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([700, 1220], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 700, 1080), windowA.LastSetPosition);
+    }
+
+    /// <summary>
+    /// The other half of what was asked for: two windows split 1/2 - 1/2 across ONE row have no
+    /// window above or below either of them, so there is no horizontal boundary to move and a
+    /// vertical drag has nothing to record. That window goes back to its tile, as before.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_UserDraggedOnAnAxisWithNoNeighbor_SnapsBack()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4021), new IntPtr(4022));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(0, 0, 960, 700));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([960, 960], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>...and once there IS a window above or below, the same drag starts moving that edge.</summary>
+    [Fact]
+    public void WindowBoundsChanged_StackedVertically_UserDraggedTheHorizontalEdge_TreeKeepsIt()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4031), new IntPtr(4032));
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.True(LayoutTree.ToggleAxis(Assert.IsType<GroupNode>(tree!.Root).Children[0]));
+
+        // One ordinary out-of-band reflow to settle the new stack before the drag is measured.
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 540), windowA.LastSetPosition);
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(0, 0, 1920, 700));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        Assert.Equal([700, 380], Assert.IsType<GroupNode>(tree.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 1920, 700), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(0, 700, 1920, 380), windowB.LastSetPosition);
+    }
+
+    /// <summary>
+    /// A bounds change nobody performed by hand -- an app resizing itself, a restore, a shell nudge
+    /// -- still says nothing about the layout, so an earlier decision still applies to it untouched.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_ResizeThatIsNotAUserGesture_StillSnapsBack()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4041), new IntPtr(4042));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(0, 0, 1200, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        Assert.Equal([960, 960], Assert.IsType<GroupNode>(tree!.Root).Sizes);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>
+    /// Dragging a window somewhere else is not a size question, and a slot is still not something a
+    /// window may leave by being dragged -- even when the drop reports the same gesture flag.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_UserMovedWithoutResizing_StillSnapsBackToItsSlot()
+    {
+        var (s, windowA, windowB) = SideBySide(new IntPtr(4051), new IntPtr(4052));
+
+        windowA.SimulateExternalMove(Rectangle.FromSize(1500, 300, 960, 1080));
+        s.Workspace.RaiseWindowBoundsChanged(windowA, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var group = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal([960, 960], group.Sizes);
+        Assert.Equal(new WindowRef(windowA.Handle), Assert.IsType<LeafNode>(group.Children[0]).Window);
+        Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(960, 0, 960, 1080), windowB.LastSetPosition);
+    }
+
+    /// <summary>Two windows tiled 1/2 - 1/2 across one 1920x1080 display.</summary>
+    private static (Setup S, RecordingWindow A, RecordingWindow B) SideBySide(nint handleA, nint handleB)
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
+        var windowA = new RecordingWindow(handleA, Rectangle.FromSize(100, 100, 400, 300));
+        var windowB = new RecordingWindow(handleB, Rectangle.FromSize(100, 100, 400, 300));
+        s.Workspace.RaiseWindowAdded(windowA);
+        s.Workspace.RaiseWindowAdded(windowB);
+        return (s, windowA, windowB);
     }
 
     [Fact]

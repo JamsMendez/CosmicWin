@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Layout;
 
 namespace CosmicWin.App;
@@ -142,6 +142,38 @@ internal static class TreeArranger
             // vacated space. Terminates: each recursive pass strictly shrinks the live-leaf set.
             Apply(engine, registry, workArea, gap, moved);
         }
+    }
+
+    /// <summary>
+    /// Translates a finished hand-resize of <paramref name="leaf"/> into the tree, so the reflow
+    /// that follows lands the size the user dragged instead of snapping it back. Reports whether
+    /// anything in the tree actually changed.
+    /// </summary>
+    /// <remarks>
+    /// The comparison has to be against the tile that was APPLIED, not the slot the tree handed
+    /// out: <see cref="Apply"/> deflates every slot by half the gap before placing the window, so
+    /// measuring the drag against the raw <see cref="Node.LastGeometry"/> would read a whole gap of
+    /// phantom movement on a build that has spacing turned on and none on a build that does not.
+    /// </remarks>
+    public static bool TryApplyUserResize(Node leaf, Rectangle dragged) =>
+        TryApplyUserResize(leaf, dragged, Gap);
+
+    /// <summary>Explicit-spacing overload, for the same reason the arrange one has one.</summary>
+    public static bool TryApplyUserResize(Node leaf, Rectangle dragged, int gap)
+    {
+        var placed = Deflate(leaf.LastGeometry, Math.Max(0, gap) / 2);
+
+        // A leaf that has never been arranged has no tile to have been dragged away FROM, so there
+        // is no delta to read -- only a rectangle-shaped guess at one.
+        if (placed.Width <= 0 || placed.Height <= 0)
+        {
+            return false;
+        }
+
+        return LayoutTree.ApplyEdgeDrag(
+            leaf,
+            placed,
+            new Rect(dragged.Left, dragged.Top, dragged.Width, dragged.Height));
     }
 
     /// <summary>

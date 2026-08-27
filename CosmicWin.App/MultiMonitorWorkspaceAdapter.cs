@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Layout;
 using CosmicWin.Layout.Filters;
 
@@ -30,6 +30,14 @@ namespace CosmicWin.App;
 /// window's OWN tree undoes any drag by construction, since <see cref="TreeArranger"/> never reads
 /// on-screen position -- removes 's cross-monitor re-home and 's reorder outright, rather
 /// than fixing them further. Gated by <see cref="_isPaused"/> exactly like an earlier decision.
+/// <para>
+/// Narrowed since, on the maintainer's report, to POSITION only. Size is not a slot: a window
+/// dragged bigger is asking for a boundary between two tiles to move, which the tree can express
+/// exactly, and answering it with a snap-back was the tree refusing to record something it could
+/// hold. The drag now goes through <see cref="TreeArranger.TryApplyUserResize"/> BEFORE the
+/// reflow, so the reflow lands it; the tree stays the source of truth, it just learned this one
+/// fact from the mouse.
+/// </para>
 /// </remarks>
 /// <remarks>
 /// The "evict a window that refuses repositioning"
@@ -343,9 +351,16 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
     /// <summary>
     /// Decision #80: snaps an already-tracked window back to its tree slot after any
-    /// out-of-band move. No-op while paused or for an untracked/excluded window. Ignores the new
-    /// real position entirely -- re-arranging the UNCHANGED tree re-applies the same geometry,
-    /// undoing the drag on screen, cross-monitor included (returns to its ORIGINAL slot).
+    /// out-of-band move. No-op while paused or for an untracked/excluded window. Re-arranging the
+    /// UNCHANGED tree re-applies the same geometry, undoing the move on screen, cross-monitor
+    /// included (returns to its ORIGINAL slot).
+    /// <para>
+    /// One case is no longer out-of-band: a hand-RESIZE the user finished with the mouse
+    /// (<see cref="WindowEventArgs.IsUserGesture"/>) is written into the tree first, so the reflow
+    /// keeps the size that was dragged. Position is untouched -- a window still cannot leave its
+    /// slot by being dragged -- and a drag on an axis where the window has no neighbour still
+    /// snaps back, because there is no boundary there to move.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// The snap-back attempt above can itself fail -- a window
@@ -411,6 +426,31 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var before = window.Bounds;
+
+        // The user's own hand-resize is the one bounds change that carries an INTENT about the
+        // layout, so it is written into the tree first and the reflow below then lands it. Every
+        // other bounds change still snaps back untouched, per an earlier decision -- and so does the
+        // part of this one the tree cannot express: a drag on an axis where the window has no
+        // neighbour has no boundary to move, and ApplyEdgeDrag leaves it alone rather than
+        // approximating one.
+        if (e.IsUserGesture &&
+            _registry.TryGetLeaf(handle, out var dragged) && dragged is not null)
+        {
+            var slot = dragged.LastGeometry;
+            var applied = TreeArranger.TryApplyUserResize(dragged, window.Bounds);
+
+            // The tile it was measured AGAINST, not just the verdict. The one thing no test can
+            // answer is whether a real Win32 drop lines up with the tile actually placed once the
+            // gap is on -- a drag that reads as a few phantom pixels of movement is indistinguishable
+            // from one the user really made, and both come out of here as "resized".
+            Trace?.Record(
+                $"drag hwnd=0x{handle:X} class={window.ClassName} " +
+                $"slot=[X={slot.X} Y={slot.Y} W={slot.Width} H={slot.Height}] gap={TreeArranger.Gap} " +
+                $"dropped=[L={window.Bounds.Left} T={window.Bounds.Top} " +
+                $"W={window.Bounds.Width} H={window.Bounds.Height}] -- " +
+                (applied ? "tree resized" : "nothing to resize on either axis"));
+        }
+
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
 
         if (before != window.Bounds)
