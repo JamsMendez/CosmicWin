@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -154,6 +154,27 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         }
 
         return RunBounded(() => ActivateFromAttachedInput(target), ActivationTimeout);
+    }
+
+    /// <summary>
+    /// Posts <c>WM_CLOSE</c>. The application decides what happens next, including nothing.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the polite ask and nothing stronger. There is no fallback to
+    /// <c>DestroyWindow</c> (which cannot cross a process boundary anyway) and none to
+    /// <c>TerminateProcess</c>: a window manager that can discard a user's unsaved work because an
+    /// application took too long to answer a keystroke has picked the wrong default.
+    /// <para>
+    /// <c>PostMessage</c>, never <c>SendMessage</c>. Sending blocks until the target has finished
+    /// handling it, and "finished" can mean a modal save prompt waiting on a human. Today's own
+    /// lesson, one layer down: an unbounded wait on another process, taken on the thread that also
+    /// draws the focus border.
+    /// </para>
+    /// </remarks>
+    public bool TryClose(nint hwnd)
+    {
+        HWND target = new(hwnd);
+        return PInvoke.IsWindow(target) && PInvoke.PostMessage(target, PInvoke.WM_CLOSE, default, default);
     }
 
     /// <summary>

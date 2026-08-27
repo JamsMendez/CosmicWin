@@ -1,4 +1,4 @@
-namespace CosmicWin.Interop.Win32;
+﻿namespace CosmicWin.Interop.Win32;
 
 /// <summary>
 /// <see cref="IWindow"/> backed by <see cref="INativeWindowSource"/>, owned by
@@ -96,6 +96,8 @@ internal sealed class Win32Window : IWindow
         IsAlive ? _nativeSource.Activate(Handle) : ActivationOutcome.Failed;
 
     public bool TryActivate() => Activate().Confirmed();
+
+    public bool TryClose() => IsAlive && _nativeSource.TryClose(Handle);
 
     internal void Refresh(string title, Rectangle bounds, string className, string processName, uint style, uint exStyle, bool isOwned)
     {

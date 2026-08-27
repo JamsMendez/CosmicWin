@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 
 namespace CosmicWin.Interop.Tests.TestDoubles;
 
@@ -107,6 +107,25 @@ internal sealed class FakeWindow : IWindow
     }
 
     public bool TryActivate() => Activate().Confirmed();
+
+    /// <summary>Every handle this window was ASKED to close for, in order.</summary>
+    public int CloseAskCount { get; private set; }
+
+    /// <summary>
+    /// Records the ask and reports it delivered. Deliberately does NOT set <see cref="IsAlive"/>
+    /// to false: WM_CLOSE is a request an application may refuse, and a double that closed itself
+    /// would let a fact assert a removal the real thing never promises.
+    /// </summary>
+    public bool TryClose()
+    {
+        if (!IsAlive)
+        {
+            return false;
+        }
+
+        CloseAskCount++;
+        return true;
+    }
 
     /// <summary>Makes the next <see cref="Activate"/> call fail without throwing.</summary>
     public void FailNextActivate() => _failNextActivate = true;

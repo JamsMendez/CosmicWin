@@ -1,4 +1,4 @@
-EnumWindows
+﻿EnumWindows
 GetWindowRect
 GetWindowTextW
 GetWindowTextLengthW
@@ -56,3 +56,5 @@ SetWindowRgn
 DeleteObject
 ShowWindow
 SHOW_WINDOW_CMD
+PostMessage
+WM_CLOSE

@@ -1,4 +1,4 @@
-using System.Management;
+﻿using System.Management;
 using CosmicWin.App;
 using CosmicWin.App.Input;
 using CosmicWin.Interop;
@@ -429,6 +429,8 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
             LastActivateAttempt = hwnd;
             return inner.Activate(hwnd);
         }
+
+        public bool TryClose(nint hwnd) => inner.TryClose(hwnd);
     }
 
 }

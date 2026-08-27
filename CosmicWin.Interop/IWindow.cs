@@ -1,4 +1,4 @@
-namespace CosmicWin.Interop;
+﻿namespace CosmicWin.Interop;
 
 /// <summary>
 /// Represents a tracked top-level Win32 window. Shaped after the reference implementation's
@@ -97,4 +97,15 @@ public interface IWindow : IEquatable<IWindow>
 
     /// <summary><c>true</c> if this window has an owner window — the raw signal WE-1's owned-dialog clause needs.</summary>
     bool IsOwned { get; }
+
+    /// <summary>
+    /// Asks this window to close, reporting whether the ask was delivered — NOT whether it closed.
+    /// </summary>
+    /// <remarks>
+    /// An application may refuse, and routinely does: an unsaved document answers with its own
+    /// dialog and stays put. Callers must not remove anything from a layout on the strength of a
+    /// <c>true</c> here. The window leaving is reported separately, by the destroy/hide path, if
+    /// and when it happens.
+    /// </remarks>
+    bool TryClose();
 }

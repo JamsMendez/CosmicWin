@@ -1,4 +1,4 @@
-namespace CosmicWin.Interop.Win32;
+﻿namespace CosmicWin.Interop.Win32;
 
 /// <summary>Info snapshot for one native window, as read by <see cref="INativeWindowSource"/>. Task 3.28's 5 new fields are trailing/default-valued so pre-existing positional call sites keep compiling.</summary>
 internal readonly record struct NativeWindowInfo(
@@ -97,6 +97,26 @@ internal interface INativeWindowSource
     /// A boolean here could not be un-flattened by anything above it, however well instrumented.
     /// </remarks>
     ActivationOutcome Activate(nint hwnd);
+
+    /// <summary>
+    /// ASKS the given window to close, reporting only whether the ask was delivered. Never waits
+    /// for an answer, and never forces one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>WM_CLOSE</c> is a request an application is entitled to refuse -- an unsaved document
+    /// puts up its own dialog and stays exactly where it is. So <c>true</c> here means the message
+    /// was posted, never that a window went away. Nothing above this may treat it as a removal;
+    /// the destroy/hide event path reports that when and if it actually happens.
+    /// </para>
+    /// <para>
+    /// POSTED rather than sent. <c>SendMessage</c> blocks the calling thread until the target
+    /// finishes handling it, and the target's answer may be a modal "save changes?" dialog that
+    /// waits on a human -- an unbounded freeze on whichever thread asked, which for a chord is the
+    /// one that also owns the focus border.
+    /// </para>
+    /// </remarks>
+    bool TryClose(nint hwnd);
 
     /// <summary>
     /// Subscribes to every top-level window being SHOWN, with NO trackability filtering. Disposing

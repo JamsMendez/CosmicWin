@@ -125,6 +125,28 @@ internal sealed class RecordingWindow : IWindow
     /// <summary>Makes the next <see cref="TryActivate"/> call fail without throwing.</summary>
     public void FailNextActivate() => _failNextActivate = true;
 
+    /// <summary>How many times this window was ASKED to close.</summary>
+    public int CloseAskCount { get; private set; }
+
+    /// <summary>When set, the ask is delivered nowhere -- the shape of a window already gone.</summary>
+    public bool RefuseCloseAsk { get; set; }
+
+    /// <summary>
+    /// Records the ask and reports it delivered. Deliberately leaves <see cref="IsAlive"/> alone:
+    /// WM_CLOSE is a request an application may refuse, and a double that quietly closed itself
+    /// would let a fact assert a removal the real contract never promises.
+    /// </summary>
+    public bool TryClose()
+    {
+        if (!IsAlive || RefuseCloseAsk)
+        {
+            return false;
+        }
+
+        CloseAskCount++;
+        return true;
+    }
+
     /// <summary>
     /// Simulates an OUT-OF-BAND move (a mouse drag), the way the real OS reports it: <see
     /// cref="Bounds"/> changes WITHOUT going through <see cref="SetPosition"/> and without

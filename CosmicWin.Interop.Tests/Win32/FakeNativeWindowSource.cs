@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -102,6 +102,15 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// answered separately, exactly as the real source derives it.
     /// </summary>
     public bool TryActivateWindow(nint hwnd) => Activate(hwnd).Confirmed();
+
+    /// <summary>Handles that were asked to close, in order.</summary>
+    public List<nint> CloseAsks { get; } = [];
+
+    public bool TryClose(nint hwnd)
+    {
+        CloseAsks.Add(hwnd);
+        return true;
+    }
 
     /// <summary>
     /// Makes every subsequent <see cref="Activate"/> call for this handle report
