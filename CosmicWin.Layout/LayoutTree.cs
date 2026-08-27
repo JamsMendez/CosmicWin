@@ -1,4 +1,4 @@
-namespace CosmicWin.Layout;
+﻿namespace CosmicWin.Layout;
 
 /// <summary>
 /// Tree operations for the tiling layout engine. This work unit covers only node
@@ -639,19 +639,93 @@ public sealed class LayoutTree : ITilingEngine
             return false;
         }
 
+        int requestedTransfer = (int)Math.Round(
+            match.Value.Ancestor.GroupLength * step,
+            MidpointRounding.AwayFromZero);
+
+        return TransferAcross(effective, focused, grows ? requestedTransfer : -requestedTransfer, minRatio);
+    }
+
+    /// <summary>
+    /// Translates one finished mouse edge-drag into the tree: every boundary the user actually
+    /// moved transfers exactly the pixels it was dragged, so the reflow that follows lands the new
+    /// proportions instead of undoing them.
+    /// </summary>
+    /// <remarks>
+    /// An edge with no matching-axis neighbour is dropped, not approximated. Two windows split
+    /// 1/2 - 1/2 across a single horizontal group have no boundary above or below either of them,
+    /// so a vertical drag there has nothing to transfer and the window returns to its tile; add a
+    /// split above or below and the same drag starts moving that boundary. The work-area border is
+    /// the same case -- there is no neighbour on the far side of it to take space from.
+    /// </remarks>
+    public static bool ApplyEdgeDrag(
+        Node focused,
+        Rect previous,
+        Rect current,
+        double minRatio = DefaultMinRatio)
+    {
+        var changed = false;
+
+        // Per AXIS, not per edge. A gesture that only MOVES the window reports both of an axis's
+        // edges travelling the same distance, and reading those as two independent boundary drags
+        // would distort the group while the user asked for no size change at all. A drag that does
+        // change the length moves exactly one of the two edges, so the untouched one contributes a
+        // zero delta and costs nothing.
+        if (current.Width != previous.Width)
+        {
+            changed |= TransferAcross(Direction.Left, focused, previous.X - current.X, minRatio);
+            changed |= TransferAcross(
+                Direction.Right,
+                focused,
+                current.X + current.Width - (previous.X + previous.Width),
+                minRatio);
+        }
+
+        if (current.Height != previous.Height)
+        {
+            changed |= TransferAcross(Direction.Up, focused, previous.Y - current.Y, minRatio);
+            changed |= TransferAcross(
+                Direction.Down,
+                focused,
+                current.Y + current.Height - (previous.Y + previous.Height),
+                minRatio);
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Moves <paramref name="growth"/> pixels across the boundary <paramref name="direction"/>
+    /// names -- into the focused subtree when positive, out of it when negative -- never taking
+    /// whichever side gives space up below <paramref name="minRatio"/> of its group.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the keyboard step and the mouse drag on purpose: the floor is the one rule both
+    /// have to obey identically, and two copies of it is exactly how a window ends up squeezed to
+    /// nothing on one path and not the other.
+    /// </remarks>
+    private static bool TransferAcross(Direction direction, Node focused, int growth, double minRatio)
+    {
+        if (growth == 0)
+        {
+            return false;
+        }
+
+        var match = FindMatchingAncestor(direction, focused);
+        if (match is null)
+        {
+            return false;
+        }
+
         var ancestor = match.Value.Ancestor;
         int targetIndex = match.Value.ChildIndex;
-        int neighborIndex = targetIndex + StepOf(effective);
-        int requestedTransfer = (int)Math.Round(
-            ancestor.GroupLength * step,
-            MidpointRounding.AwayFromZero);
-        int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
+        int neighborIndex = targetIndex + StepOf(direction);
 
         // Whoever gives space up is the one that must not fall below the floor.
-        int donorIndex = grows ? neighborIndex : targetIndex;
-        int receiverIndex = grows ? targetIndex : neighborIndex;
-        int available = ancestor.Sizes[donorIndex] - minimumSize;
-        int transfer = Math.Min(requestedTransfer, available);
+        int donorIndex = growth > 0 ? neighborIndex : targetIndex;
+        int receiverIndex = growth > 0 ? targetIndex : neighborIndex;
+        int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
+        int transfer = Math.Min(Math.Abs(growth), ancestor.Sizes[donorIndex] - minimumSize);
         if (transfer <= 0)
         {
             return false;
