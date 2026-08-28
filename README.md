@@ -55,6 +55,18 @@ cd CosmicWin
 the UAC prompt. Running the copy leaves the build tree unlocked, so builds and tests keep working
 while the app is open. Exit from the tray icon.
 
+## Recommended Windows setting
+
+Turn off **Settings → System → Multitasking → "Snap windows"**. Windows' own edge snapping competes
+with the tree: dragging a window to an edge hands it half the screen behind CosmicWin's back, and the
+snap layout flyout appears over a work area CosmicWin has already divided. With it off, a dragged
+window does what CosmicWin says it does. The setting takes effect at your next sign-in.
+
+CosmicWin never touches this setting itself — it is yours to set, and it stays set after CosmicWin
+exits. Nothing depends on it either: the guards that keep a maximized or self-resizing window from
+breaking the layout run the same whether Snap is on or off, because maximize also arrives from the
+maximize button, a double click on the title bar, and `Win+Up`.
+
 ## Start at logon
 
 CosmicWin does not install itself. Autostart is opt-in, and it is a Scheduled Task rather than a
@@ -90,13 +102,13 @@ Four things worth knowing before you rely on it:
 | --- | --- |
 | `Alt` + `H`/`J`/`K`/`L` or arrows | Move focus |
 | `Alt+Shift` + direction | Move the window |
-| `Alt+Ctrl` + direction | Resize â€” grows toward a neighbour, shrinks when there is none |
+| `Alt+Ctrl` + direction | Resize — grows toward a neighbour, shrinks when there is none |
 | `Alt+[` / `Alt+]` | Ascend / descend scope, to move a whole group |
 | `Alt+O` | Toggle the focused group's split axis |
-| `Alt+Q` | Ask the focused window to close â€” it may refuse, and that is its right |
+| `Alt+Q` | Ask the focused window to close — it may refuse, and that is its right |
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window there, without following it |
-| `Alt+Shift+Q` | Close the desktop you are on â€” Windows hands its windows to a neighbour |
+| `Alt+Shift+Q` | Close the desktop you are on — Windows hands its windows to a neighbour |
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 
