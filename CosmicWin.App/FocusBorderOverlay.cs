@@ -44,6 +44,18 @@ public interface IFocusBorder : IDisposable
     /// </remarks>
     void ShowAround(nint framed, Rectangle window, double scaling, int thickness);
 
+    /// <summary>
+    /// Draws in <paramref name="rgb"/> (<c>0xRRGGBB</c>) from now on, or follows Windows' own accent
+    /// when it is <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ShowAround"/> because the two change on wildly different clocks: the
+    /// rectangle moves on every focus change and every reflow, the colour when somebody opens a menu.
+    /// Carrying the colour on the hot call would repaint the brush hundreds of times to say the same
+    /// thing.
+    /// </remarks>
+    void UseColor(uint? rgb);
+
     /// <summary>Draws nothing, without giving up the window it reuses.</summary>
     void Hide();
 }
@@ -120,6 +132,36 @@ public sealed class FocusBorderOverlay : IFocusBorder
             frame.Height,
             thickness,
             BorderGeometry.CornerRadiusAround(BorderGeometry.WindowsCornerRadius, thickness));
+    }
+
+    /// <summary>
+    /// Repaints the overlay's fill, which IS the border -- the centre is cut out of it by the OS,
+    /// so the window's background is the only colour there is.
+    /// </summary>
+    /// <remarks>
+    /// The accent is taken from <see cref="SystemParameters.WindowGlassBrush"/> rather than
+    /// remembered at construction, so a user who changes their Windows accent while CosmicWin is
+    /// running gets the new one the next time this is called. That brush is frozen and owned by WPF;
+    /// the solid one built here is frozen too, because a brush that will never change again has no
+    /// business carrying change notification.
+    /// </remarks>
+    public void UseColor(uint? rgb)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (rgb is not { } colour)
+        {
+            _window.Background = SystemParameters.WindowGlassBrush;
+            return;
+        }
+
+        var brush = new SolidColorBrush(Color.FromRgb(
+            (byte)((colour >> 16) & 0xFF), (byte)((colour >> 8) & 0xFF), (byte)(colour & 0xFF)));
+        brush.Freeze();
+        _window.Background = brush;
     }
 
     public void Hide()

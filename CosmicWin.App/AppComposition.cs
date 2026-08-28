@@ -119,11 +119,17 @@ public sealed class AppComposition : IDisposable
         IFocusBorder? focusBorder = null,
         Action<Action>? scheduleOnOwningThread = null,
         bool focusBorderEnabled = true,
-        Action<bool>? persistFocusBorder = null)
+        Action<bool>? persistFocusBorder = null,
+        uint? focusBorderColor = null,
+        Action<uint?>? persistBorderColor = null)
     {
         // The live answer to "is the border on", owned here because BOTH the tray item and
         // UpdateFocusBorder need it and neither may become the other's source of truth.
         var borderEnabled = focusBorderEnabled;
+
+        // Same shape, same reason. The overlay knows what it is painting but cannot be asked, and
+        // the tray has to seed its picker with what is on screen right now.
+        var borderColor = focusBorderColor;
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
         var workArea = WorkAreaResolver.Resolve(primary);
@@ -276,6 +282,12 @@ public sealed class AppComposition : IDisposable
         workspace.Open();
         hook.Start();
 
+        // Stated at STARTUP, and stated even when it is null. Left to the first repaint, the first
+        // window framed after launch would wear the accent for a moment before the stored colour
+        // caught up; and saying "the accent" out loud keeps the two paths identical, so the one
+        // nobody exercises cannot rot.
+        onOwningThread(() => focusBorder?.UseColor(borderColor));
+
         // TC-3-W1: Salir stops the logon trigger BEFORE tearing the process down -- after shutdown
         // there is no guarantee anything still runs. Disable, not uninstall: TC-3 says "disable the
         // Scheduled Task trigger" where ES-4 says "remove", so quitting once must not throw the
@@ -294,6 +306,19 @@ public sealed class AppComposition : IDisposable
                 // menu click must reach the screen now, not on the next tick -- a setting the user
                 // waits half a second to see reads as one that did not work.
                 onOwningThread(UpdateFocusBorder);
+            },
+            getBorderColor: () => borderColor,
+            setBorderColor: rgb =>
+            {
+                borderColor = rgb;
+
+                // Persisted before the repaint, the same order the toggle uses and for the same
+                // reason: the choice must survive even if the refresh throws.
+                persistBorderColor?.Invoke(rgb);
+
+                // On the overlay's own thread. A WPF window may only be touched by the thread that
+                // created it, and this arrives from a tray click.
+                onOwningThread(() => focusBorder?.UseColor(rgb));
             },
             exit: () =>
             {
@@ -556,6 +581,12 @@ public sealed class AppComposition : IDisposable
         // value stated explicitly instead of whatever this machine's file happens to say.
         var settings = SettingsFile.Load();
 
+        // The file carries MORE THAN ONE setting now, so each save has to start from the whole
+        // record. Rebuilding it from the one value that changed -- which is what
+        // `new Settings(FocusBorder: enabled)` did -- would write the colour back to the accent
+        // every time somebody toggled the border, and vice versa.
+        var stored = settings;
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -574,7 +605,9 @@ public sealed class AppComposition : IDisposable
             focusBorder: new FocusBorderOverlay(),
             scheduleOnOwningThread: RunOnUiThread,
             focusBorderEnabled: settings.FocusBorder,
-            persistFocusBorder: enabled => SettingsFile.Save(new Settings(FocusBorder: enabled)));
+            persistFocusBorder: enabled => SettingsFile.Save(stored = stored with { FocusBorder = enabled }),
+            focusBorderColor: settings.BorderColor,
+            persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }));
     }
 
     /// <summary>

@@ -133,4 +133,57 @@ public sealed class TrayMenuControllerTests
         controller.ToggleFocusBorder();
         Assert.True(paused);
     }
+
+    /// <summary>
+    /// Read through the getter like every other item here, because the colour is persisted and the
+    /// settings file can be edited by hand while the menu is closed.
+    /// </summary>
+    [Fact]
+    public void BorderColor_ReflectsInjectedGetter_NotInternalState()
+    {
+        uint? colour = 0xFF8800u;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            () => colour, value => colour = value);
+
+        Assert.Equal(0xFF8800u, controller.BorderColor);
+
+        colour = null;
+
+        Assert.Null(controller.BorderColor);
+    }
+
+    /// <summary>
+    /// Forwarded, never interpreted. The controller does not know what a colour looks like on
+    /// screen and must not start deciding which ones are allowed.
+    /// </summary>
+    [Fact]
+    public void SetBorderColor_ForwardsBothAColourAndTheAccent()
+    {
+        var chosen = new List<uint?>();
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            () => null, chosen.Add);
+
+        controller.SetBorderColor(0x00A0FFu);
+        controller.SetBorderColor(null);
+
+        Assert.Equal([0x00A0FFu, null], chosen);
+    }
+
+    /// <summary>
+    /// The colour delegates are optional, because every caller that predates them passes six
+    /// arguments. Without them the item reports the accent and setting one is a quiet no-op --
+    /// never a throw from a menu click.
+    /// </summary>
+    [Fact]
+    public void WithNoColourDelegatesWired_TheItemIsInertRatherThanBroken()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.Null(controller.BorderColor);
+
+        controller.SetBorderColor(0xFF0000u);
+    }
 }

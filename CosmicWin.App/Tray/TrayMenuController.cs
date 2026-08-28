@@ -11,7 +11,8 @@ namespace CosmicWin.App.Tray;
 public sealed class TrayMenuController(
     Func<bool> getPaused, Action<bool> setPaused,
     Func<bool> getFocusBorder, Action<bool> setFocusBorder,
-    Action reload, Action exit)
+    Action reload, Action exit,
+    Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -41,6 +42,28 @@ public sealed class TrayMenuController(
         setFocusBorder(next);
         return next;
     }
+
+    /// <summary>
+    /// The colour that border is drawn in as <c>0xRRGGBB</c>, or <see langword="null"/> for
+    /// Windows' own accent. Read through the getter for the same reason the toggle above is: it is
+    /// persisted, and the settings file can be edited by hand while the menu is closed.
+    /// </summary>
+    /// <remarks>
+    /// Answers the accent when no getter was wired. The delegates are optional because a tray built
+    /// before the colour existed passes six arguments, and a menu click must never throw.
+    /// </remarks>
+    public uint? BorderColor => getBorderColor?.Invoke();
+
+    /// <summary>
+    /// Repaints the border in <paramref name="rgb"/>, or hands it back to the system accent with
+    /// <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Forwarded, never interpreted. This class does not know what a colour looks like on screen,
+    /// and a controller that started deciding which ones are allowed would be a second opinion
+    /// nobody asked for -- the picker already showed the user exactly what they chose.
+    /// </remarks>
+    public void SetBorderColor(uint? rgb) => setBorderColor?.Invoke(rgb);
 
     /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();

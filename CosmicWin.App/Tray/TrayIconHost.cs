@@ -49,6 +49,17 @@ public sealed class TrayIconHost : IDisposable
         };
         borderItem.Click += (_, _) => borderItem.Checked = controller.ToggleFocusBorder();
 
+        // A SUBMENU rather than a bare item, so the accent has a way back. A colour dialog cannot
+        // express "no colour of my own" -- it always answers with one -- and a picker that could
+        // only ever move away from the system accent would be a one-way door out of the default.
+        var colorItem = new ToolStripMenuItem("Color del borde");
+        var pickColorItem = new ToolStripMenuItem("Elegir...");
+        pickColorItem.Click += (_, _) => PickBorderColor(controller);
+        var accentItem = new ToolStripMenuItem("Acento del sistema");
+        accentItem.Click += (_, _) => controller.SetBorderColor(null);
+        colorItem.DropDownItems.Add(pickColorItem);
+        colorItem.DropDownItems.Add(accentItem);
+
         var reloadItem = new ToolStripMenuItem("Reload")
         {
             Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
@@ -65,10 +76,23 @@ public sealed class TrayIconHost : IDisposable
         // to it, and the menu outlives every local here.
         _menu = new ContextMenuStrip();
         var menu = _menu;
-        menu.Items.Add(_pauseItem);
-        menu.Items.Add(borderItem);
-        menu.Items.Add(reloadItem);
-        menu.Items.Add(exitItem);
+
+        // Added by WALKING MenuOrder rather than in source order, so that list is the real decision
+        // about how this menu reads and not a comment describing one. Reordering the menu is a change
+        // to MenuOrder, which a fact already pins.
+        var items = new Dictionary<TrayMenuEntry, ToolStripMenuItem>
+        {
+            [TrayMenuEntry.FocusBorder] = borderItem,
+            [TrayMenuEntry.BorderColor] = colorItem,
+            [TrayMenuEntry.Pause] = _pauseItem,
+            [TrayMenuEntry.Reload] = reloadItem,
+            [TrayMenuEntry.Exit] = exitItem,
+        };
+
+        foreach (var entry in MenuOrder)
+        {
+            menu.Items.Add(items[entry]);
+        }
 
         _ownedIcon = LoadTrayIcon();
         _icon = new NotifyIcon
@@ -106,6 +130,61 @@ public sealed class TrayIconHost : IDisposable
 
     /// <summary>The one sliver of tray label logic extracted as a pure function and unit-tested.</summary>
     public static string PauseLabel(bool isPaused) => isPaused ? "Reanudar" : "Pausar";
+
+    /// <summary>
+    /// The order the items appear in: the border and its colour first, then the pause, then the two
+    /// that end something.
+    /// </summary>
+    /// <remarks>
+    /// The constructor ADDS its items by walking this list, which is what makes it the decision
+    /// rather than a description of one. Kept public so a fact can assert the real order instead of
+    /// its own copy of it -- everything else in this class needs a live notification area and is
+    /// verified by hand.
+    /// </remarks>
+    public static IReadOnlyList<TrayMenuEntry> MenuOrder { get; } =
+    [
+        TrayMenuEntry.FocusBorder,
+        TrayMenuEntry.BorderColor,
+        TrayMenuEntry.Pause,
+        TrayMenuEntry.Reload,
+        TrayMenuEntry.Exit,
+    ];
+
+    /// <summary>
+    /// Opens Windows' own colour dialog, seeded with the colour the border is wearing right now.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cancelled, it changes NOTHING -- not even back to the accent. A dialog dismissed is a user
+    /// who decided not to decide, and reading it as a choice is the classic way a picker eats a
+    /// setting somebody liked.
+    /// </para>
+    /// <para>
+    /// Seeded with the system highlight when the border is following the accent, because the dialog
+    /// has to open on some colour and the one on screen is the least surprising one. The alpha byte
+    /// is dropped on the way out: the border is opaque, and a stored alpha would be a value nothing
+    /// reads and everything has to keep carrying.
+    /// </para>
+    /// </remarks>
+    private static void PickBorderColor(TrayMenuController controller)
+    {
+        using var dialog = new ColorDialog
+        {
+            Color = controller.BorderColor is { } rgb
+                ? Color.FromArgb((int)(0xFF000000u | rgb))
+                : SystemColors.Highlight,
+
+            // The full picker straight away. Collapsed, it offers 48 basic colours and hides the
+            // custom one behind a button, which is the half of the dialog this menu item exists for.
+            FullOpen = true,
+            AnyColor = true,
+        };
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            controller.SetBorderColor((uint)(dialog.Color.ToArgb() & 0x00FFFFFF));
+        }
+    }
 
     public void Dispose()
     {

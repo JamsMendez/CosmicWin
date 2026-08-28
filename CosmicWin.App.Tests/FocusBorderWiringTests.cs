@@ -26,8 +26,13 @@ public sealed class FocusBorderWiringTests
 
         public int HideCallCount { get; private set; }
 
+        /// <summary>Every colour it was told to use, in order. Null is the system accent.</summary>
+        public List<uint?> Colours { get; } = [];
+
         public void ShowAround(nint framed, Rectangle window, double scaling, int thickness) =>
             Shown.Add(new Call(framed, window, scaling, thickness));
+
+        public void UseColor(uint? rgb) => Colours.Add(rgb);
 
         public void Hide() => HideCallCount++;
 
@@ -77,10 +82,12 @@ public sealed class FocusBorderWiringTests
     private sealed record Harness(
         AppComposition Composition, FakeWorkspace Workspace, NoForeground Foreground,
         RecordingFocusBorder Border, ImmediateScheduler Scheduler, LowLevelKeyboardHook Hook,
-        FakeKeyboardHookPlatform Platform, TrayMenuController Tray, List<bool> Persisted);
+        FakeKeyboardHookPlatform Platform, TrayMenuController Tray, List<bool> Persisted,
+        List<uint?> PersistedColours);
 
     private static Harness Wire(
-        IVirtualDesktopService? virtualDesktops = null, bool focusBorderEnabled = true)
+        IVirtualDesktopService? virtualDesktops = null, bool focusBorderEnabled = true,
+        uint? focusBorderColor = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -93,6 +100,7 @@ public sealed class FocusBorderWiringTests
         LowLevelKeyboardHook? hook = null;
         var platform = new FakeKeyboardHookPlatform();
         TrayMenuController? tray = null;
+        var persistedColours = new List<uint?>();
         var persisted = new List<bool>();
 
         var composition = AppComposition.Wire(
@@ -115,10 +123,13 @@ public sealed class FocusBorderWiringTests
             focusBorder: border,
             virtualDesktops: virtualDesktops,
             focusBorderEnabled: focusBorderEnabled,
-            persistFocusBorder: persisted.Add);
+            persistFocusBorder: persisted.Add,
+            focusBorderColor: focusBorderColor,
+            persistBorderColor: persistedColours.Add);
 
         return new Harness(
-            composition, workspace, foreground, border, scheduler, hook!, platform, tray!, persisted);
+            composition, workspace, foreground, border, scheduler, hook!, platform, tray!, persisted,
+            persistedColours);
     }
 
     [Fact]
@@ -536,6 +547,102 @@ public sealed class FocusBorderWiringTests
             harness.Workspace.RaiseWindowBoundsChanged(other);
 
             Assert.Empty(harness.Border.Shown);
+        }
+    }
+
+    /// <summary>
+    /// The stored colour reaches the overlay at STARTUP, not on the first focus change. Applied
+    /// lazily, the first window framed after launch would wear last month's accent for a moment.
+    /// </summary>
+    [Fact]
+    public void TheConfiguredColour_IsAppliedAsTheAppComesUp()
+    {
+        var harness = Wire(focusBorderColor: 0xFF8800u);
+        using (harness.Composition)
+        {
+            Assert.Equal(0xFF8800u, harness.Border.Colours[0]);
+        }
+    }
+
+    /// <summary>
+    /// No stored colour still SAYS so. The overlay would default to the accent anyway, but leaving
+    /// it unsaid means the two paths differ, and the one nobody exercises is the one that rots.
+    /// </summary>
+    [Fact]
+    public void WithNoStoredColour_TheAccentIsAskedForExplicitly()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            Assert.Equal([null], harness.Border.Colours);
+        }
+    }
+
+    /// <summary>
+    /// A colour chosen in the tray reaches the screen and the disk. Both, and in that order: the
+    /// same rule the border toggle follows, because a preference that only survives is not a
+    /// setting the user can see working.
+    /// </summary>
+    [Fact]
+    public void AColourChosenInTheTray_IsAppliedAndPersisted()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            harness.Tray.SetBorderColor(0x00A0FFu);
+
+            Assert.Equal(0x00A0FFu, harness.Border.Colours[^1]);
+            Assert.Equal([0x00A0FFu], harness.PersistedColours);
+        }
+    }
+
+    /// <summary>The way home: handing back the accent is a choice like any other, not an absence.</summary>
+    [Fact]
+    public void TheAccentCanBeChosenBack_AndIsPersistedAsSuch()
+    {
+        var harness = Wire(focusBorderColor: 0xFF8800u);
+        using (harness.Composition)
+        {
+            harness.Tray.SetBorderColor(null);
+
+            Assert.Null(harness.Border.Colours[^1]);
+            Assert.Equal([(uint?)null], harness.PersistedColours);
+        }
+    }
+
+    /// <summary>
+    /// The tray reads the live colour, so the item can seed its picker with what is on screen right
+    /// now rather than with whatever the file said at launch.
+    /// </summary>
+    [Fact]
+    public void TheTrayReportsTheColourCurrentlyInUse()
+    {
+        var harness = Wire(focusBorderColor: 0xFF8800u);
+        using (harness.Composition)
+        {
+            Assert.Equal(0xFF8800u, harness.Tray.BorderColor);
+
+            harness.Tray.SetBorderColor(0x00A0FFu);
+
+            Assert.Equal(0x00A0FFu, harness.Tray.BorderColor);
+        }
+    }
+
+    /// <summary>
+    /// Colour and switch are independent. Choosing a colour must not turn the border on, and it
+    /// must not write the OTHER setting away either -- the file carries both, and a save that
+    /// rebuilt it from one of them would silently reset the other.
+    /// </summary>
+    [Fact]
+    public void ChoosingAColour_LeavesTheOnOffSwitchAlone()
+    {
+        var harness = Wire(focusBorderEnabled: false);
+        using (harness.Composition)
+        {
+            harness.Tray.SetBorderColor(0x00A0FFu);
+
+            Assert.False(harness.Tray.IsFocusBorderEnabled);
+            Assert.Empty(harness.Persisted);
         }
     }
 }

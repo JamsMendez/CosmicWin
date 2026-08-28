@@ -108,12 +108,15 @@ public static class CompositionRoot
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
-        Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit) =>
+        Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit,
+        Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
             getFocusBorder,
             setFocusBorder,
             () => exceptions.Reload(loadExceptions()),
-            exit);
+            exit,
+            getBorderColor,
+            setBorderColor);
 }
