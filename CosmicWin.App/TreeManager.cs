@@ -315,9 +315,16 @@ public sealed class TreeManager
     /// <summary>
     /// MM-5: when LE-2's in-tree walk reaches root with no match, resolves the nearest connected
     /// monitor whose center lies in <paramref name="direction"/> from <paramref name="current"/>,
-    /// returning its tree's first leaf (depth-first). Geometric ranking applies only BETWEEN
-    /// monitors -- LE-2's own in-tree walk stays tree-walk-only.
+    /// returning the leaf of its tree that touches the crossed edge. Geometric ranking applies only
+    /// BETWEEN monitors -- LE-2's own in-tree walk stays tree-walk-only.
     /// </summary>
+    /// <remarks>
+    /// The landing leaf is resolved by <see cref="LayoutTree.NearestLeaf"/>, the same descent the
+    /// in-tree walk uses. This method used to own a private copy that always took the first child,
+    /// so Alt+H onto the monitor at the left landed on its LEFTMOST window -- skipping every window
+    /// between the edge and it. A monitor edge is still an edge; the direction the user pressed
+    /// decides which end of that tree meets it.
+    /// </remarks>
     public FocusResult FocusAdjacentDisplay(IDisplay current, Direction direction)
     {
         // The VISIBLE tree on that monitor: focus can only fall through to a window the user can
@@ -328,7 +335,7 @@ public sealed class TreeManager
             return FocusResult.NoMatch;
         }
 
-        return FocusResult.Found(FirstLeaf(tree.Root));
+        return FocusResult.Found(LayoutTree.NearestLeaf(tree.Root, direction));
     }
 
     /// <summary>
@@ -405,11 +412,4 @@ public sealed class TreeManager
 
     private static (long X, long Y) Center(Rectangle bounds) =>
         (bounds.Left + bounds.Width / 2L, bounds.Top + bounds.Height / 2L);
-
-    private static LeafNode FirstLeaf(Node node) => node switch
-    {
-        LeafNode leaf => leaf,
-        GroupNode { Children.Count: > 0 } group => FirstLeaf(group.Children[0]),
-        _ => throw new InvalidOperationException("Cannot descend into an empty group.")
-    };
 }

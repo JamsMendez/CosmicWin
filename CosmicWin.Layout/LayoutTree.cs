@@ -341,9 +341,10 @@ public sealed class LayoutTree : ITilingEngine
     /// <summary>
     /// LE-2 "Directional focus — tree walk": moves focus from <paramref name="focused"/> in
     /// <paramref name="direction"/> by delegating the ancestor search to <see
-    /// cref="FindMatchingAncestor"/>, then descending depth-first into the sibling at the
-    /// matching boundary to find its first leaf. Returns <see cref="FocusResult.NoMatch"/> (LE-2
-    /// step 4) rather than performing any geometric/nearest-window search when no match exists.
+    /// cref="FindMatchingAncestor"/>, then descending into the sibling at the matching boundary to
+    /// find the leaf that actually TOUCHES that boundary (<see cref="NearestLeaf"/>). Returns
+    /// <see cref="FocusResult.NoMatch"/> (LE-2 step 4) rather than performing any
+    /// geometric/nearest-window search when no match exists.
     /// </summary>
     public static FocusResult NextFocus(Direction direction, LeafNode focused)
     {
@@ -355,16 +356,57 @@ public sealed class LayoutTree : ITilingEngine
 
         int step = StepOf(direction);
         var sibling = match.Value.Ancestor.Children[match.Value.ChildIndex + step];
-        return FocusResult.Found(FirstLeaf(sibling));
+        return FocusResult.Found(NearestLeaf(sibling, direction));
     }
 
-    private static LeafNode FirstLeaf(Node node) => node switch
+    /// <summary>
+    /// The leaf inside <paramref name="node"/> that shares the boundary just crossed travelling in
+    /// <paramref name="direction"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Public because the boundary being crossed is not always a boundary INSIDE this tree:
+    /// <c>TreeManager</c>'s monitor fall-through crosses between two trees entirely and lands in
+    /// one of them, which is the same question asked one level up. It kept a private first-child
+    /// copy of this descent and carried the identical defect for the identical reason. The rule
+    /// belongs to the tree, so both askers now read it from here.
+    /// </para>
+    /// <para>
+    /// This REPLACES an unconditional "descend through <c>Children[0]</c>", which was reported from
+    /// real use as focus skipping a window: with A C B on screen, Alt+H from B landed on A. B's
+    /// left-hand sibling is the group holding A and C, and its leading child is the one FURTHEST
+    /// from the boundary being crossed — C is the window the user is pointing at.
+    /// </para>
+    /// <para>
+    /// The old rule looked right because the only test that exercised it pressed Right, and for
+    /// Right the leading child IS the nearest one. Direction was never part of the answer, so half
+    /// the axis was wrong and unmeasured.
+    /// </para>
+    /// <para>
+    /// The reversal applies ONLY where it means something: a group stacking along the direction
+    /// travelled has a near end and a far end. A PERPENDICULAR group does not — every child of
+    /// it touches the boundary equally — so the leading child stays the answer there rather
+    /// than being flipped for a symmetry this tree cannot see. Choosing better among those would
+    /// need focus history, which is not modelled here.
+    /// </para>
+    /// </remarks>
+    public static LeafNode NearestLeaf(Node node, Direction direction) => node switch
     {
         LeafNode leaf => leaf,
-        GroupNode { Children.Count: > 0 } group => FirstLeaf(group.Children[0]),
+        GroupNode { Children.Count: > 0 } group =>
+            NearestLeaf(group.Children[EntryIndexOf(group, direction)], direction),
         GroupNode => throw new InvalidOperationException("Cannot descend into an empty group."),
         _ => throw new InvalidOperationException($"Unknown node type: {node.GetType()}")
     };
+
+    /// <summary>
+    /// Which child of <paramref name="group"/> the descent enters through: the trailing one when
+    /// travelling Left/Up along the group's own axis, the leading one in every other case.
+    /// </summary>
+    private static int EntryIndexOf(GroupNode group, Direction direction) =>
+        group.Axis == AxisOf(direction) && StepOf(direction) < 0
+            ? group.Children.Count - 1
+            : 0;
 
     private static SplitAxis AxisOf(Direction direction) => direction switch
     {

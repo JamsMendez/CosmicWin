@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
 using CosmicWin.Layout;
@@ -225,10 +225,11 @@ public sealed class TreeManagerTests
         Assert.Equal(0, secondaryWindow.SetPositionCallCount);
     }
 
-    // The nearest
-    // connected monitor in the requested direction resolves to its tree's first leaf.
+    // The nearest connected monitor in the requested direction resolves to a leaf of its tree.
+    // These three park a BARE LEAF at the root on purpose -- the direction-aware descent is pinned
+    // separately below, on trees that actually have somewhere to descend.
     [Fact]
-    public void FocusAdjacentDisplay_MonitorToRightExists_ReturnsFirstLeafOfThatMonitorsTree()
+    public void FocusAdjacentDisplay_MonitorToRightExists_ReturnsThatMonitorsLeaf()
     {
         var primary = Display(1, 0, 0, 1920, 1080, primary: true);
         var secondary = Display(2, 1920, 0, 1280, 720);
@@ -286,7 +287,7 @@ public sealed class TreeManagerTests
     // exercise Up/Down meaningfully). Queries FROM the bottom display -- the top display's tree
     // resolves as the adjacent match.
     [Fact]
-    public void FocusAdjacentDisplay_MonitorAboveExists_ReturnsFirstLeafOfThatMonitorsTree()
+    public void FocusAdjacentDisplay_MonitorAboveExists_ReturnsThatMonitorsLeaf()
     {
         var top = Display(1, 0, 0, 1920, 1080, primary: true);
         var bottom = Display(2, 0, 1080, 1920, 1080);
@@ -319,7 +320,7 @@ public sealed class TreeManagerTests
     // (TreeManager.cs:185). Queries FROM the top display -- the bottom display's tree resolves
     // as the adjacent match.
     [Fact]
-    public void FocusAdjacentDisplay_MonitorBelowExists_ReturnsFirstLeafOfThatMonitorsTree()
+    public void FocusAdjacentDisplay_MonitorBelowExists_ReturnsThatMonitorsLeaf()
     {
         var top = Display(1, 0, 0, 1920, 1080, primary: true);
         var bottom = Display(2, 0, 1080, 1920, 1080);
@@ -332,6 +333,75 @@ public sealed class TreeManagerTests
 
         Assert.Equal(FocusWalkStatus.Found, result.Status);
         Assert.Same(leaf, result.Leaf);
+    }
+
+    // The same defect LayoutTree.NextFocus carried, one layer up. Every FocusAdjacentDisplay test
+    // above parks a BARE LEAF at the root, so the descent was never exercised and the direction
+    // never mattered -- which is exactly how this survived.
+    [Fact]
+    public void FocusAdjacentDisplay_MonitorToTheLeft_LandsOnItsNearestLeafNotItsFirst()
+    {
+        // Crossing a monitor boundary leftward must land on that monitor's RIGHTMOST window: the
+        // one sharing the edge just crossed. Landing on its leftmost skips every window between.
+        var left = Display(1, 0, 0, 1920, 1080, primary: true);
+        var right = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { left, right }, left, new WindowRegistry());
+        manager.TryGetTree(left, out var leftTree);
+        var root = new GroupNode(SplitAxis.Horizontal) { GroupLength = 1920 };
+        var far = new LeafNode(new WindowRef(new IntPtr(801)));
+        var adjacent = new LeafNode(new WindowRef(new IntPtr(802)));
+        LayoutTree.AddChild(root, far, index: 0);
+        LayoutTree.AddChild(root, adjacent, index: 1);
+        leftTree!.Root = root;
+
+        var result = manager.FocusAdjacentDisplay(right, Direction.Left);
+
+        Assert.Equal(FocusWalkStatus.Found, result.Status);
+        Assert.Same(adjacent, result.Leaf);
+    }
+
+    [Fact]
+    public void FocusAdjacentDisplay_MonitorAbove_LandsOnItsNearestLeafNotItsFirst()
+    {
+        // The vertical half: going Up into a stacked monitor lands on its BOTTOM window.
+        var top = Display(1, 0, 0, 1920, 1080, primary: true);
+        var bottom = Display(2, 0, 1080, 1920, 1080);
+        var manager = new TreeManager(new IDisplay[] { top, bottom }, top, new WindowRegistry());
+        manager.TryGetTree(top, out var topTree);
+        var root = new GroupNode(SplitAxis.Vertical) { GroupLength = 1080 };
+        var far = new LeafNode(new WindowRef(new IntPtr(803)));
+        var adjacent = new LeafNode(new WindowRef(new IntPtr(804)));
+        LayoutTree.AddChild(root, far, index: 0);
+        LayoutTree.AddChild(root, adjacent, index: 1);
+        topTree!.Root = root;
+
+        var result = manager.FocusAdjacentDisplay(bottom, Direction.Up);
+
+        Assert.Equal(FocusWalkStatus.Found, result.Status);
+        Assert.Same(adjacent, result.Leaf);
+    }
+
+    [Fact]
+    public void FocusAdjacentDisplay_MonitorToTheLeftStacksAcrossTheCrossing_StillTakesItsFirstChild()
+    {
+        // Deliberate, and the mirror of the in-tree pin: a group stacking ACROSS the direction
+        // travelled has no near end -- every child of it meets the monitor edge equally -- so the
+        // leading child stays the answer rather than being flipped for a symmetry that is not there.
+        var left = Display(1, 0, 0, 1920, 1080, primary: true);
+        var right = Display(2, 1920, 0, 1280, 720);
+        var manager = new TreeManager(new IDisplay[] { left, right }, left, new WindowRegistry());
+        manager.TryGetTree(left, out var leftTree);
+        var root = new GroupNode(SplitAxis.Vertical) { GroupLength = 1080 };
+        var upper = new LeafNode(new WindowRef(new IntPtr(805)));
+        var lower = new LeafNode(new WindowRef(new IntPtr(806)));
+        LayoutTree.AddChild(root, upper, index: 0);
+        LayoutTree.AddChild(root, lower, index: 1);
+        leftTree!.Root = root;
+
+        var result = manager.FocusAdjacentDisplay(right, Direction.Left);
+
+        Assert.Equal(FocusWalkStatus.Found, result.Status);
+        Assert.Same(upper, result.Leaf);
     }
 
     // Triangulation for W2 (Down no-match): queries FROM the bottom display -- no monitor
