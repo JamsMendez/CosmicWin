@@ -24,7 +24,7 @@ public enum HotkeyActionKind : byte
     FocusLeft, FocusRight, FocusUp, FocusDown, FocusIn, FocusOut,
     MoveLeft, MoveRight, MoveUp, MoveDown, ToggleOrientation,
     ResizeLeft, ResizeRight, ResizeUp, ResizeDown,
-    SwitchDesktop, MoveWindowToDesktop, CloseWindow,
+    SwitchDesktop, MoveWindowToDesktop, CloseWindow, CloseDesktop,
 }
 
 /// <summary>

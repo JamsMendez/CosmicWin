@@ -20,6 +20,13 @@ internal interface INativeVirtualDesktops
     void SwitchTo(Guid desktopId);
 
     bool MoveWindowTo(nint windowHandle, Guid desktopId);
+
+    /// <summary>
+    /// Closes the desktop currently in view. Returns nothing because there is nothing to return:
+    /// this is Windows' own shortcut delivered as synthetic input, and the shell answers with an
+    /// animation. The POLICY above decides whether it is worth asking; this only asks.
+    /// </summary>
+    void CloseCurrentDesktop();
 }
 
 /// <summary>
@@ -126,6 +133,38 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
         var moved = _native.MoveWindowTo(windowHandle, desktopId);
         LastError = moved ? null : _native.LastError;
         return moved;
+    }
+
+    /// <summary>
+    /// Closes the desktop in view, refusing the two cases that can be decided without the shell.
+    /// </summary>
+    /// <remarks>
+    /// The LAST desktop is refused HERE rather than left to Windows, which ignores the request in
+    /// silence. A chord that does nothing and says nothing is the exact failure <see cref="LastError"/>
+    /// was added for after the first live run.
+    /// </remarks>
+    public bool TryCloseCurrentDesktop()
+    {
+        LastError = null;
+
+        if (!_native.IsAvailable)
+        {
+            LastError = $"Unsupported build. {_native.LastError}".TrimEnd();
+            return false;
+        }
+
+        // Read rather than remembered, like every other operation here: the user can close a desktop
+        // through Task View between two chords, and a cached count would answer for a world that is
+        // gone.
+        var count = _native.GetDesktopIds().Count;
+        if (count <= 1)
+        {
+            LastError = "The last desktop cannot be closed.";
+            return false;
+        }
+
+        _native.CloseCurrentDesktop();
+        return true;
     }
 
     private bool Switch(Guid desktopId)

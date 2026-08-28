@@ -10,7 +10,7 @@ namespace CosmicWin.Interop;
 /// </para>
 /// <para>
 /// Positional, one-based, because that is what the shell actually models. <c>CreateDesktop</c>
-/// appends at the END of the list and desktops have no durable name or number â€” so "desktop 3" can
+/// appends at the END of the list and desktops have no durable name or number — so "desktop 3" can
 /// only mean "the third one". The alternative, giving each desktop a name, needs
 /// <c>SetDesktopName</c>, which takes an <c>HSTRING</c> this runtime cannot marshal without
 /// hand-rolled interop. Positional also keeps <c>Win+Ctrl+Left/Right</c> agreeing with us.
@@ -50,6 +50,32 @@ public interface IVirtualDesktopService
     /// being dragged along with it are separate intents.
     /// </summary>
     bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex);
+
+    /// <summary>
+    /// Closes the desktop the user is looking at, which is the only one that can be closed. Returns
+    /// whether the shell was ASKED, not whether the desktop is gone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The current one because that is the whole vocabulary Windows offers: <c>Win+Ctrl+F4</c> takes
+    /// no argument. The alternative would be the internal <c>RemoveDesktop</c> slot, which this
+    /// codebase deliberately holds at a wrong signature -- deleting a desktop drags its surviving
+    /// windows to a fallback, and that is not a decision to make through an interface Microsoft
+    /// never promised.
+    /// </para>
+    /// <para>
+    /// "Asked", not "done", and the distinction is not hedging. The shell is driven by synthetic
+    /// input here and answers with an animation rather than a return value, so reading the desktop
+    /// set back on the next line still names the desktop being closed. What the caller can rely on
+    /// is that a <see langword="false"/> means nothing was asked at all -- an unsupported build, or
+    /// the last remaining desktop, both refused here before any input is sent.
+    /// </para>
+    /// <para>
+    /// Defaulted so the fakes that predate it need not answer a question they were never asked. A
+    /// double that cannot close a desktop reporting that it did not is the truthful answer.
+    /// </para>
+    /// </remarks>
+    bool TryCloseCurrentDesktop() => false;
 
     /// <summary>
     /// Why the last operation did not do what was asked, or <see langword="null"/> if it did.

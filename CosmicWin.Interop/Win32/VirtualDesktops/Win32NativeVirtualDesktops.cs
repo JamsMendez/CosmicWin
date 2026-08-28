@@ -94,6 +94,27 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         }
     }
 
+    /// <summary>
+    /// Windows' own <c>Win+Ctrl+F4</c>, not the internal <c>RemoveDesktop</c> slot.
+    /// </summary>
+    /// <remarks>
+    /// That slot is deliberately held at a wrong signature here and stays that way: it is unverified
+    /// on this vtable, and deleting a desktop drags its surviving windows to a fallback the caller
+    /// chooses -- a decision nobody should make through an interface Microsoft never promised. The
+    /// documented shortcut has honoured the same meaning for a decade and cannot silently change
+    /// under an update, which is the whole reason <see cref="ShellDesktopShortcuts"/> exists.
+    /// <para>
+    /// Costs a keystroke of real synthetic input on the user's desktop, and there is no cheaper
+    /// honest way to do this. It is also fire-and-forget: nothing here can confirm the close, so
+    /// nothing here pretends to.
+    /// </para>
+    /// </remarks>
+    public void CloseCurrentDesktop()
+    {
+        LastError = null;
+        ShellDesktopShortcuts.SendCloseDesktop();
+    }
+
     public void SwitchTo(Guid desktopId)
     {
         if (_internalManager is not { } manager)

@@ -58,6 +58,11 @@ public sealed class ChordTable
         table.Register(ModifierKeys.Alt, KeyboardKey.OpenBracket, HotkeyActionKind.FocusOut);
         table.Register(ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation);
         table.Register(ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow);
+
+        // Shift over the SAME key that closes a window, the way Shift over a desktop digit turns
+        // "go there" into "send there". Closing the desktop is the bigger version of closing the
+        // thing in front of you, and one modifier keeping one meaning is worth more than a mnemonic.
+        table.Register(ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseDesktop);
         table.RegisterDesktopDigits();
         return table;
     }

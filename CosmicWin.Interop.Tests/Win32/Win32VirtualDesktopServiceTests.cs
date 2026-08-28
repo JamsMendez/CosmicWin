@@ -3,7 +3,7 @@ using CosmicWin.Interop.Win32.VirtualDesktops;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// The positional policy â€” index arithmetic, range limits, create-on-demand â€” with no live shell.
+/// The positional policy — index arithmetic, range limits, create-on-demand — with no live shell.
 /// The maintainer chose positional over named desktops: the shell appends new desktops
 /// at the end and gives them no durable number, so "desktop 3" can only mean "the third one".
 /// </summary>
@@ -36,6 +36,8 @@ public sealed class Win32VirtualDesktopServiceTests
 
         public int SwitchCalls { get; private set; }
 
+        public int CloseCalls { get; private set; }
+
         public List<(nint Handle, Guid Desktop)> Moved { get; } = [];
 
         public IReadOnlyList<Guid> GetDesktopIds() => _ids.ToArray();
@@ -61,6 +63,23 @@ public sealed class Win32VirtualDesktopServiceTests
         {
             Moved.Add((windowHandle, desktopId));
             return true;
+        }
+
+        /// <summary>
+        /// Models the real one: the shell drops the current desktop and lands the user on a
+        /// neighbour. Synthetic input, so it is fire-and-forget -- there is nothing to report.
+        /// </summary>
+        public void CloseCurrentDesktop()
+        {
+            CloseCalls++;
+            var index = _ids.IndexOf(Current);
+            if (index < 0)
+            {
+                return;
+            }
+
+            _ids.RemoveAt(index);
+            Current = _ids.Count == 0 ? Guid.Empty : _ids[Math.Min(index, _ids.Count - 1)];
         }
     }
 
@@ -151,6 +170,54 @@ public sealed class Win32VirtualDesktopServiceTests
 
         Assert.False(service.TryMoveWindowTo(0, 3));
         Assert.Equal(0, native.CreateCalls);
+    }
+
+    /// <summary>
+    /// Closing hands the current desktop to the shell's own Win+Ctrl+F4, which is fire-and-forget:
+    /// it is synthetic input, the shell answers with an animation rather than a return value, and
+    /// the reconciliation tick is what notices afterwards. So the service reports only whether it
+    /// ASKED, and everything it can decide on its own it decides before asking.
+    /// </summary>
+    [Fact]
+    public void TryCloseCurrentDesktop_AsksTheShellWhenThereIsMoreThanOne()
+    {
+        var native = new FakeDesktops(initialCount: 2);
+        var service = new Win32VirtualDesktopService(native);
+
+        Assert.True(service.TryCloseCurrentDesktop());
+
+        Assert.Equal(1, native.CloseCalls);
+        Assert.Equal(1, service.Count);
+    }
+
+    /// <summary>
+    /// The LAST desktop is refused here rather than left to Windows. The shell ignores the request
+    /// silently, and a chord that does nothing without saying why is the exact failure LastError was
+    /// added for after the first live run.
+    /// </summary>
+    [Fact]
+    public void TryCloseCurrentDesktop_RefusesTheOnlyDesktop_AndSaysWhy()
+    {
+        var native = new FakeDesktops(initialCount: 1);
+        var service = new Win32VirtualDesktopService(native);
+
+        Assert.False(service.TryCloseCurrentDesktop());
+
+        Assert.Equal(0, native.CloseCalls);
+        Assert.NotNull(service.LastError);
+    }
+
+    /// <summary>An unrecognised build degrades to "no virtual desktops", never to a wrong guess.</summary>
+    [Fact]
+    public void TryCloseCurrentDesktop_OnAnUnsupportedBuild_AsksNothing()
+    {
+        var native = new FakeDesktops(initialCount: 3) { IsAvailable = false };
+        var service = new Win32VirtualDesktopService(native);
+
+        Assert.False(service.TryCloseCurrentDesktop());
+
+        Assert.Equal(0, native.CloseCalls);
+        Assert.NotNull(service.LastError);
     }
 
     /// <summary>

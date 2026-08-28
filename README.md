@@ -90,11 +90,13 @@ Four things worth knowing before you rely on it:
 | --- | --- |
 | `Alt` + `H`/`J`/`K`/`L` or arrows | Move focus |
 | `Alt+Shift` + direction | Move the window |
-| `Alt+Ctrl` + direction | Resize — grows toward a neighbour, shrinks when there is none |
+| `Alt+Ctrl` + direction | Resize â€” grows toward a neighbour, shrinks when there is none |
 | `Alt+[` / `Alt+]` | Ascend / descend scope, to move a whole group |
 | `Alt+O` | Toggle the focused group's split axis |
+| `Alt+Q` | Ask the focused window to close â€” it may refuse, and that is its right |
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window there, without following it |
+| `Alt+Shift+Q` | Close the desktop you are on â€” Windows hands its windows to a neighbour |
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 

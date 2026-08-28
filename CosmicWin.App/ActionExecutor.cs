@@ -804,7 +804,8 @@ public sealed class ActionExecutor(
 
     private bool TryDispatchDesktop(HotkeyAction action, nint foregroundHandle)
     {
-        if (action.Kind is not (HotkeyActionKind.SwitchDesktop or HotkeyActionKind.MoveWindowToDesktop))
+        if (action.Kind is not (HotkeyActionKind.SwitchDesktop or HotkeyActionKind.MoveWindowToDesktop
+            or HotkeyActionKind.CloseDesktop))
         {
             return false;
         }
@@ -812,6 +813,29 @@ public sealed class ActionExecutor(
         if (VirtualDesktops is not { } desktops)
         {
             DesktopTrace?.Record($"{action.Kind} {action.Argument} -- no service wired");
+            return true;
+        }
+
+        // Answered BEFORE the readings below, because it invalidates every one of them. Closing a
+        // desktop is Windows' own Win+Ctrl+F4 delivered as synthetic input: the shell replies with
+        // an animation rather than a return value, so `count` and `index` read on the next line
+        // would describe a desktop set that has not finished changing.
+        //
+        // Nothing else happens here on purpose -- no handover, no tree surgery. The reconciliation
+        // tick already rehomes every tracked window on each pass and hands focus on when it notices
+        // a desktop CosmicWin did not switch to; a close produces exactly that aftermath, and it is
+        // the only observer positioned to see it AFTER the shell has settled.
+        if (action.Kind == HotkeyActionKind.CloseDesktop)
+        {
+            var closed = desktops.TryCloseCurrentDesktop();
+            // count-BEFORE, spelled out. These are read the instant the input is queued, so on a
+            // successful close they still name the desktop being closed -- a bare `count=` here
+            // reads like an outcome and is not one. What proves a close landed is the NEXT line
+            // this log gets, or the tick's own handover.
+            DesktopTrace?.Record(
+                $"CloseDesktop asked={closed} supported={desktops.IsSupported} " +
+                $"count-before={desktops.Count} index-before={desktops.CurrentIndex} " +
+                $"error={desktops.LastError ?? "(none)"}");
             return true;
         }
 
