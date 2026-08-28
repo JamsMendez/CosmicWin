@@ -15,8 +15,8 @@ namespace CosmicWin.App;
 
 /// <summary>
 /// Extracts <c>App.xaml.cs</c>'s
-/// composition into a plain, directly-testable class. Four consecutive closures (,
-/// ) defended the composition site from OUTSIDE a WPF <see
+/// composition into a plain, directly-testable class. Four consecutive closures defended the
+/// composition site from OUTSIDE a WPF <see
 /// cref="System.Windows.Application"/> subclass -- three by tightening the type system, the last
 /// (<c>CompositionSiteArchitectureTests</c>, now deleted) by reading its source text -- and each
 /// closure fell to a mutation the previous one had not anticipated. This class does not add a

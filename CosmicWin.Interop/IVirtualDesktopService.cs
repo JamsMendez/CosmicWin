@@ -10,8 +10,8 @@ namespace CosmicWin.Interop;
 /// </para>
 /// <para>
 /// Positional, one-based, because that is what the shell actually models. <c>CreateDesktop</c>
-/// appends at the END of the list and desktops have no durable name or number — so "desktop 3" can
-/// only mean "the third one". The alternative, naming them the way i3 does, needs
+/// appends at the END of the list and desktops have no durable name or number â€” so "desktop 3" can
+/// only mean "the third one". The alternative, giving each desktop a name, needs
 /// <c>SetDesktopName</c>, which takes an <c>HSTRING</c> this runtime cannot marshal without
 /// hand-rolled interop. Positional also keeps <c>Win+Ctrl+Left/Right</c> agreeing with us.
 /// </para>

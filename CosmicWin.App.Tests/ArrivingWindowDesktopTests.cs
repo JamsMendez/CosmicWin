@@ -17,8 +17,8 @@ namespace CosmicWin.App.Tests;
 /// <para>
 /// Windows decides where a new window is born, and an application that already owns a window
 /// elsewhere can have the next one born beside it. CosmicWin previously only ever FILED an arriving
-/// window under whatever desktop the shell named, so it inherited that decision. Matching the
-/// reference implementation's behaviour means overruling it: the window is sent to the user, and the
+/// window under whatever desktop the shell named, so it inherited that decision. CosmicWin now
+/// overrules it deliberately: the window is sent to the user, and the
 /// user is not dragged after the window.
 /// </para>
 /// <para>

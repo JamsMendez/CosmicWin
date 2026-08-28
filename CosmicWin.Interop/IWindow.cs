@@ -1,14 +1,13 @@
 ﻿namespace CosmicWin.Interop;
 
 /// <summary>
-/// Represents a tracked top-level Win32 window. Shaped after the reference implementation's
-/// <c>IWindow</c>, trimmed to the
+/// Represents a tracked top-level Win32 window. Trimmed to the
 /// surface CosmicWin's tiling engine actually needs.
 /// </summary>
 /// <remarks>
 /// Once a window dies (<see cref="IsAlive"/> becomes <c>false</c>), property reads MUST return
 /// default-but-valid values (<see cref="string.Empty"/>, <see cref="Rectangle.Empty"/>) rather
-/// than throw — this matches the reference implementation's contract and keeps callers (the tiling engine,
+/// than throw — this keeps callers (the tiling engine,
 /// the hook-driven dispatcher) simple.
 /// </remarks>
 public interface IWindow : IEquatable<IWindow>

@@ -164,7 +164,7 @@ public sealed class Win32NativeWindowSourceRealWindowTests
     }
 
     /// <summary>
-    /// MR-2 ( first real run): observation #96 measured plain <c>SetForegroundWindow</c>
+    /// MR-2 (first real run): observation #96 measured plain <c>SetForegroundWindow</c>
     /// returning <c>false</c> from a background process on this exact machine. This proves the
     /// <c>AttachThreadInput</c> fix actually moves the real OS foreground -- not just that the call
     /// returns a boolean -- against a genuinely external spawned window.

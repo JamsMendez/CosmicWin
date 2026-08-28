@@ -6,9 +6,8 @@
 /// <see cref="Poll"/> as the bounded-interval reconciliation fallback for a missed event.
 /// </summary>
 /// <remarks>
-/// Ports the enumerate + hook + dirty-check pattern from the reference implementation's
-/// <c>the reference implementation.Win32Workspace</c>/<c>WinEventHookHelper</c> (algorithm only — this is
-/// original code, not a copy), scoped to what WT-1 needs. The actual native calls are behind
+/// Enumerate, hook, then dirty-check: the three together are scoped to what WT-1
+/// needs. The actual native calls are behind
 /// <see cref="INativeWindowSource"/> so the tracking algorithm is unit-testable without a real
 /// desktop session; production callers use the parameterless constructor, which wires up the
 /// real <see cref="Win32NativeWindowSource"/>.

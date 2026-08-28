@@ -13,8 +13,7 @@ namespace CosmicWin.Interop.Win32;
 /// <summary>
 /// Real, CsWin32-backed <see cref="INativeWindowSource"/>: enumerates via <c>EnumWindows</c>,
 /// reads geometry/title via <c>GetWindowRect</c>/<c>GetWindowTextW</c>, and subscribes to
-/// create/destroy/move-resize notifications via <c>SetWinEventHook</c>. Ports the pattern from
-/// the reference implementation's <c>the reference implementation.WinEventHookHelper</c> (algorithm only — original code).
+/// create/destroy/move-resize notifications via <c>SetWinEventHook</c>.
 /// </summary>
 internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 {
@@ -127,8 +126,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// <c>ActionDispatcher.RunAsync</c>'s thread-pool thread, and <c>AttachThreadInput</c> shares
     /// INPUT queues -- a thread-pool thread has none, so there was nothing to attach to.
     /// <para>
-    /// This is the escalation the vendored the reference implementation reference (<c>the reference implementation/Utilities/FocusHelper.cs</c>)
-    /// uses, algorithm only: try plainly, then from a dedicated thread that first CREATES a message
+    /// So activation escalates through rungs: try plainly, then from a dedicated thread that first CREATES a message
     /// queue and attaches to the foreground thread's input, then -- only if that is still refused --
     /// release Windows' foreground lock with two synthetic Alt taps and retry. The synthetic input
     /// is deliberately the LAST rung: it is real <c>VK_MENU</c> traffic on the user's desktop and can

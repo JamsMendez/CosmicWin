@@ -4,7 +4,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.Layout.Tests;
 
 /// <summary>
-/// D3 <c>RemoveChild</c> (ported from the reference implementation's removal counterpart to <c>Data::add_window</c>):
+/// D3 <c>RemoveChild</c>, the counterpart to <c>AddChild</c>:
 /// proportional redistribution of the removed child's size among the remaining siblings, with the
 /// the design invariant that <c>Sizes.Sum == GroupLength</c> always holds afterward. Mirrors
 /// <c>AddChild</c>'s rounding convention, except the overflow remainder is absorbed by the LAST

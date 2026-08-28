@@ -1,8 +1,7 @@
 ﻿namespace CosmicWin.Interop;
 
 /// <summary>
-/// Carries the <see cref="IWindow"/> a workspace event refers to. Shaped after the reference implementation's
-/// <c>WindowChangedEventArgs</c> shape.
+/// Carries the <see cref="IWindow"/> a workspace event refers to.
 /// </summary>
 public sealed class WindowEventArgs : EventArgs
 {
@@ -29,8 +28,7 @@ public sealed class WindowEventArgs : EventArgs
 }
 
 /// <summary>
-/// Tracks the set of top-level windows on the system. Shaped after the reference implementation's
-/// <c>IWorkspace</c>, trimmed to
+/// Tracks the set of top-level windows on the system. Trimmed to
 /// what WT-1 (window-tracking) requires: enumerate at startup, then track create/destroy/
 /// move/resize via events, with <see cref="Poll"/> as the reconciliation fallback for a missed
 /// event.

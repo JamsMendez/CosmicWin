@@ -3,7 +3,7 @@ using CosmicWin.Interop.Win32;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// MR-1 ( first real run, cosmic-win): pins the pure trackability decision extracted
+/// MR-1 (first real run, cosmic-win): pins the pure trackability decision extracted
 /// from <see cref="Win32NativeWindowSource.IsTrackable(HWND)"/>'s two raw Win32 reads against the
 /// exact descriptor shape a real desktop enumeration measured -- <c>ApplicationFrameWindow</c>
 /// (owned by <c>explorer.exe</c>, unowned per <c>GW_OWNER</c>, DWM-cloaked) silently passing every

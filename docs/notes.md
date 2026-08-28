@@ -156,10 +156,11 @@ they are and why is in the root [README](../README.md); the code no longer repea
 no upstream project.
 
 Optional checkouts can live under `docs/reference/`, which is git-ignored and never distributed --
-nothing here needs them to build, run or test. One translation trap is worth carrying regardless:
-the `Orientation` naming is INVERTED between the two projects. The reference implementation's
-`Orientation::Vertical` measures width and means side-by-side, which is CosmicWin's
-`SplitAxis.Horizontal`. Translate deliberately.
+nothing here needs them to build, run or test. One naming trap is worth carrying regardless:
+`SplitAxis` is named for the arrangement you SEE, not for the dimension being measured, and several
+tiling window managers name theirs the other way round. Their `Vertical` measures width and means
+side by side, which is CosmicWin's `SplitAxis.Horizontal`. Read any borrowed vocabulary
+deliberately -- `SplitAxis`'s own doc comment says why this project refuses that inversion.
 
 ## Virtual desktops
 

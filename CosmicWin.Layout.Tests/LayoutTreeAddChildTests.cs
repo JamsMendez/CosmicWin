@@ -4,7 +4,7 @@ using CosmicWin.Layout;
 namespace CosmicWin.Layout.Tests;
 
 /// <summary>
-/// D3 <c>AddChild</c> (ported from the reference implementation): equal-share initial
+/// D3 <c>AddChild</c>: equal-share initial
 /// placement, proportional shrink of existing siblings, and the design's invariant that
 /// <c>Sizes.Sum() == GroupLength</c> always holds afterward. Also covers LE-4's split-orientation
 /// heuristic, used when a Leaf is first split into a Group.
@@ -104,11 +104,10 @@ public class LayoutTreeAddChildTests
     {
         // NOTE (spec/design inconsistency discovered during implementation): LE-4's literal
         // text pairs "width > height -> Vertical split (side-by-side)". That labeling actually
-        // matches the reference implementation's ORIGINAL (rejected) convention verified in
-        // the reference implementation's shell/layout/tiling/mod.rs — Orientation::Vertical there
-        // measures geo.size.w (i.e. is the side-by-side axis), while Orientation::Horizontal
-        // measures geo.size.h (i.e. is the "inverted" stacked axis the design says CosmicWin
-        // rejects). Design D2 explicitly flips this so SplitAxis.Horizontal = children left->right
+        // matches the ORIGINAL (rejected) convention, in which the label Vertical
+        // names the axis that measures WIDTH (i.e. is the side-by-side axis), while Horizontal
+        // names the one that measures HEIGHT (i.e. is the "inverted" stacked axis the design says
+        // CosmicWin rejects). Design D2 explicitly flips this so SplitAxis.Horizontal = children left->right
         // (side by side). Applying D2's own definition, the *behavior* LE-4 describes (wide ->
         // side-by-side, tall -> stacked) maps to Horizontal/Vertical the other way round from
         // LE-4's literal parenthetical labels. This test follows D2's definition (source of

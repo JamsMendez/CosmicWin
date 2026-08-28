@@ -8,7 +8,7 @@ namespace CosmicWin.App.Tests;
 /// <summary>
 /// Where a NEW window lands. Measured on real hardware: every window after the second was
 /// appended to the end of the root group, next to the last one, no matter which window had focus.
-/// That is neither what LE-4 says nor how the reference implementation behaves.
+/// That is not what LE-4 says.
 ///
 /// LE-4's own scenario is explicit — "a new Horizontal-oriented Group REPLACES the Leaf, with both
 /// windows side by side" — and the user described the same thing from the product side: a new
@@ -19,7 +19,7 @@ namespace CosmicWin.App.Tests;
 /// <remarks>
 /// The consequence is deliberate and worth stating: splitting the focused tile means each new
 /// window takes half of THAT tile, not an equal share of the row. Three windows opened without
-/// moving focus give 1/2, 1/4, 1/4 -- not thirds. That is the i3/the reference implementation model, and it is what makes
+/// moving focus give 1/2, 1/4, 1/4 -- not thirds. That follows directly from splitting, and it is what makes
 /// nested groups (and therefore HA-1's Alt+[) arise during ordinary use at all.
 /// </remarks>
 public sealed class NewWindowPlacementTests

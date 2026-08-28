@@ -10,7 +10,7 @@ namespace CosmicWin.App.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Requested after live use, matching the reference implementation: a dialog should arrive in the
+/// Requested after live use: a dialog should arrive in the
 /// middle of the screen rather than wherever the application last left it.
 /// </para>
 /// <para>

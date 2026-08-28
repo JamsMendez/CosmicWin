@@ -5,8 +5,7 @@ namespace CosmicWin.Interop.Win32;
 /// factor, bounds, and work area.
 /// </summary>
 /// <remarks>
-/// Ports the enumerate + <c>GetDpiForMonitor</c> pattern from the reference implementation's
-/// <c>the reference implementation.Win32DisplayManager</c> (algorithm only — original code), trimmed to what
+/// Enumerates once and reads each monitor's real DPI through <c>GetDpiForMonitor</c>, trimmed to what
 /// WT-2 and this work unit need: a point-in-time snapshot taken at construction. Hotplug
 /// tracking (MM-1/MM-2, Phase 3,) is out of this work unit's scope.
 /// </remarks>

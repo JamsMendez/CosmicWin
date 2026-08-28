@@ -100,11 +100,11 @@ public class LayoutTreeResizeNodeTests
     }
 
     /// <summary>
-    /// REPLACES the MR-3 pin . That fact asserted this exact scenario -- Ctrl+Alt+H on
+    /// REPLACES the MR-3 pin. That fact asserted this exact scenario -- Ctrl+Alt+H on
     /// the leftmost of two tiled windows -- was "correct, spec-compliant behavior, not a defect",
     /// on the grounds that LE-6 step 2 documents a no-op at a group boundary. The investigation was
-    /// right about the code and wrong about the spec: LE-6 is an incomplete port of the reference implementation,
-    /// which carries a shrink as a first-class intent, so the boundary no-op was never the whole
+    /// right about the code and wrong about the spec: LE-6 is incomplete -- it never carried
+    /// a shrink as a first-class intent, so the boundary no-op was never the whole
     /// story. The maintainer re-reported it from real use twice before it was believed.
     /// <para>
     /// What survives is the part that IS a genuine boundary: a group whose axis does not match the
@@ -125,15 +125,15 @@ public class LayoutTreeResizeNodeTests
     }
 
     /// <summary>
-    /// Reported from real use: "el resize decremental no funciona". It never did
-    /// there was no shrink in the engine AT ALL. LE-6 only ever grew the focused subtree by taking
+    /// Reported from real use: "el resize decremental no funciona". It never did -- there was
+    /// no shrink in the engine AT ALL. LE-6 only ever grew the focused subtree by taking
     /// from a neighbour on the pressed side, so the leading child of a group, having no neighbour
     /// that way, could only ever get bigger.
     /// <para>
-    /// the reference implementation separates the two intents: <c>ResizeDirection::{Inwards,Outwards}</c> chooses
-    /// shrink or grow, <c>ResizeEdge</c> chooses which boundary moves, and Inwards flips the edge
-    /// (<c>input/mod.rs:2271</c>). It reaches that through a resize MODE with an on-screen
-    /// indicator, which CosmicWin has no equivalent of. With four chords and no mode, the direction
+    /// The design considered and rejected here splits the two intents apart: one choice for
+    /// shrink-or-grow, a second for which boundary moves, and shrink flipping the edge. That split
+    /// only pays for itself behind a resize MODE with an on-screen indicator, which CosmicWin has
+    /// no equivalent of and does not want one. With four chords and no mode, the direction
     /// names which way the BOUNDARY travels: grow into the neighbour on the pressed side when there
     /// is one, otherwise push the opposite boundary the same way, which shrinks. Both operations
     /// stay reachable and no existing grow changes meaning.

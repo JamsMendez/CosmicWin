@@ -6,7 +6,7 @@ namespace CosmicWin.Layout.Tests;
 /// <summary>
 /// TEMPORARY diagnostic, not a behavioural test. Replays the user's reported 3-window
 /// scenario through the CURRENT engine and prints the resulting tree after each chord, so a
-/// report of the reference implementation's behaviour can be contrasted against what CosmicWin actually does today
+/// report of the expected behaviour can be contrasted against what CosmicWin actually does today
 /// instead of against a guess about what it does.
 /// </summary>
 public sealed class MoveSequenceDiagnostic(ITestOutputHelper output)

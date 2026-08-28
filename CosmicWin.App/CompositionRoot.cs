@@ -62,9 +62,9 @@ public static class CompositionRoot
     /// did NOT, by itself, make every caller state its gate -- the underlying <see
     /// cref="WorkspaceSessionAdapter"/> constructor this factory delegates to still defaulted
     /// <c>isPaused</c> to never-paused, so a caller that bypassed this factory entirely and
-    /// constructed the adapter directly still compiled with the gate silently omitted
-    /// That terminal defaulting site is now also mandatory ,
-    /// so the claim above is finally true at every layer, not just this one.
+    /// constructed the adapter directly still compiled with the gate silently omitted. That
+    /// terminal defaulting site is now also mandatory, so the claim above is finally true at every
+    /// layer, not just this one.
     /// </remarks>
     public static WorkspaceSessionAdapter BuildSessionAdapter(
         IWorkspace workspace, LayoutTree tree, WindowRegistry registry, ActionExecutor executor,

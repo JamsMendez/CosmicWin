@@ -1,9 +1,8 @@
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// Enumerates the displays attached to the system. Shaped after the reference implementation's
-/// <c>IDisplayManager</c>,
-/// trimmed to what multi-monitor-tiling (MM-1..5, later work units) requires.
+/// Enumerates the displays attached to the system. Trimmed to what
+/// multi-monitor-tiling (MM-1..5, later work units) requires.
 /// </summary>
 public interface IDisplayManager
 {

@@ -88,9 +88,8 @@ public sealed class LayoutTree : ITilingEngine
     /// <para>
     /// Spec/design note: LE-4's literal wording ("width &gt; height -&gt; Vertical split
     /// (side-by-side)") uses the opposite enum label from what this method returns. That literal
-    /// wording matches the reference implementation's original <c>Orientation</c> convention (verified against it:
-    /// <c>Orientation::Vertical</c>
-    /// there measures <c>geo.size.w</c>, i.e. is the side-by-side axis) — precisely the
+    /// wording follows the inverted convention in which the label <c>Vertical</c>
+    /// names the side-by-side axis — precisely the
     /// "inverted" naming the design says CosmicWin rejects. This method implements D2's own
     /// definition of what the enum values mean, applied to LE-4's behavioral intent (wide
     /// regions split side by side, tall regions stack). Flagged for spec reconciliation; see
@@ -101,7 +100,7 @@ public sealed class LayoutTree : ITilingEngine
         width > height ? SplitAxis.Horizontal : SplitAxis.Vertical;
 
     /// <summary>
-    /// D3 <c>AddChild</c>, ported from the reference implementation: inserts
+    /// D3 <c>AddChild</c>: inserts
     /// <paramref name="child"/> into <paramref name="group"/> at <paramref name="index"/>,
     /// giving it an equal share of the group's length and proportionally shrinking existing
     /// siblings so that <c>Sizes.Sum == GroupLength</c> always holds afterward.
@@ -432,39 +431,35 @@ public sealed class LayoutTree : ITilingEngine
     };
 
     /// <summary>
-    /// LE-5, re-cut as an ancestor walk, ported (algorithm only) from
-    /// <c>TilingLayout::move_current_node</c>,
-    /// the reference implementation's ancestor walk -- its
-    /// <c>while let Some(parent) = maybe_parent</c> loop climbs the tree until it finds a level
+    /// LE-5, re-cut as an ancestor walk: it climbs the tree until it finds a level
     /// that can absorb the move, instead of giving up at the node's own parent.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This REPLACES the original "act only inside <c>focused.Parent</c>" rule, which was measured
-    /// against the real WM and reported as the thing that makes CosmicWin feel unlike
-    /// the reference implementation. Pushing a window at the edge of its group toward the outside used to return false and
+    /// This REPLACES the original "act only inside <c>focused.Parent</c>" rule, which was
+    /// reported from real use as the thing that makes CosmicWin feel stuck.
+    /// Pushing a window at the edge of its group toward the outside used to return false and
     /// do nothing; HA-1's <c>Alt+[</c> existed so the user could hand-raise the scope that this walk
     /// now derives per keypress. <c>Alt+[</c> keeps its meaning -- deliberately moving a WHOLE group
     /// as one unit -- but is no longer required for an ordinary window to leave its group.
     /// </para>
     /// <para>
-    /// Four cases, in its own order:
+    /// Four cases, in this order:
     /// <list type="number">
     /// <item>axis mismatch at this level -- the level splits perpendicular and the focused node
     /// takes the leading or trailing half (<see cref="SplitOutOf"/>);</item>
     /// <item>axis matches and we ARRIVED here from below -- the node leaves its old group and joins
-    /// this one beside the subtree it came out of (the reference implementation's
-    /// <c>MoveBehavior::ToParent</c>);</item>
-    /// <item>axis matches at our own level -- move INTO the neighbour when it is a group
-    /// (its <c>is_group()</c> branch), otherwise swap with it, sizes included, which is
+    /// this one beside the subtree it came out of;</item>
+    /// <item>axis matches at our own level -- move INTO the neighbour when it is a group,
+    /// otherwise swap with it, sizes included, which is
     /// the original LE-5 behaviour and the only branch that survives unchanged;</item>
     /// <item>no room at this level -- ascend and try again.</item>
     /// </list>
     /// </para>
     /// <para>
-    /// Deliberate divergence: where the reference implementation inserts into the MIDDLE of a perpendicular
-    /// neighbouring group (mod.rs:1737, "we want the middle"), this inserts at the edge the move
-    /// came from -- a window pushed Right enters the neighbour at its start. Same escape, but the
+    /// Deliberate choice: entering a perpendicular neighbouring group inserts at the edge the move
+    /// came from -- a window pushed Right enters the neighbour at its start -- rather than in the
+    /// MIDDLE of it. Same escape, but the
     /// landing slot follows the direction the user pressed instead of the group's parity.
     /// </para>
     /// </remarks>
@@ -524,7 +519,7 @@ public sealed class LayoutTree : ITilingEngine
                 }
 
                 // (3b) Exactly two of us here: swap, carrying sizes along. This is the original
-                // LE-5 behaviour, and the reference implementation guards it the same way -- `len == 2`.
+                // LE-5 behaviour, and it is guarded on there being exactly two -- `len == 2`.
                 if (level.Children.Count == 2)
                 {
                     (level.Children[index], level.Children[neighbourIndex]) =
@@ -534,12 +529,12 @@ public sealed class LayoutTree : ITilingEngine
                     return true;
                 }
 
-                // (3c) Three or more siblings: the reference implementation's "else we make a new fork" -- pair up
+                // (3c) Three or more siblings: make a new fork instead -- pair up
                 // with the neighbour inside a new group of the SAME axis, taking the neighbour's
                 // slot. Swapping instead looks equivalent on a flat row but is not: a swap is an
                 // involution, so pressing the same direction again just undoes it and the window
                 // can never travel past its neighbour. The fork is what makes the walk a reversible
-                // CYCLE -- measured against the reference implementation, where a window pushed
+                // CYCLE -- a window pushed
                 // repeatedly keeps advancing instead of dead-ending after two presses.
                 var neighbourNode = level.Children[neighbourIndex];
                 Detach(origin, originIndex);
@@ -575,7 +570,7 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
-    /// the reference implementation's case (1): <paramref name="level"/> splits along <paramref name="axis"/>, its
+    /// Case (1) of <see cref="MoveNode"/>: <paramref name="level"/> splits along <paramref name="axis"/>, its
     /// former contents drop into a nested group, and <paramref name="focused"/> takes the half the
     /// direction points at.
     /// </summary>

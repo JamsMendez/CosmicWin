@@ -6,8 +6,8 @@ namespace CosmicWin.Layout;
 /// </summary>
 /// <remarks>
 /// Geometry (e.g. last-arranged bounds) is intentionally not modeled here yet — <c>Arrange()</c>
-/// is out of scope for this work unit ( covers only the node model and <c>AddChild</c>; see
-/// Tasks 1.15-1.16).
+/// is out of scope for this work unit, which covers only the node model and <c>AddChild</c>
+/// (see Tasks 1.15-1.16).
 /// </remarks>
 public abstract record Node
 {

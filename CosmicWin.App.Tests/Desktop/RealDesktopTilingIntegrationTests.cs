@@ -158,7 +158,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         var beforeW3 = Read(nativeSource, window3.Handle);
         Assert.True(beforeW2.Left < beforeW3.Left, "Precondition: window2 starts to the left of window3.");
 
-        // reference-implementation parity: with THREE siblings a move forks rather than swaps, so
+        // With THREE siblings a move forks rather than swaps, so
         // passing a neighbour takes two presses -- the first pairs the two windows up inside a new
         // group, the second exchanges them within it. Both are asserted, because the pair-then-
         // exchange cycle is the behaviour, and one press alone would look like a failed swap.

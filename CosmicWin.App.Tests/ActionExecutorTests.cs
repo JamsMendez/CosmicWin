@@ -50,7 +50,7 @@ public sealed class ActionExecutorTests
     }
 
     /// <summary>
-    /// REWRITTEN for reference-implementation parity: this asserted a straight A/B swap across a
+    /// REWRITTEN: this asserted a straight A/B swap across a
     /// three-leaf row. With three or more siblings LE-5 now forks -- the mover pairs up with its
     /// neighbour inside a new group taking that neighbour's slot -- so A and B share the left half
     /// at 225 each while C keeps 450. The executor contract under test is unchanged and still the

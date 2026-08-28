@@ -17,8 +17,8 @@ namespace CosmicWin.App.Tests;
 /// the user presses <c>Alt+[</c>.
 /// </summary>
 /// <remarks>
-/// Directional focus always returns the scope to a leaf, matching how <c>focus parent</c> behaves in
-/// i3/sway: ascending is a deliberate, short-lived act aimed at the next Move or Resize, not a mode
+/// Directional focus always returns the scope to a leaf:
+/// ascending is a deliberate, short-lived act aimed at the next Move or Resize, not a mode
 /// the user can get stranded in. NOTE for whoever picks this up: CosmicWin has no border/overlay
 /// surface, so ascending is currently INVISIBLE — the user sees nothing until the next Move or
 /// Resize acts on the group. That is a real UX gap, not an oversight in these facts.
@@ -85,7 +85,7 @@ public sealed class ActionExecutorFocusScopeTests
         await Press(executor, HotkeyActionKind.FocusOut);
         await Press(executor, HotkeyActionKind.MoveRight);
 
-        // reference-implementation parity: the root has THREE children, so LE-5 forks instead of
+        // The root has THREE children, so LE-5 forks instead of
         // swapping -- the group pairs up with D inside a new group taking D's slot. A keeps the
         // left half (450); the pair splits the right half, group at 450 and D at 675. What this
         // fact actually pins is unchanged and still holds: the chord moved the WHOLE group, since
@@ -179,8 +179,8 @@ public sealed class ActionExecutorFocusScopeTests
 
         await Press(executor, HotkeyActionKind.MoveLeft);
 
-        // D forked with the inner GROUP as a single sibling (reference-implementation parity: three
-        // root children fork rather than swap), which is what a LEAF-scoped LE-5 move does. Had the
+        // D forked with the inner GROUP as a single sibling (three root children fork rather than
+        // swap), which is what a LEAF-scoped LE-5 move does. Had the
         // stale group scope survived, the move would have acted on the group instead and left D
         // where it was -- D ending up at 675 rather than untouched is what proves the scope dropped.
         Assert.Equal(0, windowA.LastSetPosition!.Value.Left);
