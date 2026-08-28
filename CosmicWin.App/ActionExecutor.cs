@@ -30,6 +30,30 @@ public sealed class ActionExecutor(
     private Node? _focusScope;
 
     /// <summary>
+    /// Which window held focus on each desktop the moment the user walked away from it, so walking
+    /// back puts them where they were instead of on whatever tile the tree happens to list first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Keyed by (display, desktop) -- the SAME pair <see cref="TreeManager"/> keys its layout trees
+    /// by. "Which window was I on" is a question per screen: two monitors are two places the user
+    /// was, and one slot for the machine would have the second monitor answering for the first.
+    /// </para>
+    /// <para>
+    /// Only desktops CosmicWin saw the user leave are in here. Task View and Win+Ctrl+arrow are
+    /// departures nothing observes, so they leave no record and the arrival falls back to the first
+    /// tile exactly as it always did -- a gap in the improvement, never a new failure.
+    /// </para>
+    /// <para>
+    /// Nothing invalidates it. A recalled handle is checked against the tree the user is looking at
+    /// before it is used, so a window that died or was rehomed drops out on its own; an entry that
+    /// outlives its window is inert rather than wrong, which is what makes an invalidation hook
+    /// nobody remembers to wire unnecessary here.
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<(nint Display, Guid Desktop), nint> _focusByDesktop = [];
+
+    /// <summary>
     /// Windows' virtual desktops, or <see langword="null"/> when the composition did not wire them
     /// (every unit test that predates the feature). Settable rather than a constructor parameter for
     /// the same reason <see cref="TreeManager"/> and <see cref="FocusTrace"/> are.
@@ -349,19 +373,35 @@ public sealed class ActionExecutor(
             return;
         }
 
+        // ARRIVAL only, for the same reason the sweep below is: on a send the user has not gone
+        // anywhere, so the record for the desktop in view names the window being sent away at this
+        // very instant -- recalling it would hand focus straight back to what is leaving.
+        var recalled = arriving ? RecallFocusOn(display) : null;
+        var landing = recalled ?? survivor;
+
         // ARRIVAL only. On a send the user has not gone anywhere -- the window has -- so the desktop
         // in view is the one they were already on, and sweeping it would activate every tile on it
         // including, one moment before the shell takes it away, the window being sent.
         if (arriving)
         {
-            SweepDesktop(display, landingOn: survivor.Window.Handle);
+            // A RECALLED landing window is swept like every other tile -- landingOn: 0 excludes
+            // nobody, since no window has handle zero. It is not an oversight that it loses the
+            // exemption: the window that held focus when this desktop was left is precisely the one
+            // whose stale active frame the sweep exists to clear, because Windows cloaked it without
+            // ever delivering WM_NCACTIVATE(FALSE). Excluding it would strand exactly the border the
+            // sweep was written for. It costs one extra activation and it is activated again below,
+            // last, so focus still ends where the user left it.
+            //
+            // A FALLBACK landing window keeps the exemption. That one is a tile the user was never
+            // on, so there is no stale frame to clear and the second activation would buy nothing.
+            SweepDesktop(display, landingOn: recalled is null ? landing.Window.Handle : 0);
         }
 
         // The OUTCOME, not the bool. Null distinguishes the third case the bool could not express:
-        // nobody was asked at all, because the survivor is untracked or already dead. Reporting that
-        // as a refusal would blame Windows for a decision taken right here.
+        // nobody was asked at all, because the landing window is untracked or already dead.
+        // Reporting that as a refusal would blame Windows for a decision taken right here.
         ActivationOutcome? outcome =
-            registry.TryGetWindow(survivor.Window.Handle, out var window) && window is { IsAlive: true }
+            registry.TryGetWindow(landing.Window.Handle, out var window) && window is { IsAlive: true }
                 ? window.Activate()
                 : null;
         var activated = outcome?.Confirmed() ?? false;
@@ -371,7 +411,7 @@ public sealed class ActionExecutor(
             // The same rule MoveFocus follows, and for the same reason it was written: the cache
             // advances only on a REAL activation, so a refused one cannot leave CosmicWin claiming
             // the user is somewhere they are not.
-            _focused = survivor;
+            _focused = landing;
         }
 
         // Recorded on EVERY outcome, not only the interesting one. The whole reason this line
@@ -393,6 +433,11 @@ public sealed class ActionExecutor(
         DesktopTrace?.Record(
             $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
             $"display=0x{display.Handle:X} survivor=0x{survivor.Window.Handle:X} " +
+            // Both, not one derived from the other. `recalled` says whether the memory answered at
+            // all -- zero on a first visit, on a send, and on a record the tree no longer backs --
+            // and `landing` says where focus actually went. A single field could not tell a recall
+            // that was refused apart from one that was never consulted.
+            $"recalled=0x{recalled?.Window.Handle ?? 0:X} landing=0x{landing.Window.Handle:X} " +
             $"activation={outcome?.ToString() ?? "not-asked"} activated={activated} " +
             $"fg-after=0x{foreground.GetForegroundHandle():X} " +
             // Keyed to fg-before, NOT to departingHandle. The arriving path calls in with a
@@ -522,6 +567,89 @@ public sealed class ActionExecutor(
             $"sweep display=0x{display.Handle:X} landing=0x{landingOn:X} " +
             $"count={visited.Count} {string.Join(" ", visited)}" +
             (abandoned > 0 ? $" budget-exhausted={abandoned}" : string.Empty));
+    }
+
+    /// <summary>
+    /// Files the window the user is leaving <paramref name="desktop"/> on, so walking back later
+    /// can put them on it again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called with the desktop read BEFORE the switch, because by the time focus is handed over the
+    /// service already names the arriving one and the record would be filed under the wrong desktop.
+    /// </para>
+    /// <para>
+    /// <see cref="Guid.Empty"/> is refused rather than used as a key. It is what the shell answers
+    /// when it will not say which desktop this is, and every unknown desktop shares it -- so filing
+    /// under it would let one desktop hand its window to another. Nothing recorded means the arrival
+    /// falls back to the first tile, which is the honest answer to a question the shell declined.
+    /// </para>
+    /// <para>
+    /// Only TRACKED windows are remembered. The arrival can activate nothing else, so a record for a
+    /// dialog or an excluded app would be a slot that can only ever be refused -- and it would
+    /// displace the real tile the user was on before that dialog opened.
+    /// </para>
+    /// </remarks>
+    private void RememberFocusOn(Guid desktop, nint foregroundHandle)
+    {
+        if (TreeManager is not { } treeManager || desktop == Guid.Empty)
+        {
+            return;
+        }
+
+        // The foreground first, the cache second -- the same order every chord resolves focus in.
+        // The cache answers when the user is looking at something CosmicWin does not track, which is
+        // exactly when it is the better witness of which TILE they were working on.
+        var leaf = foregroundHandle != 0
+            && registry.TryGetLeaf(foregroundHandle, out var tracked) && tracked is not null
+                ? tracked
+                : _focused;
+
+        if (leaf is null
+            || !registry.TryGetWindow(leaf.Window.Handle, out var window) || window is not { IsAlive: true })
+        {
+            return;
+        }
+
+        _focusByDesktop[(treeManager.ResolveDisplay(window.Bounds).Handle, desktop)] = leaf.Window.Handle;
+    }
+
+    /// <summary>
+    /// The window the user was on when they last left the desktop now in view on
+    /// <paramref name="display"/>, or <see langword="null"/> when there is nothing to go back to.
+    /// </summary>
+    /// <remarks>
+    /// The record is checked against <see cref="TreeManager.LeavesOn"/>, which reads the tree for
+    /// the desktop CURRENTLY in view. That one lookup answers three questions at once: is the window
+    /// still tiled, is it still on THIS desktop, and is it still on this monitor. A window that
+    /// closed, was rehomed by a chord, or was dragged to another screen fails it and the arrival
+    /// falls back -- which is why this needs no invalidation wired anywhere else.
+    /// </remarks>
+    private LeafNode? RecallFocusOn(IDisplay display)
+    {
+        if (TreeManager is not { } treeManager
+            || VirtualDesktops is not { } desktops
+            || !_focusByDesktop.TryGetValue((display.Handle, desktops.CurrentDesktopId), out var remembered))
+        {
+            return null;
+        }
+
+        foreach (var leaf in treeManager.LeavesOn(display))
+        {
+            if (leaf.Window.Handle != remembered)
+            {
+                continue;
+            }
+
+            // Alive as well as tiled. A window can sit in the tree for the interval between it dying
+            // and reconciliation noticing, and activating a dead handle would leave the arrival with
+            // no focus at all -- strictly worse than the first tile.
+            return registry.TryGetWindow(remembered, out var window) && window is { IsAlive: true }
+                ? leaf
+                : null;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -699,6 +827,13 @@ public sealed class ActionExecutor(
         bool ok;
         if (action.Kind == HotkeyActionKind.SwitchDesktop)
         {
+            // Filed BEFORE the switch and unconditionally. Before, because afterwards the service
+            // names the arriving desktop and the record would be filed under it. Unconditionally,
+            // because a refused switch leaves the user exactly where this says they are, and a
+            // switch to the desktop already shown re-files the same window under the same key --
+            // both are writes that cost nothing and say something true.
+            RememberFocusOn(desktopBefore, foregroundHandle);
+
             ok = desktops.TrySwitchTo(action.Argument);
             if (ok)
             {
