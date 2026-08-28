@@ -131,12 +131,6 @@ run or test CosmicWin, and no code was copied from any of them.
 - **WinMan.Windows** (GPL-2) — its enumerate-plus-hook window-tracking approach, reimplemented at
   roughly a fifth of the size and a different shape.
 
-Copyright covers expression, not ideas or algorithms, and the code here shares no expression with
-any of them: a line-level comparison against the whole reference tree finds six identical lines out
-of 830, every one of them boilerplate that any Windows C# project writes the same way — the required
-signatures of a WPF startup override and a Win32 hook procedure, the canonical way to locate
-AppData, a standard guard clause, and two interface declarations from the MIT-licensed part.
-
 ## Documentation
 
 [`docs/notes.md`](docs/notes.md) — the things that were only discoverable by
