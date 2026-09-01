@@ -63,6 +63,19 @@ internal sealed class RecordingWindow : IWindow
 
     public Rectangle? LastSetPosition { get; private set; }
 
+    /// <summary>
+    /// Where this window ends up REGARDLESS of what it was asked for -- a window that accepts the
+    /// reposition and then puts itself somewhere else.
+    /// </summary>
+    /// <remarks>
+    /// Not the same as <see cref="FailNextSetPosition"/>, and the difference is the whole point.
+    /// A refusal flips <see cref="CanReposition"/> and the arranger evicts it at once. This one
+    /// reports success every time, so nothing upstream can tell it apart from a window that
+    /// complied -- which is exactly how a real one produced 31,759 reflows in two minutes without
+    /// ever failing a single call.
+    /// </remarks>
+    public Rectangle? SnapsBackTo { get; set; }
+
     public void SetPosition(Rectangle bounds)
     {
         SetPositionCallCount++;
@@ -78,8 +91,10 @@ internal sealed class RecordingWindow : IWindow
             return;
         }
 
-        Bounds = bounds;
         LastSetPosition = bounds;
+
+        // The ASK is recorded above whatever happens next, because a fighter accepts every ask.
+        Bounds = SnapsBackTo ?? bounds;
     }
 
     /// <summary>

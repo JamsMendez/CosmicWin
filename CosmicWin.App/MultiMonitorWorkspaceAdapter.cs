@@ -64,6 +64,29 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly Dictionary<nint, IDisplay> _owners = new();
 
     /// <summary>
+    /// How many times one window may be handed the SAME tile and fail to arrive on it before the
+    /// tree gives up on it.
+    /// </summary>
+    /// <remarks>
+    /// Generous on purpose. An application moves itself around while it starts up, and an early
+    /// wobble is not a fight -- evicting on two or three would throw out windows that go on to
+    /// behave perfectly. A real fighter reaches this in well under a second: the measured one
+    /// issued hundreds of rounds per second, indefinitely.
+    /// </remarks>
+    private const int MissesBeforeGivingUp = 12;
+
+    /// <summary>The tile each window was last offered, and how many times running it has missed it.</summary>
+    private readonly Dictionary<nint, (Rect Tile, int Misses)> _misses = new();
+
+    /// <summary>
+    /// Windows the tree has given up on. Refusing re-admission is half the guard, not a detail:
+    /// a fighter stays visible, trackable and un-excluded, so the next reconciliation pass would
+    /// adopt it straight back and the storm would resume at the same rate.
+    /// </summary>
+    private readonly HashSet<nint> _givenUp = [];
+
+
+    /// <summary>
     /// Which virtual desktop a window is on. Unset means "there is only one", which is how every
     /// caller that predates virtual desktops behaves.
     /// </summary>
@@ -135,6 +158,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         var window = e.Window;
         if (WorkspaceSessionAdapter.IsExcluded(window, _exceptions()))
+        {
+            return;
+        }
+
+        // Given up on, and staying that way for as long as this handle lives. See _givenUp.
+        if (_givenUp.Contains(window.Handle))
         {
             return;
         }
@@ -366,6 +395,48 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether <paramref name="handle"/> has now missed the SAME tile too many times running.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tile has to match too, or this would count an ordinary busy desktop as a fight: every
+    /// time a neighbour opens or closes, every survivor is handed a DIFFERENT tile and arrives at
+    /// it a moment later, which is convergence, not failure. Only the same target missed over and
+    /// over says the window is never going to get there.
+    /// </para>
+    /// <para>
+    /// A leaf with no arranged geometry yet has been offered nothing to miss, so it cannot be
+    /// failing to reach it.
+    /// </para>
+    /// </remarks>
+    private bool HasGivenUpOn(nint handle, Rectangle arrivedAt)
+    {
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return false;
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        if (tile.Width <= 0 || tile.Height <= 0)
+        {
+            return false;
+        }
+
+        if (arrivedAt.Left == tile.X && arrivedAt.Top == tile.Y
+            && arrivedAt.Width == tile.Width && arrivedAt.Height == tile.Height)
+        {
+            // Landed. Whatever it did before this is forgiven -- an application that wobbles while
+            // it starts up and then behaves is not a fighter.
+            _misses.Remove(handle);
+            return false;
+        }
+
+        var misses = _misses.TryGetValue(handle, out var seen) && seen.Tile.Equals(tile) ? seen.Misses + 1 : 1;
+        _misses[handle] = (tile, misses);
+        return misses >= MissesBeforeGivingUp;
+    }
+
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
     {
         var handle = e.Window.Handle;
@@ -376,6 +447,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         _owners.Remove(handle);
+
+        // Forgotten with the window, because Windows reuses HWND values: a handle held against a
+        // future window would refuse one that never did anything wrong.
+        _misses.Remove(handle);
+        _givenUp.Remove(handle);
+
         if (!WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
         {
             return;
@@ -511,6 +588,37 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 $"slot=[X={slot.X} Y={slot.Y} W={slot.Width} H={slot.Height}] gap={TreeArranger.Gap} " +
                 $"dropped=[L={dropped.Left} T={dropped.Top} " +
                 $"W={dropped.Width} H={dropped.Height}] -- {outcome}");
+        }
+
+        // A window that will not stay where it is put is given up on rather than fought forever.
+        // Measured with Clipchamp: its InputNonClientPointerSource accepted every reposition,
+        // reported itself off the right edge of the desktop every time, and produced 31,759 reflows
+        // of one handle in two minutes. Photoshop produced the identical shape from a `Button`.
+        //
+        // Non-convergence is the signature, deliberately -- not a size, not a class name, not a
+        // refusal. CanReposition already catches a window that says no; this one says yes and
+        // drifts, which is indistinguishable from compliance at the moment of the call. And a list
+        // of class names is always one release behind, while this catches the next one nobody has
+        // met yet.
+        //
+        // A user's own drag is exempt: it is SUPPOSED to leave the window off its tile, and the
+        // block above has just written that intent into the tree.
+        if (!e.IsUserGesture && HasGivenUpOn(handle, before))
+        {
+            _misses.Remove(handle);
+            _givenUp.Add(handle);
+            _owners.Remove(handle);
+
+            Trace?.Record(
+                $"gave up hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                $"-- never reached its tile in {MissesBeforeGivingUp} attempts; evicted and refused");
+
+            if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
+            {
+                TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
+            }
+
+            return;
         }
 
         TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
