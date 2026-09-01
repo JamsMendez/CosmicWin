@@ -139,6 +139,36 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
+        // ONE HWND, ONE LEAF. The shell announces the same window as added more than once --
+        // measured on real hardware, three times for a single Photoshop window in one session,
+        // while every ordinary window was announced exactly once.
+        //
+        // Every announcement used to build a NEW leaf. WindowRegistry.Register only replaces the
+        // mapping, so the earlier leaf stayed in the tree with nothing able to reach it:
+        // TreeArranger walks the TREE and found both, handing one handle two rectangles per pass,
+        // and each reposition raised the bounds-changed event that drove the next pass. Recorded:
+        // 17,467 reflows of one handle in 57 seconds, ~306 a second, a 2.5 MB trace file, and the
+        // window itself split the screen with a copy of itself. A close afterwards detached only
+        // the registered leaf, so the other kept its slot for as long as the app ran -- the empty
+        // tile left behind by a window that no longer exists.
+        //
+        // Verified against the TREE, never the registry on its own. A registry entry can outlive
+        // the tree it pointed into, and refusing on a stale one would drop a window that really is
+        // new -- nothing else would ever add it. `_owners` names the display to ask, exactly as
+        // OnWindowRemoved already asks it.
+        if (_owners.TryGetValue(window.Handle, out var owner)
+            && _registry.TryGetLeaf(window.Handle, out var held) && held is not null
+            && _treeManager.TryGetTreeHolding(owner, held, out _))
+        {
+            // Traced rather than dropped in silence: this path doing nothing is indistinguishable
+            // from the event never arriving, and telling those two apart is the whole reason the
+            // duplicate took a supervised session to find.
+            Trace?.Record(
+                $"duplicate add ignored hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                $"proc={window.ProcessName} -- already a leaf on display 0x{owner.Handle:X}");
+            return;
+        }
+
         var display = _treeManager.ResolveDisplay(window.Bounds);
         if (!_treeManager.TryGetTree(display, out var visible) || visible is null)
         {
