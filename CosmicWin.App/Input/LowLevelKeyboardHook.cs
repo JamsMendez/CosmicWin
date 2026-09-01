@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -10,8 +10,30 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
     private readonly bool[] _acceptedKeyDown = new bool[256];
     private volatile bool _paused;
 
+
     /// <summary>The last modifier+key combination that matched no chord, for diagnosis. Never null-cleared.</summary>
     public volatile string? LastUnmatched;
+
+    /// <summary>
+    /// The modifier keys PHYSICALLY down, by side, as a short string -- empty when none are.
+    /// Unset leaves the diagnosis exactly as narrow as it was before it existed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Injected rather than read here, and not only for testability: reading it is Win32, and this
+    /// type is otherwise free of it. <see cref="WindowsKeyboardHookPlatform"/> supplies the real
+    /// one.
+    /// </para>
+    /// <para>
+    /// It exists because <see cref="ModifierKeys"/> is a CONCLUSION, and the reported defect is
+    /// about that conclusion being wrong: "the right Alt sometimes does not switch desktops, the
+    /// left Alt always does" outlived two measured hypotheses because the trace only ever showed
+    /// what was concluded, never what was held. Computed Alt against raw RMENU says the conclusion
+    /// is right and the fault is further down; computed None against raw RMENU says the conclusion
+    /// lost it; computed None against nothing held says the key state was already gone.
+    /// </para>
+    /// </remarks>
+    public Func<string>? PhysicalModifiers { get; init; }
 
     /// <summary>While <c>true</c>, no chord matches and nothing is written to the dispatcher channel. Written from the tray's UI thread, read from this hook's dedicated STA thread -- <c>volatile</c> mirrors the existing <see cref="LowLevelKeyboardHook"/> <c>_lastActivity</c> pattern.</summary>
     public bool IsPaused
@@ -38,15 +60,50 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             // a broken feature -- exactly how "the right Alt does not work" was reported, with no
             // way to see what modifiers actually arrived. Recorded in MEMORY only: this runs inside
             // the low-level keyboard hook, and Windows uninstalls a hook that takes too long.
+            RecordUnmatched(key, modifiers);
+            return false;
+        }
+
+        return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
+    }
+
+    /// <summary>
+    /// Records an unmatched PRESS, and refuses to record anything the user was merely typing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The floor is privacy, not volume. <c>unmatched chord</c> reaches the desktop trace whether
+    /// or not the <c>trace-dialogs</c> marker exists -- unlike the dialog paths, which are behind
+    /// it -- so a record taken with nothing held would write the user's own typing, passwords
+    /// included, to a file on disk for as long as the app runs. Requiring a modifier to be
+    /// physically down costs nothing a failing chord has (every one of them is a modifier plus a
+    /// key) and excludes everything ordinary typing is.
+    /// </para>
+    /// <para>
+    /// With no snapshot wired the original rule stands unchanged, so nothing written before this
+    /// existed starts recording more than it did.
+    /// </para>
+    /// </remarks>
+    private void RecordUnmatched(KeyboardKey key, ModifierKeys modifiers)
+    {
+        if (PhysicalModifiers?.Invoke() is not { } raw)
+        {
             if (modifiers != ModifierKeys.None)
             {
                 LastUnmatched = $"{modifiers}+{key}";
             }
 
-            return false;
+            return;
         }
 
-        return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
+        // Nothing concluded AND nothing held is a plain keystroke, and none of this diagnosis's
+        // business.
+        if (modifiers == ModifierKeys.None && raw.Length == 0)
+        {
+            return;
+        }
+
+        LastUnmatched = $"{modifiers}+{key} raw=[{raw}]";
     }
 }
 
@@ -68,12 +125,17 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private readonly Func<long> _clock;
     private readonly CancellationTokenSource _stop = new();
     private readonly ManualResetEventSlim _started = new();
-    private readonly KeyboardEventProcessor _processor = new(ChordTable.Default);
+    private readonly KeyboardEventProcessor _processor = new(ChordTable.Default)
+    {
+        // Wired, or the diagnosis is a test that passes and an instrument that reads nothing.
+        PhysicalModifiers = WindowsKeyboardHookPlatform.PhysicalModifierSides,
+    };
     private Thread? _thread;
     private Exception? _startupFailure;
     private long _lastActivity;
 
     public bool? UnhookSucceeded { get; private set; }
+
 
     /// <summary>Pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
     public bool IsPaused
@@ -205,6 +267,38 @@ internal sealed unsafe class WindowsKeyboardHookPlatform : IKeyboardHookPlatform
         }
         return PInvoke.CallNextHookEx(_hook, code, wParam, lParam);
     }
+
+    /// <summary>
+    /// Every modifier physically down, BY SIDE, space separated -- empty when none are.
+    /// </summary>
+    /// <remarks>
+    /// Sides, which <see cref="CurrentModifiers"/> deliberately does not distinguish: it asks
+    /// VK_MENU and VK_CONTROL, the either-side keys, because a chord does not care which Alt. The
+    /// open question does care, and is precisely "why this Alt and not that one". Win is included
+    /// though no chord uses it -- it is what the desktop shortcuts inject, so a Win appearing here
+    /// with nothing of ours running would name the culprit.
+    /// </remarks>
+    internal static string PhysicalModifierSides()
+    {
+        var held = new List<string>(4);
+        foreach (var (key, name) in Sides)
+        {
+            if (IsPressed(key))
+            {
+                held.Add(name);
+            }
+        }
+
+        return string.Join(" ", held);
+    }
+
+    private static readonly (int Key, string Name)[] Sides =
+    [
+        (0xA0, "LSHIFT"), (0xA1, "RSHIFT"),
+        (0xA2, "LCTRL"), (0xA3, "RCTRL"),
+        (0xA4, "LALT"), (0xA5, "RALT"),
+        (0x5B, "LWIN"), (0x5C, "RWIN"),
+    ];
 
     private static ModifierKeys CurrentModifiers()
     {
