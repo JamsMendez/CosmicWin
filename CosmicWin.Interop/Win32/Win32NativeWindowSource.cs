@@ -282,6 +282,13 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         PInvoke.SendInput(inputs, Marshal.SizeOf<INPUT>());
     }
 
+    /// <summary>
+    /// <c>WS_CHILD</c>. Named here rather than pulled from the generated enum because this file
+    /// already reads raw style bits through <see cref="ReadStyle"/> and interprets none of the
+    /// others -- <c>WindowStyleFlags</c> in the layout side owns that job, and it is Win32-free.
+    /// </summary>
+    private const uint WsChild = 0x40000000;
+
     private static bool IsTrackable(HWND hwnd)
     {
         if (!PInvoke.IsWindowVisible(hwnd))
@@ -295,7 +302,17 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         // only decides what is trackable at all, not what the tiling engine should tile.
         var hasOwner = PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) != HWND.Null;
 
-        return IsTrackable(hasOwner, ReadIsCloaked(hwnd));
+        // A CHILD is not a window this manager has any business tiling, and asking is what makes
+        // the two admission paths agree. Adoption enumerates through EnumWindows, which returns
+        // only top-level windows by construction; the event path takes a raw HWND from a
+        // desktop-wide hook, which reports children too. Measured: restarting with Clipchamp open
+        // laid it out correctly at its full half, while opening it under a running CosmicWin let
+        // its own title bar and caption buttons into the tree and squeezed it into a quarter.
+        //
+        // WS_CHILD rather than a class name, deliberately -- a list of offenders is always one
+        // release behind, and this is the same question EnumWindows already answers.
+        var isChild = (ReadStyle(hwnd) & WsChild) != 0;
+        return IsTrackable(hasOwner, ReadIsCloaked(hwnd), isChild);
     }
 
     /// <summary>
@@ -312,7 +329,8 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// proves this decision, which is reason enough without an impossibility that expired.
     /// </para>
     /// </summary>
-    internal static bool IsTrackable(bool hasOwner, bool isCloaked) => !hasOwner && !isCloaked;
+    internal static bool IsTrackable(bool hasOwner, bool isCloaked, bool isChild) =>
+        !hasOwner && !isCloaked && !isChild;
 
     /// <summary>
     /// The exact complement of <see cref="IsTrackable(bool, bool)"/>'s owner half, extracted for the

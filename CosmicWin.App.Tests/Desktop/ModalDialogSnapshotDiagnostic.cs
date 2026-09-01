@@ -187,7 +187,7 @@ public sealed class ModalDialogSnapshotDiagnostic(ITestOutputHelper output)
 
         return
             $"0x{entry.Handle:X8} owner={Yes(info.IsOwned)} " +
-            $"track={Yes(Win32NativeWindowSource.IsTrackable(info.IsOwned, isCloaked: false))} " +
+            $"track={Yes(Win32NativeWindowSource.IsTrackable(info.IsOwned, isCloaked: false, isChild: (info.Style & 0x40000000u) != 0))} " +
             $"autoex={Yes(WindowFilters.IsAutoExcluded(descriptor))} " +
             $"modal={Yes(WindowFilters.IsModalDialog(descriptor))} " +
             $"| {Styles(info.Style, info.ExStyle)} " +

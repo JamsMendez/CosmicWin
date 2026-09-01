@@ -1,4 +1,4 @@
-using CosmicWin.Interop.Win32;
+﻿using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
 
@@ -28,7 +28,7 @@ public sealed class Win32NativeWindowSourceCloakingTests
     [Fact]
     public void IsTrackable_UnownedAndNotCloaked_ReturnsTrue()
     {
-        Assert.True(Win32NativeWindowSource.IsTrackable(hasOwner: false, isCloaked: false));
+        Assert.True(Win32NativeWindowSource.IsTrackable(hasOwner: false, isCloaked: false, isChild: false));
     }
 
     /// <summary>
@@ -38,13 +38,13 @@ public sealed class Win32NativeWindowSourceCloakingTests
     [Fact]
     public void IsTrackable_UnownedButCloaked_ReturnsFalse()
     {
-        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: false, isCloaked: true));
+        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: false, isCloaked: true, isChild: false));
     }
 
     [Fact]
     public void IsTrackable_Owned_ReturnsFalseRegardlessOfCloakState()
     {
-        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: true, isCloaked: false));
-        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: true, isCloaked: true));
+        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: true, isCloaked: false, isChild: false));
+        Assert.False(Win32NativeWindowSource.IsTrackable(hasOwner: true, isCloaked: true, isChild: false));
     }
 }

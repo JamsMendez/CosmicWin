@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -92,7 +92,7 @@ public sealed class Win32WindowShownWatcherTests
     public void NoWindowIsEverReportedByBothHooks(bool hasOwner)
     {
         Assert.False(
-            Win32NativeWindowSource.IsTrackable(hasOwner, isCloaked: false)
+            Win32NativeWindowSource.IsTrackable(hasOwner, isCloaked: false, isChild: false)
             && Win32NativeWindowSource.IsShownWindowWorthReporting(hasOwner));
     }
 
