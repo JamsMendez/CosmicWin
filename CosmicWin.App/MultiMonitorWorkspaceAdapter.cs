@@ -85,6 +85,8 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// </summary>
     private readonly HashSet<nint> _givenUp = [];
 
+    /// <summary>Handles whose admission is already in progress on this call stack.</summary>
+    private readonly HashSet<nint> _arriving = [];
 
     /// <summary>
     /// Which virtual desktop a window is on. Unset means "there is only one", which is how every
@@ -149,7 +151,62 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _workspace.WindowBoundsChanged += OnWindowBoundsChanged;
     }
 
+    /// <summary>
+    /// Serialises announcements of one handle against ITSELF, then does the work.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This handler re-enters. Measured on real hardware with the guard's own state recorded on
+    /// every announcement, Clipchamp opening:
+    /// </para>
+    /// <code>
+    /// 48.1280  guard state hwnd=0x40944 owner=False leaf=False givenUp=False
+    /// 48.1292  guard state hwnd=0x40944 owner=False leaf=False givenUp=False
+    /// 48.1934  added hwnd=0x40944 ...
+    /// 48.2268  added hwnd=0x40944 ...
+    /// </code>
+    /// <para>
+    /// The <c>added</c> line is written at the END of the work. Sequential processing would read
+    /// guard, added, guard, added; both guards first and both additions after says the two calls
+    /// were inside at the same time, 1.2 ms apart, on one thread. Something between entry and the
+    /// bookkeeping pumps, and the shell delivers the next announcement into that gap.
+    /// </para>
+    /// <para>
+    /// Which is why the duplicate-leaf guard below never fired once in production: it asks whether
+    /// the handle is already an owned, registered leaf, and the code that makes it so runs later in
+    /// the same method. The second call reached the question before the first had answered it, so
+    /// both saw nothing and both built a leaf. Eviction then removes ONE leaf per give-up, so the
+    /// surplus stayed -- orphans that keep their tiles and that the focus walk keeps electing.
+    /// </para>
+    /// <para>
+    /// Claimed by HANDLE rather than by a lock, deliberately. A lock would serialise a re-entrant
+    /// call on one thread into a deadlock or, if reentrant, change nothing. The question here is
+    /// not "are two threads inside" but "is this handle already being admitted", and refusing the
+    /// second answer is correct however the re-entry got in. The claim is released in a
+    /// <c>finally</c> so a throw cannot leave a handle permanently unaddable.
+    /// </para>
+    /// </remarks>
     private void OnWindowAdded(object? sender, WindowEventArgs e)
+    {
+        if (!_arriving.Add(e.Window.Handle))
+        {
+            Trace?.Record(
+                $"re-entrant add ignored hwnd=0x{e.Window.Handle:X} class={e.Window.ClassName} " +
+                $"proc={e.Window.ProcessName} -- already being admitted");
+            return;
+        }
+
+        try
+        {
+            AddWindow(e);
+        }
+        finally
+        {
+            _arriving.Remove(e.Window.Handle);
+        }
+    }
+
+    private void AddWindow(WindowEventArgs e)
     {
         if (_isPaused())
         {
@@ -185,9 +242,30 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // the tree it pointed into, and refusing on a stale one would drop a window that really is
         // new -- nothing else would ever add it. `_owners` names the display to ask, exactly as
         // OnWindowRemoved already asks it.
-        if (_owners.TryGetValue(window.Handle, out var owner)
-            && _registry.TryGetLeaf(window.Handle, out var held) && held is not null
-            && _treeManager.TryGetTreeHolding(owner, held, out _))
+        // WHICH of the three failed, when one does. Measured on real hardware: Clipchamp's chrome
+        // was announced four times against three give-ups, leaving one leaf nothing would ever
+        // remove -- and the trace carried NOT ONE `duplicate add ignored` line, so this guard never
+        // fired. Three conditions can refuse and the record only ever said "refused", which is the
+        // one thing that did not happen. Replaying the measured order against the test harness
+        // reproduces nothing, so the difference lives in state this line is about to name.
+        var hasOwner = _owners.TryGetValue(window.Handle, out var owner);
+        var hasLeaf = _registry.TryGetLeaf(window.Handle, out var held) && held is not null;
+        var heldInATree = hasOwner && hasLeaf && _treeManager.TryGetTreeHolding(owner, held!, out _);
+        if (!heldInATree)
+        {
+            // Every state this guard saw, not just the partial ones. The first cut of this line
+            // recorded partial state only and stayed silent through three reproductions, which is
+            // itself the finding: on the duplicate announcement the adapter remembers NOTHING about
+            // the handle, so there is no state for the guard to match and refusing was never
+            // possible. givenUp rides along because it refused nothing either, on a handle it had
+            // been given moments earlier.
+            Trace?.Record(
+                $"guard state hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                $"proc={window.ProcessName} owner={hasOwner} leaf={hasLeaf} " +
+                $"givenUp={_givenUp.Contains(window.Handle)}");
+        }
+
+        if (heldInATree)
         {
             // Traced rather than dropped in silence: this path doing nothing is indistinguishable
             // from the event never arriving, and telling those two apart is the whole reason the
