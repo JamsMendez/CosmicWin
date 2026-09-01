@@ -48,16 +48,35 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
     /// </summary>
     public const int MaxIndex = 9;
 
+    /// <summary>
+    /// How long to let a switch the shell has ACCEPTED become visible before calling it failed.
+    /// </summary>
+    /// <remarks>
+    /// Twelve reads twenty milliseconds apart -- 240 ms at worst, and almost always one read. The
+    /// budget is bounded by what a chord may block on, not by how slow an animation can get: this
+    /// runs on the dispatcher pump, so a generous budget would stall every chord queued behind a
+    /// switch the shell is never going to perform.
+    /// </remarks>
+    private const int SettleReads = 12;
+
+    private static readonly TimeSpan SettleInterval = TimeSpan.FromMilliseconds(20);
+
     private readonly INativeVirtualDesktops _native;
+    private readonly Action<TimeSpan> _settleWait;
 
     public Win32VirtualDesktopService()
         : this(new Win32NativeVirtualDesktops())
     {
     }
 
-    internal Win32VirtualDesktopService(INativeVirtualDesktops native)
+    /// <param name="settleWait">
+    /// How to wait between verification reads. Injected so the settling facts cost no wall clock;
+    /// production sleeps.
+    /// </param>
+    internal Win32VirtualDesktopService(INativeVirtualDesktops native, Action<TimeSpan>? settleWait = null)
     {
         _native = native;
+        _settleWait = settleWait ?? Thread.Sleep;
     }
 
     public bool IsSupported => _native.IsAvailable;
@@ -180,7 +199,34 @@ public sealed class Win32VirtualDesktopService : IVirtualDesktopService
         // Verified, not assumed. SwitchDesktop returns void, so the only honest way to know whether
         // the user actually moved is to look -- the same lesson MR-2 taught about
         // SetForegroundWindow claiming success while nothing happened on screen.
-        return _native.GetCurrentDesktopId() == desktopId;
+        //
+        // GIVEN TIME, because one immediate read of an ASYNCHRONOUS operation measures the shell's
+        // reaction speed rather than its answer. A desktop change is animated, and a single read
+        // taken the instant after asking reported the desktop the user was still leaving -- so a
+        // switch that was really happening was declared failed, nothing retried, and the chord did
+        // nothing at all in silence. Measured: `SwitchDesktop arg=2 ok=False index=1->1
+        // error=(none)`, 18 ms after CosmicWin's own arriving-window redirect had moved the view,
+        // with the identical chord succeeding 2.3 seconds later.
+        //
+        // Asked ONCE and then waited for. Re-issuing the switch on every read would fight an
+        // animation already in flight, and the shell answers a second ask with a second desktop
+        // change -- one chord, two moves.
+        for (var read = 0; ; read++)
+        {
+            if (_native.GetCurrentDesktopId() == desktopId)
+            {
+                return true;
+            }
+
+            // The budget is spent. A shell that has not moved by now is refusing, and saying so is
+            // better than blocking the chords queued behind this one any longer.
+            if (read >= SettleReads)
+            {
+                return false;
+            }
+
+            _settleWait(SettleInterval);
+        }
     }
 
     /// <summary>
