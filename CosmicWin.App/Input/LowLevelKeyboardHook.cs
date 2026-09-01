@@ -10,6 +10,14 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
     private readonly bool[] _acceptedKeyDown = new bool[256];
     private volatile bool _paused;
 
+    /// <summary>The failure currently repeating, and how many times running it has done so.</summary>
+    /// <remarks>
+    /// Touched only from the hook's own thread, which is the only caller of <see cref="Process"/>.
+    /// The cross-thread value is <see cref="LastUnmatched"/>, and it is published as one finished
+    /// string precisely so a reader can never catch the text and the count a beat apart.
+    /// </remarks>
+    private string? _repeating;
+    private int _repeats;
 
     /// <summary>The last modifier+key combination that matched no chord, for diagnosis. Never null-cleared.</summary>
     public volatile string? LastUnmatched;
@@ -64,6 +72,12 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             return false;
         }
 
+        // The run ends here. The count answers "how many times in a row did THIS chord fail", and a
+        // chord that worked in between means the user was not staring at a dead keyboard. Only the
+        // run is reset -- LastUnmatched itself is never null-cleared, so the last real failure stays
+        // readable for as long as the app runs.
+        _repeating = null;
+        _repeats = 0;
         return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
     }
 
@@ -90,7 +104,7 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
         {
             if (modifiers != ModifierKeys.None)
             {
-                LastUnmatched = $"{modifiers}+{key}";
+                Publish($"{modifiers}+{key}");
             }
 
             return;
@@ -103,7 +117,31 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             return;
         }
 
-        LastUnmatched = $"{modifiers}+{key} raw=[{raw}]";
+        Publish($"{modifiers}+{key} raw=[{raw}]");
+    }
+
+    /// <summary>
+    /// Publishes one failure, with a repeat count once the same one happens twice running.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count exists because the publisher writes only when the text CHANGES, and identical
+    /// failures therefore collapsed into a single line. Measured on real hardware: the desktop
+    /// chords went dead for 3.6 and 5.5 seconds and each dead stretch produced exactly ONE
+    /// <c>unmatched chord: Alt+165 raw=[RALT]</c> line -- one lost chord and three hundred were the
+    /// same picture, and which of the two it was is the entire diagnosis.
+    /// </para>
+    /// <para>
+    /// Carried in the text rather than in a second property so the publisher needs no change and
+    /// there is no second value to read out of step with this one. The first occurrence carries no
+    /// suffix, so a chord that genuinely failed once reads exactly as it did before.
+    /// </para>
+    /// </remarks>
+    private void Publish(string description)
+    {
+        _repeats = description == _repeating ? _repeats + 1 : 1;
+        _repeating = description;
+        LastUnmatched = _repeats == 1 ? description : $"{description} x{_repeats}";
     }
 }
 
@@ -133,9 +171,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private Thread? _thread;
     private Exception? _startupFailure;
     private long _lastActivity;
+    private int _watchdogReinstalls;
 
     public bool? UnhookSucceeded { get; private set; }
 
+    /// <summary>How many times the watchdog has put the hook back.</summary>
+    public int WatchdogReinstalls => Volatile.Read(ref _watchdogReinstalls);
 
     /// <summary>Pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
     public bool IsPaused
@@ -187,6 +228,11 @@ public sealed class LowLevelKeyboardHook : IDisposable
                     RecordUninstall();
                     _platform.Install(OnKeyboardEvent);
                     Volatile.Write(ref _lastActivity, _clock());
+
+                    // Counted here and published by the reconciliation tick, never written from
+                    // this thread: a hook that touches a file is a hook Windows uninstalls, which
+                    // is the very failure this counter exists to make visible.
+                    Interlocked.Increment(ref _watchdogReinstalls);
                 }
                 _stop.Token.WaitHandle.WaitOne(5);
             }

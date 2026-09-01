@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 
@@ -153,6 +153,44 @@ public sealed class KeyboardHookTests
         Assert.True(channel.Reader.TryRead(out var action));
         Assert.Equal(HotkeyActionKind.FocusLeft, action.Kind);
         Assert.True(platform.UninstallCount >= 1);
+    }
+
+    /// <summary>
+    /// Every watchdog reinstall is counted, because a reinstall is currently INVISIBLE.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Windows silently uninstalls a low-level keyboard hook whose callback overruns
+    /// <c>LowLevelHooksTimeout</c>. A ghosted hook delivers no events, so <c>_lastActivity</c>
+    /// stops moving, and five seconds later the watchdog puts it back -- which is exactly what "the
+    /// chord went dead and I had to press the modifier again" would look like from the outside.
+    /// </para>
+    /// <para>
+    /// That whole sequence writes nothing anywhere today. The reinstall leaves no record, so a
+    /// dead stretch caused by a ghosted hook and a dead stretch caused by a lost modifier are
+    /// indistinguishable in the trace -- and telling those two apart decides which defect is real.
+    /// </para>
+    /// <para>
+    /// Counted in memory and published by the reconciliation tick, never written from here: this
+    /// runs on the hook's own thread, and a hook that touches a file is a hook Windows uninstalls.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Watchdog_CountsEveryReinstall()
+    {
+        var platform = new FakeKeyboardHookPlatform();
+        var clock = new FakeClock();
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        using var hook = new LowLevelKeyboardHook(
+            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        Assert.Equal(0, hook.WatchdogReinstalls);
+
+        clock.Advance(5000);
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromSeconds(2)));
     }
 
     [Theory]

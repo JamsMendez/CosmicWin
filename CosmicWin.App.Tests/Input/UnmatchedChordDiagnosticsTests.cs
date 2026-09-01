@@ -125,6 +125,93 @@ public sealed class UnmatchedChordDiagnosticsTests
         Assert.Equal("Alt+Tab", processor.LastUnmatched);
     }
 
+    /// <summary>
+    /// A chord that fails over and over must LOOK different from one that failed once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured on real hardware: the desktop chords went dead for 3.6 and 5.5 seconds at a time,
+    /// and the trace showed exactly ONE <c>unmatched chord: Alt+165 raw=[RALT]</c> line for each
+    /// dead stretch. That is not because one chord was lost. The publisher only records when the
+    /// text CHANGES, so an identical failure repeating three hundred times and one failing once
+    /// produce the same single line -- the instrument cannot tell the two apart, and the difference
+    /// between them is the whole diagnosis.
+    /// </para>
+    /// <para>
+    /// Counted in the text rather than in a second field on purpose: the publisher already writes
+    /// on change, so a count that rides in the string makes every repeat visible without the
+    /// publisher learning anything new, and without a second value that can be read a beat out of
+    /// step with the first from the reconciliation thread.
+    /// </para>
+    /// <para>
+    /// The first occurrence carries no suffix, so a chord that really did fail once reads exactly
+    /// as it did before this existed.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheSameUnmatchedChordRepeating_CountsTheRepeats()
+    {
+        var processor = new KeyboardEventProcessor(ChordTable.Default)
+        {
+            PhysicalModifiers = () => "RALT",
+        };
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT]", processor.LastUnmatched);
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT] x2", processor.LastUnmatched);
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT] x3", processor.LastUnmatched);
+    }
+
+    /// <summary>
+    /// A DIFFERENT failure starts its own count, or the number would say how long the user has been
+    /// pressing keys rather than how often this one chord failed.
+    /// </summary>
+    [Fact]
+    public void ADifferentUnmatchedChord_RestartsTheCount()
+    {
+        var processor = new KeyboardEventProcessor(ChordTable.Default)
+        {
+            PhysicalModifiers = () => "RALT",
+        };
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT] x2", processor.LastUnmatched);
+
+        processor.Process(KeyboardKey.Escape, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Escape raw=[RALT]", processor.LastUnmatched);
+
+        processor.Process(KeyboardKey.Escape, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Escape raw=[RALT] x2", processor.LastUnmatched);
+    }
+
+    /// <summary>
+    /// A matched chord between two identical failures does not merge them into one run: the count
+    /// answers "how many times in a row did THIS fail", and a chord that worked in between means
+    /// the run ended.
+    /// </summary>
+    [Fact]
+    public void AMatchedChordBetweenTwoFailures_EndsTheRun()
+    {
+        var processor = new KeyboardEventProcessor(ChordTable.Default)
+        {
+            PhysicalModifiers = () => "RALT",
+        };
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT] x2", processor.LastUnmatched);
+
+        processor.Process(KeyboardKey.D1, true, ModifierKeys.Alt, Sink());
+
+        processor.Process(Unbound, true, ModifierKeys.Alt, Sink());
+        Assert.Equal("Alt+Tab raw=[RALT]", processor.LastUnmatched);
+    }
+
     /// <summary>A matched chord is not an unmatched one, however much is held.</summary>
     [Fact]
     public void AMatchedChord_RecordsNothing()

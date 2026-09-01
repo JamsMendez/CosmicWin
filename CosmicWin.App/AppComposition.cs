@@ -333,6 +333,7 @@ public sealed class AppComposition : IDisposable
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
         // disagreeing with the desktop, and nothing else ever looks again.
         string? lastReportedUnmatched = null;
+        var lastReportedReinstalls = 0;
 
         // The arriving desktop's own layout, applied to the work area in force NOW. Its windows
         // were left exactly where they were when the user walked away, so without this they would
@@ -492,6 +493,21 @@ public sealed class AppComposition : IDisposable
             {
                 lastReportedUnmatched = unmatched;
                 desktopTrace?.Record($"unmatched chord: {unmatched}");
+            }
+
+            // Windows silently uninstalls a low-level keyboard hook whose callback overruns
+            // LowLevelHooksTimeout. A ghosted hook delivers nothing, so the watchdog puts it back a
+            // few seconds later and the keyboard "comes good on its own" -- which is what a dead
+            // stretch of chords looks like from the user's side, and it used to leave no record at
+            // all. Without this line a stretch caused by a ghosted hook and one caused by a lost
+            // modifier read identically in the trace.
+            var reinstalls = hook.WatchdogReinstalls;
+            if (reinstalls != lastReportedReinstalls)
+            {
+                desktopTrace?.Record(
+                    $"hook reinstalled by watchdog -- total={reinstalls} " +
+                    $"(+{reinstalls - lastReportedReinstalls} since last report)");
+                lastReportedReinstalls = reinstalls;
             }
 
             if (virtualDesktops is not null)
