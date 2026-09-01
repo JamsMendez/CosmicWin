@@ -55,7 +55,7 @@ public sealed class Win32Workspace : IWorkspace
 
         foreach (var hwnd in _nativeSource.EnumerateTopLevelWindows())
         {
-            TryAddWindow(hwnd);
+            TryAddWindow(hwnd, WindowArrival.Adopted);
         }
 
         _hookSubscription = _nativeSource.SubscribeWindowEvents(OnNativeWindowEvent);
@@ -107,7 +107,7 @@ public sealed class Win32Workspace : IWorkspace
             }
             else
             {
-                TryAddWindow(hwnd);
+                TryAddWindow(hwnd, WindowArrival.Adopted);
             }
         }
     }
@@ -123,7 +123,15 @@ public sealed class Win32Workspace : IWorkspace
         switch (kind)
         {
             case NativeWindowEventKind.Created:
-                TryAddWindow(hwnd);
+                TryAddWindow(hwnd, WindowArrival.Created);
+                break;
+
+            // The window was already there; the user walked back to the desktop it lives on.
+            // Tracked exactly like a create -- it must join the tree either way -- and reported as
+            // the ADOPTION it is, so nothing downstream mistakes returning to a desktop for nine
+            // windows being born on it.
+            case NativeWindowEventKind.Uncloaked:
+                TryAddWindow(hwnd, WindowArrival.Adopted);
                 break;
             case NativeWindowEventKind.Destroyed:
 
@@ -157,7 +165,13 @@ public sealed class Win32Workspace : IWorkspace
         }
     }
 
-    private void TryAddWindow(nint hwnd)
+    /// <param name="arrival">
+    /// Whether this announcement is a birth or an adoption. The enumeration paths adopt: they
+    /// report windows that already existed and were merely not being tracked yet -- at startup, or
+    /// because they were cloaked on a desktop the user had not visited. Only the shell's own
+    /// creation event is a birth, and only a birth carries a placement decision worth overruling.
+    /// </param>
+    private void TryAddWindow(nint hwnd, WindowArrival arrival)
     {
         if (_windows.ContainsKey(hwnd))
         {
@@ -173,7 +187,7 @@ public sealed class Win32Workspace : IWorkspace
             hwnd, info.Title, info.Bounds, _nativeSource,
             info.ClassName, info.ProcessName, info.Style, info.ExStyle, info.IsOwned);
         _windows[hwnd] = window;
-        WindowAdded?.Invoke(this, new WindowEventArgs(window));
+        WindowAdded?.Invoke(this, new WindowEventArgs(window, arrival: arrival));
     }
 
     private void RemoveWindow(nint hwnd)

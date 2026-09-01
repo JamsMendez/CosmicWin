@@ -49,6 +49,30 @@ internal enum NativeWindowEventKind
     /// consequence for tracking today; that is the consumer's decision to make, not this enum's.
     /// </remarks>
     Hidden,
+
+    /// <summary>
+    /// A window that already existed became visible again (<c>EVENT_OBJECT_UNCLOAKED</c>) -- what
+    /// DWM does to every window on a virtual desktop the moment the user returns to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Its own kind, and it was NOT always: it used to be reported as <see cref="Created"/>, on the
+    /// reasoning that a window which has just become trackable is, to everything downstream, a
+    /// window that has just arrived. That reasoning held exactly as long as nothing downstream
+    /// cared, and stopped holding the moment <c>WindowArrival</c> existed.
+    /// </para>
+    /// <para>
+    /// What it cost while it lasted: the arriving-window redirect exists to bring a window BORN on
+    /// the wrong desktop to the user, and an uncloak reported as a birth handed it every window on
+    /// every desktop the user visited. Measured -- CosmicWin started with two populated desktops
+    /// and emptied the second into the first.
+    /// </para>
+    /// <para>
+    /// The CLOAK half stays unhandled on purpose: treating it as a removal is the regression that
+    /// once dismantled the whole layout on a desktop switch.
+    /// </para>
+    /// </remarks>
+    Uncloaked,
 }
 
 /// <summary>

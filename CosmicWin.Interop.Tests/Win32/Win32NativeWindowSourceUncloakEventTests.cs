@@ -1,4 +1,4 @@
-using CosmicWin.Interop.Win32;
+﻿using CosmicWin.Interop.Win32;
 using CosmicWin.Interop.Win32.VirtualDesktops;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -31,7 +31,7 @@ public sealed class Win32NativeWindowSourceUncloakEventTests
     private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(900);
 
     [RequiresDesktopFact]
-    public void SubscribeWindowEvents_ReportsCreated_WhenACloakedWindowBecomesVisibleAgain()
+    public void SubscribeWindowEvents_ReportsUncloaked_WhenACloakedWindowBecomesVisibleAgain()
     {
         var desktops = new Win32VirtualDesktopService();
         if (!desktops.IsSupported)
@@ -51,7 +51,7 @@ public sealed class Win32NativeWindowSourceUncloakEventTests
         var created = new HashSet<nint>();
         using var subscription = source.SubscribeWindowEvents((kind, hwnd) =>
         {
-            if (kind == NativeWindowEventKind.Created)
+            if (kind == NativeWindowEventKind.Uncloaked)
             {
                 created.Add(hwnd);
             }
@@ -83,6 +83,6 @@ public sealed class Win32NativeWindowSourceUncloakEventTests
             Thread.Sleep(Settle);
         }
 
-        Assert.True(observed, "Uncloaking the window reported no Created event, so nothing admits it.");
+        Assert.True(observed, "Uncloaking the window reported no Uncloaked event, so nothing admits it.");
     }
 }

@@ -30,7 +30,12 @@ internal sealed class FakeWorkspace : IWorkspace
         PollCallCount++;
     }
 
-    public void RaiseWindowAdded(IWindow window) => WindowAdded?.Invoke(this, new WindowEventArgs(window));
+    /// <param name="arrival">
+    /// Whether the real workspace would be reporting a birth or an adoption. Defaults to the birth
+    /// every caller written before the distinction existed meant.
+    /// </param>
+    public void RaiseWindowAdded(IWindow window, WindowArrival arrival = WindowArrival.Created) =>
+        WindowAdded?.Invoke(this, new WindowEventArgs(window, arrival: arrival));
 
     public void RaiseWindowRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
 

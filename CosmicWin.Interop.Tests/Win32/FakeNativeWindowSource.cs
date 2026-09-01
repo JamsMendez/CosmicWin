@@ -173,6 +173,21 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         _callback?.Invoke(NativeWindowEventKind.MoveSizeEnded, hwnd);
 
     /// <summary>Simulates the OS moving/resizing a window AND the hook delivering the event.</summary>
+    /// <summary>
+    /// Simulates DWM uncloaking a window that already existed -- returning to a virtual desktop.
+    /// The window is NOT new: it is seeded first, exactly as a real one was there all along.
+    /// </summary>
+    public void SimulateWindowUncloakedWithEvent(nint hwnd, string title, Rectangle bounds)
+    {
+        if (!_windows.ContainsKey(hwnd))
+        {
+            SimulateWindowCreatedSilently(hwnd, title, bounds);
+        }
+
+        _hiddenFromEnumeration.Remove(hwnd);
+        _callback?.Invoke(NativeWindowEventKind.Uncloaked, hwnd);
+    }
+
     public void SimulateWindowMovedWithEvent(nint hwnd, Rectangle newBounds)
     {
         if (_windows.TryGetValue(hwnd, out var info))

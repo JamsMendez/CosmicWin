@@ -294,6 +294,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         // no-sysmenu) belong to CosmicWin.Layout's WindowDescriptor/Filters (Phase 3) — Interop
         // only decides what is trackable at all, not what the tiling engine should tile.
         var hasOwner = PInvoke.GetWindow(hwnd, GET_WINDOW_CMD.GW_OWNER) != HWND.Null;
+
         return IsTrackable(hasOwner, ReadIsCloaked(hwnd));
     }
 
@@ -595,14 +596,20 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
 
                     break;
 
-                // Reported as CREATED, not as a kind of its own. A window that has just become
-                // trackable is, to everything downstream, a window that has just arrived -- and
-                // TryAddWindow is idempotent, so a window already tracked (every window on a desktop
-                // being returned to) costs one dictionary lookup and changes nothing.
+                // Its OWN kind, and it used to be CREATED. The old reasoning -- a window that has
+                // just become trackable is, to everything downstream, a window that has just
+                // arrived -- held exactly as long as nothing downstream cared which it was.
+                // Something does now: the arriving-window redirect overrules where Windows chose to
+                // put a NEW window, and an uncloak reported as a birth handed it every window on
+                // every desktop the user walked back to. Measured: two populated desktops, and the
+                // second emptied into the first.
+                //
+                // Still gated on IsTrackable, and TryAddWindow is still idempotent, so returning to
+                // a desktop costs one dictionary lookup per window and announces nothing.
                 case PInvoke.EVENT_OBJECT_UNCLOAKED:
                     if (IsTrackable(hwnd))
                     {
-                        callback(NativeWindowEventKind.Created, hwnd);
+                        callback(NativeWindowEventKind.Uncloaked, hwnd);
                     }
 
                     break;

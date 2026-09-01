@@ -3,15 +3,48 @@
 /// <summary>
 /// Carries the <see cref="IWindow"/> a workspace event refers to.
 /// </summary>
+/// <summary>
+/// Whether a window being announced is NEW to the system, or merely new to CosmicWin.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The same event carries both, and they are the same fact about a window appearing and a
+/// completely different fact about intent. Windows decides where a new window is born, and that
+/// decision is worth overruling; a window that has been sitting on another desktop all along made
+/// no decision to overrule, and moving it is moving something the user put there.
+/// </para>
+/// <para>
+/// Adoption of another desktop's windows is guaranteed, not exotic: <c>IsTrackable</c> rejects
+/// cloaked windows and DWM cloaks every window on a desktop the user is not looking at, so a
+/// starting window manager can only ever adopt the desktop in view. Every other desktop is adopted
+/// later, the moment the user walks over to it.
+/// </para>
+/// </remarks>
+public enum WindowArrival
+{
+    /// <summary>The window has just been created. The default, so an unqualified announcement keeps meaning what it always meant.</summary>
+    Created = 0,
+
+    /// <summary>The window already existed and is only now being tracked -- a startup sweep, or a reconciliation pass.</summary>
+    Adopted = 1,
+}
+
 public sealed class WindowEventArgs : EventArgs
 {
-    public WindowEventArgs(IWindow window, bool isUserGesture = false)
+    public WindowEventArgs(IWindow window, bool isUserGesture = false, WindowArrival arrival = WindowArrival.Created)
     {
         Window = window;
         IsUserGesture = isUserGesture;
+        Arrival = arrival;
     }
 
     public IWindow Window { get; }
+
+    /// <summary>
+    /// Whether this window is genuinely new, or was already there. Meaningful only on
+    /// <see cref="IWorkspace.WindowAdded"/>; the other events leave it at its default.
+    /// </summary>
+    public WindowArrival Arrival { get; }
 
     /// <summary>
     /// This event is the settled result of the user dragging or resizing the window by hand,

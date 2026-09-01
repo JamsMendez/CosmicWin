@@ -161,9 +161,26 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Only ever on a NAMED desktop that is not the user's. Empty means the shell would not say,
         // which it answers for any window merely mid-creation -- moving windows on that would be
         // moving them on a guess.
+        // A BIRTH only. An adopted window made no decision to overrule -- it has been sitting where
+        // the user left it, and this redirect used to drag it away the moment CosmicWin first saw
+        // it. Reported: restart with windows on more than one desktop, then move between them, and
+        // the other desktops empty themselves into the one CosmicWin believes the user is on.
+        //
+        // Guaranteed rather than unlucky, and worth spelling out because it reads like a race that
+        // a smaller window would fix. IsTrackable rejects cloaked windows and DWM cloaks every
+        // window on a desktop nobody is looking at, so a starting CosmicWin can only adopt the
+        // desktop in view; every other desktop is adopted later, at the instant the user walks over
+        // and its windows uncloak. The reconciliation tick polls BEFORE it refreshes which desktop
+        // the user is on, so at that instant `user` still names the desktop they just left. The
+        // window that had never moved was therefore moved -- to a desktop the user was no longer on.
+        //
+        // Reordering the tick would shrink that window without closing it, because the ordering is
+        // the symptom: two different facts were arriving on one event with nothing to tell them
+        // apart. WindowArrival is what tells them apart.
         var redirected = false;
         var user = ResolveUserDesktop?.Invoke() ?? Guid.Empty;
-        if (SendWindowToDesktop is { } send && named != Guid.Empty && user != Guid.Empty && named != user)
+        if (e.Arrival == WindowArrival.Created
+            && SendWindowToDesktop is { } send && named != Guid.Empty && user != Guid.Empty && named != user)
         {
             // A refused move leaves `named` alone on purpose. Filing it where we WANTED it would
             // describe a desktop the window is not on -- the same lie the empty desktop id already
