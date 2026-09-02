@@ -21,6 +21,18 @@ public static class WindowStyleFlags
     public const uint SystemMenu = 0x00080000;
 
     /// <summary>
+    /// GWL_STYLE bit: <c>WS_THICKFRAME</c> (a.k.a. <c>WS_SIZEBOX</c>) -- the window carries a
+    /// resize border, which is the window telling Windows that the user may resize it.
+    /// </summary>
+    /// <remarks>
+    /// The most direct evidence a tiling manager can ask for, because resizing is the whole job. A
+    /// window that invites the user to drag its edge cannot object to a tile doing the same thing,
+    /// and the transient windows the exclusions target -- splashes, toasts, popups -- are
+    /// fixed-size by construction.
+    /// </remarks>
+    public const uint ThickFrame = 0x00040000;
+
+    /// <summary>
     /// GWL_STYLE bit: <c>WS_MAXIMIZE</c>. Like <see cref="Minimized"/> it is TRANSIENT -- Windows
     /// sets it while the window is maximised and clears it on restore. Unlike it, this bit is not
     /// an exclusion: a maximised window keeps its tile. It marks the one thing a maximised window

@@ -109,6 +109,58 @@ public class WindowFiltersAutoExclusionTests
         Assert.True(WindowFilters.IsAutoExcluded(descriptor));
     }
 
+    /// <summary>
+    /// Measured on real hardware with NVIDIA Broadcast open, which was never tiled:
+    /// <c>0x5069A class=Chrome_WidgetWin_1 title="NVIDIA Broadcast" 1540x772 visible owner=0x0
+    /// cloaked=0 WS_CHILD=False style=0x14C60000 exstyle=0x00280100</c>. It clears Interop's
+    /// trackability gate outright and dies here instead: no <c>WS_SYSMENU</c>, and only HALF the
+    /// caption-box evidence the custom-frame escape above demands -- an Electron app with its own
+    /// chrome, resizable, that simply cannot be maximized.
+    /// <para>
+    /// <c>WS_THICKFRAME</c> is the evidence that was being ignored, and it is the most direct
+    /// evidence there is: the window itself declares that the user may resize it, which is exactly
+    /// the permission a tiling manager needs. The shell and transient windows this rule protects
+    /// against -- splash screens, toasts, popups -- are fixed-size, and the same live enumeration
+    /// confirmed it: with the whole desktop open, thirty NVIDIA and overlay windows among them,
+    /// this bit newly admits exactly one window, and it is this one. The GeForce Overlay stays out
+    /// on <c>WS_EX_TOOLWINDOW</c>, which it carries and this window does not.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_ResizableCustomFrameWithOnlyAMinimizeBox_ReturnsFalse()
+    {
+        var descriptor = Normal() with { Style = 0x14C60000u };
+
+        Assert.False(WindowFilters.IsAutoExcluded(descriptor));
+    }
+
+    /// <summary>
+    /// The triangulation that keeps the clause above honest: the SAME window shape with the resize
+    /// border taken away is still excluded. Nothing else about it changed -- still no system menu,
+    /// still a lone minimize box -- so <c>WS_THICKFRAME</c> is doing the work, not the caption or
+    /// the minimize box sneaking a window past on its own.
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_FixedSizeCustomFrameWithOnlyAMinimizeBox_ReturnsTrue()
+    {
+        var descriptor = Normal() with { Style = 0x14C20000u };
+
+        Assert.True(WindowFilters.IsAutoExcluded(descriptor));
+    }
+
+    /// <summary>
+    /// The resize escape does not outrank <c>WS_MINIMIZE</c> either. A minimized window is drawn
+    /// nowhere, and being resizable while minimized changes nothing about that -- the same pairing
+    /// the custom-frame escape above already answers for.
+    /// </summary>
+    [Fact]
+    public void IsAutoExcluded_MinimizedResizableCustomFrame_ReturnsTrue()
+    {
+        var descriptor = Normal() with { Style = 0x34C60000u };
+
+        Assert.True(WindowFilters.IsAutoExcluded(descriptor));
+    }
+
     [Fact]
     public void IsAutoExcluded_OwnedWindowLackingBothMaximizeAndMinimizeBox_ReturnsTrue()
     {

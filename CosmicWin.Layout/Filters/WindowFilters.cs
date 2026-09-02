@@ -20,8 +20,28 @@ public static class WindowFilters
 
         var hasMaximizeBox = (descriptor.Style & WindowStyleFlags.MaximizeBox) != 0;
         var hasMinimizeBox = (descriptor.Style & WindowStyleFlags.MinimizeBox) != 0;
+
+        // Reported with NVIDIA Broadcast, which was never tiled and cleared Interop's trackability
+        // gate outright -- visible, unowned, uncloaked, not a child -- only to die on the clause
+        // below. Measured: style 0x14C60000, no WS_SYSMENU, a lone minimize box, and a RESIZE
+        // BORDER. An Electron app with its own chrome that simply cannot be maximized, so it brings
+        // half the caption-box evidence the custom-frame escape asks for and was refused for the
+        // missing half.
+        //
+        // WS_THICKFRAME is the evidence that was going unread, and it is the most direct there is:
+        // the window declares that the user may resize it, which is the only permission a tiling
+        // manager ever needs. Everything this clause protects against -- splash screens, toasts,
+        // dropdowns, popups -- is fixed-size by construction.
+        //
+        // Measured rather than reasoned into place: enumerated against the whole live desktop,
+        // thirty NVIDIA and overlay windows among them, this bit newly admits EXACTLY ONE window,
+        // and it is the one that was missing. The GeForce Overlay is visible and unowned too and
+        // stays out, on the WS_EX_TOOLWINDOW it carries and this window does not.
+        var isResizable = (descriptor.Style & WindowStyleFlags.ThickFrame) != 0;
+
         if ((descriptor.Style & WindowStyleFlags.SystemMenu) == 0
-            && !(hasMaximizeBox && hasMinimizeBox))
+            && !(hasMaximizeBox && hasMinimizeBox)
+            && !isResizable)
         {
             return true;
         }
