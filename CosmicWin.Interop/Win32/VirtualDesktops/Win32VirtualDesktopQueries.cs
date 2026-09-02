@@ -70,6 +70,50 @@ internal static class Win32VirtualDesktopQueries
         }
     }
 
+    /// <summary>
+    /// Whether <paramref name="windowHandle"/> is on the desktop being viewed right now.
+    /// <see langword="false"/> with a reason when the shell will not say -- and "will not say" is
+    /// not "no", which is exactly why the answer and the failure are separate outputs here.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT derived from <see cref="TryGetWindowDesktopId"/> and
+    /// <see cref="GetCurrentDesktopId"/>. Comparing those two GUIDs would answer the same question
+    /// through the UNDOCUMENTED internal manager, whose vtable this codebase re-verifies at runtime
+    /// precisely because a Windows update can silently move a slot. <c>IVirtualDesktopManager</c>
+    /// answers it directly, is documented, and -- unlike its <c>MoveWindowToDesktop</c> sibling,
+    /// which returns <c>E_ACCESSDENIED</c> for windows the caller does not own -- reading works
+    /// cross-process, which is the only mode a window manager ever operates in.
+    /// </remarks>
+    public static bool TryIsWindowOnCurrentDesktop(nint windowHandle, out bool onCurrentDesktop, out string? error)
+    {
+        onCurrentDesktop = false;
+        error = null;
+
+        if (Manager is not { } manager)
+        {
+            error = "IVirtualDesktopManager could not be created.";
+            return false;
+        }
+
+        try
+        {
+            var hr = manager.IsWindowOnCurrentVirtualDesktop(windowHandle, out var onCurrent);
+            if (hr < 0)
+            {
+                error = $"IsWindowOnCurrentVirtualDesktop: HRESULT 0x{hr:X8}";
+                return false;
+            }
+
+            onCurrentDesktop = onCurrent != 0;
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException)
+        {
+            error = $"IsWindowOnCurrentVirtualDesktop: {ex.GetType().Name} 0x{ex.HResult:X8}";
+            return false;
+        }
+    }
+
     /// <summary>The desktop the user is currently looking at, or <see cref="Guid.Empty"/> if unknown.</summary>
     public static Guid GetCurrentDesktopId() =>
         new Win32NativeVirtualDesktops() is { IsAvailable: true } native ? native.GetCurrentDesktopId() : Guid.Empty;

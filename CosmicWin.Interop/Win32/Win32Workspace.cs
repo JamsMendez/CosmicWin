@@ -26,6 +26,15 @@ public sealed class Win32Workspace : IWorkspace
     /// drop fire exactly one event carrying the settled position.
     /// </summary>
     private readonly HashSet<nint> _beingDragged = [];
+
+    /// <summary>
+    /// Handles that ONE reconciliation pass found cloaked while still filed under the desktop being
+    /// looked at -- the shape of a dismissal. They are not removed on that reading, because a
+    /// desktop switch cloaks its windows and moves the current desktop as two separate steps, and a
+    /// pass landing between them sees exactly this. Requiring the fact twice running costs one
+    /// interval and makes the transient case unreachable; see <see cref="Poll"/>.
+    /// </summary>
+    private readonly HashSet<nint> _lookedDismissedLastPass = [];
     private IDisposable? _hookSubscription;
 
     public event EventHandler<WindowEventArgs>? WindowAdded;
@@ -73,6 +82,7 @@ public sealed class Win32Workspace : IWorkspace
         {
             if (currentSet.Contains(hwnd))
             {
+                _lookedDismissedLastPass.Remove(hwnd);
                 continue;
             }
 
@@ -89,6 +99,39 @@ public sealed class Win32Workspace : IWorkspace
             // left behind was never reclaimed). WS_VISIBLE is what tells the two apart: cloaking
             // leaves it set, ShowWindow(SW_HIDE) clears it.
             if (!_nativeSource.TryGetWindowInfo(hwnd, out var info) || !info.IsVisible)
+            {
+                RemoveWindow(hwnd);
+                continue;
+            }
+
+            // Alive, still WS_VISIBLE, and gone from the enumeration: cloaked. Which of the two
+            // cloaks it is decides everything above, and neither test already made can tell them
+            // apart -- an application cloaks its own window to DISMISS it, keeping WS_VISIBLE set
+            // exactly like the desktop switch does. Reported with the Windows emoji panel, which
+            // Chrome opens from its context menu: it took a tile, was dismissed, and held that tile
+            // for the rest of the session, drawing a focus border on nothing every time the user
+            // walked back to the desktop.
+            //
+            // The desktop is the discriminator. A window cloaked while STILL filed under the
+            // desktop being looked at did not go anywhere -- there is nowhere else it could be.
+            //
+            // Asked through the DOCUMENTED IVirtualDesktopManager, and answered three ways: a
+            // refusal is null and is NOT a "no". Reading it as one would report a living window as
+            // closed on the strength of an error, so an unplaceable window keeps its tile.
+            if (_nativeSource.IsOnCurrentDesktop(hwnd) != true)
+            {
+                _lookedDismissedLastPass.Remove(hwnd);
+                continue;
+            }
+
+            // Twice running, and only twice running. Switching desktops cloaks the departing
+            // windows and moves the current desktop as two separate steps; a pass landing between
+            // them reads a still-current desktop for a window that is on its way out, which is a
+            // dismissal to the letter. Acting on that single reading would put back the regression
+            // that dismantled the whole tree on a desktop switch -- for a tile reclaimed one
+            // interval sooner. A switch settles well inside one interval; a dismissed window
+            // answers this way for as long as it exists.
+            if (!_lookedDismissedLastPass.Add(hwnd))
             {
                 RemoveWindow(hwnd);
             }
@@ -196,6 +239,10 @@ public sealed class Win32Workspace : IWorkspace
         // a stale entry would silently withhold bounds events from its handle for the rest of the
         // session if the OS ever reused it.
         _beingDragged.Remove(hwnd);
+
+        // Same reason, and the same reuse hazard: a handle left here would count as one pass
+        // already served against whatever window Windows hands the value to next.
+        _lookedDismissedLastPass.Remove(hwnd);
 
         if (!_windows.Remove(hwnd, out var window))
         {

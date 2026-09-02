@@ -1,5 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 
+using CosmicWin.Interop.Win32.VirtualDesktops;
+
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Dwm;
@@ -72,6 +74,16 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             PInvoke.IsWindowVisible(handle));
         return true;
     }
+
+    /// <summary>
+    /// Answered through the DOCUMENTED <c>IVirtualDesktopManager</c>, which accepts an HWND from any
+    /// process. Reading is the half of that interface which works cross-process; moving is the half
+    /// that does not, and this file needs only the half that does.
+    /// </summary>
+    public bool? IsOnCurrentDesktop(nint hwnd) =>
+        Win32VirtualDesktopQueries.TryIsWindowOnCurrentDesktop(hwnd, out var onCurrent, out _)
+            ? onCurrent
+            : null;
 
     /// <summary>
     /// Places the window so its DRAWN frame lands on <paramref name="bounds"/>. SetWindowPos speaks

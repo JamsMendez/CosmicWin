@@ -355,4 +355,158 @@ public class Win32WorkspaceTests
         Assert.Equal(new IntPtr(2), Assert.Single(removed));
         Assert.DoesNotContain(workspace.Snapshot, w => w.Handle == new IntPtr(2));
     }
+
+    /// <summary>
+    /// Reported from real use: selecting text in Chrome and picking Emoji opens the Windows emoji
+    /// panel, which takes a tile. Dismissing it left that tile claimed for the rest of the session,
+    /// and walking to another desktop and back drew a focus border on a window that was not there.
+    /// <para>
+    /// The panel is never destroyed and never hidden -- it CLOAKS itself, which is the one
+    /// disappearance every test above deliberately refuses to act on. A cloaked window keeps its
+    /// HWND and keeps <c>WS_VISIBLE</c> set, so "does it still answer" and "is it still visible"
+    /// both say yes, and absence from the enumeration alone cannot tell this apart from the user
+    /// walking to another desktop.
+    /// </para>
+    /// <para>
+    /// The DESKTOP is what tells them apart, and it is the only thing that does. A window cloaked
+    /// while it is still filed under the desktop being looked at was dismissed; a window cloaked
+    /// because the user left is alive somewhere else.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowCloakedOnTheDesktopTheUserIsWatching_IsReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "emoji panel", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+        source.PlaceOnCurrentDesktop(new IntPtr(2));
+        workspace.Poll();
+        workspace.Poll();
+
+        Assert.Equal(new IntPtr(2), Assert.Single(removed));
+        Assert.DoesNotContain(workspace.Snapshot, w => w.Handle == new IntPtr(2));
+    }
+
+    /// <summary>
+    /// One reading is not enough to act on, and this is why. Switching desktops cloaks the windows
+    /// being left AND moves the current desktop, and those are two separate steps: a pass landing
+    /// between them would see a window cloaked while its desktop is still the current one --
+    /// indistinguishable, in that instant, from a dismissal. Acting on a single pass would put the
+    /// dismantle-the-whole-tree-on-a-desktop-switch regression back for anyone whose timing is
+    /// unlucky, which is far too high a price for reclaiming a tile two seconds sooner.
+    /// <para>
+    /// So the fact has to hold across two consecutive passes. A desktop switch settles well inside
+    /// one interval, so nothing transient survives; a dismissed window answers the same way for as
+    /// long as it exists, so the only cost is that its tile is reclaimed one pass later.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowCloakedOnTheCurrentDesktopForOneSinglePass_IsNotReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "mid-switch", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+        source.PlaceOnCurrentDesktop(new IntPtr(2));
+        workspace.Poll();
+
+        Assert.Empty(removed);
+        Assert.Contains(workspace.Snapshot, w => w.Handle == new IntPtr(2));
+    }
+
+    /// <summary>
+    /// The regression this whole mechanism is built around, stated as its own fact: a window cloaked
+    /// because the user walked to another desktop must survive any number of passes. It is alive, it
+    /// is somewhere, and the layout it belongs to has to be waiting when the user walks back.
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowCloakedByLeavingItsDesktop_IsNeverReportedAsRemoved()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "on desktop 2", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+        source.PlaceOnAnotherDesktop(new IntPtr(2));
+        workspace.Poll();
+        workspace.Poll();
+        workspace.Poll();
+
+        Assert.Empty(removed);
+        Assert.True(workspace.Snapshot.Single(w => w.Handle == new IntPtr(2)).IsAlive);
+    }
+
+    /// <summary>
+    /// Fail closed. The shell declines to place plenty of windows, and a refusal is not a "yes" --
+    /// reading it as one would report a living window as closed on the strength of an error. A tile
+    /// held by a window nobody can place is a smaller defect than a window torn out of the tree
+    /// while the user is still using it.
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowTheShellWillNotPlace_IsLeftAlone()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "unplaceable", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+        source.RefuseToPlace(new IntPtr(2));
+        workspace.Poll();
+        workspace.Poll();
+        workspace.Poll();
+
+        Assert.Empty(removed);
+        Assert.True(workspace.Snapshot.Single(w => w.Handle == new IntPtr(2)).IsAlive);
+    }
+
+    /// <summary>
+    /// Two passes means two CONSECUTIVE passes. A window that looks dismissed once, is then placed
+    /// somewhere else, and later looks dismissed again has not been dismissed twice -- it has been
+    /// dismissed once, most recently, and the count has to start over. Without this the two-pass
+    /// guard degrades into "any two readings ever", which a long enough session guarantees.
+    /// </summary>
+    [Fact]
+    public void Poll_AWindowThatLooksDismissedThenDoesNot_StartsCountingOver()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "stays", Rectangle.FromSize(0, 0, 400, 300));
+        source.SeedExistingWindow(new IntPtr(2), "flickers", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var removed = new List<nint>();
+        workspace.WindowRemoved += (_, e) => removed.Add(e.Window.Handle);
+        workspace.Open();
+
+        source.HideFromEnumeration(new IntPtr(2));
+
+        source.PlaceOnCurrentDesktop(new IntPtr(2));
+        workspace.Poll();
+
+        source.PlaceOnAnotherDesktop(new IntPtr(2));
+        workspace.Poll();
+
+        source.PlaceOnCurrentDesktop(new IntPtr(2));
+        workspace.Poll();
+
+        Assert.Empty(removed);
+        Assert.Contains(workspace.Snapshot, w => w.Handle == new IntPtr(2));
+    }
 }

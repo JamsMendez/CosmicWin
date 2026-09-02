@@ -60,6 +60,24 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
 
     public bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info) => _windows.TryGetValue(hwnd, out info);
 
+    /// <summary>
+    /// Where each handle is, as far as the shell is concerned. Absent means Windows will not say,
+    /// which is the honest default: the real <c>IVirtualDesktopManager</c> declines for plenty of
+    /// windows, and every test written before this question existed meant exactly that.
+    /// </summary>
+    private readonly Dictionary<nint, bool?> _onCurrentDesktop = new();
+
+    public bool? IsOnCurrentDesktop(nint hwnd) => _onCurrentDesktop.GetValueOrDefault(hwnd);
+
+    /// <summary>The window is cloaked but has not gone anywhere -- it is still filed under the desktop being looked at, which is what a dismissed window looks like.</summary>
+    public void PlaceOnCurrentDesktop(nint hwnd) => _onCurrentDesktop[hwnd] = true;
+
+    /// <summary>The window is cloaked because the user walked away from its desktop. It is alive and elsewhere.</summary>
+    public void PlaceOnAnotherDesktop(nint hwnd) => _onCurrentDesktop[hwnd] = false;
+
+    /// <summary>The shell declines to place it at all -- an <c>E_INVALIDARG</c> or an unreachable manager.</summary>
+    public void RefuseToPlace(nint hwnd) => _onCurrentDesktop[hwnd] = null;
+
     public bool SetWindowPosition(nint hwnd, Rectangle bounds)
     {
         _setPositionAttempts[hwnd] = _setPositionAttempts.GetValueOrDefault(hwnd) + 1;

@@ -100,6 +100,28 @@ internal interface INativeWindowSource
     bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info);
 
     /// <summary>
+    /// Whether <paramref name="hwnd"/> lives on the virtual desktop the user is looking at right
+    /// now, or <see langword="null"/> when Windows will not say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one question that separates the TWO reasons a window can be cloaked, and nothing else on
+    /// this interface can answer it. DWM cloaks every window on a desktop the user walks away from;
+    /// an application also cloaks its own window to dismiss it, which is what the Windows emoji
+    /// panel does instead of closing. Both drop out of <see cref="EnumerateTopLevelWindows"/>, both
+    /// keep answering <see cref="TryGetWindowInfo"/>, and both keep <c>WS_VISIBLE</c> set. Only the
+    /// first one is still somewhere.
+    /// </para>
+    /// <para>
+    /// Three-valued on purpose. The shell declines this question for windows it does not recognise,
+    /// and a refusal read as "yes" would report a living window as closed — so
+    /// <see langword="null"/> is its own answer, and callers must treat it as "leave it alone"
+    /// rather than folding it into either side.
+    /// </para>
+    /// </remarks>
+    bool? IsOnCurrentDesktop(nint hwnd);
+
+    /// <summary>
     /// Repositions/resizes the given window. Returns <c>false</c> (rather than throwing) if the
     /// native call fails — e.g. the target belongs to a higher-integrity/protected process.
     /// </summary>

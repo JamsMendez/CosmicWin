@@ -418,6 +418,8 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public bool TryGetWindowInfo(nint hwnd, out NativeWindowInfo info) => inner.TryGetWindowInfo(hwnd, out info);
 
+        public bool? IsOnCurrentDesktop(nint hwnd) => inner.IsOnCurrentDesktop(hwnd);
+
         public bool SetWindowPosition(nint hwnd, Rectangle bounds) => inner.SetWindowPosition(hwnd, bounds);
 
         public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback) => inner.SubscribeWindowEvents(callback);
