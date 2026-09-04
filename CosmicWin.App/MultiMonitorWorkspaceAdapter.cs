@@ -696,6 +696,22 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// Whether <paramref name="handle"/> is sitting at its tile's corner and wholly within it --
+    /// where a window that merely cannot FILL its slot belongs, and where there is nothing for a
+    /// reflow to do.
+    /// </summary>
+    private bool SitsInsideItsTile(nint handle, Rectangle at)
+    {
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return false;
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        return tile.Width > 0 && tile.Height > 0 && ObeysItsCorner(tile, at) && !Overflows(tile, at);
+    }
+
+    /// <summary>
     /// Whether the window went exactly where it was put. This is what a fighter gets wrong and a
     /// constrained window gets right, and it is the only thing that separates them.
     /// </summary>
@@ -897,6 +913,24 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // block above has just written that intent into the tree.
         if (!e.IsUserGesture)
         {
+            // A window that has already demonstrated it clamps inside its tile is not a new
+            // question every two seconds. Measured with the real NVIDIA Broadcast: judged
+            // `Underfills`, kept its tile -- correctly -- and then reflowed on every single poll
+            // for the life of the window.
+            //
+            // The same self-sustaining shape as the parked-window storm, and the same fuel. The
+            // reflow re-asks the window for the height it has just refused, the ask is filed as its
+            // bounds, and the next reconciliation pass reads the gap between that ask and the
+            // window's real size as a fresh bounds change. Nothing about the tree ever changed.
+            //
+            // Only while it is still INSIDE the tile it holds. A tile that shrank under the window
+            // is a different fact -- possibly a floor, which must untile it -- so that goes back to
+            // being judged.
+            if (_clampsInsideItsTile.Contains(handle) && SitsInsideItsTile(handle, before))
+            {
+                return;
+            }
+
             switch (Judge(handle, before))
             {
                 case ArrivalVerdict.Fighting:

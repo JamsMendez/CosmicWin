@@ -474,6 +474,82 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>
+    /// Keeping its tile is not the same as being asked for it again every two seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured with the real NVIDIA Broadcast, 18:51:44 onwards. It was admitted, judged
+    /// correctly -- `clamps itself ... will not go over 1136x1000; kept, and its tile is not
+    /// filled` -- and then reflowed on EVERY poll for the life of the window:
+    /// </para>
+    /// <para>
+    /// <c>reflow ... [W=1136 H=1000] -> [W=1136 H=1376]</c>, at :44.9, :46.9, :48.9, :51.0, :53.0.
+    /// </para>
+    /// <para>
+    /// The same self-sustaining shape as the parked-window storm and the same fuel. The verdict
+    /// falls through to a reflow, the reflow re-asks the window for the height it has just refused,
+    /// the ask is filed as its bounds, and the next reconciliation pass reads the difference
+    /// between that ask and the window's real size as a fresh bounds change. Nothing about the tree
+    /// changed; the only thing that moved was a number the tiler wrote about a window that had
+    /// already said no.
+    /// </para>
+    /// <para>
+    /// Cleared for a reflow the moment the window stops being inside the tile it holds, because a
+    /// tile that shrank under it is a different fact -- possibly a floor -- and has to be judged
+    /// again.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowThatCannotFillItsTile_IsNotAskedToFillItForever()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+        clamped.MaximumSize = (WorkArea.Width - 400, WorkArea.Height - 200);
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        // Enough to reach the verdict twice over, so what follows is measured on a settled window
+        // rather than on one still being worked out.
+        Rounds(s, clamped, 4);
+        var settled = clamped.SetPositionCallCount;
+
+        Rounds(s, clamped, EnoughRounds);
+
+        Assert.True(InTree(s, clamped.Handle));
+        Assert.Equal(settled, clamped.SetPositionCallCount);
+    }
+
+    /// <summary>
+    /// And it goes back to being a question the moment its tile stops fitting around it: a slot
+    /// that shrank under a clamping window may be under its FLOOR, which is the one verdict that
+    /// must still untile it.
+    /// </summary>
+    [Fact]
+    public void AClampingWindowWhoseTileShrinksUnderIt_IsJudgedAgain()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+        clamped.MinimumSize = Floor;
+        clamped.MaximumSize = Ceiling;
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        // Alone, it cannot fill the work area: judged, kept, and thereafter left alone.
+        Rounds(s, clamped, 4);
+        Assert.True(InTree(s, clamped.Handle));
+
+        // A neighbour arrives and halves the slot, which is now under the floor.
+        s.Workspace.RaiseWindowAdded(Window(20));
+        Rounds(s, clamped, 4);
+
+        Assert.False(InTree(s, clamped.Handle));
+    }
+
+    /// <summary>
     /// The whole hardware sequence, end to end, in one fact. Broadcast overflowed its half tile and
     /// was untiled in four seconds -- that part worked. Then it was re-admitted into a full-height
     /// column, which it could not fill, and THAT was read as a fight: twelve rounds and
