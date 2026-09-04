@@ -918,6 +918,83 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
+    /// Takes <paramref name="leaf"/> out of its group and stands it BESIDE its former siblings, on
+    /// the other axis. Reports whether the tree changed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>[A, B, C]</c> stacked becomes <c>[[A, C] stacked, B] side by side</c>. The siblings keep
+    /// the axis they were given and B gets the FULL extent of the one it was failing on -- the
+    /// whole height rather than a third of it.
+    /// </para>
+    /// <para>
+    /// The shape a window with a minimum size needs. Three windows stacked on a 1376-tall field get
+    /// 453 each, and a window that will not go under 772 cannot be one of them; the only answers
+    /// used to be ejecting it from the tree or squashing every neighbour to make room. A branch of
+    /// its own costs neither.
+    /// </para>
+    /// <para>
+    /// It buys one axis and SELLS half the other, so a caller must measure both before committing:
+    /// a window extracted from a row of three gains the full height and drops from the whole width
+    /// to half of it. Nothing here can tell whether that trade helped, because nothing here knows
+    /// what the window needs.
+    /// </para>
+    /// <para>
+    /// Pure surgery, and deliberately ignorant of minimum sizes. Those are measured from real
+    /// windows by the layer that owns them; this project has never seen a window and should not
+    /// learn to.
+    /// </para>
+    /// <para>
+    /// A pair needs no special case. <see cref="Prune"/> already collapses a group down to one
+    /// child, so extracting from two windows leaves the pair on the other axis -- the honest answer,
+    /// since a window that cannot share an axis with ONE neighbour gains nothing from a branch.
+    /// </para>
+    /// </remarks>
+    public bool ExtractToOppositeAxis(Node leaf)
+    {
+        if (leaf.Parent is not GroupNode group)
+        {
+            return false;
+        }
+
+        var index = group.Children.IndexOf(leaf);
+        if (index < 0 || group.Children.Count < 2)
+        {
+            return false;
+        }
+
+        var grandparent = group.Parent;
+        var slot = grandparent?.Children.IndexOf(group) ?? -1;
+
+        RemoveChild(group, index);
+
+        // GroupLength is left at zero on purpose: the next arrange rescales a group whose sizes sum
+        // to nothing into equal shares, which is exactly the split a fresh branch should start from.
+        var wrapper = new GroupNode(
+            group.Axis == SplitAxis.Horizontal ? SplitAxis.Vertical : SplitAxis.Horizontal);
+
+        if (grandparent is not null && slot >= 0)
+        {
+            wrapper.Parent = grandparent;
+            grandparent.Children[slot] = wrapper;
+        }
+        else
+        {
+            wrapper.Parent = null;
+            Root = wrapper;
+        }
+
+        AddChild(wrapper, group, 0);
+        AddChild(wrapper, leaf, 1);
+
+        // The group may now hold a single child, which is a wrapper nobody needs. Pruning it here
+        // keeps the pair case honest instead of leaving a one-child group for a later removal to
+        // discover.
+        Prune(this, group);
+        return true;
+    }
+
+    /// <summary>
     /// LE-3 "Orientation toggle": flips <paramref name="focused"/>'s immediate parent group's
     /// <see cref="GroupNode.Axis"/> in place (Horizontal&#8596;Vertical). <see
     /// cref="GroupNode.Children"/> order and <see cref="GroupNode.Sizes"/> ratios are left

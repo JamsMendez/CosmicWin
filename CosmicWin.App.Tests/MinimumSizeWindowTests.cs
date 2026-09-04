@@ -60,6 +60,18 @@ public sealed class MinimumSizeWindowTests
     private static MultiMonitorWorkspaceAdapter Adapter(Setup s) =>
         new(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
 
+    /// <summary>
+    /// Collects the adapter's own lines, so a fact can pin that the retry RAN rather than only what
+    /// it decided. A window whose floor no arrangement can satisfy never changes the tree, and its
+    /// being asked at all is then invisible in every other observable.
+    /// </summary>
+    private sealed class RecordingTrace : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
     private static RecordingWindow Window(int handle) =>
         new(new IntPtr(handle), Rectangle.FromSize(0, 0, 400, 300));
 
@@ -729,35 +741,33 @@ public sealed class MinimumSizeWindowTests
         var adapter = Adapter(s);
         using var _adapter = adapter;
 
+        var trace = new RecordingTrace();
+        adapter.Trace = trace;
+
         var neighbour = Window(10);
         var second = Window(30);
         var constrained = Window(20);
 
-        // Shorter than a full-height column and taller than any row this many windows can make, so
-        // the toggle alone decides whether it fits. THREE windows, because untiling one of two
-        // collapses the group and leaves no axis to toggle back.
-        constrained.MinimumSize = (100, WorkArea.Height - 200);
+        // A floor NO arrangement on this work area can satisfy, branch or no branch. That is the
+        // point: the window can never be let in, so the only thing left to observe is whether it
+        // was ASKED -- which is the trigger this fact exists for.
+        constrained.MinimumSize = (WorkArea.Width * 2, 100);
 
         s.Workspace.RaiseWindowAdded(neighbour);
         s.Workspace.RaiseWindowAdded(second);
         s.Workspace.RaiseWindowAdded(constrained);
-        Assert.True(InTree(s, constrained.Handle));
-
-        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
-        Assert.True(LayoutTree.ToggleAxis(leaf!));
 
         Rounds(s, constrained, 3);
         Assert.False(InTree(s, constrained.Handle));
 
-        // The user presses the same chord again. Nothing closes; the slots simply grow back.
+        // Nothing closes; the user simply reshapes what is left, and the OS reports the survivors
+        // settling into it.
         Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var survivor) && survivor is not null);
         Assert.True(LayoutTree.ToggleAxis(survivor!));
-
-        // What the OS reports once the reflow lands, and the only thing this adapter ever hears
-        // about a layout the user changed through a chord.
+        trace.Lines.Clear();
         s.Workspace.RaiseWindowBoundsChanged(neighbour);
 
-        Assert.True(InTree(s, constrained.Handle));
+        Assert.Contains(trace.Lines, line => line.StartsWith("still too small", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -791,27 +801,30 @@ public sealed class MinimumSizeWindowTests
         var adapter = Adapter(s);
         using var _adapter = adapter;
 
+        var trace = new RecordingTrace();
+        adapter.Trace = trace;
+
         var neighbour = Window(10);
         var second = Window(30);
         var constrained = Window(20);
-        constrained.MinimumSize = (100, WorkArea.Height - 200);
+
+        // Unsatisfiable on purpose, for the same reason as the drag fact above: what is under test
+        // is that the chord's completion ASKS, not what the answer turns out to be.
+        constrained.MinimumSize = (WorkArea.Width * 2, 100);
 
         s.Workspace.RaiseWindowAdded(neighbour);
         s.Workspace.RaiseWindowAdded(second);
         s.Workspace.RaiseWindowAdded(constrained);
 
-        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
-        Assert.True(LayoutTree.ToggleAxis(leaf!));
         Rounds(s, constrained, 3);
         Assert.False(InTree(s, constrained.Handle));
 
-        // The user presses the chord again. Nothing moves out of band and nothing closes, so this
-        // call is the ONLY thing that happens -- exactly as it is in production.
-        Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var survivor) && survivor is not null);
-        Assert.True(LayoutTree.ToggleAxis(survivor!));
+        // Nothing moves out of band and nothing closes, so this call is the ONLY thing that
+        // happens -- exactly as it is in production, where the executor makes it after every chord.
+        trace.Lines.Clear();
         adapter.RetryParkedWindows();
 
-        Assert.True(InTree(s, constrained.Handle));
+        Assert.Contains(trace.Lines, line => line.StartsWith("still too small", StringComparison.Ordinal));
     }
 
     /// <summary>The same call, and still not a pardon.</summary>
@@ -875,6 +888,120 @@ public sealed class MinimumSizeWindowTests
 
         Assert.False(InTree(s, constrained.Handle));
         Assert.True(InTree(s, neighbour.Handle));
+    }
+
+    /// <summary>
+    /// A window asking for more than its slot is a reason to RESHAPE the tree, not to leave it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use, twice. Alt+O stacks the group, NVIDIA Broadcast's row is 453 tall
+    /// against a floor of 772, and it was untiled. Correct, and still the wrong outcome: the user
+    /// pressed a key about ORIENTATION and a window fell out of the layout.
+    /// </para>
+    /// <para>
+    /// There was a third answer neither ejecting nor squashing everyone, and the maintainer named
+    /// it: give the window its own branch. <c>[A, B, C]</c> stacked becomes
+    /// <c>[[A, C] stacked, B] side by side</c> -- A and C get the stacking that was asked for, and
+    /// B gets the full height rather than a third of it.
+    /// </para>
+    /// <para>
+    /// MEASURED, never assumed. The trade buys one axis and sells half the other, so a window
+    /// short of BOTH can come out of it no better off; the tree is reshaped, the tiles are computed
+    /// without moving anything, and the floor is checked against the result before any of it is
+    /// kept.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowAskingForMoreThanItsSlot_IsGivenItsOwnBranch_NotEjected()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var first = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+
+        // Taller than any share of a stacked work area and shorter than all of it.
+        constrained.MinimumSize = (100, 700);
+
+        s.Workspace.RaiseWindowAdded(first);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, constrained, 3);
+
+        Assert.True(InTree(s, constrained.Handle));
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var settled) && settled is not null);
+        Assert.True(TreeArranger.TileOf(settled!).Height >= 700);
+    }
+
+    /// <summary>
+    /// The neighbours keep the orientation that was asked for. Reshaping to fit one window must not
+    /// quietly cancel the chord for everyone else.
+    /// </summary>
+    [Fact]
+    public void GivingAWindowItsOwnBranch_LeavesTheOthersOnTheAxisTheyAskedFor()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var first = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+        constrained.MinimumSize = (100, 700);
+
+        s.Workspace.RaiseWindowAdded(first);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        var asked = leaf!.Parent!.Axis == SplitAxis.Horizontal ? SplitAxis.Vertical : SplitAxis.Horizontal;
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, constrained, 3);
+
+        Assert.True(s.Registry.TryGetLeaf(first.Handle, out var kept) && kept is not null);
+        Assert.Equal(asked, kept!.Parent!.Axis);
+    }
+
+    /// <summary>
+    /// And when a branch of its own does not help either, the window is still parked. Reshaping is
+    /// an attempt, not a pardon.
+    /// </summary>
+    /// <remarks>
+    /// The failure path costs nothing to undo: untiling the window collapses the branch that was
+    /// built for it, and the neighbours are left on the axis the chord asked for -- exactly where
+    /// they were before any of this existed.
+    /// </remarks>
+    [Fact]
+    public void WhenABranchOfItsOwnStillDoesNotFit_TheWindowIsParkedAsBefore()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var first = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+
+        // No arrangement on this work area can satisfy it, branch or no branch.
+        constrained.MinimumSize = (WorkArea.Width * 2, 100);
+
+        s.Workspace.RaiseWindowAdded(first);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Rounds(s, constrained, 3);
+
+        Assert.False(InTree(s, constrained.Handle));
+        Assert.True(InTree(s, first.Handle));
+        Assert.True(InTree(s, second.Handle));
     }
 
     /// <summary>

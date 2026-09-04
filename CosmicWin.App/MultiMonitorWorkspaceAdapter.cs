@@ -397,12 +397,22 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Admission is still retried FREELY -- this is the cheap half of it, not a refusal.
         if (DoesNotFitItsFloor(tree, workArea, window.Handle))
         {
-            Trace?.Record(
-                $"still too small hwnd=0x{window.Handle:X} class={window.ClassName} " +
-                $"proc={window.ProcessName} -- needs {Describe(_minimumSize[window.Handle])}; left untiled");
+            if (TryRegroupToFit(tree, workArea, window.Handle))
+            {
+                Trace?.Record(
+                    $"regrouped hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                    $"proc={window.ProcessName} -- given a branch of its own so " +
+                    $"{Describe(_minimumSize[window.Handle])} fits");
+            }
+            else
+            {
+                Trace?.Record(
+                    $"still too small hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                    $"proc={window.ProcessName} -- needs {Describe(_minimumSize[window.Handle])}; left untiled");
 
-            Untile(window.Handle, tree, display);
-            return;
+                Untile(window.Handle, tree, display);
+                return;
+            }
         }
 
         // Laid out whether or not its desktop is on screen. A hidden window accepts a position --
@@ -509,6 +519,50 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 OnWindowAdded(this, new WindowEventArgs(window, arrival: WindowArrival.Adopted));
             }
         }
+    }
+
+    /// <summary>
+    /// Reshapes <paramref name="tree"/> so <paramref name="handle"/> stands beside its former
+    /// siblings instead of among them, reporting whether that actually made its tile fit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The third answer. A window asking for more than its share used to leave the tree or force
+    /// everyone else to give way; a branch of its own costs neither. <c>[A, B, C]</c> stacked
+    /// becomes <c>[[A, C] stacked, B] side by side</c>: the neighbours keep the axis the chord
+    /// asked for and B gets the whole of the one it was failing on.
+    /// </para>
+    /// <para>
+    /// MEASURED, never assumed. The trade buys one axis and sells half the other, so a window short
+    /// of BOTH can come out no better off. The tree is reshaped, the tiles are computed without
+    /// moving anything, and the floor is checked against the result -- only then is any of it kept.
+    /// </para>
+    /// <para>
+    /// A refusal costs nothing to undo. The caller untiles the window, which collapses the branch
+    /// built for it and leaves the neighbours exactly where the chord put them.
+    /// </para>
+    /// <para>
+    /// It cannot nest without bound. Extracting a leaf that is ALREADY standing beside a group
+    /// re-wraps the same pair, and <c>Prune</c> collapses the leftover single-child group, so the
+    /// shape flips rather than deepening.
+    /// </para>
+    /// </remarks>
+    private bool TryRegroupToFit(LayoutTree tree, Rect workArea, nint handle)
+    {
+        // Three or more, and the threshold is the whole justification. Standing one window beside
+        // the others leaves THEIR arrangement untouched -- same axis, same order, same neighbours.
+        // With only two there are no others: extracting one flips the entire layout, and which way
+        // the user wants their two windows arranged is their decision, not a consequence of one of
+        // them having a minimum size. A pair that does not fit is parked, exactly as before, and
+        // the user can flip it themselves.
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null
+            || leaf.Parent is not { Children.Count: >= 3 }
+            || !tree.ExtractToOppositeAxis(leaf))
+        {
+            return false;
+        }
+
+        return !DoesNotFitItsFloor(tree, workArea, handle);
     }
 
     /// <summary>
@@ -1039,6 +1093,20 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 case ArrivalVerdict.MinimumSize:
                     var floor = FloorFrom(handle, before, display);
                     _minimumSize[handle] = floor;
+
+                    // Reshaping the tree comes BEFORE giving up on it. A window asking for more
+                    // than its share is a fact about the arrangement, not about the window, and the
+                    // arrangement is the thing this owns.
+                    if (TryRegroupToFit(tree, WorkAreaResolver.Resolve(display), handle))
+                    {
+                        Trace?.Record(
+                            $"regrouped hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                            $"-- given a branch of its own so {Describe(floor)} fits");
+
+                        // Out of the switch rather than out of the method: the reflow at the bottom
+                        // is what puts every window on the new shape.
+                        break;
+                    }
 
                     Trace?.Record(
                         $"minimum size hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
