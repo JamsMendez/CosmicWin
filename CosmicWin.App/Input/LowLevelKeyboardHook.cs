@@ -170,10 +170,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// </summary>
     /// <remarks>
     /// Sixty times the interval, deliberately. Gating on GetLastInputInfo makes the whole net
-    /// depend on that one reading being truthful, and it is already known to decline input this
-    /// process injects; if it ever under-reports for real input, a dead hook would never be
-    /// replaced and the keyboard would stay dead until a restart -- worse than the churn being
-    /// removed. So the reading decides how OFTEN, and this decides that it happens at all.
+    /// depend on that one reading being truthful, and if it ever under-reports, a dead hook would
+    /// never be replaced and the keyboard would stay dead until a restart -- a worse failure than
+    /// the churn being removed. So the reading decides how OFTEN, and this decides that it happens
+    /// at all. The reading has since been measured to be truthful about injected input as well as
+    /// physical, which makes this insurance rather than a known-necessary correction; it is kept
+    /// because one API deciding whether the keyboard ever recovers is a bet worth not taking.
     /// </remarks>
     public static readonly TimeSpan DefaultWatchdogBackstop = TimeSpan.FromMinutes(5);
     private readonly ChannelWriter<HotkeyAction> _writer;
@@ -316,11 +318,13 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// always reads as slightly YOUNGER than the session and can never trip the test.
     /// </para>
     /// <para>
-    /// KNOWN IMPRECISION, stated rather than hidden: GetLastInputInfo counts mouse input, and a
-    /// low-level KEYBOARD hook does not. Five minutes of mousing without typing still reads as
-    /// input this hook did not see, and still reinstalls. That is strictly better than firing on an
-    /// idle machine forever, and it is the next thing to measure -- `foundGone` in the trace says
-    /// whether any of those reinstalls ever found a hook that was actually gone.
+    /// KNOWN IMPRECISION, stated rather than hidden and since MEASURED: GetLastInputInfo counts
+    /// mouse input, and a low-level KEYBOARD hook does not. One injected click on a window, with no
+    /// key pressed for a minute beforehand, produced exactly one `hook reinstalled by watchdog --
+    /// total=1 foundGone=0`. So mousing without typing does reinstall, and the hook it replaces is
+    /// alive. That is still far better than firing on an idle machine forever -- 39 reinstalls in
+    /// 200 idle seconds became 0 -- and `foundGone` in the trace is what will say whether any
+    /// reinstall, from either trigger, ever finds a hook that is actually gone. It never has.
     /// </para>
     /// <para>
     /// A refusal is not an idle machine. GetLastInputInfo fails off the interactive desktop, and

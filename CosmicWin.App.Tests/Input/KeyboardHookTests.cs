@@ -301,10 +301,12 @@ public sealed class KeyboardHookTests
     /// <remarks>
     /// <para>
     /// Gating the watchdog on GetLastInputInfo makes the whole net depend on that one reading being
-    /// truthful. If it ever under-reports -- and it already declines to count input this very
-    /// process INJECTS, measured -- a genuinely dead hook would never be replaced, and the symptom
-    /// is a keyboard that stays dead until the app is restarted. That is a worse failure than the
-    /// churn being removed here.
+    /// truthful. If it ever under-reports, a genuinely dead hook would never be replaced, and the
+    /// symptom is a keyboard that stays dead until the app is restarted -- a worse failure than the
+    /// churn being removed here. The reading has since been measured to be truthful about injected
+    /// input as well as physical, so this is insurance rather than a correction for a known fault;
+    /// it stays because one API deciding whether the keyboard ever recovers is a bet worth not
+    /// taking.
     /// </para>
     /// <para>
     /// So the reading decides HOW OFTEN, not WHETHER. The backstop is sixty times the interval, so
