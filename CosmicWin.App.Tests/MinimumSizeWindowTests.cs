@@ -68,6 +68,18 @@ public sealed class MinimumSizeWindowTests
         new(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
 
     /// <summary>
+    /// An adapter that reports a focused leaf, so an arriving window SPLITS it.
+    /// </summary>
+    /// <remarks>
+    /// The default factory reports none, and <c>InsertWindow</c> then appends to the root group --
+    /// which builds FLAT trees. Production almost never does: with a focused leaf it goes through
+    /// <c>SplitLeafInPlace</c> and every group comes out a pair. A fact about nesting has to be
+    /// built the way the real thing is, or it measures a shape no user will ever have.
+    /// </remarks>
+    private static MultiMonitorWorkspaceAdapter AdapterFocusing(Setup s, Func<LeafNode?> focused) =>
+        new(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, focused);
+
+    /// <summary>
     /// Collects the adapter's own lines, so a fact can pin that the retry RAN rather than only what
     /// it decided. A window whose floor no arrangement can satisfy never changes the tree, and its
     /// being asked at all is then invisible in every other observable.
@@ -1128,6 +1140,108 @@ public sealed class MinimumSizeWindowTests
 
         Assert.False(InTree(s, constrained.Handle));
         Assert.True(InTree(s, neighbour.Handle));
+    }
+
+    /// <summary>
+    /// When the space is not in the window's own group, it is taken from an ANCESTOR's split.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Found by driving four windows. Toggling the ROOT left NVIDIA Broadcast inside a subtree only
+    /// 684 tall against a floor of 772: no share of its own group could reach, because 772 is more
+    /// than that whole group measures. The rest has to come from the root's own split.
+    /// </para>
+    /// <para>
+    /// Built BINARY on purpose, through a focused leaf, because that is the only shape production
+    /// makes and the flat trees the other facts use would never reach this path at all.
+    /// </para>
+    /// <para>
+    /// Here the window's own group divides WIDTH while the window is short of HEIGHT, so that level
+    /// has nothing to offer and is skipped rather than squeezed -- and the root, which does divide
+    /// height, is where the space is.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WhenTheSpaceIsNotInItsOwnGroup_ItIsTakenFromAnAncestor()
+    {
+        var s = OneDisplay();
+        LeafNode? focus = null;
+        var adapter = AdapterFocusing(s, () => focus);
+        using var _adapter = adapter;
+
+        var first = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+        constrained.MinimumSize = (100, 700);
+
+        s.Workspace.RaiseWindowAdded(first);
+        s.Registry.TryGetLeaf(first.Handle, out var firstLeaf);
+        focus = firstLeaf;
+
+        s.Workspace.RaiseWindowAdded(second);
+        s.Registry.TryGetLeaf(second.Handle, out var secondLeaf);
+        focus = secondLeaf;
+
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        // [first, [second, constrained]] -- now stack the ROOT, which leaves the subtree half the
+        // height and the constrained window short of a floor its own group cannot pay for.
+        Assert.True(s.Registry.TryGetLeaf(first.Handle, out var rootChild) && rootChild is not null);
+        Assert.True(LayoutTree.ToggleAxis(rootChild!));
+
+        Rounds(s, constrained, 3);
+
+        Assert.True(InTree(s, constrained.Handle));
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var settled) && settled is not null);
+        Assert.True(TreeArranger.TileOf(settled!).Height >= 700);
+    }
+
+    /// <summary>
+    /// And a walk that still falls short puts every group it touched back.
+    /// </summary>
+    /// <remarks>
+    /// Gathering space from more than one place means taking it before knowing whether the total
+    /// will be enough. A window that ends up parked anyway must not leave squeezed neighbours
+    /// behind it -- that is the layout paying for an attempt that failed.
+    /// </remarks>
+    [Fact]
+    public void AWalkThatStillFallsShort_LeavesTheNeighboursExactlyAsTheyWere()
+    {
+        var s = OneDisplay();
+        LeafNode? focus = null;
+        var adapter = AdapterFocusing(s, () => focus);
+        using var _adapter = adapter;
+
+        var first = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+
+        // Taller than the whole work area, so no walk up any tree can ever satisfy it.
+        constrained.MinimumSize = (100, WorkArea.Height + 400);
+
+        s.Workspace.RaiseWindowAdded(first);
+        s.Registry.TryGetLeaf(first.Handle, out var firstLeaf);
+        focus = firstLeaf;
+
+        s.Workspace.RaiseWindowAdded(second);
+        s.Registry.TryGetLeaf(second.Handle, out var secondLeaf);
+        focus = secondLeaf;
+
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(first.Handle, out var rootChild) && rootChild is not null);
+        Assert.True(LayoutTree.ToggleAxis(rootChild!));
+
+        Rounds(s, constrained, 3);
+
+        Assert.False(InTree(s, constrained.Handle));
+
+        // The two survivors against each other, which needs no baseline and no constant. Left
+        // squeezed, the donor sits on the layout floor at a tenth of the work area while the other
+        // keeps the rest -- put back, they split it evenly, as two windows always do.
+        Assert.True(s.Registry.TryGetLeaf(first.Handle, out var donor) && donor is not null);
+        Assert.True(s.Registry.TryGetLeaf(second.Handle, out var other) && other is not null);
+        Assert.True(TreeArranger.TileOf(donor!).Height >= TreeArranger.TileOf(other!).Height - TreeArranger.Gap);
     }
 
     /// <summary>

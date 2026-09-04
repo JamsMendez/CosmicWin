@@ -1,4 +1,4 @@
-using CosmicWin.Layout;
+﻿using CosmicWin.Layout;
 
 namespace CosmicWin.Layout.Tests;
 
@@ -13,10 +13,11 @@ namespace CosmicWin.Layout.Tests;
 /// the share itself.
 /// </para>
 /// <para>
-/// It takes exactly the shortfall and no more, so the damage is bounded by what the window actually
-/// needs rather than by a policy. The donors are protected by the same floor ratio the resize chord
-/// already uses, and a request that would push one under it is refused outright -- the tree is left
-/// exactly as it was.
+/// It takes at most the shortfall, so the cost is bounded by what the window actually needs rather
+/// than by a policy. The donors are protected by the same floor ratio the resize chord already uses,
+/// and a request beyond what they can spare takes what they can and REPORTS the amount -- because
+/// the caller is gathering space from more than one place, and a partial answer here is what makes
+/// the next place enough.
 /// </para>
 /// </remarks>
 public class LayoutTreeGrowWithinGroupTests
@@ -41,7 +42,7 @@ public class LayoutTreeGrowWithinGroupTests
     {
         var (group, _, b, _) = ThreeEqual();
 
-        Assert.True(LayoutTree.GrowWithinGroup(b, by: 120));
+        Assert.Equal(120, LayoutTree.GrowWithinGroup(b, by: 120));
 
         Assert.Equal(420, group.Sizes[1]);
         Assert.Equal(900, group.Sizes.Sum());
@@ -56,7 +57,7 @@ public class LayoutTreeGrowWithinGroupTests
     {
         var (group, _, b, _) = ThreeEqual();
 
-        Assert.True(LayoutTree.GrowWithinGroup(b, by: 120));
+        Assert.Equal(120, LayoutTree.GrowWithinGroup(b, by: 120));
 
         Assert.Equal(240, group.Sizes[0]);
         Assert.Equal(240, group.Sizes[2]);
@@ -76,29 +77,45 @@ public class LayoutTreeGrowWithinGroupTests
         group.Sizes[0] = 688;
         group.Sizes[1] = 688;
 
-        Assert.True(LayoutTree.GrowWithinGroup(b, by: 84));
+        Assert.Equal(84, LayoutTree.GrowWithinGroup(b, by: 84));
 
         Assert.Equal(604, group.Sizes[0]);
         Assert.Equal(772, group.Sizes[1]);
     }
 
     /// <summary>
-    /// A request that would push a donor under the floor ratio is refused OUTRIGHT, not clamped.
+    /// A request bigger than the donors can spare takes what they can and SAYS how much.
     /// </summary>
     /// <remarks>
-    /// Clamping would hand back a half-answer the caller cannot use: it asked because a window has a
-    /// size it will not go under, and most of the way there is the same as nowhere. Refusing leaves
-    /// the tree untouched so the caller can fall back on something else.
+    /// The caller is gathering space from more than one place, so a partial answer here is what
+    /// makes the next place enough. Whether the total ever reaches the floor is the caller's
+    /// question, and the caller is the one holding the sizes it would have to put back.
     /// </remarks>
     [Fact]
-    public void Grow_ThatWouldSquashADonorBelowTheFloorRatio_ChangesNothing()
+    public void Grow_BeyondWhatTheDonorsCanSpare_TakesExactlyWhatTheyCan()
     {
         var (group, _, b, _) = ThreeEqual();
 
-        // 300 each, floor is 10% of 900 = 90, so the two donors can spare 210 each at most.
-        Assert.False(LayoutTree.GrowWithinGroup(b, by: 500));
+        // 300 each, floor is 10% of 900 = 90, so the two donors can spare 210 each -- 420 in all.
+        Assert.Equal(420, LayoutTree.GrowWithinGroup(b, by: 500));
 
-        Assert.Equal([300, 300, 300], group.Sizes);
+        Assert.Equal([90, 720, 90], group.Sizes);
+        Assert.Equal(900, group.Sizes.Sum());
+    }
+
+    /// <summary>And a donor is never taken below the floor ratio, however much is asked for.</summary>
+    [Fact]
+    public void Grow_NeverTakesADonorBelowTheFloorRatio()
+    {
+        var (group, a, b, c) = ThreeEqual();
+        _ = a;
+        _ = c;
+
+        LayoutTree.GrowWithinGroup(b, by: 5000);
+
+        var floor = (int)Math.Ceiling(group.GroupLength * LayoutTree.DefaultMinRatio);
+        Assert.True(group.Sizes[0] >= floor);
+        Assert.True(group.Sizes[2] >= floor);
     }
 
     [Fact]
@@ -106,8 +123,8 @@ public class LayoutTreeGrowWithinGroupTests
     {
         var (group, _, b, _) = ThreeEqual();
 
-        Assert.False(LayoutTree.GrowWithinGroup(b, by: 0));
-        Assert.False(LayoutTree.GrowWithinGroup(b, by: -50));
+        Assert.Equal(0, LayoutTree.GrowWithinGroup(b, by: 0));
+        Assert.Equal(0, LayoutTree.GrowWithinGroup(b, by: -50));
 
         Assert.Equal([300, 300, 300], group.Sizes);
     }
@@ -118,6 +135,6 @@ public class LayoutTreeGrowWithinGroupTests
     {
         var only = new LeafNode(new WindowRef(1));
 
-        Assert.False(LayoutTree.GrowWithinGroup(only, by: 100));
+        Assert.Equal(0, LayoutTree.GrowWithinGroup(only, by: 100));
     }
 }

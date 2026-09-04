@@ -587,9 +587,25 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// only those two. No group there has three children, so nothing could ever be given a branch.
     /// </para>
     /// <para>
-    /// Only along the axis the group actually splits. A window short of HEIGHT inside a group that
-    /// divides width cannot be helped by any share of it, and the shortfall belongs to an ancestor
-    /// this does not touch.
+    /// Walks UP, because the space is not always in the window's own group. Measured with four
+    /// windows: toggling the ROOT left NVIDIA Broadcast in a subtree 684 tall against a floor of
+    /// 772, so no share of that group could ever reach -- taking everything its siblings could
+    /// spare still left it short, and the rest had to come from the root's own split.
+    /// </para>
+    /// <para>
+    /// Two levels are enough there and the arithmetic says why: 684 minus the donor floor leaves 616
+    /// available inside the group, and the containing subtree then needs 772 x 684/616 which is
+    /// about 857, of which the neighbour can spare 550 -- so the subtree reaches 1234 and the
+    /// window's share of it 1111. Neither level alone gets there; both together do.
+    /// </para>
+    /// <para>
+    /// A group that divides the axis the window is already happy on is skipped rather than
+    /// squeezed. Nothing it could give would help, and the shortfall belongs further up.
+    /// </para>
+    /// <para>
+    /// Every group it touches is recorded as it was and PUT BACK if the walk still falls short. A
+    /// window that ends up parked anyway must not leave three sets of neighbours squeezed behind
+    /// it -- the layout would be paying for an attempt that failed.
     /// </para>
     /// <para>
     /// Exactly the shortfall, measured from the tile it holds rather than from the floor alone: the
@@ -605,24 +621,73 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private bool TryGrowToFit(LayoutTree tree, Rect workArea, nint handle)
     {
         if (!_minimumSize.TryGetValue(handle, out var floor)
-            || !_registry.TryGetLeaf(handle, out var leaf) || leaf is null
-            || leaf.Parent is not { } group)
+            || !_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
         {
             return false;
         }
 
-        var tile = TreeArranger.TileOf(leaf);
-        if (tile.Width <= 0 || tile.Height <= 0)
+        // Every group whose Sizes this touches, as they were. A walk that gathers space from three
+        // places and still falls short would otherwise leave three sets of neighbours squeezed for
+        // a window that gets parked anyway -- the layout paying for an attempt that failed.
+        var undo = new List<(GroupNode Group, List<int> Sizes)>();
+
+        for (Node node = leaf; node.Parent is { } group; node = group)
         {
-            return false;
+            if (!DoesNotFitItsFloor(tree, workArea, handle))
+            {
+                return true;
+            }
+
+            var tile = TreeArranger.TileOf(leaf);
+            var slot = TreeArranger.TileOf(node);
+            if (tile.Width <= 0 || tile.Height <= 0 || slot.Width <= 0 || slot.Height <= 0)
+            {
+                break;
+            }
+
+            var sideways = group.Axis == SplitAxis.Horizontal;
+            var deficit = sideways ? floor.Width - tile.Width : floor.Height - tile.Height;
+            if (deficit <= 0)
+            {
+                // This group divides the axis the window is already happy on, so nothing it can
+                // give would help. The shortfall belongs further up.
+                //
+                // Clarity rather than correctness, and mutation-verified as such: GrowWithinGroup
+                // refuses a non-positive request anyway, so removing this changes no behaviour. It
+                // earns its place by keeping untouched groups out of the undo list and by saying
+                // out loud why a level is passed over.
+                continue;
+            }
+
+            // Growing an ANCESTOR's child lifts the leaf only by its share of it, so the request is
+            // scaled by that ratio. At the leaf's own group the two lengths are the same and this
+            // is simply the deficit.
+            var mine = sideways ? tile.Width : tile.Height;
+            var theirs = sideways ? slot.Width : slot.Height;
+            var request = (int)Math.Ceiling(deficit * (double)theirs / mine);
+
+            undo.Add((group, [.. group.Sizes]));
+            if (LayoutTree.GrowWithinGroup(node, request) > 0)
+            {
+                // Re-measured before the next level, because what is still missing depends on what
+                // this one managed to give.
+                TreeArranger.Arrange(tree, workArea);
+            }
         }
 
-        var deficit = group.Axis == SplitAxis.Horizontal
-            ? floor.Width - tile.Width
-            : floor.Height - tile.Height;
+        if (!DoesNotFitItsFloor(tree, workArea, handle))
+        {
+            return true;
+        }
 
-        return LayoutTree.GrowWithinGroup(leaf, deficit)
-            && !DoesNotFitItsFloor(tree, workArea, handle);
+        foreach (var (group, sizes) in undo)
+        {
+            group.Sizes.Clear();
+            group.Sizes.AddRange(sizes);
+        }
+
+        TreeArranger.Arrange(tree, workArea);
+        return false;
     }
 
     /// <summary>

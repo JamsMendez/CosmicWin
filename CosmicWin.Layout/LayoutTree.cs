@@ -933,11 +933,18 @@ public sealed class LayoutTree : ITilingEngine
     /// rather than by a policy this file would have to invent.
     /// </para>
     /// <para>
-    /// Donors are protected by the same floor ratio <see cref="ResizeNode"/> already uses, and a
-    /// request that would push one under it is refused OUTRIGHT rather than clamped. Clamping would
-    /// hand back a half-answer the caller cannot use: it asked because a window has a size it will
-    /// not go under, and most of the way there is the same as nowhere. Refusing leaves the tree
-    /// untouched so the caller can fall back on something else.
+    /// Donors are protected by the same floor ratio <see cref="ResizeNode"/> already uses, and it
+    /// takes as much as they can spare rather than refusing when they cannot spare it all --
+    /// reporting the amount, so the caller knows what is still missing.
+    /// </para>
+    /// <para>
+    /// Partial on purpose, and it did not start that way. All-or-nothing reads well at ONE level --
+    /// most of the way to a size a window will not go under is the same as nowhere -- and it is
+    /// wrong the moment the space has to be gathered from more than one place. Measured: a window
+    /// needing 772 in a group of 684 is refused here, and its ancestor is then asked for a share
+    /// scaled by a ratio that never improved, so that is refused too. Taking the 234 this group can
+    /// spare is what makes the ancestor's 174 enough. Whether a partial answer is worth keeping is
+    /// the CALLER's question, and the caller is the one that can put the tree back.
     /// </para>
     /// <para>
     /// Spread evenly across the donors, because nothing here knows which neighbour deserves to give
@@ -945,17 +952,17 @@ public sealed class LayoutTree : ITilingEngine
     /// last donor absorbing the rounding remainder.
     /// </para>
     /// </remarks>
-    public static bool GrowWithinGroup(Node leaf, int by, double minRatio = DefaultMinRatio)
+    public static int GrowWithinGroup(Node leaf, int by, double minRatio = DefaultMinRatio)
     {
         if (by <= 0 || leaf.Parent is not GroupNode group)
         {
-            return false;
+            return 0;
         }
 
         var index = group.Children.IndexOf(leaf);
         if (index < 0 || group.Children.Count < 2)
         {
-            return false;
+            return 0;
         }
 
         var floor = (int)Math.Ceiling(group.GroupLength * minRatio);
@@ -968,9 +975,10 @@ public sealed class LayoutTree : ITilingEngine
             }
         }
 
-        if (sparable < by)
+        by = Math.Min(by, sparable);
+        if (by <= 0)
         {
-            return false;
+            return 0;
         }
 
         var donors = group.Children.Count - 1;
@@ -993,7 +1001,7 @@ public sealed class LayoutTree : ITilingEngine
         }
 
         group.Sizes[index] += taken;
-        return taken > 0;
+        return taken;
     }
 
     /// <summary>
