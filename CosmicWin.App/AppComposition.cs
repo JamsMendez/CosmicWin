@@ -279,6 +279,12 @@ public sealed class AppComposition : IDisposable
         // close by Alt+Q. Both have to reach windows the tree does not contain.
         executor.ActivateUntrackedWindow = handle => resolveAnyWindow(handle)?.TryActivate() ?? false;
         executor.CloseWindowAt = handle => resolveAnyWindow(handle)?.TryClose() ?? false;
+
+        // Three verbs now, and this is the read-only one: WHERE a window is, including one the tree
+        // does not hold. A focus chord pressed while an untiled window has the foreground measures
+        // the direction from here, which is the difference between landing on the tile the user
+        // pointed at and landing on whatever survived.
+        executor.ResolveWindowBounds = handle => resolveAnyWindow(handle)?.Bounds;
         workspace.Open();
         hook.Start();
 

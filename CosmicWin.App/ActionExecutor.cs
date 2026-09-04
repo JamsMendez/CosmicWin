@@ -175,7 +175,7 @@ public sealed class ActionExecutor(
         {
             Dispatch(action.Kind, focused, foregroundHandle);
         }
-        else if (FocusDirectionOf(action.Kind) is { } direction)
+        else if (FocusDirectionOf(action.Kind) is { } direction && !TryEnterTheTree(direction, foregroundHandle))
         {
             // The chord never reached the tree walk: recorded rather than dropped, so a silent
             // focus chord on real hardware can be told apart from a failed one -- and the
@@ -191,6 +191,17 @@ public sealed class ActionExecutor(
     /// it. Unset -- as in every test that predates floating dialogs -- such a chord is simply dropped.
     /// </summary>
     public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
+
+    /// <summary>
+    /// Where a window actually IS, including one the tree does not hold. Unset -- as in every test
+    /// that predates it -- a focus chord from outside the tree stays the no-op it always was.
+    /// </summary>
+    /// <remarks>
+    /// The registry holds only tiled leaves, so it cannot answer for the very window this is asked
+    /// about. The WORKSPACE tracks every top-level window, which is where production resolves it --
+    /// the same split, and the same reason, as <see cref="ActivateUntrackedWindow"/>.
+    /// </remarks>
+    public Func<nint, Interop.Rectangle?>? ResolveWindowBounds { get; set; }
 
     /// <summary>
     /// Puts focus back on a window the TREE does not hold, reporting whether it took. Unset -- as
@@ -725,6 +736,135 @@ public sealed class ActionExecutor(
 
         focused = null!;
         return false;
+    }
+
+    /// <summary>
+    /// Last resort for a focus chord that resolved to nothing: puts the user back INTO the tree,
+    /// reporting whether it answered the chord.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two readings in <see cref="TryResolveFocused"/> cover the case they were written for --
+    /// a dialog or a non-tiled app stealing the foreground, where the tiled window BEHIND it is
+    /// still in the tree and the cache names it. Neither can cover the window that LEFT the tree
+    /// while being looked at, because then the foreground is untracked AND the cache holds the leaf
+    /// that was just removed.
+    /// </para>
+    /// <para>
+    /// Measured with NVIDIA Broadcast: tiled and focused, Alt+O made its tile shorter than its
+    /// minimum size, and the adapter untiled it -- correctly. From that moment every layout chord
+    /// died, reported as focused=0x0 UnresolvedFocus, with no way back except the mouse. The same
+    /// symptom as the standing chord-dropout report, reached by a different route.
+    /// </para>
+    /// <para>
+    /// It LANDS rather than walks, and that is the difference between a way in and a starting
+    /// point. Walking from the survivor answers nothing when it is the only tile left -- which is
+    /// exactly the shape a window leaving the tree tends to produce -- and a user pressing a
+    /// direction from outside is asking to be back inside, not to travel from a tile they are not
+    /// on. Precedent: the desktop handover activates its landing leaf for the same reason.
+    /// </para>
+    /// <para>
+    /// The display is named by the tile the departed leaf last occupied, which survives the leaf
+    /// leaving the tree and is where the user was working. With no cache at all -- nothing has ever
+    /// been focused -- ResolveDisplay's documented Primary fail-safe answers.
+    /// </para>
+    /// <para>
+    /// Direction chords only. Alt+[ and Alt+] ascend from a leaf the user is standing on and there
+    /// is none out here; a direction is the way back in, and every other chord works again the
+    /// moment it lands.
+    /// </para>
+    /// </remarks>
+    private bool TryEnterTheTree(Direction direction, nint foregroundHandle)
+    {
+        if (TreeManager is not { } trees
+            || ResolveWindowBounds?.Invoke(foregroundHandle) is not { } from
+            || from.Width <= 0 || from.Height <= 0)
+        {
+            return false;
+        }
+
+        if (NearestTileToward(trees, direction, from) is not { } survivor)
+        {
+            return false;
+        }
+
+        var target = survivor.Window.Handle;
+        if (!registry.TryGetWindow(target, out var window) || window is null)
+        {
+            Trace(direction, foregroundHandle, 0, target, FocusTraceOutcome.UntrackedTarget);
+            return true;
+        }
+
+        // The cache advances only on a REAL activation, exactly as the ordinary walk does. A refused
+        // SetForegroundWindow that still relocated CosmicWin's idea of focus is the MR-2 defect.
+        var outcome = window.Activate();
+        var activated = outcome.Confirmed();
+        if (activated)
+        {
+            _focused = survivor;
+            _focusScope = null;
+        }
+
+        Trace(direction, foregroundHandle, 0, target,
+            activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed, outcome);
+
+        return true;
+    }
+
+    /// <summary>
+    /// The nearest tile lying in <paramref name="direction"/> from <paramref name="from"/>, or
+    /// <see langword="null"/> when nothing lies that way.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Geometry rather than a tree walk, because the window this measures from is NOT in the tree
+    /// -- that is the whole situation -- so there is no leaf to walk from and no sibling order to
+    /// read. Centres, the same comparison <c>TreeManager</c> already uses to find an adjacent
+    /// display.
+    /// </para>
+    /// <para>
+    /// The direction is not decoration and must be obeyed. A window evicted for refusing to be
+    /// repositioned sits wherever it pinned itself, and handing FocusRight the only survivor put
+    /// the user on a window physically to its LEFT -- a measured misdirection this codebase already
+    /// pins with its own facts. Nothing in the direction pressed is a legitimate answer of "no",
+    /// exactly as it is for a tile at the edge of the tree.
+    /// </para>
+    /// </remarks>
+    private static LeafNode? NearestTileToward(TreeManager trees, Direction direction, Interop.Rectangle from)
+    {
+        var originX = from.Left + (from.Width / 2);
+        var originY = from.Top + (from.Height / 2);
+
+        LeafNode? nearest = null;
+        var shortest = long.MaxValue;
+
+        foreach (var leaf in trees.LeavesOn(trees.ResolveDisplay(from)))
+        {
+            var tile = leaf.LastGeometry;
+            if (tile.Width <= 0 || tile.Height <= 0)
+            {
+                continue;
+            }
+
+            var x = tile.X + (tile.Width / 2);
+            var y = tile.Y + (tile.Height / 2);
+
+            var distance = direction switch
+            {
+                Direction.Left => originX - x,
+                Direction.Right => x - originX,
+                Direction.Up => originY - y,
+                _ => y - originY,
+            };
+
+            if (distance > 0 && distance < shortest)
+            {
+                shortest = distance;
+                nearest = leaf;
+            }
+        }
+
+        return nearest;
     }
 
     /// <summary>

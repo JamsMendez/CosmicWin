@@ -271,7 +271,20 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     public async Task WindowBoundsChanged_SameMonitorDrag_ThenFocusRight_StillActivatesTheOriginalRightWindow()
     {
         var (s, windowA, windowB) = DragPastSibling(new IntPtr(1101), new IntPtr(1102));
-        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle })
+        {
+            TreeManager = s.Trees,
+
+            // WIRED, exactly as production wires it. Without this the executor cannot see the
+            // evicted window at all and the chord dies for lack of a reading, which would let this
+            // fact pass without ever exercising the rule it exists to pin: a focus chord CAN now
+            // enter the tree from outside it, and the only thing stopping it landing on the wrong
+            // sibling is that the sibling is not in the direction pressed.
+            ResolveWindowBounds = handle =>
+                handle == windowA.Handle ? windowA.Bounds
+                : handle == windowB.Handle ? windowB.Bounds
+                : null,
+        };
         await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
         Assert.Equal(1, windowB.TryActivateCallCount);
         Assert.Equal(0, windowA.TryActivateCallCount);
@@ -360,7 +373,20 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         windowA.SimulateExternalMove(Rectangle.FromSize(1500, 100, 400, 300));
         s.Workspace.RaiseWindowBoundsChanged(windowA);
 
-        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle })
+        {
+            TreeManager = s.Trees,
+
+            // WIRED, exactly as production wires it. Without this the executor cannot see the
+            // evicted window at all and the chord dies for lack of a reading, which would let this
+            // fact pass without ever exercising the rule it exists to pin: a focus chord CAN now
+            // enter the tree from outside it, and the only thing stopping it landing on the wrong
+            // sibling is that the sibling is not in the direction pressed.
+            ResolveWindowBounds = handle =>
+                handle == windowA.Handle ? windowA.Bounds
+                : handle == windowB.Handle ? windowB.Bounds
+                : null,
+        };
         await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
 
         Assert.Equal(0, windowB.TryActivateCallCount);
@@ -406,7 +432,20 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         s.Workspace.RaiseWindowAdded(windowA);
         s.Workspace.RaiseWindowAdded(windowB);
 
-        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle }) { TreeManager = s.Trees };
+        var executor = new ActionExecutor(new LayoutTree(), s.Registry, new FakeForegroundWindowSource { Handle = windowA.Handle })
+        {
+            TreeManager = s.Trees,
+
+            // WIRED, exactly as production wires it. Without this the executor cannot see the
+            // evicted window at all and the chord dies for lack of a reading, which would let this
+            // fact pass without ever exercising the rule it exists to pin: a focus chord CAN now
+            // enter the tree from outside it, and the only thing stopping it landing on the wrong
+            // sibling is that the sibling is not in the direction pressed.
+            ResolveWindowBounds = handle =>
+                handle == windowA.Handle ? windowA.Bounds
+                : handle == windowB.Handle ? windowB.Bounds
+                : null,
+        };
         await executor.ScheduleAsync(new HotkeyAction(HotkeyActionKind.FocusRight), CancellationToken.None);
 
         Assert.Equal(0, windowB.TryActivateCallCount);
