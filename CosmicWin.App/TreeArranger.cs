@@ -158,6 +158,35 @@ internal static class TreeArranger
     public static bool TryApplyUserResize(Node leaf, Rectangle dragged) =>
         TryApplyUserResize(leaf, dragged, Gap);
 
+    /// <summary>
+    /// Computes every tile and moves NOTHING, so a caller can ask what a window would be given
+    /// before deciding whether to give it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves of <see cref="ArrangeAndPosition"/> cost wildly different things. Arranging is
+    /// arithmetic over the tree and is thrown away every time anything changes; positioning is a
+    /// SetWindowPos per window, is what the user sees, and is what the workspace remembers as the
+    /// window's bounds.
+    /// </para>
+    /// <para>
+    /// Answering a question with the whole pair is what made a parked window churn the desktop
+    /// every two seconds forever: it was inserted, everything was reflowed, the tile was measured
+    /// against a floor already on record, and the whole thing was undone. Worse, the ask it could
+    /// not honour is what made the next reconciliation pass read a bounds change and start again.
+    /// </para>
+    /// <para>
+    /// Populates <see cref="Node.LastGeometry"/> exactly as the positioning pass does, so
+    /// <see cref="TileOf"/> reads the same rectangle either way -- and the caller's next real
+    /// arrange overwrites it, so a discarded answer leaves nothing behind.
+    /// </para>
+    /// </remarks>
+    public static void Arrange(ITilingEngine engine, Rect workArea) => Arrange(engine, workArea, Gap);
+
+    /// <summary>Explicit-spacing overload, for the same reason the arrange one has one.</summary>
+    public static void Arrange(ITilingEngine engine, Rect workArea, int gap) =>
+        engine.Arrange(Deflate(workArea, Math.Max(0, gap) / 2));
+
     /// <summary>Explicit-spacing overload, for the same reason the arrange one has one.</summary>
     /// <summary>
     /// The rectangle a leaf's window was actually PLACED on: its slot, inset by half the gap the

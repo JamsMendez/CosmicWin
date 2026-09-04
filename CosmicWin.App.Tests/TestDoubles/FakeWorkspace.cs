@@ -16,7 +16,19 @@ internal sealed class FakeWorkspace : IWorkspace
 
     public bool IsOpen { get; private set; }
 
-    public IReadOnlyList<IWindow> Snapshot => Array.Empty<IWindow>();
+    private readonly List<IWindow> _open = [];
+
+    /// <summary>
+    /// The windows this workspace has announced and not yet withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// It used to be permanently empty, which was true enough while nothing read it. The adapter
+    /// now does: a window it untiled is no longer in its own bookkeeping, so the only way back to
+    /// the <see cref="IWindow"/> behind a handle is to ask the workspace what is open. A double
+    /// that answers "nothing" would make that lookup silently find no window and the behaviour
+    /// under test never happen.
+    /// </remarks>
+    public IReadOnlyList<IWindow> Snapshot => _open;
 
     public void Open() => IsOpen = true;
 
@@ -34,10 +46,21 @@ internal sealed class FakeWorkspace : IWorkspace
     /// Whether the real workspace would be reporting a birth or an adoption. Defaults to the birth
     /// every caller written before the distinction existed meant.
     /// </param>
-    public void RaiseWindowAdded(IWindow window, WindowArrival arrival = WindowArrival.Created) =>
-        WindowAdded?.Invoke(this, new WindowEventArgs(window, arrival: arrival));
+    public void RaiseWindowAdded(IWindow window, WindowArrival arrival = WindowArrival.Created)
+    {
+        if (!_open.Contains(window))
+        {
+            _open.Add(window);
+        }
 
-    public void RaiseWindowRemoved(IWindow window) => WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+        WindowAdded?.Invoke(this, new WindowEventArgs(window, arrival: arrival));
+    }
+
+    public void RaiseWindowRemoved(IWindow window)
+    {
+        _open.Remove(window);
+        WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+    }
 
     /// <summary>Simulates the real <c>Win32Workspace</c> raising <see cref="WindowBoundsChanged"/> after an out-of-band move.</summary>
     /// <param name="isUserGesture">

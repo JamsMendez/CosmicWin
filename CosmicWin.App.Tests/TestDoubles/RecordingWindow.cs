@@ -59,6 +59,17 @@ internal sealed class RecordingWindow : IWindow
 
     public int SetPositionCallCount { get; private set; }
 
+    /// <summary>
+    /// Every position this window has been handed, in order.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="LastSetPosition"/> alone cannot see a layout that changed and changed back, which
+    /// is exactly what untiling a window and re-admitting it looks like from a sibling: it is given
+    /// the whole work area for an instant and its own half again straight afterwards. A mutation
+    /// that untiled a window it should have kept survived the suite on that blind spot.
+    /// </remarks>
+    public List<Rectangle> Positions { get; } = [];
+
     public int TryActivateCallCount { get; private set; }
 
     public Rectangle? LastSetPosition { get; private set; }
@@ -92,9 +103,10 @@ internal sealed class RecordingWindow : IWindow
         }
 
         LastSetPosition = bounds;
+        Positions.Add(bounds);
 
         // The ASK is recorded above whatever happens next, because a fighter accepts every ask.
-        Bounds = SnapsBackTo ?? bounds;
+        Bounds = SnapsBackTo ?? Clamped(bounds);
     }
 
     /// <summary>
@@ -133,6 +145,52 @@ internal sealed class RecordingWindow : IWindow
     }
 
     public bool TryActivate() => Activate().Confirmed();
+
+    /// <summary>
+    /// A size this window will not go under, exactly as <c>WM_GETMINMAXINFO</c> makes a real one
+    /// behave: the position and every dimension that meets the floor are honoured, and one that
+    /// does not is silently raised.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT <see cref="SnapsBackTo"/>, and the difference is the whole point. That one
+    /// lands somewhere unrelated to what was asked, which is a window fighting. This one obeys as
+    /// far as it can and reports the one thing it cannot do, which is a window with a constraint.
+    /// Both miss their tile and both do it reproducibly, so only the SHAPE of the miss separates
+    /// them -- and that is what the adapter has to read.
+    /// </remarks>
+    public (int Width, int Height)? MinimumSize { get; set; }
+
+    /// <summary>
+    /// A size this window will not go OVER, the other half of what <c>WM_GETMINMAXINFO</c> reports.
+    /// Measured on NVIDIA Broadcast, which clamps its height UP to 772 and DOWN to 1000 -- a window
+    /// with a floor usually has a ceiling too, and a double that models only one of them cannot
+    /// reproduce what the trace showed.
+    /// </summary>
+    public (int Width, int Height)? MaximumSize { get; set; }
+
+    /// <summary>
+    /// The position is always honoured and the size is pulled into range, which is what separates a
+    /// constrained window from <see cref="SnapsBackTo"/>'s fighter: a fighter moves.
+    /// </summary>
+    private Rectangle Clamped(Rectangle asked)
+    {
+        var width = asked.Width;
+        var height = asked.Height;
+
+        if (MinimumSize is { } floor)
+        {
+            width = Math.Max(width, floor.Width);
+            height = Math.Max(height, floor.Height);
+        }
+
+        if (MaximumSize is { } ceiling)
+        {
+            width = Math.Min(width, ceiling.Width);
+            height = Math.Min(height, ceiling.Height);
+        }
+
+        return Rectangle.FromSize(asked.Left, asked.Top, width, height);
+    }
 
     /// <summary>Makes the next <see cref="SetPosition"/> call fail (threat matrix precedent).</summary>
     public void FailNextSetPosition() => _failNextSetPosition = true;
