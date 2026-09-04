@@ -1,4 +1,4 @@
-using CosmicWin.App.Input;
+﻿using CosmicWin.App.Input;
 
 namespace CosmicWin.App.Tests.TestDoubles;
 
@@ -41,6 +41,17 @@ internal sealed class FakeKeyboardHookPlatform : IKeyboardHookPlatform
     }
 
     public void PumpMessages() => Interlocked.Increment(ref _pumps);
+
+    /// <summary>
+    /// How long ago the SESSION last saw input. Defaults to "just now", which is the reading that
+    /// makes a silent hook suspicious; a test about an idle machine raises it.
+    /// </summary>
+    public long? SystemInputAge { get; set; }
+
+    public long? MillisecondsSinceSystemInput() => RefuseSystemInputQuestion ? null : SystemInputAge ?? 0;
+
+    /// <summary>Makes the shell refuse the question, the way it does off the interactive desktop.</summary>
+    public bool RefuseSystemInputQuestion { get; set; }
 
     public void RaiseActivity() => _callback!(KeyboardKey.H, true, ModifierKeys.Alt);
 

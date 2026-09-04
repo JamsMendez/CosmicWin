@@ -16,3 +16,6 @@ GetForegroundWindow
 GetGUIThreadInfo
 GUITHREADINFO
 GetWindowThreadProcessId
+GetLastInputInfo
+LASTINPUTINFO
+GetTickCount

@@ -1,6 +1,7 @@
 ﻿using System.Threading.Channels;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.UI.Input.KeyboardAndMouse;
 using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.App.Input;
@@ -152,14 +153,33 @@ internal interface IKeyboardHookPlatform
     void Install(KeyboardHookCallback callback);
     bool Uninstall();
     void PumpMessages();
+
+    /// <summary>
+    /// How long ago the SESSION last received any input, or <c>null</c> when the shell will not
+    /// say. Answered without a hook, which is what makes it usable as evidence ABOUT the hook.
+    /// </summary>
+    long? MillisecondsSinceSystemInput();
 }
 
 public sealed class LowLevelKeyboardHook : IDisposable
 {
     public static readonly TimeSpan DefaultWatchdogInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The silence after which the hook is replaced regardless of what the session reports.
+    /// </summary>
+    /// <remarks>
+    /// Sixty times the interval, deliberately. Gating on GetLastInputInfo makes the whole net
+    /// depend on that one reading being truthful, and it is already known to decline input this
+    /// process injects; if it ever under-reports for real input, a dead hook would never be
+    /// replaced and the keyboard would stay dead until a restart -- worse than the churn being
+    /// removed. So the reading decides how OFTEN, and this decides that it happens at all.
+    /// </remarks>
+    public static readonly TimeSpan DefaultWatchdogBackstop = TimeSpan.FromMinutes(5);
     private readonly ChannelWriter<HotkeyAction> _writer;
     private readonly IKeyboardHookPlatform _platform;
     private readonly TimeSpan _watchdogInterval;
+    private readonly TimeSpan _watchdogBackstop;
     private readonly Func<long> _clock;
     private readonly CancellationTokenSource _stop = new();
     private readonly ManualResetEventSlim _started = new();
@@ -208,11 +228,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     internal LowLevelKeyboardHook(
         ChannelWriter<HotkeyAction> writer, IKeyboardHookPlatform platform,
-        TimeSpan watchdogInterval, Func<long>? clock = null)
+        TimeSpan watchdogInterval, Func<long>? clock = null, TimeSpan? watchdogBackstop = null)
     {
         _writer = writer;
         _platform = platform;
         _watchdogInterval = watchdogInterval;
+        _watchdogBackstop = watchdogBackstop ?? DefaultWatchdogBackstop;
         _clock = clock ?? (() => Environment.TickCount64);
     }
 
@@ -238,7 +259,7 @@ public sealed class LowLevelKeyboardHook : IDisposable
             while (!_stop.IsCancellationRequested)
             {
                 _platform.PumpMessages();
-                if (_clock() - Volatile.Read(ref _lastActivity) >= _watchdogInterval.TotalMilliseconds)
+                if (ShouldReinstall())
                 {
                     // The result is the diagnosis. This unhook succeeds on a handle Windows still
                     // holds and fails on one Windows has already thrown away, so it says whether
@@ -269,6 +290,60 @@ public sealed class LowLevelKeyboardHook : IDisposable
         {
             RecordUninstall();
         }
+    }
+
+    /// <summary>
+    /// Whether the hook looks GONE, which is not the same question as whether anyone has typed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to ask only the second one, and a keyboard's resting state is silence. Measured
+    /// on hardware with nobody sitting at it: 39 teardowns of a live hook in 200 seconds, every one
+    /// reporting the handle Windows still held. Each teardown is a gap a keypress can fall into --
+    /// the shape of "the chord went dead and worked when I pressed it again" -- so the watchdog was
+    /// manufacturing the failure mode it was written to survive.
+    /// </para>
+    /// <para>
+    /// Silence proves nothing; MISSED INPUT proves something. A hook Windows has removed stops
+    /// seeing everything, so the session receiving input this hook did not see is the signature,
+    /// and GetLastInputInfo reports the session's last input without needing a hook at all -- the
+    /// one reading still available to a hook that may be dead.
+    /// </para>
+    /// <para>
+    /// The comparison is between two AGES on the same clock, and "the session has been quiet at
+    /// least as long as we have" is the skip. It is deliberately generous at the boundary: a real
+    /// keypress reaches GetLastInputInfo a hair before it reaches this callback, so an alive hook
+    /// always reads as slightly YOUNGER than the session and can never trip the test.
+    /// </para>
+    /// <para>
+    /// KNOWN IMPRECISION, stated rather than hidden: GetLastInputInfo counts mouse input, and a
+    /// low-level KEYBOARD hook does not. Five minutes of mousing without typing still reads as
+    /// input this hook did not see, and still reinstalls. That is strictly better than firing on an
+    /// idle machine forever, and it is the next thing to measure -- `foundGone` in the trace says
+    /// whether any of those reinstalls ever found a hook that was actually gone.
+    /// </para>
+    /// <para>
+    /// A refusal is not an idle machine. GetLastInputInfo fails off the interactive desktop, and
+    /// reading that as "nothing happened" would retire the watchdog exactly where nobody can watch
+    /// it, so an unanswered question reinstalls.
+    /// </para>
+    /// </remarks>
+    private bool ShouldReinstall()
+    {
+        var ourAge = _clock() - Volatile.Read(ref _lastActivity);
+        if (ourAge < _watchdogInterval.TotalMilliseconds)
+        {
+            return false;
+        }
+
+        // Checked before the reading is consulted, so a reading that is silently wrong delays the
+        // recovery instead of cancelling it.
+        if (ourAge >= _watchdogBackstop.TotalMilliseconds)
+        {
+            return true;
+        }
+
+        return _platform.MillisecondsSinceSystemInput() is not { } sessionAge || sessionAge < ourAge;
     }
 
     private bool OnKeyboardEvent(KeyboardKey key, bool isKeyDown, ModifierKeys modifiers)
@@ -321,6 +396,27 @@ internal sealed unsafe class WindowsKeyboardHookPlatform : IKeyboardHookPlatform
         var succeeded = PInvoke.UnhookWindowsHookEx(_hook);
         _hook = HHOOK.Null;
         return succeeded;
+    }
+
+    /// <summary>
+    /// Answered through <c>GetLastInputInfo</c>, which reports the session's last input WITHOUT a
+    /// hook of any kind -- the one reading available to a hook that may be dead.
+    /// </summary>
+    /// <remarks>
+    /// Returned as an AGE rather than a timestamp on purpose. <c>dwTime</c> shares the 32-bit
+    /// <c>GetTickCount</c> timeline, which wraps roughly every forty-nine days, and an age computed
+    /// by unsigned subtraction is right across the wrap while a timestamp compared against a 64-bit
+    /// clock is not.
+    /// </remarks>
+    public long? MillisecondsSinceSystemInput()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)sizeof(LASTINPUTINFO) };
+        if (!PInvoke.GetLastInputInfo(ref info))
+        {
+            return null;
+        }
+
+        return unchecked(PInvoke.GetTickCount() - info.dwTime);
     }
 
     public void PumpMessages()

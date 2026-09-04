@@ -129,7 +129,7 @@ public sealed class KeyboardHookTests
     }
 
     [Fact]
-    public void Watchdog_ReinstallsOnlyAfterFiveSecondsWithoutKeyboardActivity()
+    public void Watchdog_DoesNotReinstallBeforeItsIntervalHasPassed()
     {
         var platform = new FakeKeyboardHookPlatform();
         var clock = new FakeClock();
@@ -254,6 +254,117 @@ public sealed class KeyboardHookTests
         Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
 
         Assert.True(SpinWait.SpinUntil(() => hook.WatchdogFoundHookGone >= 1, TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>
+    /// An idle machine is not a broken hook, and the watchdog must leave it alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured on hardware, nobody at the keyboard: 39 reinstalls in 200 seconds, `foundGone=0`
+    /// on every one. The trigger was "no key has arrived for five seconds", which is the resting
+    /// state of every keyboard on earth, so a healthy hook was torn down and put back roughly
+    /// twelve times a minute for the life of the process -- and each teardown is a window a
+    /// keypress can fall into, which is exactly what "it went dead, I pressed it again and it
+    /// worked" looks like.
+    /// </para>
+    /// <para>
+    /// Silence is not evidence. MISSED INPUT is: the session received something and this hook did
+    /// not see it. GetLastInputInfo answers that without a hook, which is what makes it usable as
+    /// evidence about one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Watchdog_OnAnIdleMachine_LeavesTheHookAlone()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 60_000 };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(60_000);
+
+        // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
+        // decided to do nothing, which a timeout would only have guessed at.
+        var pumps = platform.PumpCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
+
+        Assert.Equal(1, platform.InstallCount);
+        Assert.Equal(0, hook.WatchdogReinstalls);
+    }
+
+    /// <summary>
+    /// The safety net still has a floor under it: a long enough silence puts the hook back
+    /// regardless of what the session says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Gating the watchdog on GetLastInputInfo makes the whole net depend on that one reading being
+    /// truthful. If it ever under-reports -- and it already declines to count input this very
+    /// process INJECTS, measured -- a genuinely dead hook would never be replaced, and the symptom
+    /// is a keyboard that stays dead until the app is restarted. That is a worse failure than the
+    /// churn being removed here.
+    /// </para>
+    /// <para>
+    /// So the reading decides HOW OFTEN, not WHETHER. The backstop is sixty times the interval, so
+    /// it costs a sixtieth of the teardowns the old trigger produced while keeping a guaranteed
+    /// recovery for a reading that turns out to be wrong.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Watchdog_AfterALongEnoughSilence_PutsTheHookBackAnyway()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 600_000 };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(300));
+
+        hook.Start();
+        clock.Advance(300_000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>
+    /// And the case it exists for: the session got input that never reached this hook.
+    /// </summary>
+    [Fact]
+    public void Watchdog_WhenTheSystemSawInputThisHookDidNot_PutsItBack()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500 };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>
+    /// A question the shell refuses is not an answer of "idle", so the net stays up.
+    /// </summary>
+    /// <remarks>
+    /// GetLastInputInfo fails when the calling thread is not on the interactive desktop, and
+    /// reading that as "nothing has happened" would silently retire the watchdog on exactly the
+    /// machines nobody can look at. Unknown reinstalls, which is what this code did before the
+    /// reading existed at all.
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WhenTheShellWillNotSay_PutsItBack()
+    {
+        var platform = new FakeKeyboardHookPlatform { RefuseSystemInputQuestion = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
     }
 
     /// <summary>Shutting down is not a rescue: the unhook in Dispose never moves that counter.</summary>
