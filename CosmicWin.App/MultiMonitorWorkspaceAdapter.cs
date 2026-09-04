@@ -397,11 +397,20 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Admission is still retried FREELY -- this is the cheap half of it, not a refusal.
         if (DoesNotFitItsFloor(tree, workArea, window.Handle))
         {
+            // Which of the two answered, never "one of them". A trace that says branch when it
+            // gave a share sends the next diagnosis looking at the wrong mechanism.
             if (TryRegroupToFit(tree, workArea, window.Handle))
             {
                 Trace?.Record(
                     $"regrouped hwnd=0x{window.Handle:X} class={window.ClassName} " +
                     $"proc={window.ProcessName} -- given a branch of its own so " +
+                    $"{Describe(_minimumSize[window.Handle])} fits");
+            }
+            else if (TryGrowToFit(tree, workArea, window.Handle))
+            {
+                Trace?.Record(
+                    $"given a share hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                    $"proc={window.ProcessName} -- taken from its siblings so " +
                     $"{Describe(_minimumSize[window.Handle])} fits");
             }
             else
@@ -563,6 +572,57 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         return !DoesNotFitItsFloor(tree, workArea, handle);
+    }
+
+    /// <summary>
+    /// Gives <paramref name="handle"/> the share it is short of, out of its siblings', reporting
+    /// whether that made its tile fit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The answer when a branch is not available, which is MOST of the time. Real trees are binary:
+    /// a new window splits the focused tile in two, so a constrained window usually has exactly one
+    /// sibling. Measured on the reported desktop -- Terminal 1710, Alacritty 849, Broadcast 849 --
+    /// which is a half and two quarters, not three equal thirds, and toggling the inner pair moved
+    /// only those two. No group there has three children, so nothing could ever be given a branch.
+    /// </para>
+    /// <para>
+    /// Only along the axis the group actually splits. A window short of HEIGHT inside a group that
+    /// divides width cannot be helped by any share of it, and the shortfall belongs to an ancestor
+    /// this does not touch.
+    /// </para>
+    /// <para>
+    /// Exactly the shortfall, measured from the tile it holds rather than from the floor alone: the
+    /// gap is deflated off every slot identically, so a slot grown by the deficit grows the tile by
+    /// the same amount. Donors are protected by the layout's own floor ratio, and a request that
+    /// would push one under it changes nothing at all.
+    /// </para>
+    /// <para>
+    /// Checked afterwards like every other reshape here. Growing one axis cannot fix a shortfall on
+    /// the other, and a window short of both is still parked.
+    /// </para>
+    /// </remarks>
+    private bool TryGrowToFit(LayoutTree tree, Rect workArea, nint handle)
+    {
+        if (!_minimumSize.TryGetValue(handle, out var floor)
+            || !_registry.TryGetLeaf(handle, out var leaf) || leaf is null
+            || leaf.Parent is not { } group)
+        {
+            return false;
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        if (tile.Width <= 0 || tile.Height <= 0)
+        {
+            return false;
+        }
+
+        var deficit = group.Axis == SplitAxis.Horizontal
+            ? floor.Width - tile.Width
+            : floor.Height - tile.Height;
+
+        return LayoutTree.GrowWithinGroup(leaf, deficit)
+            && !DoesNotFitItsFloor(tree, workArea, handle);
     }
 
     /// <summary>
@@ -1105,6 +1165,15 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
                         // Out of the switch rather than out of the method: the reflow at the bottom
                         // is what puts every window on the new shape.
+                        break;
+                    }
+
+                    if (TryGrowToFit(tree, WorkAreaResolver.Resolve(display), handle))
+                    {
+                        Trace?.Record(
+                            $"given a share hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                            $"-- taken from its siblings so {Describe(floor)} fits");
+
                         break;
                     }
 

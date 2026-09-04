@@ -918,6 +918,85 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
+    /// Gives <paramref name="leaf"/> <paramref name="by"/> more of its group's length and takes it
+    /// from the other children. Reports whether the tree changed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The answer for a window that needs more than its share and has no branch to be given. Real
+    /// trees are BINARY -- <c>SplitLeafInPlace</c> divides the focused tile in two -- so a
+    /// constrained window usually has exactly ONE sibling, and standing it beside "the others" is
+    /// not available. What is available is the share itself.
+    /// </para>
+    /// <para>
+    /// Exactly the shortfall and no more, so the cost is bounded by what the window actually needs
+    /// rather than by a policy this file would have to invent.
+    /// </para>
+    /// <para>
+    /// Donors are protected by the same floor ratio <see cref="ResizeNode"/> already uses, and a
+    /// request that would push one under it is refused OUTRIGHT rather than clamped. Clamping would
+    /// hand back a half-answer the caller cannot use: it asked because a window has a size it will
+    /// not go under, and most of the way there is the same as nowhere. Refusing leaves the tree
+    /// untouched so the caller can fall back on something else.
+    /// </para>
+    /// <para>
+    /// Spread evenly across the donors, because nothing here knows which neighbour deserves to give
+    /// more. The invariant is what matters: <c>Sizes.Sum() == GroupLength</c> still holds, with the
+    /// last donor absorbing the rounding remainder.
+    /// </para>
+    /// </remarks>
+    public static bool GrowWithinGroup(Node leaf, int by, double minRatio = DefaultMinRatio)
+    {
+        if (by <= 0 || leaf.Parent is not GroupNode group)
+        {
+            return false;
+        }
+
+        var index = group.Children.IndexOf(leaf);
+        if (index < 0 || group.Children.Count < 2)
+        {
+            return false;
+        }
+
+        var floor = (int)Math.Ceiling(group.GroupLength * minRatio);
+        var sparable = 0;
+        for (var other = 0; other < group.Sizes.Count; other++)
+        {
+            if (other != index)
+            {
+                sparable += Math.Max(0, group.Sizes[other] - floor);
+            }
+        }
+
+        if (sparable < by)
+        {
+            return false;
+        }
+
+        var donors = group.Children.Count - 1;
+        var taken = 0;
+        var remaining = donors;
+        for (var other = 0; other < group.Sizes.Count; other++)
+        {
+            if (other == index)
+            {
+                continue;
+            }
+
+            // The last donor absorbs the remainder, so the group adds up exactly rather than
+            // drifting by a pixel per rounding.
+            var share = remaining == 1 ? by - taken : by / donors;
+            share = Math.Min(share, Math.Max(0, group.Sizes[other] - floor));
+            group.Sizes[other] -= share;
+            taken += share;
+            remaining--;
+        }
+
+        group.Sizes[index] += taken;
+        return taken > 0;
+    }
+
+    /// <summary>
     /// Takes <paramref name="leaf"/> out of its group and stands it BESIDE its former siblings, on
     /// the other axis. Reports whether the tree changed.
     /// </summary>

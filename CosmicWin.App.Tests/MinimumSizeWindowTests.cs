@@ -38,7 +38,14 @@ public sealed class MinimumSizeWindowTests
     /// Wider than half the work area and narrower than all of it, so the same window does not fit
     /// beside a neighbour and does fit alone. That gap is the whole subject.
     /// </summary>
-    private static readonly (int Width, int Height) Floor = (1400, 100);
+    /// <remarks>
+    /// Wide enough that no SHARE of a two-window group can reach it either. A neighbour may be
+    /// squeezed down to the layout floor ratio and no further, which on this work area leaves at
+    /// most 768 to give; asking for 840 more than half is asking for space that does not exist, so
+    /// these facts still describe a window that genuinely cannot be fitted rather than one the
+    /// tiler has simply not tried hard enough for.
+    /// </remarks>
+    private static readonly (int Width, int Height) Floor = (1800, 100);
 
     /// <summary>
     /// And the ceiling the real one turned out to have as well. Narrower than the whole work area,
@@ -46,7 +53,7 @@ public sealed class MinimumSizeWindowTests
     /// the pair of behaviours the hardware showed, and exactly what one axis of a
     /// <c>WM_GETMINMAXINFO</c> range looks like from outside.
     /// </summary>
-    private static readonly (int Width, int Height) Ceiling = (1500, 1080);
+    private static readonly (int Width, int Height) Ceiling = (1850, 1080);
 
     private sealed record Setup(TreeManager Trees, WindowRegistry Registry, FakeWorkspace Workspace, IDisplay Primary);
 
@@ -597,7 +604,9 @@ public sealed class MinimumSizeWindowTests
         var mixed = Window(20);
 
         // Broadcast's shape: a height it will not go under, and a width it will not go over.
-        mixed.MinimumSize = (100, 700);
+        // Beyond what a SHARE can reach as well: a neighbour may be squeezed to the layout's
+        // floor ratio and no further, so this stays a window that genuinely cannot be fitted.
+        mixed.MinimumSize = (100, 1000);
         mixed.MaximumSize = (1200, WorkArea.Height * 2);
 
         s.Workspace.RaiseWindowAdded(neighbour);
@@ -638,7 +647,9 @@ public sealed class MinimumSizeWindowTests
         var tall = Window(20);
 
         // A height it will not go under, and nothing at all to say about its width.
-        tall.MinimumSize = (0, 700);
+        // Beyond what a SHARE can reach as well: a neighbour may be squeezed to the layout's
+        // floor ratio and no further, so this stays a window that genuinely cannot be fitted.
+        tall.MinimumSize = (0, 1000);
 
         s.Workspace.RaiseWindowAdded(neighbour);
         s.Workspace.RaiseWindowAdded(tall);
@@ -676,7 +687,9 @@ public sealed class MinimumSizeWindowTests
 
         var neighbour = Window(10);
         var boxed = Window(20);
-        boxed.MinimumSize = (1400, 700);
+        // Beyond what a SHARE can reach as well: a neighbour may be squeezed to the layout's
+        // floor ratio and no further, so this stays a window that genuinely cannot be fitted.
+        boxed.MinimumSize = (1800, 1000);
 
         s.Workspace.RaiseWindowAdded(neighbour);
         s.Workspace.RaiseWindowAdded(boxed);
@@ -1002,6 +1015,119 @@ public sealed class MinimumSizeWindowTests
         Assert.False(InTree(s, constrained.Handle));
         Assert.True(InTree(s, first.Handle));
         Assert.True(InTree(s, second.Handle));
+    }
+
+    /// <summary>
+    /// One sibling is enough. A window short of its share takes the shortfall out of the neighbour
+    /// instead of leaving the tree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The case that actually occurs, and the reason the branch alone was not enough. Real trees
+    /// are BINARY -- a new window splits the focused tile in two -- so a constrained window usually
+    /// has exactly ONE sibling and there is nobody to be stood beside.
+    /// </para>
+    /// <para>
+    /// Measured on the reported desktop: Terminal 1710, Alacritty 849, Broadcast 849. A half and
+    /// two quarters, not three equal thirds -- and toggling the inner pair moved only those two
+    /// while Terminal stayed exactly where it was, which is what proves the shape. No group there
+    /// has three children, so nothing could ever have been given a branch and the fix before this
+    /// one could never fire.
+    /// </para>
+    /// <para>
+    /// The cost is bounded by what the window needs and nothing else: it takes the shortfall, and
+    /// the neighbour keeps the rest. On that desktop stacking the pair offers 688 each against a
+    /// floor of 772, so the neighbour goes to 604 -- 84 pixels, not the half-a-screen the flat case
+    /// would have cost.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowWithOneSibling_IsGivenTheShareItNeeds_NotEjected()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var constrained = Window(20);
+
+        // More than half the height and well within what one neighbour can spare.
+        constrained.MinimumSize = (100, 700);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, constrained, 3);
+
+        Assert.True(InTree(s, constrained.Handle));
+        Assert.True(InTree(s, neighbour.Handle));
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var settled) && settled is not null);
+        Assert.True(TreeArranger.TileOf(settled!).Height >= 700);
+    }
+
+    /// <summary>
+    /// And the neighbour keeps what the layout says it must. A share is taken, never seized.
+    /// </summary>
+    /// <remarks>
+    /// The donor floor is the layout's own, the one the resize chord has always used. A request
+    /// that would push a neighbour under it is refused outright rather than clamped, because most
+    /// of the way to a size a window will not go under is the same as nowhere -- and the window is
+    /// then parked, exactly as it was before any of this existed.
+    /// </remarks>
+    [Fact]
+    public void AShareIsTakenFromTheNeighbour_NeverBelowTheLayoutsOwnFloor()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var constrained = Window(20);
+        constrained.MinimumSize = (100, 700);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+        Rounds(s, constrained, 3);
+
+        Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var donor) && donor is not null);
+        Assert.True(TreeArranger.TileOf(donor!).Height >= (int)(WorkArea.Height * 0.10));
+    }
+
+    /// <summary>
+    /// A share fixes ONE axis, and a window short of both is still parked.
+    /// </summary>
+    /// <remarks>
+    /// A group divides along a single axis, so the most a share can ever answer for is that one.
+    /// Growing a window to the width it demanded says nothing about the height it also demanded --
+    /// and taking the successful half as the whole answer would leave it tiled while still
+    /// overflowing, which is the state every rule here exists to end.
+    /// </remarks>
+    [Fact]
+    public void AWindowShortOfBothAxes_IsNotSavedByAShareOfOne()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var constrained = Window(20);
+
+        // The width one neighbour can spare; the height no arrangement on this work area can.
+        constrained.MinimumSize = (1300, WorkArea.Height + 120);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Rounds(s, constrained, 3);
+
+        Assert.False(InTree(s, constrained.Handle));
+        Assert.True(InTree(s, neighbour.Handle));
     }
 
     /// <summary>
