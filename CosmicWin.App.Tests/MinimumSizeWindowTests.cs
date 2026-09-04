@@ -550,6 +550,151 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>
+    /// A floor is what the window REFUSED to go under, not everything it happened to measure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured with the real NVIDIA Broadcast, 19:08:33. Its tile was flipped to a wide short row
+    /// -- [8,930 3424x454] -- and it landed on 1945x772: it raised the height it would not go under
+    /// AND, on the other axis, took barely half the width it was offered. Both numbers were then
+    /// recorded as its floor.
+    /// </para>
+    /// <para>
+    /// <c>still too small hwnd=0x400F4 ... -- needs 1945x772; left untiled</c>
+    /// </para>
+    /// <para>
+    /// It does not need 1945. Fifteen minutes earlier in the same session the same window was tiled
+    /// happily in a 1136-wide tile and reported `clamps itself ... will not go over 1136x1000`. The
+    /// width it "demanded" was a width it had chosen, and recording it locked the window out of
+    /// every slot it would have accepted.
+    /// </para>
+    /// <para>
+    /// The two are distinguishable from the one rectangle, and the test is per AXIS: a dimension is
+    /// a floor only where the window came back BIGGER than the tile. Where it came back smaller it
+    /// obeyed, and a window that underfills an axis has said nothing about a minimum on it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowThatOverflowsOneAxisAndUnderfillsTheOther_RecordsAFloorOnlyWhereItOverflowed()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var mixed = Window(20);
+
+        // Broadcast's shape: a height it will not go under, and a width it will not go over.
+        mixed.MinimumSize = (100, 700);
+        mixed.MaximumSize = (1200, WorkArea.Height * 2);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(mixed);
+
+        // Side by side, both tiles are 1080 tall and this window fits. Flipping the axis makes them
+        // 540 tall, which is the arrangement that produced the bad reading on hardware.
+        Assert.True(s.Registry.TryGetLeaf(mixed.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, mixed, 3);
+        Assert.False(InTree(s, mixed.Handle));
+
+        // Announced again, the tree splits the work area the wide way and offers 960x1080 -- under
+        // the width it was recorded as "needing" and comfortably over the height it actually
+        // refused to go below. It fits, and only a floor that kept the width can turn it away.
+        s.Workspace.RaiseWindowAdded(mixed);
+
+        Assert.True(InTree(s, mixed.Handle));
+    }
+
+    /// <summary>
+    /// An axis the window filled EXACTLY has demonstrated nothing, and must not become a floor.
+    /// </summary>
+    /// <remarks>
+    /// A window landing on the width it was given is a window that took the width it was given.
+    /// Reading that as "will not go under" pins it to whatever the widest tile it ever saw happened
+    /// to be, which is the same mistake as recording the whole rectangle, one comparison narrower.
+    /// </remarks>
+    [Fact]
+    public void AnAxisTheWindowFilledExactly_IsNotAFloor()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var tall = Window(20);
+
+        // A height it will not go under, and nothing at all to say about its width.
+        tall.MinimumSize = (0, 700);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(tall);
+
+        // Stacked, the tile is the full width and half the height: the window fills the width
+        // exactly and raises only the height.
+        Assert.True(s.Registry.TryGetLeaf(tall.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, tall, 3);
+        Assert.False(InTree(s, tall.Handle));
+
+        // Offered half the width and all the height, which clears the only thing it ever refused.
+        s.Workspace.RaiseWindowAdded(tall);
+
+        Assert.True(InTree(s, tall.Handle));
+    }
+
+    /// <summary>
+    /// A floor demonstrated on one axis is not forgotten by a later arrival that only tests the
+    /// other one.
+    /// </summary>
+    /// <remarks>
+    /// Per-axis recording has two halves and this is the one nothing else reaches. A window with a
+    /// floor on BOTH axes only ever proves one of them per arrangement -- a narrow tall tile asks
+    /// about its width, a wide short one asks about its height -- and clearing the axis that was
+    /// not asked would make every arrangement overwrite what the last one learned.
+    /// </remarks>
+    [Fact]
+    public void AFloorOnOneAxis_SurvivesAnArrivalThatOnlyTestsTheOther()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var boxed = Window(20);
+        boxed.MinimumSize = (1400, 700);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(boxed);
+
+        // Narrow and tall: asks about the WIDTH only, and the width is refused.
+        Rounds(s, boxed, 3);
+        Assert.False(InTree(s, boxed.Handle));
+
+        // Alone, both floors clear and it is tiled again.
+        s.Workspace.RaiseWindowRemoved(neighbour);
+        Assert.True(InTree(s, boxed.Handle));
+
+        // Wide and short: asks about the HEIGHT only. Nothing here tests the width -- the window
+        // fills it exactly -- so the width already on record has to survive the pass.
+        var second = Window(30);
+        s.Workspace.RaiseWindowAdded(second);
+        Assert.True(s.Registry.TryGetLeaf(boxed.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, boxed, 3);
+        Assert.False(InTree(s, boxed.Handle));
+
+        // Back to a narrow tall slot. It clears the height it just proved and NOT the width it
+        // proved earlier, so it must stay out.
+        s.Workspace.RaiseWindowAdded(boxed);
+
+        Assert.False(InTree(s, boxed.Handle));
+    }
+
+    /// <summary>
     /// The whole hardware sequence, end to end, in one fact. Broadcast overflowed its half tile and
     /// was untiled in four seconds -- that part worked. Then it was re-admitted into a full-height
     /// column, which it could not fill, and THAT was read as a fight: twelve rounds and

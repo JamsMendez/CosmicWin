@@ -399,8 +399,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         {
             Trace?.Record(
                 $"still too small hwnd=0x{window.Handle:X} class={window.ClassName} " +
-                $"proc={window.ProcessName} -- needs {_minimumSize[window.Handle].Width}x" +
-                $"{_minimumSize[window.Handle].Height}; left untiled");
+                $"proc={window.ProcessName} -- needs {Describe(_minimumSize[window.Handle])}; left untiled");
 
             Untile(window.Handle, tree, display);
             return;
@@ -696,6 +695,57 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// The floor to record from one failed arrival, taken PER AXIS.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A floor is what the window REFUSED to go under, not everything it happened to measure while
+    /// refusing. Measured with NVIDIA Broadcast: offered a wide short row of 3424x454 it landed on
+    /// 1945x772 -- it raised the height it would not shrink to, and on the other axis took barely
+    /// half the width it was offered. Recording the whole rectangle wrote 1945 down as a minimum
+    /// WIDTH, and the same window had been tiled happily in a 1136-wide tile minutes earlier. It
+    /// was then locked out of every slot it would have accepted.
+    /// </para>
+    /// <para>
+    /// The two are distinguishable from the one rectangle. A dimension is a floor only where the
+    /// window came back BIGGER than the tile; where it came back smaller it obeyed, and a window
+    /// that underfills an axis has said nothing at all about a minimum on it.
+    /// </para>
+    /// <para>
+    /// The axis that says nothing keeps whatever was already known rather than being cleared, so a
+    /// floor demonstrated in one arrangement is not forgotten by a later arrival that happens not
+    /// to test it. Zero means no floor known on that axis, which every comparison reads as "fits".
+    /// </para>
+    /// </remarks>
+    private (int Width, int Height, IDisplay LastSeenOn) FloorFrom(nint handle, Rectangle landedAt, IDisplay display)
+    {
+        _minimumSize.TryGetValue(handle, out var known);
+
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return (landedAt.Width, landedAt.Height, display);
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        return (
+            landedAt.Width > tile.Width ? landedAt.Width : known.Width,
+            landedAt.Height > tile.Height ? landedAt.Height : known.Height,
+            display);
+    }
+
+    /// <summary>
+    /// Renders a floor for the trace, saying only what is actually known. An axis with no
+    /// demonstrated minimum is left out rather than printed as a zero nobody can read.
+    /// </summary>
+    private static string Describe((int Width, int Height, IDisplay LastSeenOn) floor) => (floor.Width, floor.Height) switch
+    {
+        ( > 0, > 0) => $"{floor.Width}x{floor.Height}",
+        ( > 0, _) => $"{floor.Width} wide",
+        (_, > 0) => $"{floor.Height} tall",
+        _ => "any size",
+    };
+
+    /// <summary>
     /// Whether <paramref name="handle"/> is sitting at its tile's corner and wholly within it --
     /// where a window that merely cannot FILL its slot belongs, and where there is nothing for a
     /// reflow to do.
@@ -949,11 +999,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 // else. `_givenUp` is deliberately NOT touched: that is a sentence for the life of
                 // the handle, and this window has done nothing wrong.
                 case ArrivalVerdict.MinimumSize:
-                    _minimumSize[handle] = (before.Width, before.Height, display);
+                    var floor = FloorFrom(handle, before, display);
+                    _minimumSize[handle] = floor;
 
                     Trace?.Record(
                         $"minimum size hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
-                        $"-- will not go under {before.Width}x{before.Height}; untiled until a tile that fits exists");
+                        $"-- will not go under {Describe(floor)}; untiled until a tile that fits exists");
 
                     Untile(handle, tree, display);
                     return;
