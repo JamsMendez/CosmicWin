@@ -1,4 +1,4 @@
-namespace CosmicWin.Layout;
+﻿namespace CosmicWin.Layout;
 
 /// <summary>
 /// The Win32-free behavior exposed by the Phase 1 tiling engine.
@@ -16,7 +16,14 @@ public interface ITilingEngine
 
     bool ToggleAxis(Node focused);
 
-    bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep);
+    /// <param name="minLength">
+    /// A length <paramref name="focused"/> may not be taken under, when it is the node that
+    /// actually moves. Zero means no limit.
+    /// </param>
+    /// <param name="maxLength">A length it may not be grown past, on the same terms.</param>
+    bool ResizeNode(
+        Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep,
+        int minLength = 0, int maxLength = int.MaxValue);
 
     IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea);
 

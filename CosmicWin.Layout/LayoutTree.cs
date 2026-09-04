@@ -39,8 +39,9 @@ public sealed class LayoutTree : ITilingEngine
 
     bool ITilingEngine.ToggleAxis(Node focused) => ToggleAxis(focused);
 
-    bool ITilingEngine.ResizeNode(Direction direction, Node focused, double step) =>
-        ResizeNode(direction, focused, step);
+    bool ITilingEngine.ResizeNode(
+        Direction direction, Node focused, double step, int minLength, int maxLength) =>
+        ResizeNode(direction, focused, step, DefaultMinRatio, minLength, maxLength);
 
     bool ITilingEngine.Remove(Node focused) => Remove(focused);
 
@@ -656,11 +657,20 @@ public sealed class LayoutTree : ITilingEngine
     /// LE-6: grows the focused subtree by transferring space from its directional neighbor in
     /// the nearest matching-axis ancestor, without allowing that neighbor below the minimum.
     /// </summary>
+    /// <param name="minLength">
+    /// A length <paramref name="focused"/> may not be taken under, when it is the node that
+    /// actually moves. Zero means no limit, which is every caller that has never measured a window.
+    /// </param>
+    /// <param name="maxLength">
+    /// A length <paramref name="focused"/> may not be grown past, on the same terms.
+    /// </param>
     public static bool ResizeNode(
         Direction direction,
         Node focused,
         double step = DefaultResizeStep,
-        double minRatio = DefaultMinRatio)
+        double minRatio = DefaultMinRatio,
+        int minLength = 0,
+        int maxLength = int.MaxValue)
     {
         // Grow into the neighbour on the pressed side when there is one...
         var match = FindMatchingAncestor(direction, focused);
@@ -680,7 +690,8 @@ public sealed class LayoutTree : ITilingEngine
             match.Value.Ancestor.GroupLength * step,
             MidpointRounding.AwayFromZero);
 
-        return TransferAcross(effective, focused, grows ? requestedTransfer : -requestedTransfer, minRatio);
+        return TransferAcross(
+            effective, focused, grows ? requestedTransfer : -requestedTransfer, minRatio, minLength, maxLength);
     }
 
     /// <summary>
@@ -816,7 +827,9 @@ public sealed class LayoutTree : ITilingEngine
     /// have to obey identically, and two copies of it is exactly how a window ends up squeezed to
     /// nothing on one path and not the other.
     /// </remarks>
-    private static bool TransferAcross(Direction direction, Node focused, int growth, double minRatio)
+    private static bool TransferAcross(
+        Direction direction, Node focused, int growth, double minRatio,
+        int minLength = 0, int maxLength = int.MaxValue)
     {
         if (growth == 0)
         {
@@ -838,6 +851,21 @@ public sealed class LayoutTree : ITilingEngine
         int receiverIndex = growth > 0 ? targetIndex : neighborIndex;
         int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
         int transfer = Math.Min(Math.Abs(growth), ancestor.Sizes[donorIndex] - minimumSize);
+
+        // The caller's limits describe a WINDOW, so they apply only when the window itself is what
+        // moves. A resize walks up to the nearest matching-axis ancestor, and what moves there may
+        // be a whole branch holding several windows -- one window's floor says nothing about how
+        // short that branch may be, and honouring it would let a single constrained window pin a
+        // group it merely happens to live in.
+        if (ReferenceEquals(ancestor.Children[targetIndex], focused))
+        {
+            var room = growth > 0
+                ? maxLength - ancestor.Sizes[targetIndex]
+                : ancestor.Sizes[targetIndex] - minLength;
+
+            transfer = Math.Min(transfer, room);
+        }
+
         if (transfer <= 0)
         {
             return false;

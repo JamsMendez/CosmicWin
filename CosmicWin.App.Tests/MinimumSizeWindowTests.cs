@@ -1245,6 +1245,84 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>
+    /// A ceiling is remembered as carefully as a floor, and reported for anything that would resize
+    /// the window past it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other half of a WM_GETMINMAXINFO range, and it was being thrown away: the verdict knew
+    /// the window would not go over its size and recorded only that it HAD one, never the number.
+    /// Growing a tile past it buys dead space and costs a neighbour real room -- measured with
+    /// NVIDIA Broadcast, whose slot went to 1117 while the window stayed at 1000 and the window
+    /// beside it was squashed to 258 in exchange.
+    /// </para>
+    /// <para>
+    /// Per AXIS, exactly like the floor and wrong in the same way otherwise: a dimension is a
+    /// ceiling only where the window came back SMALLER than its tile.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowThatCannotFillItsTile_HasItsCeilingRemembered()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+        clamped.MaximumSize = (WorkArea.Width - 400, WorkArea.Height - 200);
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        Rounds(s, clamped, 4);
+
+        var limits = adapter.LimitsOf(clamped.Handle);
+        Assert.Equal(WorkArea.Width - 400, limits.MaxWidth);
+        Assert.Equal(WorkArea.Height - 200, limits.MaxHeight);
+    }
+
+    /// <summary>
+    /// An axis the window FILLED is no ceiling, and is reported as unbounded.
+    /// </summary>
+    /// <remarks>
+    /// Recording it would pin the window to whatever the smallest slot it ever held happened to be
+    /// -- the mirror of the floor bug that had NVIDIA Broadcast "needing" a width it had merely
+    /// chosen.
+    /// </remarks>
+    [Fact]
+    public void AnAxisTheWindowFilled_IsReportedAsHavingNoCeiling()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+
+        // Short of the work area on the height only; the width is taken in full.
+        clamped.MaximumSize = (WorkArea.Width * 2, WorkArea.Height - 200);
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        Rounds(s, clamped, 4);
+
+        var limits = adapter.LimitsOf(clamped.Handle);
+        Assert.Equal(int.MaxValue, limits.MaxWidth);
+        Assert.Equal(WorkArea.Height - 200, limits.MaxHeight);
+    }
+
+    /// <summary>A window that has demonstrated nothing is reported as bounded by nothing.</summary>
+    [Fact]
+    public void AWindowThatFitsItsTile_HasNoLimitsToReport()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var ordinary = Window(10);
+        s.Workspace.RaiseWindowAdded(ordinary);
+        Rounds(s, ordinary, 4);
+
+        Assert.Equal((0, 0, int.MaxValue, int.MaxValue), adapter.LimitsOf(ordinary.Handle));
+    }
+
+    /// <summary>
     /// The whole hardware sequence, end to end, in one fact. Broadcast overflowed its half tile and
     /// was untiled in four seconds -- that part worked. Then it was re-admitted into a full-height
     /// column, which it could not fill, and THAT was read as a fight: twelve rounds and

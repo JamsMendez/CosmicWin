@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
@@ -162,7 +162,7 @@ public sealed class CompositionRootTests
 
         public bool ToggleAxis(Node focused) => throw Corrupt();
 
-        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep) =>
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, int minLength = 0, int maxLength = int.MaxValue) =>
             throw Corrupt();
 
         public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) => throw Corrupt();
@@ -366,7 +366,7 @@ public sealed class CompositionRootTests
 
         public bool ToggleAxis(Node focused) => false;
 
-        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep)
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, int minLength = 0, int maxLength = int.MaxValue)
         {
             ResizeNodeCallCount++;
             LastResizeDirection = direction;

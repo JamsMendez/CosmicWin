@@ -109,6 +109,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly HashSet<nint> _clampsInsideItsTile = [];
 
     /// <summary>
+    /// The size a window has PROVEN it will not go OVER, measured the same way as its floor.
+    /// </summary>
+    /// <remarks>
+    /// The other half of a <c>WM_GETMINMAXINFO</c> range, and worth just as much once anything
+    /// tries to resize the window. Growing a tile past this buys nothing but dead space and costs a
+    /// neighbour real room -- measured with NVIDIA Broadcast, whose slot went to 1117 while the
+    /// window stayed at 1000 and the window beside it was squashed to 258 in exchange.
+    /// </remarks>
+    private readonly Dictionary<nint, (int Width, int Height)> _maximumSize = new();
+
+    /// <summary>
     /// Windows the tree has given up on. Refusing re-admission is half the guard, not a detail:
     /// a fighter stays visible, trackable and un-excluded, so the next reconciliation pass would
     /// adopt it straight back and the storm would resume at the same rate.
@@ -951,6 +962,51 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// The ceiling to record from one arrival that could not FILL its tile, taken per AXIS.
+    /// </summary>
+    /// <remarks>
+    /// The mirror of <see cref="FloorFrom"/> and wrong in the same way if it is not: a dimension is
+    /// a ceiling only where the window came back SMALLER than the tile. Where it filled the tile it
+    /// said nothing about a maximum, and recording that would pin it to whatever the smallest slot
+    /// it ever held happened to be.
+    /// </remarks>
+    private (int Width, int Height) CeilingFrom(nint handle, Rectangle landedAt)
+    {
+        _maximumSize.TryGetValue(handle, out var known);
+
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return known;
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        return (
+            landedAt.Width < tile.Width ? landedAt.Width : known.Width,
+            landedAt.Height < tile.Height ? landedAt.Height : known.Height);
+    }
+
+    /// <summary>
+    /// The sizes <paramref name="handle"/> has demonstrated it will not go under or over, for
+    /// anything that would otherwise resize it past them.
+    /// </summary>
+    /// <remarks>
+    /// Zero means no floor demonstrated on that axis and <see cref="int.MaxValue"/> means no
+    /// ceiling, which is every window until it misses a tile and says otherwise. Measured, never
+    /// asked for -- see the remarks on the two dictionaries behind it.
+    /// </remarks>
+    public (int MinWidth, int MinHeight, int MaxWidth, int MaxHeight) LimitsOf(nint handle)
+    {
+        _minimumSize.TryGetValue(handle, out var floor);
+        _maximumSize.TryGetValue(handle, out var ceiling);
+
+        return (
+            floor.Width,
+            floor.Height,
+            ceiling.Width > 0 ? ceiling.Width : int.MaxValue,
+            ceiling.Height > 0 ? ceiling.Height : int.MaxValue);
+    }
+
+    /// <summary>
     /// Renders a floor for the trace, saying only what is actually known. An axis with no
     /// demonstrated minimum is left out rather than printed as a zero nobody can read.
     /// </summary>
@@ -1024,6 +1080,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _misses.Remove(handle);
         _givenUp.Remove(handle);
         _minimumSize.Remove(handle);
+        _maximumSize.Remove(handle);
         _clampsInsideItsTile.Remove(handle);
 
         if (!WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
@@ -1256,6 +1313,8 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 // two seconds for the rest of the session is how the trace stopped being readable
                 // the last time something benign was logged on a tick.
                 case ArrivalVerdict.Underfills:
+                    _maximumSize[handle] = CeilingFrom(handle, before);
+
                     if (_clampsInsideItsTile.Add(handle))
                     {
                         Trace?.Record(

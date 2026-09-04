@@ -285,6 +285,10 @@ public sealed class AppComposition : IDisposable
         // the direction from here, which is the difference between landing on the tile the user
         // pointed at and landing on whatever survived.
         executor.ResolveWindowBounds = handle => resolveAnyWindow(handle)?.Bounds;
+
+        // The fourth, and the only one that reads the adapter rather than the workspace: these are
+        // measured from how a window BEHAVED, which is the adapter's business alone.
+        executor.ResolveSizeLimits = sessionAdapter.LimitsOf;
         workspace.Open();
         hook.Start();
 

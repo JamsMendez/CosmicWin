@@ -193,6 +193,17 @@ public sealed class ActionExecutor(
     public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
 
     /// <summary>
+    /// The sizes a window has demonstrated it will not go under or over. Unset -- as in every test
+    /// that predates it -- a resize is bounded by the layout's ratio alone, exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// Measured from the window's own behaviour by the layer that watches it, never asked for:
+    /// WM_GETMINMAXINFO is readable only by SENDING a message, and a send blocks until the target
+    /// answers.
+    /// </remarks>
+    public Func<nint, (int MinWidth, int MinHeight, int MaxWidth, int MaxHeight)>? ResolveSizeLimits { get; set; }
+
+    /// <summary>
     /// Where a window actually IS, including one the tree does not hold. Unset -- as in every test
     /// that predates it -- a focus chord from outside the tree stays the no-op it always was.
     /// </summary>
@@ -283,10 +294,10 @@ public sealed class ActionExecutor(
             case HotkeyActionKind.MoveUp: MutateScope(focused, (e, n) => e.MoveNode(Direction.Up, n)); break;
             case HotkeyActionKind.MoveDown: MutateScope(focused, (e, n) => e.MoveNode(Direction.Down, n)); break;
             case HotkeyActionKind.ToggleOrientation: MutateScope(focused, (e, n) => e.ToggleAxis(n)); break;
-            case HotkeyActionKind.ResizeLeft: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Left, n)); break;
-            case HotkeyActionKind.ResizeRight: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Right, n)); break;
-            case HotkeyActionKind.ResizeUp: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Up, n)); break;
-            case HotkeyActionKind.ResizeDown: MutateScope(focused, (e, n) => e.ResizeNode(Direction.Down, n)); break;
+            case HotkeyActionKind.ResizeLeft: ResizeScope(focused, Direction.Left); break;
+            case HotkeyActionKind.ResizeRight: ResizeScope(focused, Direction.Right); break;
+            case HotkeyActionKind.ResizeUp: ResizeScope(focused, Direction.Up); break;
+            case HotkeyActionKind.ResizeDown: ResizeScope(focused, Direction.Down); break;
             case HotkeyActionKind.FocusOut: AscendScope(focused); break;
             case HotkeyActionKind.FocusIn: DescendScope(focused); break;
         }
@@ -1106,6 +1117,44 @@ public sealed class ActionExecutor(
     /// arrange-and-position step after a window is added or removed) — on the SAME tree/work area
     /// <paramref name="focused"/> was just mutated on.
     /// </summary>
+    /// <summary>
+    /// A resize that stops where the WINDOW stops, rather than where the layout's ratio does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured with NVIDIA Broadcast, which will not go under 772 tall and will not go over 1000.
+    /// Shrinking past the floor became a tug of war -- the chord took the slot to 703 and the
+    /// adapter gave the space straight back, five presses producing five rounds and no movement.
+    /// Growing past the ceiling was worse because nothing corrected it: the slot went to 1117, the
+    /// window stayed at 1000, and the neighbour was squashed to 258 in exchange for dead space.
+    /// </para>
+    /// <para>
+    /// Slot lengths rather than tile lengths, because the gap is deflated off every slot
+    /// identically -- a slot held to floor-plus-gap holds the tile to the floor.
+    /// </para>
+    /// <para>
+    /// Left and Right resize the width, Up and Down the height, because that is the axis
+    /// ResizeNode's matching ancestor divides.
+    /// </para>
+    /// </remarks>
+    private void ResizeScope(LeafNode focused, Direction direction)
+    {
+        var min = 0;
+        var max = int.MaxValue;
+
+        if (ResolveSizeLimits?.Invoke(focused.Window.Handle) is { } limits)
+        {
+            var sideways = direction is Direction.Left or Direction.Right;
+            var floor = sideways ? limits.MinWidth : limits.MinHeight;
+            var ceiling = sideways ? limits.MaxWidth : limits.MaxHeight;
+
+            min = floor > 0 ? floor + TreeArranger.Gap : 0;
+            max = ceiling < int.MaxValue ? ceiling + TreeArranger.Gap : int.MaxValue;
+        }
+
+        MutateScope(focused, (e, n) => e.ResizeNode(direction, n, LayoutTree.DefaultResizeStep, min, max));
+    }
+
     private void MutateScope(LeafNode focused, Func<ITilingEngine, Node, bool> mutate)
     {
         var (localEngine, workArea) = ResolveEngineAndWorkArea(focused);
