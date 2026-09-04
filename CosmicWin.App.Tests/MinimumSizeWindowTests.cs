@@ -695,6 +695,189 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>
+    /// Closing a neighbour is not the only way a slot can grow, and it must not be the only way
+    /// back into the tree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use and reproduced immediately. Alt+O with NVIDIA Broadcast on screen
+    /// stacks the group, its tile becomes 3424x244 against a floor of 772, and it is untiled --
+    /// correct, a 244-pixel row genuinely cannot hold it. Pressing Alt+O again puts the columns
+    /// back, 1383 tall, which clears that floor with room to spare. Nothing asked:
+    /// </para>
+    /// <para>
+    /// <c>20:17:38 border around 0xA0876 [L=2041 T=8 W=1391 H=1376]</c> -- and that was the ONLY
+    /// line. No guard state, no added, the window still floating at 8,1140.
+    /// </para>
+    /// <para>
+    /// The retry was wired to one event, a window LEAVING, on the reasoning that admitting one only
+    /// ever divides the space further. True, and beside the point: an orientation toggle, a resize
+    /// chord and a drag all reshape slots without anything leaving, and every one of them left the
+    /// user with a floating window and no way back except closing something.
+    /// </para>
+    /// <para>
+    /// Affordable now for a reason. Re-offering the tree used to mean inserting the window,
+    /// reflowing the display, measuring and undoing it; today a known floor is measured against the
+    /// tile the tree WOULD hand out, arranging without moving anything. Asking often costs a
+    /// dictionary scan that is empty on almost every pass.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WhenTheLayoutChangesShapeWithoutAnythingClosing_TheParkedWindowIsAskedAgain()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+
+        // Shorter than a full-height column and taller than any row this many windows can make, so
+        // the toggle alone decides whether it fits. THREE windows, because untiling one of two
+        // collapses the group and leaves no axis to toggle back.
+        constrained.MinimumSize = (100, WorkArea.Height - 200);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+        Assert.True(InTree(s, constrained.Handle));
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+
+        Rounds(s, constrained, 3);
+        Assert.False(InTree(s, constrained.Handle));
+
+        // The user presses the same chord again. Nothing closes; the slots simply grow back.
+        Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var survivor) && survivor is not null);
+        Assert.True(LayoutTree.ToggleAxis(survivor!));
+
+        // What the OS reports once the reflow lands, and the only thing this adapter ever hears
+        // about a layout the user changed through a chord.
+        s.Workspace.RaiseWindowBoundsChanged(neighbour);
+
+        Assert.True(InTree(s, constrained.Handle));
+    }
+
+    /// <summary>
+    /// The reshape a CHORD performs reaches this adapter through no event at all, so it needs its
+    /// own way in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first cut of this fix hung on WindowBoundsChanged and did nothing on hardware. A chord
+    /// reflow moves windows through <c>TreeArranger</c>, <c>Win32Window.SetPosition</c> writes the
+    /// asked-for rectangle straight into the cached bounds, and by the time the WinEvent lands
+    /// <c>Win32Workspace.UpdateBounds</c> is comparing the rectangle against itself and reports NO
+    /// change. That is documented in TreeArranger and it is the whole reason the focus border needs
+    /// its own callback.
+    /// </para>
+    /// <para>
+    /// So a compliant window moving raises nothing, and the two Alt+O presses that produced the
+    /// report emitted not one <c>guard state</c> line for the parked window -- the retry never ran.
+    /// The headless fact passed only because the test raised the event by hand: the stimulus was
+    /// not what production produces.
+    /// </para>
+    /// <para>
+    /// The chord's own completion is the signal, which is what the executor's AfterAction already
+    /// is -- the same hook the border uses, and for the same reason.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WhenAChordReshapesTheLayout_TheParkedWindowIsAskedAgain()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+        constrained.MinimumSize = (100, WorkArea.Height - 200);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(s.Registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.True(LayoutTree.ToggleAxis(leaf!));
+        Rounds(s, constrained, 3);
+        Assert.False(InTree(s, constrained.Handle));
+
+        // The user presses the chord again. Nothing moves out of band and nothing closes, so this
+        // call is the ONLY thing that happens -- exactly as it is in production.
+        Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var survivor) && survivor is not null);
+        Assert.True(LayoutTree.ToggleAxis(survivor!));
+        adapter.RetryParkedWindows();
+
+        Assert.True(InTree(s, constrained.Handle));
+    }
+
+    /// <summary>The same call, and still not a pardon.</summary>
+    [Fact]
+    public void WhenAChordReshapesButStillDoesNotFit_TheParkedWindowStaysOut()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+        constrained.MinimumSize = (WorkArea.Width * 2, 100);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Rounds(s, constrained, 3);
+        Assert.False(InTree(s, constrained.Handle));
+
+        adapter.RetryParkedWindows();
+
+        Assert.False(InTree(s, constrained.Handle));
+        Assert.True(InTree(s, neighbour.Handle));
+    }
+
+    /// <summary>
+    /// And asking again is still not letting it in: a reshape that does NOT free enough leaves the
+    /// window exactly where it was.
+    /// </summary>
+    /// <remarks>
+    /// The retry re-measures rather than forgives, and the cheap path has to keep that promise or
+    /// the whole floor becomes advisory.
+    /// </remarks>
+    [Fact]
+    public void WhenTheLayoutReshapesButStillDoesNotFit_TheParkedWindowStaysOut()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var second = Window(30);
+        var constrained = Window(20);
+
+        // A floor no arrangement on this work area can satisfy, so no reshape can ever help.
+        constrained.MinimumSize = (WorkArea.Width * 2, 100);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(second);
+        s.Workspace.RaiseWindowAdded(constrained);
+
+        Rounds(s, constrained, 3);
+        Assert.False(InTree(s, constrained.Handle));
+
+        Assert.True(s.Registry.TryGetLeaf(neighbour.Handle, out var survivor) && survivor is not null);
+        Assert.True(LayoutTree.ToggleAxis(survivor!));
+        s.Workspace.RaiseWindowBoundsChanged(neighbour);
+
+        Assert.False(InTree(s, constrained.Handle));
+        Assert.True(InTree(s, neighbour.Handle));
+    }
+
+    /// <summary>
     /// The whole hardware sequence, end to end, in one fact. Broadcast overflowed its half tile and
     /// was untiled in four seconds -- that part worked. Then it was re-admitted into a full-height
     /// column, which it could not fill, and THAT was read as a fight: twelve rounds and

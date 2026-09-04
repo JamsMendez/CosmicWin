@@ -429,6 +429,44 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// Offers the tree again to every parked window, wherever it is parked. Called once per chord.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A chord that reshapes the layout -- an orientation toggle, a resize, a move -- reaches this
+    /// adapter through NO event at all. The reflow moves windows through <see cref="TreeArranger"/>
+    /// and <c>Win32Window.SetPosition</c> writes the asked-for rectangle straight into the cached
+    /// bounds, so by the time the WinEvent lands <c>Win32Workspace.UpdateBounds</c> compares the
+    /// rectangle against itself and reports no change. A compliant window moving is silent, which
+    /// is the same reason the focus border needs its own callback rather than a bounds event.
+    /// </para>
+    /// <para>
+    /// Reported from real use: Alt+O stacks the group and NVIDIA Broadcast is untiled for its
+    /// floor -- correct. Alt+O again puts the columns back, which clears that floor, and nothing
+    /// asked. The first cut of the fix hung on WindowBoundsChanged and changed NOTHING on hardware;
+    /// the trace carried not one <c>guard state</c> line for the parked window. It passed headless
+    /// only because the test raised the event by hand.
+    /// </para>
+    /// <para>
+    /// The displays come from the parked windows themselves rather than from a monitor list: a
+    /// window with a floor on record remembers where it was last seen, and a display with nothing
+    /// parked on it has nothing to ask.
+    /// </para>
+    /// <para>
+    /// Terminates. Admission either tiles the window or leaves it untiled without touching it, and
+    /// neither path re-enters here -- this is called from the executor's post-chord hook, which
+    /// nothing in admission reaches.
+    /// </para>
+    /// </remarks>
+    public void RetryParkedWindows()
+    {
+        foreach (var display in _minimumSize.Values.Select(parked => parked.LastSeenOn).Distinct().ToArray())
+        {
+            RetryParkedOn(display);
+        }
+    }
+
+    /// <summary>
     /// Offers the tree again to every window parked on <paramref name="display"/> for not fitting.
     /// </summary>
     /// <remarks>
@@ -1042,6 +1080,26 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         {
             _owners.Remove(handle);
         }
+
+        // A tiled window moving is this adapter's only evidence that the SHAPE of the display
+        // changed, and a reshape is the other moment a slot can grow.
+        //
+        // Reported from real use: Alt+O stacks the group, NVIDIA Broadcast's tile becomes 244
+        // pixels tall against a floor of 772 and it is untiled -- correct. Alt+O again puts the
+        // columns back, 1383 tall, and nothing asked. The retry was wired to a window LEAVING, on
+        // the reasoning that admitting one only ever divides the space further; true, and beside
+        // the point, because an orientation toggle, a resize chord and a drag all reshape slots
+        // without anything leaving. The user was left with a floating window and no way back except
+        // closing something.
+        //
+        // Affordable because admission with a floor already on record no longer costs a reflow: it
+        // arranges to measure and moves nothing. On the overwhelming majority of passes there is
+        // nothing parked and this is a dictionary scan over an empty set.
+        //
+        // Terminates without a guard. RetryParkedOn announces an arrival, and admission either
+        // tiles the window or leaves it untiled without touching it -- neither path re-enters this
+        // one, and `_arriving` already refuses a re-entrant announcement.
+        RetryParkedOn(display);
     }
 
     /// <summary>

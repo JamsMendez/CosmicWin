@@ -439,7 +439,16 @@ public sealed class AppComposition : IDisposable
 
         // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused
         // without moving anything at all, and the border still has to go and find it.
-        executor.AfterAction = () => onOwningThread(UpdateFocusBorder);
+        // Two things after every chord, in this order. A chord that reshapes the layout reaches the
+        // adapter through no event at all -- a compliant window moving writes its own new bounds
+        // into the cache, so the reconciliation pass compares the rectangle against itself and
+        // reports nothing -- which is the same reason the border below cannot wait for one either.
+        // Parked windows are asked FIRST so the border is drawn on the layout that results.
+        executor.AfterAction = () =>
+        {
+            sessionAdapter.RetryParkedWindows();
+            onOwningThread(UpdateFocusBorder);
+        };
 
         // Following the window itself, not just the chord that moved it. An application may take
         // several frames to settle where it was put -- Windows Terminal animates its resize -- so a
