@@ -501,12 +501,18 @@ public sealed class AppComposition : IDisposable
             // stretch of chords looks like from the user's side, and it used to leave no record at
             // all. Without this line a stretch caused by a ghosted hook and one caused by a lost
             // modifier read identically in the trace.
+            //
+            // `foundGone` is the half that decides whether the watchdog is the cure or the disease.
+            // Its trigger is silence, not death, and a keyboard is silent nearly all the time -- so
+            // a total that climbs while this stays at zero says every one of those reinstalls tore
+            // down a hook Windows was still holding, and opened a gap for nothing.
             var reinstalls = hook.WatchdogReinstalls;
             if (reinstalls != lastReportedReinstalls)
             {
                 desktopTrace?.Record(
                     $"hook reinstalled by watchdog -- total={reinstalls} " +
-                    $"(+{reinstalls - lastReportedReinstalls} since last report)");
+                    $"(+{reinstalls - lastReportedReinstalls} since last report) " +
+                    $"foundGone={hook.WatchdogFoundHookGone}");
                 lastReportedReinstalls = reinstalls;
             }
 

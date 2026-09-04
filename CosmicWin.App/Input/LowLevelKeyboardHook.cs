@@ -172,11 +172,26 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private Exception? _startupFailure;
     private long _lastActivity;
     private int _watchdogReinstalls;
+    private int _watchdogFoundHookGone;
 
     public bool? UnhookSucceeded { get; private set; }
 
     /// <summary>How many times the watchdog has put the hook back.</summary>
     public int WatchdogReinstalls => Volatile.Read(ref _watchdogReinstalls);
+
+    /// <summary>
+    /// How many of those reinstalls found the hook ALREADY GONE, which is the only kind that
+    /// rescued anything.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WatchdogReinstalls"/> alone cannot tell the two stories apart. The watchdog's
+    /// condition is that no key has arrived for its interval -- the resting state of every
+    /// keyboard -- and it makes no test of whether the hook is alive. UnhookWindowsHookEx IS that
+    /// test, and the watchdog already calls it: it succeeds on a handle Windows still holds and
+    /// fails on one Windows has already removed. Counted on the watchdog path only, never on the
+    /// teardown in <see cref="Dispose"/>.
+    /// </remarks>
+    public int WatchdogFoundHookGone => Volatile.Read(ref _watchdogFoundHookGone);
 
     /// <summary>Pass-through onto <see cref="_processor"/> -- the tray writes through the hook, never the processor directly.</summary>
     public bool IsPaused
@@ -225,7 +240,11 @@ public sealed class LowLevelKeyboardHook : IDisposable
                 _platform.PumpMessages();
                 if (_clock() - Volatile.Read(ref _lastActivity) >= _watchdogInterval.TotalMilliseconds)
                 {
-                    RecordUninstall();
+                    // The result is the diagnosis. This unhook succeeds on a handle Windows still
+                    // holds and fails on one Windows has already thrown away, so it says whether
+                    // the hook being replaced was dead -- and therefore whether the watchdog has
+                    // ever rescued anything, or has only ever been opening gaps in a healthy hook.
+                    var wasStillInstalled = RecordUninstall();
                     _platform.Install(OnKeyboardEvent);
                     Volatile.Write(ref _lastActivity, _clock());
 
@@ -233,6 +252,10 @@ public sealed class LowLevelKeyboardHook : IDisposable
                     // this thread: a hook that touches a file is a hook Windows uninstalls, which
                     // is the very failure this counter exists to make visible.
                     Interlocked.Increment(ref _watchdogReinstalls);
+                    if (!wasStillInstalled)
+                    {
+                        Interlocked.Increment(ref _watchdogFoundHookGone);
+                    }
                 }
                 _stop.Token.WaitHandle.WaitOne(5);
             }
@@ -254,8 +277,20 @@ public sealed class LowLevelKeyboardHook : IDisposable
         return _processor.Process(key, isKeyDown, modifiers, _writer);
     }
 
-    private void RecordUninstall() =>
-        UnhookSucceeded = (UnhookSucceeded ?? true) && _platform.Uninstall();
+    /// <summary>
+    /// Unhooks and folds the result into <see cref="UnhookSucceeded"/>, reporting it as well.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="UnhookSucceeded"/> is a sticky AND over the process lifetime, which answers "did
+    /// anything ever go wrong" and cannot answer "did THIS one". The watchdog needs the second
+    /// question, once per reinstall.
+    /// </remarks>
+    private bool RecordUninstall()
+    {
+        var succeeded = _platform.Uninstall();
+        UnhookSucceeded = (UnhookSucceeded ?? true) && succeeded;
+        return succeeded;
+    }
 
     public void Dispose()
     {

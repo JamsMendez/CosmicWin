@@ -193,6 +193,83 @@ public sealed class KeyboardHookTests
         Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromSeconds(2)));
     }
 
+    /// <summary>
+    /// And of those reinstalls, how many found a hook that was ACTUALLY GONE.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The counter above says the watchdog fired 200 times in twenty minutes. It does not say
+    /// whether it was ever needed once, and those are completely different findings: one is a
+    /// window manager rescuing itself from a hook Windows keeps killing, the other is a window
+    /// manager tearing down a healthy hook every five seconds and opening 200 gaps a keypress can
+    /// fall into.
+    /// </para>
+    /// <para>
+    /// `_lastActivity` moves only when a key arrives, so the watchdog's condition is "nobody has
+    /// typed for five seconds" -- which is the resting state of every keyboard. It has no test of
+    /// whether the hook is alive at all.
+    /// </para>
+    /// <para>
+    /// UnhookWindowsHookEx is that test, and it is already being called. It succeeds on a handle
+    /// Windows still holds and FAILS on one Windows has already removed, so its result at the
+    /// moment of the reinstall says which of the two stories is true -- for free, on a call the
+    /// watchdog makes anyway.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WhoseUnhookSucceeds_ReplacedAHookThatWasStillInstalled()
+    {
+        var platform = new FakeKeyboardHookPlatform { UninstallResult = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromSeconds(2)));
+
+        Assert.Equal(0, hook.WatchdogFoundHookGone);
+    }
+
+    /// <summary>
+    /// The other half, and the only one that would justify the watchdog: a handle Windows had
+    /// already thrown away.
+    /// </summary>
+    /// <remarks>
+    /// Counted on the WATCHDOG path alone. The teardown in Dispose calls the same unhook, and a
+    /// counter that included it would report one phantom rescue on every shutdown of a build whose
+    /// hook was healthy the whole time.
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WhoseUnhookFails_ReplacedAHookWindowsHadAlreadyRemoved()
+    {
+        var platform = new FakeKeyboardHookPlatform { UninstallResult = false };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogFoundHookGone >= 1, TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>Shutting down is not a rescue: the unhook in Dispose never moves that counter.</summary>
+    [Fact]
+    public void Disposing_ADeadHook_IsNotCountedAsAWatchdogRescue()
+    {
+        var platform = new FakeKeyboardHookPlatform { UninstallResult = false };
+        var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => 0);
+        hook.Start();
+
+        hook.Dispose();
+
+        Assert.Equal(0, hook.WatchdogFoundHookGone);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
