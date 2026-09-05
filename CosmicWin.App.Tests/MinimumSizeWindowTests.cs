@@ -1339,20 +1339,7 @@ public sealed class MinimumSizeWindowTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void AWindowWithAFloor_IsMarkedAsConstrained()
-    {
-        var (s, adapter, _, constrained) = SideBySide();
-        using var _adapter = adapter;
-
-        Assert.False(adapter.IsConstrained(constrained.Handle));
-
-        Rounds(s, constrained, 3);
-
-        Assert.True(adapter.IsConstrained(constrained.Handle));
-    }
-
-    [Fact]
-    public void AWindowWithOnlyACeiling_IsMarkedAsConstrainedToo()
+    public void AWindowThatCannotFillTheTileItHolds_IsMarked()
     {
         var s = OneDisplay();
         var adapter = Adapter(s);
@@ -1362,6 +1349,80 @@ public sealed class MinimumSizeWindowTests
         clamped.MaximumSize = (WorkArea.Width - 400, WorkArea.Height - 200);
         s.Workspace.RaiseWindowAdded(clamped);
 
+        Rounds(s, clamped, 4);
+
+        Assert.True(adapter.IsConstrained(clamped.Handle));
+    }
+
+    /// <summary>
+    /// A limit the window's CURRENT tile clears is no reason to mark it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use, and it is the difference between a useful mark and a useless one.
+    /// Windows Terminal, pushed around with move chords until it was squeezed, demonstrated a floor
+    /// of 464 wide -- `given a share ... so 464 wide fits` -- and from then on wore the broken
+    /// border for the rest of the session while sitting in an 864-wide tile it filled completely.
+    /// </para>
+    /// <para>
+    /// Squeeze anything hard enough and it will name a size eventually. Alacritty produced 32 tall
+    /// and Chrome a ceiling of 850x1153 in the same session, so a mark earned once and kept forever
+    /// drifts until every window is wearing it and it means nothing at all.
+    /// </para>
+    /// <para>
+    /// The mark is a statement about NOW: this window is not sitting where its tile says it is. A
+    /// window filling its tile is described exactly by that tile, whatever it once refused in some
+    /// other arrangement.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowWhoseLimitItsCurrentTileClears_IsNotMarked()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var neighbour = Window(10);
+        var roomy = Window(20);
+
+        // A floor it has to DEMONSTRATE first -- recording one is the whole precondition, and a
+        // window that never misses a tile never records anything to be wrong about.
+        roomy.MinimumSize = (1400, 100);
+
+        s.Workspace.RaiseWindowAdded(neighbour);
+        s.Workspace.RaiseWindowAdded(roomy);
+
+        // Beside a neighbour it overflows its half and NAMES the floor, which is all this needs --
+        // whether it is then parked or given a share is the layout's business and not the mark's.
+        Rounds(s, roomy, 3);
+        Assert.NotEqual(0, adapter.LimitsOf(roomy.Handle).MinWidth);
+
+        // The neighbour goes and it is tiled alone, in a tile far wider than the floor it named.
+        s.Workspace.RaiseWindowRemoved(neighbour);
+        Rounds(s, roomy, EnoughRounds);
+
+        Assert.True(InTree(s, roomy.Handle));
+        Assert.False(adapter.IsConstrained(roomy.Handle));
+    }
+
+    /// <summary>And it comes back the moment the tile stops clearing it.</summary>
+    [Fact]
+    public void TheMark_FollowsWhetherTheLimitCurrentlyBites()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+        clamped.MaximumSize = (WorkArea.Width, WorkArea.Height - 200);
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        Rounds(s, clamped, 4);
+        Assert.True(adapter.IsConstrained(clamped.Handle));
+
+        // A neighbour arrives and halves the width; the height it cannot fill is unchanged, so the
+        // ceiling still bites and the mark stays.
+        s.Workspace.RaiseWindowAdded(Window(20));
         Rounds(s, clamped, 4);
 
         Assert.True(adapter.IsConstrained(clamped.Handle));
@@ -1383,18 +1444,27 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>And the mark is forgotten with the window, like everything else about it.</summary>
+    /// <summary>
+    /// The record behind the mark dies with the window, because Windows reuses HWND values.
+    /// </summary>
+    /// <remarks>
+    /// Measured through <see cref="MultiMonitorWorkspaceAdapter.LimitsOf"/> rather than the mark
+    /// itself: the mark asks whether a limit bites the tile the window currently holds, and a
+    /// window that has been removed holds none. Only the record can say whether the adapter is
+    /// still carrying something a future window with that handle would inherit.
+    /// </remarks>
     [Fact]
-    public void TheMark_IsForgottenWhenTheWindowGoes()
+    public void TheRecordBehindTheMark_IsForgottenWhenTheWindowGoes()
     {
         var (s, adapter, _, constrained) = SideBySide();
         using var _adapter = adapter;
 
         Rounds(s, constrained, 3);
-        Assert.True(adapter.IsConstrained(constrained.Handle));
+        Assert.NotEqual((0, 0, int.MaxValue, int.MaxValue), adapter.LimitsOf(constrained.Handle));
 
         s.Workspace.RaiseWindowRemoved(constrained);
 
-        Assert.False(adapter.IsConstrained(constrained.Handle));
+        Assert.Equal((0, 0, int.MaxValue, int.MaxValue), adapter.LimitsOf(constrained.Handle));
     }
 
     /// <summary>

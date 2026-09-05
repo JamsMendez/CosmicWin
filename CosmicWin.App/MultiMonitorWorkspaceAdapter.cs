@@ -986,15 +986,52 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
-    /// Whether this window has demonstrated a size it will not go under or over.
+    /// Whether a size this window will not accept BITES the tile it is holding right now.
     /// </summary>
     /// <remarks>
-    /// Asked by anything that has to tell the user the window will not behave like the others --
-    /// its tile is not the whole story about where it will sit, so a tile-shaped answer about it is
-    /// only half true.
+    /// <para>
+    /// Asked by anything that has to tell the user this window will not behave like the others: its
+    /// tile is not the whole story about where it sits, so a tile-shaped answer about it is only
+    /// half true.
+    /// </para>
+    /// <para>
+    /// A statement about NOW, not about anything the window once refused. The first cut asked only
+    /// whether a limit had ever been recorded, and it drifted: Windows Terminal, pushed around with
+    /// move chords until it was squeezed, named a floor of 464 wide and then wore the mark for the
+    /// rest of the session while sitting in an 864-wide tile it filled completely. Squeeze anything
+    /// hard enough and it will name a size eventually -- Alacritty produced 32 tall and Chrome a
+    /// ceiling of 850x1153 in that same session -- so a mark earned once and kept forever ends up on
+    /// every window and means nothing.
+    /// </para>
+    /// <para>
+    /// A window filling its tile is described exactly by that tile, whatever it refused in some
+    /// other arrangement. The record is still kept, because it is what the layout reasons with; only
+    /// the MARK is about the present.
+    /// </para>
     /// </remarks>
-    public bool IsConstrained(nint handle) =>
-        _minimumSize.ContainsKey(handle) || _maximumSize.ContainsKey(handle);
+    public bool IsConstrained(nint handle)
+    {
+        if (!_registry.TryGetLeaf(handle, out var leaf) || leaf is null)
+        {
+            return false;
+        }
+
+        var tile = TreeArranger.TileOf(leaf);
+        if (tile.Width <= 0 || tile.Height <= 0)
+        {
+            return false;
+        }
+
+        if (_minimumSize.TryGetValue(handle, out var floor)
+            && (floor.Width > tile.Width || floor.Height > tile.Height))
+        {
+            return true;
+        }
+
+        return _maximumSize.TryGetValue(handle, out var ceiling)
+            && ((ceiling.Width > 0 && ceiling.Width < tile.Width)
+                || (ceiling.Height > 0 && ceiling.Height < tile.Height));
+    }
 
     /// <summary>
     /// The sizes <paramref name="handle"/> has demonstrated it will not go under or over, for
