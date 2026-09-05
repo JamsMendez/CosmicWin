@@ -16,14 +16,14 @@ public interface ITilingEngine
 
     bool ToggleAxis(Node focused);
 
-    /// <param name="minLength">
-    /// A length <paramref name="focused"/> may not be taken under, when it is the node that
-    /// actually moves. Zero means no limit.
+    /// <param name="limitsOf">
+    /// The lengths a NODE may not be taken under or grown past, along a given axis. Consulted for
+    /// the node that moves AND for the one that gives the space up. Null means neither is bounded
+    /// by anything but the layout's own ratio.
     /// </param>
-    /// <param name="maxLength">A length it may not be grown past, on the same terms.</param>
     bool ResizeNode(
         Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep,
-        int minLength = 0, int maxLength = int.MaxValue);
+        Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null);
 
     IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea);
 

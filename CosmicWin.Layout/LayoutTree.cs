@@ -40,8 +40,9 @@ public sealed class LayoutTree : ITilingEngine
     bool ITilingEngine.ToggleAxis(Node focused) => ToggleAxis(focused);
 
     bool ITilingEngine.ResizeNode(
-        Direction direction, Node focused, double step, int minLength, int maxLength) =>
-        ResizeNode(direction, focused, step, DefaultMinRatio, minLength, maxLength);
+        Direction direction, Node focused, double step,
+        Func<Node, SplitAxis, (int Min, int Max)>? limitsOf) =>
+        ResizeNode(direction, focused, step, DefaultMinRatio, limitsOf);
 
     bool ITilingEngine.Remove(Node focused) => Remove(focused);
 
@@ -657,20 +658,18 @@ public sealed class LayoutTree : ITilingEngine
     /// LE-6: grows the focused subtree by transferring space from its directional neighbor in
     /// the nearest matching-axis ancestor, without allowing that neighbor below the minimum.
     /// </summary>
-    /// <param name="minLength">
-    /// A length <paramref name="focused"/> may not be taken under, when it is the node that
-    /// actually moves. Zero means no limit, which is every caller that has never measured a window.
-    /// </param>
-    /// <param name="maxLength">
-    /// A length <paramref name="focused"/> may not be grown past, on the same terms.
+    /// <param name="limitsOf">
+    /// The lengths a NODE may not be taken under or grown past, along a given axis. Consulted twice
+    /// per resize -- once for the node that moves and once for the one that gives the space up --
+    /// because a boundary has two sides, and bounding only one of them moves the problem rather
+    /// than solving it. Null is every caller that has never measured a window.
     /// </param>
     public static bool ResizeNode(
         Direction direction,
         Node focused,
         double step = DefaultResizeStep,
         double minRatio = DefaultMinRatio,
-        int minLength = 0,
-        int maxLength = int.MaxValue)
+        Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null)
     {
         // Grow into the neighbour on the pressed side when there is one...
         var match = FindMatchingAncestor(direction, focused);
@@ -691,7 +690,7 @@ public sealed class LayoutTree : ITilingEngine
             MidpointRounding.AwayFromZero);
 
         return TransferAcross(
-            effective, focused, grows ? requestedTransfer : -requestedTransfer, minRatio, minLength, maxLength);
+            effective, focused, grows ? requestedTransfer : -requestedTransfer, minRatio, limitsOf);
     }
 
     /// <summary>
@@ -829,7 +828,7 @@ public sealed class LayoutTree : ITilingEngine
     /// </remarks>
     private static bool TransferAcross(
         Direction direction, Node focused, int growth, double minRatio,
-        int minLength = 0, int maxLength = int.MaxValue)
+        Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null)
     {
         if (growth == 0)
         {
@@ -852,18 +851,23 @@ public sealed class LayoutTree : ITilingEngine
         int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
         int transfer = Math.Min(Math.Abs(growth), ancestor.Sizes[donorIndex] - minimumSize);
 
-        // The caller's limits describe a WINDOW, so they apply only when the window itself is what
-        // moves. A resize walks up to the nearest matching-axis ancestor, and what moves there may
-        // be a whole branch holding several windows -- one window's floor says nothing about how
-        // short that branch may be, and honouring it would let a single constrained window pin a
-        // group it merely happens to live in.
-        if (ReferenceEquals(ancestor.Children[targetIndex], focused))
+        // Asked of the RECEIVER and the DONOR, not of whoever happens to be focused. A boundary has
+        // two sides and the chord may be pressed from either, so naming them by role is the only
+        // way to bound both without writing the same rule twice.
+        //
+        // Both halves came from real use. Bounding only the node that MOVES let a neighbour grown
+        // upward push NVIDIA Broadcast's slot to 703 and then 634 while the chord stayed inside its
+        // own limits the whole time -- a window is invaded by its neighbour's resize exactly as
+        // easily as by its own. And bounding only the FOCUSED node's ceiling let the opposite
+        // happen: shrinking the neighbour handed Broadcast a slot it could not fill, 110 pixels of
+        // dead space bought with a real window's room.
+        if (limitsOf is not null)
         {
-            var room = growth > 0
-                ? maxLength - ancestor.Sizes[targetIndex]
-                : ancestor.Sizes[targetIndex] - minLength;
+            var receiverCeiling = limitsOf(ancestor.Children[receiverIndex], ancestor.Axis).Max;
+            transfer = Math.Min(transfer, receiverCeiling - ancestor.Sizes[receiverIndex]);
 
-            transfer = Math.Min(transfer, room);
+            var donorFloor = limitsOf(ancestor.Children[donorIndex], ancestor.Axis).Min;
+            transfer = Math.Min(transfer, ancestor.Sizes[donorIndex] - donorFloor);
         }
 
         if (transfer <= 0)

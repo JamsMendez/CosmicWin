@@ -1139,20 +1139,65 @@ public sealed class ActionExecutor(
     /// </remarks>
     private void ResizeScope(LeafNode focused, Direction direction)
     {
-        var min = 0;
-        var max = int.MaxValue;
+        Func<Node, SplitAxis, (int Min, int Max)>? limits =
+            ResolveSizeLimits is null ? null : LimitsOfNode;
 
-        if (ResolveSizeLimits?.Invoke(focused.Window.Handle) is { } limits)
+        MutateScope(focused, (e, n) => e.ResizeNode(direction, n, LayoutTree.DefaultResizeStep, limits));
+    }
+
+    /// <summary>
+    /// The lengths a node may not be taken under or grown past, along <paramref name="axis"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A LEAF answers for its window, in SLOT lengths rather than tile lengths: the gap is deflated
+    /// off every slot identically, so a slot held to floor-plus-gap holds the tile to the floor.
+    /// </para>
+    /// <para>
+    /// A GROUP answers for everything inside it, because a branch is invaded exactly as easily as a
+    /// window -- and a window with a floor is usually nested rather than a direct sibling of
+    /// whoever is being resized. Along the group's own axis its children sit end to end, so their
+    /// floors ADD; across it they overlap, so the largest wins.
+    /// </para>
+    /// <para>
+    /// Nothing is claimed about a group's ceiling. A branch that cannot be filled is a gap inside
+    /// itself, which is nobody else's business and certainly not a reason to refuse a neighbour
+    /// room.
+    /// </para>
+    /// </remarks>
+    private (int Min, int Max) LimitsOfNode(Node node, SplitAxis axis)
+    {
+        if (node is LeafNode leaf)
         {
-            var sideways = direction is Direction.Left or Direction.Right;
-            var floor = sideways ? limits.MinWidth : limits.MinHeight;
-            var ceiling = sideways ? limits.MaxWidth : limits.MaxHeight;
+            if (ResolveSizeLimits?.Invoke(leaf.Window.Handle) is not { } window)
+            {
+                return (0, int.MaxValue);
+            }
 
-            min = floor > 0 ? floor + TreeArranger.Gap : 0;
-            max = ceiling < int.MaxValue ? ceiling + TreeArranger.Gap : int.MaxValue;
+            var sideways = axis == SplitAxis.Horizontal;
+            var floor = sideways ? window.MinWidth : window.MinHeight;
+            var ceiling = sideways ? window.MaxWidth : window.MaxHeight;
+
+            return (
+                floor > 0 ? floor + TreeArranger.Gap : 0,
+                ceiling < int.MaxValue ? ceiling + TreeArranger.Gap : int.MaxValue);
         }
 
-        MutateScope(focused, (e, n) => e.ResizeNode(direction, n, LayoutTree.DefaultResizeStep, min, max));
+        if (node is not GroupNode group || group.Children.Count == 0)
+        {
+            return (0, int.MaxValue);
+        }
+
+        var stacked = 0;
+        var widest = 0;
+        foreach (var child in group.Children)
+        {
+            var childFloor = LimitsOfNode(child, axis).Min;
+            stacked += childFloor;
+            widest = Math.Max(widest, childFloor);
+        }
+
+        return (group.Axis == axis ? stacked : widest, int.MaxValue);
     }
 
     private void MutateScope(LeafNode focused, Func<ITilingEngine, Node, bool> mutate)

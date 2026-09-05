@@ -239,7 +239,7 @@ public sealed class WorkspaceSessionAdapterPauseTests
 
         public bool ToggleAxis(Node focused) => false;
 
-        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, int minLength = 0, int maxLength = int.MaxValue) => false;
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null) => false;
 
         public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) =>
             Array.Empty<(WindowRef, Rect)>();

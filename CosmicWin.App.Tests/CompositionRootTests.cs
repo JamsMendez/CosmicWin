@@ -162,7 +162,7 @@ public sealed class CompositionRootTests
 
         public bool ToggleAxis(Node focused) => throw Corrupt();
 
-        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, int minLength = 0, int maxLength = int.MaxValue) =>
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null) =>
             throw Corrupt();
 
         public IReadOnlyList<(WindowRef Window, Rect Bounds)> Arrange(Rect workArea) => throw Corrupt();
@@ -366,7 +366,7 @@ public sealed class CompositionRootTests
 
         public bool ToggleAxis(Node focused) => false;
 
-        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, int minLength = 0, int maxLength = int.MaxValue)
+        public bool ResizeNode(Direction direction, Node focused, double step = LayoutTree.DefaultResizeStep, Func<Node, SplitAxis, (int Min, int Max)>? limitsOf = null)
         {
             ResizeNodeCallCount++;
             LastResizeDirection = direction;
