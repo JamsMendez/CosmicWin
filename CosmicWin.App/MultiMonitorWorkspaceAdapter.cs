@@ -986,6 +986,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// Whether this window has demonstrated a size it will not go under or over.
+    /// </summary>
+    /// <remarks>
+    /// Asked by anything that has to tell the user the window will not behave like the others --
+    /// its tile is not the whole story about where it will sit, so a tile-shaped answer about it is
+    /// only half true.
+    /// </remarks>
+    public bool IsConstrained(nint handle) =>
+        _minimumSize.ContainsKey(handle) || _maximumSize.ContainsKey(handle);
+
+    /// <summary>
     /// The sizes <paramref name="handle"/> has demonstrated it will not go under or over, for
     /// anything that would otherwise resize it past them.
     /// </summary>
@@ -1067,6 +1078,20 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private void OnWindowRemoved(object? sender, WindowEventArgs e)
     {
         var handle = e.Window.Handle;
+
+        // Forgotten with the window, because Windows reuses HWND values: a handle held against a
+        // future window would refuse one that never did anything wrong.
+        //
+        // BEFORE the guard below, not after it. A window this adapter no longer owns is a PARKED
+        // one -- untiled for a floor it demonstrated -- and it is the very window whose record
+        // matters most; leaving early on the way past would have kept that floor for whatever HWND
+        // Windows handed out next.
+        _misses.Remove(handle);
+        _givenUp.Remove(handle);
+        _minimumSize.Remove(handle);
+        _maximumSize.Remove(handle);
+        _clampsInsideItsTile.Remove(handle);
+
         if (!_owners.TryGetValue(handle, out var display) ||
             !_treeManager.TryGetTree(display, out var tree) || tree is null)
         {
@@ -1074,14 +1099,6 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         _owners.Remove(handle);
-
-        // Forgotten with the window, because Windows reuses HWND values: a handle held against a
-        // future window would refuse one that never did anything wrong.
-        _misses.Remove(handle);
-        _givenUp.Remove(handle);
-        _minimumSize.Remove(handle);
-        _maximumSize.Remove(handle);
-        _clampsInsideItsTile.Remove(handle);
 
         if (!WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
         {

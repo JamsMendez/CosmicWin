@@ -1,4 +1,4 @@
-using Windows.Win32;
+﻿using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.WindowsAndMessaging;
@@ -111,7 +111,75 @@ public static class Win32OverlayWindow
     /// which is why this takes them already resolved rather than in DIPs.
     /// </para>
     /// </remarks>
-    public static bool ClipToFrame(nint hwnd, int width, int height, int thickness, int outerRadius)
+    /// <param name="dashed">
+    /// Cuts the ring into dashes, so a window whose size is not the tiler's to choose is visibly
+    /// not an ordinary one. Corners are left whole -- the run starts a dash in from each of them,
+    /// and a broken corner reads as a drawing fault rather than as a deliberate mark.
+    /// </param>
+    /// <summary>The length of one drawn dash, and of one gap, in real pixels.</summary>
+    /// <remarks>
+    /// Long enough to read as a deliberate pattern at a glance rather than as a rendering artefact,
+    /// and short enough that a small tile still shows several of them. The gap is the shorter of the
+    /// two so the border still reads as a border.
+    /// </remarks>
+    private const int DashLength = 12;
+
+    private const int GapLength = 8;
+
+    /// <summary>
+    /// Subtracts periodic gaps from a ring region, walking each of its four edges.
+    /// </summary>
+    /// <remarks>
+    /// Per EDGE rather than one strip across the whole frame: a cut spanning the full height would
+    /// carve the top and bottom together, which sounds like a saving until the pattern has to line
+    /// up on a frame whose width and height are nothing like each other. Four independent runs each
+    /// start a dash in from their corner, so no corner is ever broken.
+    /// </remarks>
+    private static void CutDashes(HRGN ring, int width, int height, int thickness)
+    {
+        var period = DashLength + GapLength;
+
+        for (var x = DashLength; x < width - thickness; x += period)
+        {
+            var right = Math.Min(x + GapLength, width - thickness);
+            Subtract(ring, x, 0, right, thickness);
+            Subtract(ring, x, height - thickness, right, height);
+        }
+
+        for (var y = DashLength; y < height - thickness; y += period)
+        {
+            var bottom = Math.Min(y + GapLength, height - thickness);
+            Subtract(ring, 0, y, thickness, bottom);
+            Subtract(ring, width - thickness, y, width, bottom);
+        }
+    }
+
+    /// <summary>Takes one rectangle out of <paramref name="region"/>, leaving it alone on failure.</summary>
+    private static void Subtract(HRGN region, int left, int top, int right, int bottom)
+    {
+        if (right <= left || bottom <= top)
+        {
+            return;
+        }
+
+        var gap = PInvoke.CreateRectRgn(left, top, right, bottom);
+        if (gap.IsNull)
+        {
+            return;
+        }
+
+        try
+        {
+            PInvoke.CombineRgn(region, region, gap, RGN_COMBINE_MODE.RGN_DIFF);
+        }
+        finally
+        {
+            PInvoke.DeleteObject(gap);
+        }
+    }
+
+    public static bool ClipToFrame(
+        nint hwnd, int width, int height, int thickness, int outerRadius, bool dashed = false)
     {
         if (width <= 0 || height <= 0 || thickness <= 0)
         {
@@ -136,6 +204,11 @@ public static class Win32OverlayWindow
             if (PInvoke.CombineRgn(outer, outer, inner, RGN_COMBINE_MODE.RGN_DIFF) == GDI_REGION_TYPE.RGN_ERROR)
             {
                 return false;
+            }
+
+            if (dashed)
+            {
+                CutDashes(outer, width, height, thickness);
             }
 
             // SetWindowRgn takes OWNERSHIP on success, so the outer region must not be deleted then.

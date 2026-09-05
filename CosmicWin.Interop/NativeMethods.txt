@@ -59,3 +59,4 @@ ShowWindow
 SHOW_WINDOW_CMD
 PostMessage
 WM_CLOSE
+CreateRectRgn

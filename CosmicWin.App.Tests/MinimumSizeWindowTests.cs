@@ -1323,6 +1323,81 @@ public sealed class MinimumSizeWindowTests
     }
 
     /// <summary>
+    /// A window whose size is not the tiler's to choose is marked as such, so the user can see it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked for after a session of watching NVIDIA Broadcast behave unlike everything else on the
+    /// desktop: it overflows a tile, leaves a gap inside another, refuses a resize halfway, and
+    /// takes a share out of its neighbour. Every one of those is correct and none of them is
+    /// obvious, and a border identical to every other window's claims a precision the layout does
+    /// not have over it.
+    /// </para>
+    /// <para>
+    /// A floor OR a ceiling is enough. Either one means the tile is not the whole story about where
+    /// the window will actually sit, which is the only thing the mark is saying.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AWindowWithAFloor_IsMarkedAsConstrained()
+    {
+        var (s, adapter, _, constrained) = SideBySide();
+        using var _adapter = adapter;
+
+        Assert.False(adapter.IsConstrained(constrained.Handle));
+
+        Rounds(s, constrained, 3);
+
+        Assert.True(adapter.IsConstrained(constrained.Handle));
+    }
+
+    [Fact]
+    public void AWindowWithOnlyACeiling_IsMarkedAsConstrainedToo()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var clamped = Window(10);
+        clamped.MaximumSize = (WorkArea.Width - 400, WorkArea.Height - 200);
+        s.Workspace.RaiseWindowAdded(clamped);
+
+        Rounds(s, clamped, 4);
+
+        Assert.True(adapter.IsConstrained(clamped.Handle));
+    }
+
+    /// <summary>An ordinary window is not marked, which is the whole point of marking anything.</summary>
+    [Fact]
+    public void AnOrdinaryWindow_IsNeverMarked()
+    {
+        var s = OneDisplay();
+        var adapter = Adapter(s);
+        using var _adapter = adapter;
+
+        var ordinary = Window(10);
+        s.Workspace.RaiseWindowAdded(ordinary);
+        Rounds(s, ordinary, EnoughRounds);
+
+        Assert.False(adapter.IsConstrained(ordinary.Handle));
+    }
+
+    /// <summary>And the mark is forgotten with the window, like everything else about it.</summary>
+    [Fact]
+    public void TheMark_IsForgottenWhenTheWindowGoes()
+    {
+        var (s, adapter, _, constrained) = SideBySide();
+        using var _adapter = adapter;
+
+        Rounds(s, constrained, 3);
+        Assert.True(adapter.IsConstrained(constrained.Handle));
+
+        s.Workspace.RaiseWindowRemoved(constrained);
+
+        Assert.False(adapter.IsConstrained(constrained.Handle));
+    }
+
+    /// <summary>
     /// The whole hardware sequence, end to end, in one fact. Broadcast overflowed its half tile and
     /// was untiled in four seconds -- that part worked. Then it was re-admitted into a full-height
     /// column, which it could not fill, and THAT was read as a fight: twelve rounds and

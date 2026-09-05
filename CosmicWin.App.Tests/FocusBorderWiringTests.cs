@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.App.Tray;
@@ -18,7 +18,7 @@ namespace CosmicWin.App.Tests;
 /// </remarks>
 public sealed class FocusBorderWiringTests
 {
-    private sealed record Call(nint Framed, Rectangle Window, double Scaling, int Thickness);
+    private sealed record Call(nint Framed, Rectangle Window, double Scaling, int Thickness, bool Dashed);
 
     private sealed class RecordingFocusBorder : IFocusBorder
     {
@@ -29,8 +29,8 @@ public sealed class FocusBorderWiringTests
         /// <summary>Every colour it was told to use, in order. Null is the system accent.</summary>
         public List<uint?> Colours { get; } = [];
 
-        public void ShowAround(nint framed, Rectangle window, double scaling, int thickness) =>
-            Shown.Add(new Call(framed, window, scaling, thickness));
+        public void ShowAround(nint framed, Rectangle window, double scaling, int thickness, bool dashed = false) =>
+            Shown.Add(new Call(framed, window, scaling, thickness, dashed));
 
         public void UseColor(uint? rgb) => Colours.Add(rgb);
 

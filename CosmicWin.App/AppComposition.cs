@@ -195,6 +195,11 @@ public sealed class AppComposition : IDisposable
             desktopTrace?.Record($"border {decision}");
         }
 
+        // Late-bound on purpose. The border is drawn by a local function that has to exist before
+        // the adapter does -- it is handed to TreeManager as a callback on the way past -- so the
+        // question it asks is routed through a variable rather than through the adapter itself.
+        Func<nint, bool> isConstrained = _ => false;
+
         // Handed to the collaborators that reflow WITHOUT a chord -- a window closing, one leaving
         // for another desktop, a group collapsing -- which is precisely the set that had no path to
         // the border at all and left it a full reconciliation interval behind.
@@ -289,6 +294,7 @@ public sealed class AppComposition : IDisposable
         // The fourth, and the only one that reads the adapter rather than the workspace: these are
         // measured from how a window BEHAVED, which is the adapter's business alone.
         executor.ResolveSizeLimits = sessionAdapter.LimitsOf;
+        isConstrained = sessionAdapter.IsConstrained;
         workspace.Open();
         hook.Start();
 
@@ -437,8 +443,13 @@ public sealed class AppComposition : IDisposable
             RecordBorderDecision(
                 $"around 0x{foregroundHandle:X} [L={framed.Left} T={framed.Top} " +
                 $"W={framed.Width} H={framed.Height}]");
+            // Broken rather than solid for a window that will not take every size it is offered.
+            // Its tile is not the whole story about where it actually sits -- it may overflow the
+            // slot, or leave a gap inside it -- and a border identical to every other one would be
+            // claiming a precision the layout does not have over it.
             focusBorder.ShowAround(
-                focusedWindow.Handle, framed, onDisplay.Scaling, BorderGeometry.DefaultThickness);
+                focusedWindow.Handle, framed, onDisplay.Scaling, BorderGeometry.DefaultThickness,
+                dashed: isConstrained(focusedWindow.Handle));
         }
 
         // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused

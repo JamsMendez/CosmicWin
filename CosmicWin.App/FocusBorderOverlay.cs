@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using CosmicWin.Interop;
@@ -42,7 +42,12 @@ public interface IFocusBorder : IDisposable
     /// The handle is not redundant with the rectangle. The border is placed directly behind the
     /// window it frames, and a z-order position can only be named by a window, never by an area.
     /// </remarks>
-    void ShowAround(nint framed, Rectangle window, double scaling, int thickness);
+    /// <param name="dashed">
+    /// Draws the frame broken rather than solid, for a window that will not take every size it is
+    /// offered. Its tile is not the whole story about where it will actually sit, and a border that
+    /// looked identical to every other one would be claiming otherwise.
+    /// </param>
+    void ShowAround(nint framed, Rectangle window, double scaling, int thickness, bool dashed = false);
 
     /// <summary>
     /// Draws in <paramref name="rgb"/> (<c>0xRRGGBB</c>) from now on, or follows Windows' own accent
@@ -109,7 +114,7 @@ public sealed class FocusBorderOverlay : IFocusBorder
     /// DIPs, so the thickness is divided by the display's scaling -- otherwise a 2px border renders
     /// 3 physical pixels at 150% and eats into the window it is supposed to sit outside of.
     /// </remarks>
-    public void ShowAround(nint framed, Rectangle window, double scaling, int thickness)
+    public void ShowAround(nint framed, Rectangle window, double scaling, int thickness, bool dashed = false)
     {
         if (_disposed || thickness <= 0)
         {
@@ -131,7 +136,8 @@ public sealed class FocusBorderOverlay : IFocusBorder
             frame.Width,
             frame.Height,
             thickness,
-            BorderGeometry.CornerRadiusAround(BorderGeometry.WindowsCornerRadius, thickness));
+            BorderGeometry.CornerRadiusAround(BorderGeometry.WindowsCornerRadius, thickness),
+            dashed);
     }
 
     /// <summary>
