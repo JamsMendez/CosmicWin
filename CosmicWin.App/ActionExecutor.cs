@@ -77,6 +77,29 @@ public sealed class ActionExecutor(
     /// </summary>
     public Action? DesktopSwitched { get; set; }
 
+    /// <summary>
+    /// Runs immediately BEFORE the shell is asked to change desktops -- a switch or a send -- and
+    /// before anything else this chord does. Unset, nothing happens and the chord behaves exactly
+    /// as it did.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use: switching desktops left the focus border briefly visible on the
+    /// arriving one. The border was let go on the way OUT, through
+    /// <see cref="AfterAction"/> -- which is after the shell has already changed desktops, after
+    /// the arriving layout, and after the handover's activations. Each activation is bounded at
+    /// 250ms on its own and, with tiling on, a whole sweep of them precedes the landing window.
+    /// </para>
+    /// <para>
+    /// The counterpart of <see cref="DesktopSwitched"/>, and deliberately narrower: that one fires
+    /// only on a SUCCESSFUL switch, because it applies the arriving layout. This fires on the way
+    /// in, unconditionally, because the point is to have let go BEFORE the answer is known. A
+    /// refused switch costs one hide the chord's own <see cref="AfterAction"/> undoes microseconds
+    /// later.
+    /// </para>
+    /// </remarks>
+    public Action? BeforeDesktopChange { get; set; }
+
     /// <summary>The monitor work area <see cref="ITilingEngine.Arrange"/> lays leaves out into.</summary>
     public Rect WorkArea { get; set; }
 
@@ -1201,6 +1224,11 @@ public sealed class ActionExecutor(
                 $"error={desktops.LastError ?? "(none)"}");
             return true;
         }
+
+        // Before the readings, before the switch, before everything: the desktop is about to change
+        // underneath whatever is drawn on it. CloseDesktop above is deliberately left out -- it
+        // takes its own early return precisely because nothing here may run for it.
+        BeforeDesktopChange?.Invoke();
 
         var countBefore = desktops.Count;
         var indexBefore = desktops.CurrentIndex;

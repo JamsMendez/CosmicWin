@@ -237,6 +237,35 @@ public sealed class AppComposition : IDisposable
             desktopTrace?.Record($"border {decision}");
         }
 
+        /// <summary>
+        /// Takes the border off the screen right now, without deciding anything about where it
+        /// belongs next.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Called on the way IN to a desktop change, so nothing stale can be seen on a desktop that
+        /// has not arrived yet. <see cref="IFocusBorder.Hide"/> is a bare SetWindowPos with no WPF
+        /// object behind it, so it needs no marshalling -- which is the whole reason this can run
+        /// before the switch instead of being queued behind it.
+        /// </para>
+        /// <para>
+        /// It RECORDS as well as hides, and that is not decoration. RecordBorderDecision suppresses
+        /// a repeat, so a border hidden here and re-shown on the same rectangle a moment later
+        /// would trace nothing at all -- and a border path that quietly does nothing reads exactly
+        /// like a broken one. This repository has already been bitten by that twice.
+        /// </para>
+        /// </remarks>
+        void ReleaseBorder(string why)
+        {
+            if (focusBorder is null || !borderEnabled)
+            {
+                return;
+            }
+
+            RecordBorderDecision($"released: {why}");
+            focusBorder.Hide();
+        }
+
         // Late-bound on purpose. The border is drawn by a local function that has to exist before
         // the adapter does -- it is handed to TreeManager as a callback on the way past -- so the
         // question it asks is routed through a variable rather than through the adapter itself.
@@ -510,6 +539,12 @@ public sealed class AppComposition : IDisposable
         // Applied on the chord itself, not left to the timer. The timer remains the safety net for
         // a switch CosmicWin did not make -- Win+Ctrl+arrow, or Task View -- but waiting for it
         // after our own chord showed the user a loose window for up to a full interval.
+        // Let go on the way IN. The border used to be refreshed on the way out, through AfterAction,
+        // which runs after the shell has already changed desktops, after the arriving layout, and
+        // after the handover's activations -- a window of time bounded only by how slow those are.
+        // Nothing stale can be seen on a desktop that has not arrived yet.
+        executor.BeforeDesktopChange = () => ReleaseBorder("the desktop is about to change under it");
+
         executor.DesktopSwitched = () =>
         {
             // Before the layout, and not left to the tick: until this runs, "the desktop the user is
@@ -787,10 +822,32 @@ public sealed class AppComposition : IDisposable
 
             workspace.WindowBoundsChanging += followDraggedWindow;
 
-            // The one gesture that never reaches the drop above: the window is destroyed while the
-            // user is still holding it. Windows reuses handles, so leaving the rectangle behind
-            // would frame the next window to take this one at a size it never had.
-            forgetGestureOnRemoval = (_, e) => ForgetGesture(e.Window.Handle);
+            // One handler, two jobs, one event -- and both are about a window that has just ceased
+            // to exist.
+            forgetGestureOnRemoval = (_, e) =>
+            {
+                // The one gesture that never reaches the drop above: the window is destroyed while
+                // the user is still holding it. Windows reuses handles, so leaving the rectangle
+                // behind would frame the next window to take this one at a size it never had.
+                ForgetGesture(e.Window.Handle);
+
+                // Reported from real use, and measured on hardware at 249ms: a closing window kept
+                // its border for a moment after it was gone. A close used to reach the border only
+                // through the ARRANGE pass -- remove, reflow the survivors, refresh -- and with
+                // tiling off there is no reflow at all, so nothing but the tick ever noticed.
+                //
+                // Unconditional rather than filtered to the framed window, and that is the cheaper
+                // reading as well as the honest one. The handle CANNOT be compared: by the time
+                // this arrives the foreground already names something else, so "is this the window
+                // the border is on" answers no for the very window that just closed. Windows close
+                // rarely -- there is no storm here to guard against, unlike a bounds change.
+                //
+                // Called directly rather than marshalled, exactly as followFocusedWindow is: this
+                // arrives on the hook's thread, and queuing it would put the tick's own latency
+                // back in front of the fix.
+                UpdateFocusBorder();
+            };
+
             workspace.WindowRemoved += forgetGestureOnRemoval;
         }
 

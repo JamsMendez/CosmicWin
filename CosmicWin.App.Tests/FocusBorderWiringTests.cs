@@ -75,7 +75,27 @@ public sealed class FocusBorderWiringTests
         public int CurrentIndex { get; set; } = 1;
         public Guid CurrentDesktopId { get; set; } = current;
         public string? LastError => null;
-        public bool TrySwitchTo(int oneBasedIndex) => true;
+
+        /// <summary>
+        /// Read at the INSTANT the shell is asked to switch. A count read after the chord has
+        /// finished cannot tell "the border let go first" from "the border let go eventually",
+        /// which is the entire question.
+        /// </summary>
+        public Func<int>? ObserveOnSwitch { get; set; }
+
+        /// <summary>What <see cref="ObserveOnSwitch"/> answered, or null if no switch happened.</summary>
+        public int? ObservedAtSwitch { get; private set; }
+
+        public bool TrySwitchTo(int oneBasedIndex)
+        {
+            ObservedAtSwitch = ObserveOnSwitch?.Invoke();
+
+            // Actually moves, so the handover downstream runs the way it does in production.
+            CurrentDesktopId = Guid.NewGuid();
+            CurrentIndex = oneBasedIndex;
+            return true;
+        }
+
         public bool TryMoveWindowTo(nint windowHandle, int oneBasedIndex) => true;
     }
 
@@ -1042,6 +1062,140 @@ public sealed class FocusBorderWiringTests
 
             Assert.Equal(Rectangle.FromSize(200, 200, 640, 480), harness.Border.Shown[^1].Window);
         }
+    }
+
+    /// <summary>
+    /// Reported from real use: closing a window left its border on screen for a moment after the
+    /// window was gone -- "primero se cierra, luego desaparece el borde". Measured on hardware at
+    /// 249ms, which is the reconciliation tick and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A close reached the border through the ARRANGE pass: the adapter removed the window,
+    /// reflowed the survivors, and <c>AfterArrange</c> refreshed the border. With tiling off there
+    /// is no reflow -- <c>LayoutIsFrozen</c> stops the adapter before it starts -- so nothing was
+    /// left on that path and the tick was the only thing that ever noticed.
+    /// </para>
+    /// <para>
+    /// The tick is deliberately NOT fired in this fact. Waiting for it is exactly the defect, so a
+    /// test that fired it would pass against the broken code.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WithTilingOff_TheBorderLetsGoOfAClosedWindow_WithoutWaitingForTheTick()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xE01), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            var released = harness.Border.HideCallCount;
+            window.Kill();
+            harness.Workspace.RaiseWindowRemoved(window);
+
+            Assert.True(
+                harness.Border.HideCallCount > released,
+                "the border must let go the moment the window is gone, not on the next tick");
+        }
+    }
+
+    /// <summary>
+    /// The same with the layout ON. The arrange pass covers the ordinary case today, but only
+    /// because a reflow happens to follow -- close the LAST window on a desktop and there are no
+    /// survivors to move, so nothing was guaranteed to run.
+    /// </summary>
+    [Fact]
+    public void TheBorderLetsGoOfTheLastClosedWindow_WithoutWaitingForTheTick()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xE02), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            var released = harness.Border.HideCallCount;
+            window.Kill();
+            harness.Workspace.RaiseWindowRemoved(window);
+
+            Assert.True(harness.Border.HideCallCount > released);
+        }
+    }
+
+    /// <summary>
+    /// The other half of the report: switching desktops left the border briefly visible on the
+    /// arriving one. It used to let go only AFTER the shell had already changed desktops -- and
+    /// after the handover's activations, each bounded at 250ms and, with tiling on, preceded by a
+    /// sweep bounded at another 250.
+    /// </summary>
+    /// <remarks>
+    /// So it lets go FIRST. Nothing stale can be seen on a desktop that has not arrived yet, and
+    /// the chord's own <c>AfterAction</c> puts the border back where the user now is. Asserted on a
+    /// count captured INSIDE <c>TrySwitchTo</c>, because a reading taken afterwards cannot tell
+    /// "before" from "eventually".
+    /// </remarks>
+    [Fact]
+    public async Task TheBorderIsReleasedBeforeTheDesktopChanges_NotAfter()
+    {
+        var desktops = new MutableVirtualDesktops(Guid.NewGuid());
+        var harness = Wire(virtualDesktops: desktops, tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xE03), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            var released = harness.Border.HideCallCount;
+            desktops.ObserveOnSwitch = () => harness.Border.HideCallCount;
+
+            Assert.True(harness.Platform.Raise(KeyboardKey.D2, isKeyDown: true, ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => desktops.ObservedAtSwitch is not null));
+
+            Assert.True(
+                desktops.ObservedAtSwitch > released,
+                $"the border must be released before the shell switches desktops; " +
+                $"it had released {desktops.ObservedAtSwitch} times at that instant, {released} before.");
+        }
+    }
+
+    /// <summary>Sending a window away is the same hazard: its border must not outlive it here.</summary>
+    [Fact]
+    public async Task TheBorderIsReleasedBeforeAWindowIsSentToAnotherDesktop()
+    {
+        var desktops = new MutableVirtualDesktops(Guid.NewGuid());
+        var harness = Wire(virtualDesktops: desktops, tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xE04), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            var released = harness.Border.HideCallCount;
+
+            Assert.True(harness.Platform.Raise(
+                KeyboardKey.D2, isKeyDown: true, ModifierKeys.Shift | ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => harness.Border.HideCallCount > released));
+        }
+    }
+
+    private static async Task<bool> WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10).ConfigureAwait(false);
+        }
+
+        return condition();
     }
 
     /// <summary>
