@@ -345,6 +345,37 @@ public sealed class AppComposition : IDisposable
         // The fourth, and the only one that reads the adapter rather than the workspace: these are
         // measured from how a window BEHAVED, which is the adapter's business alone.
         executor.ResolveSizeLimits = sessionAdapter.LimitsOf;
+
+        // The resize chord's answer when there is no tree to move a boundary in -- which, with the
+        // tiling switch off, is every window on the desktop. The arithmetic is
+        // FloatingResize.Apply's; everything here is finding the three things it needs and refusing
+        // the windows it must never be pointed at.
+        executor.ResizeFloatingWindow = (handle, direction) =>
+        {
+            if (resolveAnyWindow(handle) is not { IsAlive: true, CanReposition: true } window)
+            {
+                return;
+            }
+
+            // The FULL exclusion rule, user list included -- unlike the focus border, which reads
+            // only the automatic half. The difference is that this one MOVES the window. The
+            // automatic half keeps the chord off shell chrome: the taskbar is the foreground window
+            // the moment it is clicked, and it is visible and unowned, so nothing else would. The
+            // user's own list is what "leave this app alone" means, and a resize is exactly the
+            // kind of touching it asks CosmicWin not to do.
+            if (WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptionStore.Current))
+            {
+                return;
+            }
+
+            var display = treeManager.ResolveDisplay(window.Bounds);
+            if (FloatingResize.Apply(
+                    window.Bounds, display.WorkArea, direction,
+                    LayoutTree.DefaultResizeStep, sessionAdapter.LimitsOf(handle)) is { } resized)
+            {
+                window.SetPosition(resized);
+            }
+        };
         isConstrained = sessionAdapter.IsConstrained;
         workspace.Open();
         hook.Start();

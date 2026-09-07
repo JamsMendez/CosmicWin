@@ -164,6 +164,20 @@ public sealed class ActionExecutor(
         // Pause rather than the narrower thing it exists to be.
         if (!TilingEnabled())
         {
+            // Except a RESIZE, which is the one layout-shaped chord that still has a subject out
+            // here. It cannot move a boundary -- there is no tree and no neighbour to divide a
+            // region with -- but the WINDOW is still a rectangle, and "make the thing in front of
+            // me wider" is not a statement about a layout that is switched off.
+            //
+            // Move and toggle-axis are deliberately NOT offered the same way. A move means "put
+            // this window somewhere else in the layout", and with no layout there is nowhere to put
+            // it; a window in no group has no split axis to toggle. Only the resize survives the
+            // loss of the tree with its meaning intact.
+            if (ResizeDirectionOf(action.Kind) is { } floating)
+            {
+                ResizeFloatingWindow?.Invoke(foregroundHandle, floating);
+            }
+
             return;
         }
 
@@ -213,6 +227,20 @@ public sealed class ActionExecutor(
     /// it. Unset -- as in every test that predates floating dialogs -- such a chord is simply dropped.
     /// </summary>
     public Func<nint, Direction, bool>? MoveFloatingWindow { get; set; }
+
+    /// <summary>
+    /// Resizes the window in front of the user when there is no layout in force. Unset -- as in
+    /// every test and call site that predates the tiling switch -- a resize chord with tiling off
+    /// stays the no-op it was.
+    /// </summary>
+    /// <remarks>
+    /// An <see cref="Action"/> rather than a <see cref="Func{T1, T2, TResult}"/> like
+    /// <see cref="MoveFloatingWindow"/>, because there is no ownership question to answer. That one
+    /// reports <see langword="false"/> for a handle the dialog adapter does not manage, so the
+    /// chord can fall through; here the subject is simply the foreground window, and nothing else
+    /// is waiting for a turn.
+    /// </remarks>
+    public Action<nint, Direction>? ResizeFloatingWindow { get; set; }
 
     /// <summary>
     /// The sizes a window has demonstrated it will not go under or over. Unset -- as in every test
@@ -1121,6 +1149,16 @@ public sealed class ActionExecutor(
         FocusTraceOutcome outcome, ActivationOutcome? activation = null) =>
         FocusTrace?.Record(new FocusTraceEntry(
             direction, foregroundHandle, focusedHandle, targetHandle, outcome, activation));
+
+    /// <summary>The direction a RESIZE chord carries, or null for every other action kind.</summary>
+    private static Direction? ResizeDirectionOf(HotkeyActionKind kind) => kind switch
+    {
+        HotkeyActionKind.ResizeLeft => Direction.Left,
+        HotkeyActionKind.ResizeRight => Direction.Right,
+        HotkeyActionKind.ResizeUp => Direction.Up,
+        HotkeyActionKind.ResizeDown => Direction.Down,
+        _ => null
+    };
 
     /// <summary>The direction a FOCUS chord carries, or null for every other action kind.</summary>
     private static Direction? FocusDirectionOf(HotkeyActionKind kind) => kind switch

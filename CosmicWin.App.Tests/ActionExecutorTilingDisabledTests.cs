@@ -54,7 +54,8 @@ public sealed class ActionExecutorTilingDisabledTests
 
     private sealed record Harness(
         ActionExecutor Executor, FakeVirtualDesktops Desktops,
-        RecordingWindow WindowA, RecordingWindow WindowB, List<nint> Closed);
+        RecordingWindow WindowA, RecordingWindow WindowB, List<nint> Closed,
+        List<(nint Handle, Direction Direction)> Resized, FakeForegroundWindowSource Foreground);
 
     /// <summary>Two leaves side by side, with the left one focused and tiling switched OFF.</summary>
     private static Harness BuildWithTilingOff()
@@ -77,8 +78,9 @@ public sealed class ActionExecutorTilingDisabledTests
 
         var desktops = new FakeVirtualDesktops();
         var closed = new List<nint>();
-        var executor = new ActionExecutor(
-            new LayoutTree(group), registry, new FakeForegroundWindowSource { Handle = windowA.Handle })
+        var resized = new List<(nint Handle, Direction Direction)>();
+        var foreground = new FakeForegroundWindowSource { Handle = windowA.Handle };
+        var executor = new ActionExecutor(new LayoutTree(group), registry, foreground)
         {
             WorkArea = new Rect(0, 0, 800, 600),
             VirtualDesktops = desktops,
@@ -88,9 +90,10 @@ public sealed class ActionExecutorTilingDisabledTests
                 return true;
             },
             TilingEnabled = () => false,
+            ResizeFloatingWindow = (handle, direction) => resized.Add((handle, direction)),
         };
 
-        return new Harness(executor, desktops, windowA, windowB, closed);
+        return new Harness(executor, desktops, windowA, windowB, closed, resized, foreground);
     }
 
     /// <summary>
@@ -102,7 +105,6 @@ public sealed class ActionExecutorTilingDisabledTests
     [InlineData(HotkeyActionKind.FocusLeft)]
     [InlineData(HotkeyActionKind.MoveRight)]
     [InlineData(HotkeyActionKind.MoveLeft)]
-    [InlineData(HotkeyActionKind.ResizeRight)]
     [InlineData(HotkeyActionKind.ToggleOrientation)]
     [InlineData(HotkeyActionKind.FocusIn)]
     [InlineData(HotkeyActionKind.FocusOut)]
@@ -158,6 +160,62 @@ public sealed class ActionExecutorTilingDisabledTests
     }
 
     /// <summary>
+    /// The one layout-shaped chord that survives the loss of the tree with its meaning intact. It
+    /// cannot move a boundary out here -- there is no neighbour to divide a region with -- but the
+    /// window is still a rectangle, and making the thing in front of you wider says nothing about a
+    /// layout that is switched off.
+    /// </summary>
+    [Theory]
+    [InlineData(HotkeyActionKind.ResizeLeft, Direction.Left)]
+    [InlineData(HotkeyActionKind.ResizeRight, Direction.Right)]
+    [InlineData(HotkeyActionKind.ResizeUp, Direction.Up)]
+    [InlineData(HotkeyActionKind.ResizeDown, Direction.Down)]
+    public async Task WithTilingOff_AResizeChordReachesTheFloatingResizer(
+        HotkeyActionKind kind, Direction expected)
+    {
+        var harness = BuildWithTilingOff();
+
+        await harness.Executor.ScheduleAsync(new HotkeyAction(kind), CancellationToken.None);
+
+        Assert.Equal([(harness.WindowA.Handle, expected)], harness.Resized);
+    }
+
+    /// <summary>
+    /// It is aimed at the FOREGROUND window, never at the tree's idea of focus. With no layout in
+    /// force the tree is stale by construction -- it still holds whatever was focused when the
+    /// switch was flipped -- and resizing that instead would grow a window the user is not looking
+    /// at.
+    /// </summary>
+    [Fact]
+    public async Task WithTilingOff_TheResizeChordFollowsTheForegroundWindow_NotTheTree()
+    {
+        var harness = BuildWithTilingOff();
+        harness.Foreground.Handle = harness.WindowB.Handle;
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.ResizeRight), CancellationToken.None);
+
+        Assert.Equal([(harness.WindowB.Handle, Direction.Right)], harness.Resized);
+    }
+
+    /// <summary>
+    /// With tiling ON the chord belongs to the tree, and must not be answered twice. A resize that
+    /// moved a boundary AND separately stretched the window would fight its own layout.
+    /// </summary>
+    [Fact]
+    public async Task WithTilingOn_AResizeChordGoesToTheTree_AndNeverToTheFloatingResizer()
+    {
+        var harness = BuildWithTilingOff();
+        harness.Executor.TilingEnabled = () => true;
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.ResizeRight), CancellationToken.None);
+
+        Assert.Empty(harness.Resized);
+        Assert.True(harness.WindowA.SetPositionCallCount > 0);
+    }
+
+    /// <summary>
     /// Unset, the gate is open. Every test and call site that predates the switch must behave
     /// exactly as it did, which is what makes this a feature rather than a rewrite.
     /// </summary>
@@ -173,4 +231,20 @@ public sealed class ActionExecutorTilingDisabledTests
         Assert.Equal(1, harness.WindowA.SetPositionCallCount);
     }
 
+    /// <summary>
+    /// And with no resizer wired -- every test and call site that predates this -- a resize chord
+    /// with tiling off stays the no-op it was, rather than throwing on a null delegate.
+    /// </summary>
+    [Fact]
+    public async Task WithTilingOff_AndNoResizerWired_TheResizeChordIsStillDropped()
+    {
+        var harness = BuildWithTilingOff();
+        harness.Executor.ResizeFloatingWindow = null;
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.ResizeRight), CancellationToken.None);
+
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.SetPositionCallCount);
+    }
 }

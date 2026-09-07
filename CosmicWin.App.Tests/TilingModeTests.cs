@@ -242,6 +242,71 @@ public sealed class TilingModeTests
     }
 
     /// <summary>
+    /// The resize chord survives the switch, end to end: a real Ctrl+Alt+L through the hook, the
+    /// dispatcher and the executor, landing on the foreground window's own rectangle.
+    /// </summary>
+    /// <remarks>
+    /// The rule is the tiled one read against the work area -- grow into the pressed side while
+    /// there is room -- so a window with 1120px to its right grows by 5% of 1920, and its left edge
+    /// does not move.
+    /// </remarks>
+    [Fact]
+    public async Task WithTilingOff_TheResizeChordGrowsTheForegroundWindow()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            // Opened AFTER the switch went off, so it keeps the rectangle its application chose.
+            // Added first, it would have been tiled to the whole work area and the fact would be
+            // measuring a tile rather than a window.
+            harness.Tray.ToggleTiling();
+
+            var window = new RecordingWindow(new IntPtr(2101), Rectangle.FromSize(100, 100, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            Assert.Equal(0, window.SetPositionCallCount);
+
+            Assert.True(harness.Platform.Raise(
+                KeyboardKey.L, isKeyDown: true, ModifierKeys.Control | ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => window.Bounds.Width != 800));
+
+            Assert.Equal(Rectangle.FromSize(100, 100, 896, 600), window.Bounds);
+        }
+    }
+
+    /// <summary>
+    /// And it is never pointed at shell chrome. The taskbar is the foreground window the moment it
+    /// is clicked, and it is visible and unowned -- so nothing but the exclusion rule stands
+    /// between Ctrl+Alt+L and a resized taskbar.
+    /// </summary>
+    [Fact]
+    public async Task WithTilingOff_TheResizeChordNeverTouchesShellChrome()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            harness.Tray.ToggleTiling();
+
+            var taskbar = new RecordingWindow(
+                new IntPtr(2102), Rectangle.FromSize(0, 1032, 1920, 48),
+                className: "Shell_TrayWnd", exStyle: WindowStyleFlags.ExToolWindow);
+            harness.Workspace.RaiseWindowAdded(taskbar);
+            harness.Foreground.Handle = taskbar.Handle;
+
+            Assert.True(harness.Platform.Raise(
+                KeyboardKey.L, isKeyDown: true, ModifierKeys.Control | ModifierKeys.Alt));
+
+            // A DESKTOP chord straight after, waited for: the dispatcher is a single-reader FIFO,
+            // so the second landing proves the first was already drained. Without it this asserts
+            // on a chord that simply had not run yet.
+            Assert.True(harness.Platform.Raise(KeyboardKey.D2, isKeyDown: true, ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => harness.Desktops.Switched.Contains(2)));
+
+            Assert.Equal(0, taskbar.SetPositionCallCount);
+        }
+    }
+
+    /// <summary>
     /// Turning it back on is a request to put the layout back -- including for the windows that
     /// opened while it was off, which the workspace will never announce a second time on its own.
     /// </summary>
