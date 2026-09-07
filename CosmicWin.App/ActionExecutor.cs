@@ -243,6 +243,17 @@ public sealed class ActionExecutor(
     public Action<nint, Direction>? ResizeFloatingWindow { get; set; }
 
     /// <summary>
+    /// Which desktop a window is filed under, when the shell will say. Unset -- as in every test
+    /// that predates it -- the recall below trusts its own record, exactly as it did.
+    /// </summary>
+    /// <remarks>
+    /// Needed only where there is no tree. With a layout in force the recall walks
+    /// <c>LeavesOn(display)</c>, and the trees are keyed by desktop, so being in one IS the
+    /// answer. With no tree the record has to be checked against the shell directly.
+    /// </remarks>
+    public Func<nint, Guid>? ResolveWindowDesktop { get; set; }
+
+    /// <summary>
     /// The sizes a window has demonstrated it will not go under or over. Unset -- as in every test
     /// that predates it -- a resize is bounded by the layout's ratio alone, exactly as before.
     /// </summary>
@@ -431,6 +442,17 @@ public sealed class ActionExecutor(
                 ? cached.Bounds
                 : Interop.Rectangle.Empty;
 
+        // With no layout in force there is no tree to search, and the survivor walk below is the
+        // FIRST thing that runs -- so it answered nothing and returned before the recall ever got a
+        // turn. Measured on hardware: every switch traced "-- no survivor" and the foreground never
+        // moved. Taken here rather than folded into the walk because the two answer different
+        // questions: one asks the TREE who is left, this one asks the RECORD where the user was.
+        if (!TilingEnabled())
+        {
+            HandFocusByMemory(foregroundBefore, departingHandle, arriving);
+            return;
+        }
+
         var display = treeManager.ResolveDisplay(bounds);
         if (treeManager.FocusSurvivorOn(display, departingHandle) is not
             { Status: FocusWalkStatus.Found, Leaf: { } survivor })
@@ -518,6 +540,131 @@ public sealed class ActionExecutor(
             // reproduces on. fg-before names the real window on both paths.
             $"fg-before-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(foregroundBefore):X} " +
             $"survivor-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(survivor.Window.Handle):X}");
+    }
+
+    /// <summary>
+    /// The handover with no tree to walk: purely a RECALL, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No survivor and no sweep, and both omissions are decisions. A survivor is "any other window
+    /// in the tree", which out here would mean any window on the desktop -- and picking one would
+    /// drag the user somewhere they never asked to go. Windows has already chosen a foreground on
+    /// arrival; with nothing remembered, that choice is left alone. The sweep clears stale active
+    /// frames on cloaked tiles, which is a separate defect and not this one.
+    /// </para>
+    /// <para>
+    /// So the honest scope is small: if we know where the user was on this desktop, put them back.
+    /// Otherwise do nothing.
+    /// </para>
+    /// </remarks>
+    private void HandFocusByMemory(nint foregroundBefore, nint departingHandle, bool arriving)
+    {
+        // ARRIVAL only, exactly as the tiled recall is: on a send the user has not gone anywhere,
+        // so the record for the desktop in view names the window being sent away at this instant --
+        // recalling it would hand focus straight back to what is leaving.
+        if (!arriving || TreeManager is not { } treeManager || VirtualDesktops is not { } desktops)
+        {
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"-- untiled, not an arrival");
+            return;
+        }
+
+        // The monitor the user was on, named by the window they were looking at. The same reading
+        // the tiled path takes, minus the tree: neither answering falls through to ResolveDisplay's
+        // documented Primary fail-safe.
+        var display = treeManager.ResolveDisplay(
+            ResolveWindowBounds?.Invoke(foregroundBefore) ?? Interop.Rectangle.Empty);
+
+        if (!_focusByDesktop.TryGetValue((display.Handle, desktops.CurrentDesktopId), out var remembered)
+            || remembered == 0)
+        {
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"display=0x{display.Handle:X} -- untiled, nothing remembered");
+            return;
+        }
+
+        // Still ALIVE. Found on hardware: a trace line recalled a window killed minutes earlier and
+        // the activation was simply refused. Harmless on its own -- but Windows REUSES handles, and
+        // the moment that number names a different window the recall would activate a stranger. The
+        // tiled path has always checked this; the untiled one was reading the shell's desktop answer
+        // alone, and a dead handle draws Guid.Empty, which is deliberately read as "here".
+        //
+        // Asked through the bounds lookup because that is what this executor already has: it
+        // resolves through the registry and then the workspace, and BOTH require IsAlive. A window
+        // nothing can locate is a window that is gone.
+        if (ResolveWindowBounds?.Invoke(remembered) is null)
+        {
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"display=0x{display.Handle:X} recalled=0x{remembered:X} " +
+                $"-- untiled, remembered window is gone");
+            return;
+        }
+
+        // Still HERE. The record is keyed by desktop, but a window can be sent elsewhere between
+        // being remembered and being recalled, and activating one that now lives on another desktop
+        // would take the user there -- the exact opposite of what the chord asked for. The tiled
+        // path gets this for free: its trees are keyed by desktop, so being in one is the answer.
+        //
+        // Guid.Empty is the shell DECLINING to say, which it answers for any window merely
+        // mid-creation. Reading that as "somewhere else" is a mistake this repository has already
+        // paid for once -- every arriving window was filed under a desktop nobody was looking at,
+        // and tiling stopped outright -- so it is read as "here", exactly as the arrival path and
+        // the focus border both read it.
+        var named = ResolveWindowDesktop?.Invoke(remembered) ?? Guid.Empty;
+        if (named != Guid.Empty && named != desktops.CurrentDesktopId)
+        {
+            DesktopTrace?.Record(
+                $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+                $"display=0x{display.Handle:X} recalled=0x{remembered:X} " +
+                $"-- untiled, remembered window lives elsewhere");
+            return;
+        }
+
+        // The BOOL, not the rung, and that is a real loss worth naming: the tiled path reads
+        // ActivationOutcome and can tell AlreadyForeground from a genuine move. Nothing out here
+        // holds an IWindow to ask, so fg-after below is what carries the proof instead -- which is
+        // the reading that actually settled the tiled defect anyway.
+        var activated = ActivateUntrackedWindow?.Invoke(remembered) ?? false;
+
+        DesktopTrace?.Record(
+            $"handover departing=0x{departingHandle:X} fg-before=0x{foregroundBefore:X} " +
+            $"display=0x{display.Handle:X} recalled=0x{remembered:X} landing=0x{remembered:X} " +
+            $"activation=untiled activated={activated} " +
+            $"fg-after=0x{foreground.GetForegroundHandle():X} " +
+            $"fg-before-thread-active=0x{foreground.GetActiveWindowOfThreadOwning(foregroundBefore):X}");
+    }
+
+    /// <summary>
+    /// Files the window in front of the user under the desktop currently in view.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other half of the reported defect, and it is not about tiling at all: the record was
+    /// only ever written by CosmicWin's OWN switch chord. Leave a desktop with Win+Ctrl+arrow or
+    /// Task View and nothing was recorded, so coming back had nothing to hand out.
+    /// </para>
+    /// <para>
+    /// Called from the reconciliation tick, which is the only observer of a switch CosmicWin did
+    /// not make -- and by the time it NOTICES one, the current desktop id already names the
+    /// arriving desktop, far too late to record where the user was. So it notes every pass instead,
+    /// while the answer is still true, and the record is at worst one interval old.
+    /// </para>
+    /// <para>
+    /// Costs one native read the tick was already making beside it, and one dictionary write.
+    /// </para>
+    /// </remarks>
+    public void NoteFocusOnCurrentDesktop()
+    {
+        if (VirtualDesktops is not { } desktops)
+        {
+            return;
+        }
+
+        RememberFocusOn(desktops.CurrentDesktopId, foreground.GetForegroundHandle());
     }
 
     /// <summary>
@@ -677,13 +824,28 @@ public sealed class ActionExecutor(
                 ? tracked
                 : _focused;
 
-        if (leaf is null
-            || !registry.TryGetWindow(leaf.Window.Handle, out var window) || window is not { IsAlive: true })
+        if (leaf is not null
+            && registry.TryGetWindow(leaf.Window.Handle, out var window) && window is { IsAlive: true })
+        {
+            _focusByDesktop[(treeManager.ResolveDisplay(window.Bounds).Handle, desktop)] = leaf.Window.Handle;
+            return;
+        }
+
+        // No leaf answered. With the layout switched off that is EVERY window on the desktop --
+        // nothing is ever added to a tree -- so the record was never written at all, which is half
+        // the reported defect. It also covers the tiled case where the foreground is a window the
+        // tree does not hold and no leaf has ever been focused.
+        //
+        // The record has always been a HANDLE, so the window can answer for itself; only the route
+        // to its display changes.
+        if (foregroundHandle == 0
+            || ResolveWindowBounds?.Invoke(foregroundHandle) is not { } bounds
+            || bounds.Width <= 0 || bounds.Height <= 0)
         {
             return;
         }
 
-        _focusByDesktop[(treeManager.ResolveDisplay(window.Bounds).Handle, desktop)] = leaf.Window.Handle;
+        _focusByDesktop[(treeManager.ResolveDisplay(bounds).Handle, desktop)] = foregroundHandle;
     }
 
     /// <summary>

@@ -342,6 +342,11 @@ public sealed class AppComposition : IDisposable
         // pointed at and landing on whatever survived.
         executor.ResolveWindowBounds = handle => resolveAnyWindow(handle)?.Bounds;
 
+        // Where a window LIVES, which the untiled handover has to ask directly. The tiled one gets
+        // the same answer for free -- its trees are keyed by desktop, so being in one is the
+        // answer -- and with no tree there is nothing to read it from.
+        executor.ResolveWindowDesktop = resolveWindowDesktop;
+
         // The fourth, and the only one that reads the adapter rather than the workspace: these are
         // measured from how a window BEHAVED, which is the adapter's business alone.
         executor.ResolveSizeLimits = sessionAdapter.LimitsOf;
@@ -875,6 +880,19 @@ public sealed class AppComposition : IDisposable
             // mouse and then opens a new one would have it split whichever tile they last used a
             // hotkey on (LE-4 placement). One native read, so it belongs on the cheap tick.
             executor.ResolveFocusedLeaf();
+
+            // Files the foreground under the desktop in view, every pass. The switch CHORD records
+            // this itself, precisely and race-free; this is for the switches CosmicWin does not
+            // make -- Win+Ctrl+arrow, Task View -- where by the time the block above notices, the
+            // current desktop id already names the ARRIVING desktop and it is far too late to
+            // record where the user was.
+            //
+            // AFTER the handover above on purpose. On a tick that detects an arrival the foreground
+            // has just been handed on, so what gets filed is the arriving desktop's own window --
+            // which is true. Noted BEFORE it, the departing desktop's foreground would be filed
+            // under the arriving desktop's key: the record would be not merely stale but wrong.
+            executor.NoteFocusOnCurrentDesktop();
+
             UpdateFocusBorder();
         }
 
