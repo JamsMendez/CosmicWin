@@ -388,6 +388,7 @@ public sealed class AppCompositionTests
         public event EventHandler<WindowEventArgs>? WindowAdded;
         public event EventHandler<WindowEventArgs>? WindowRemoved;
         public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
+        public event EventHandler<WindowBoundsChangingEventArgs>? WindowBoundsChanging;
 #pragma warning restore CS0067
         public bool IsOpen { get; private set; }
         public IReadOnlyList<IWindow> Snapshot => Array.Empty<IWindow>();

@@ -41,6 +41,8 @@ public sealed class Win32Workspace : IWorkspace
     public event EventHandler<WindowEventArgs>? WindowRemoved;
     public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
 
+    public event EventHandler<WindowBoundsChangingEventArgs>? WindowBoundsChanging;
+
     public bool IsOpen { get; private set; }
 
     public IReadOnlyList<IWindow> Snapshot => _windows.Values.Cast<IWindow>().ToArray();
@@ -186,7 +188,16 @@ public sealed class Win32Workspace : IWorkspace
                 RemoveWindow(hwnd);
                 break;
             case NativeWindowEventKind.BoundsChanged:
-                if (!_beingDragged.Contains(hwnd))
+                if (_beingDragged.Contains(hwnd))
+                {
+                    // Still withheld from everything that LAYS OUT -- that is what the bracket is
+                    // for, and the flicker it fixed is documented on the MoveSizeEnded arm below.
+                    // Reported to anything merely DRAWN over the window, though: the focus border
+                    // sat frozen on the window's pre-drag rectangle for the whole gesture and only
+                    // caught up on release, because this was the frame the cache never heard about.
+                    ReportBoundsChanging(hwnd);
+                }
+                else
                 {
                     UpdateBounds(hwnd);
                 }
@@ -251,6 +262,32 @@ public sealed class Win32Workspace : IWorkspace
 
         window.MarkDead();
         WindowRemoved?.Invoke(this, new WindowEventArgs(window));
+    }
+
+    /// <summary>
+    /// Hands out the rectangle the window is passing through, WITHOUT writing it into the window's
+    /// own cache.
+    /// </summary>
+    /// <remarks>
+    /// The refusal to cache is load-bearing, not tidiness. <see cref="UpdateBounds"/> reports
+    /// nothing when the cached rectangle already equals the live one, so a gesture that kept the
+    /// cache current would arrive at its own drop with nothing left to report -- and the drop is
+    /// the single event carrying <see cref="WindowEventArgs.IsUserGesture"/>, which is what lets a
+    /// hand-resize resize the tree.
+    /// </remarks>
+    private void ReportBoundsChanging(nint hwnd)
+    {
+        if (WindowBoundsChanging is null || !_windows.TryGetValue(hwnd, out var window))
+        {
+            return;
+        }
+
+        // Asked of the OS rather than taken from the window, for the same reason as above: the
+        // window's copy is deliberately a gesture behind.
+        if (_nativeSource.TryGetWindowInfo(hwnd, out var info))
+        {
+            WindowBoundsChanging.Invoke(this, new WindowBoundsChangingEventArgs(window, info.Bounds));
+        }
     }
 
     private void UpdateBounds(nint hwnd, bool isUserGesture = false)

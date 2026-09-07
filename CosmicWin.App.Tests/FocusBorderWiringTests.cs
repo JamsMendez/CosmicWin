@@ -895,6 +895,180 @@ public sealed class FocusBorderWiringTests
     }
 
     /// <summary>
+    /// Reported from real use: resizing a window with the mouse left the border on the old
+    /// rectangle until the button came up.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not a border defect at all -- it never heard about the resize. A drag is bracketed by
+    /// MOVESIZESTART/END and every frame between them is withheld from <c>WindowBoundsChanged</c>,
+    /// which is deliberate and stays: the layout answers a gesture ONCE, at the drop, and the
+    /// alternative was measured as a tiled window flickering against its own snap-back dozens of
+    /// times a second.
+    /// </para>
+    /// <para>
+    /// The border is not laying anything out, so it listens to the live report instead. The
+    /// rectangle comes from the EVENT rather than from the window, because the window's own cached
+    /// bounds are a gesture behind on purpose.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheBorderFollowsAHandResize_BeforeTheMouseIsReleased()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xD01), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            // Mid-gesture: the window is bigger on screen and its own Bounds still say otherwise,
+            // exactly as the real workspace withholds them until the drop.
+            harness.Workspace.RaiseWindowBoundsChanging(window, Rectangle.FromSize(0, 0, 1100, 700));
+
+            Assert.Equal(Rectangle.FromSize(0, 0, 1100, 700), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>The same, in the mode where hand-resizing is the ONLY way a window changes size.</summary>
+    [Fact]
+    public void WithTilingOff_TheBorderFollowsAHandResize_BeforeTheMouseIsReleased()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xD02), Rectangle.FromSize(100, 100, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            harness.Workspace.RaiseWindowBoundsChanging(window, Rectangle.FromSize(100, 100, 420, 320));
+
+            Assert.Equal(Rectangle.FromSize(100, 100, 420, 320), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
+    /// Measured on hardware the moment the live follow started working: over one three-second
+    /// resize the border reached the new width fifteen times and SNAPPED BACK to the pre-drag width
+    /// five times, once per reconciliation interval.
+    /// </summary>
+    /// <remarks>
+    /// The tick was not wrong to run -- it is the safety net for every change no chord caused. It
+    /// was reading the only rectangle it has, the window's own, and that one is a gesture behind ON
+    /// PURPOSE: the workspace withholds the settled bounds until the user lets go so the layout
+    /// answers a drag exactly once. So the live rectangle has to outlive the event that carried it,
+    /// or every other redraw undoes the one before it.
+    /// </remarks>
+    [Fact]
+    public void TheTickDoesNotSnapTheBorderBackToTheStaleRectangle_MidGesture()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xD05), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            harness.Workspace.RaiseWindowBoundsChanging(window, Rectangle.FromSize(0, 0, 1100, 700));
+            harness.Scheduler.Fire();
+            harness.Scheduler.Fire();
+
+            Assert.Equal(Rectangle.FromSize(0, 0, 1100, 700), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
+    /// And it lets go at the drop. The remembered rectangle is a stand-in for a cache that is
+    /// deliberately behind; once the cache catches up it is the answer again, and a stand-in that
+    /// outlived its gesture would be the same staleness pointing the other way.
+    /// </summary>
+    [Fact]
+    public void TheRememberedGestureRectangleIsDroppedWhenTheGestureIs()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xD06), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            harness.Workspace.RaiseWindowBoundsChanging(window, Rectangle.FromSize(0, 0, 1100, 700));
+
+            // The drop: the window's own bounds finally say where it ended up, which the real
+            // workspace reports as the ONE settled change of the whole gesture.
+            window.SimulateExternalMove(Rectangle.FromSize(0, 0, 1100, 700));
+            harness.Workspace.RaiseWindowBoundsChanged(window, isUserGesture: true);
+
+            // A later change the gesture had nothing to do with must be followed, not overruled by
+            // a rectangle the border is still holding on to.
+            window.SimulateExternalMove(Rectangle.FromSize(0, 0, 500, 400));
+            harness.Scheduler.Fire();
+
+            Assert.Equal(Rectangle.FromSize(0, 0, 500, 400), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
+    /// A window destroyed mid-gesture never delivers its drop, and Windows reuses handles. The
+    /// remembered rectangle must not outlive the window it was measured on and land on whatever
+    /// takes its handle next.
+    /// </summary>
+    [Fact]
+    public void TheRememberedGestureRectangleDiesWithTheWindowItWasMeasuredOn()
+    {
+        // Tiling OFF so the successor keeps the rectangle it was created with. With the layout on
+        // it would be handed the whole work area, which is not the stale rectangle either -- but a
+        // fact that passes because the tile happens to differ is proving the wrong thing.
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var reused = new IntPtr(0xD07);
+            var dying = new RecordingWindow(reused, Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(dying);
+            harness.Foreground.Handle = reused;
+            harness.Scheduler.Fire();
+
+            harness.Workspace.RaiseWindowBoundsChanging(dying, Rectangle.FromSize(0, 0, 1100, 700));
+            harness.Workspace.RaiseWindowRemoved(dying);
+
+            var successor = new RecordingWindow(reused, Rectangle.FromSize(200, 200, 640, 480));
+            harness.Workspace.RaiseWindowAdded(successor);
+            harness.Foreground.Handle = reused;
+            harness.Scheduler.Fire();
+
+            Assert.Equal(Rectangle.FromSize(200, 200, 640, 480), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
+    /// Only the framed window. Every window on the desktop can be dragged, and redrawing the border
+    /// for one it is not on would move it onto a window that does not have focus.
+    /// </summary>
+    [Fact]
+    public void TheBorderIgnoresAHandResizeOfAWindowItIsNotFraming()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var framed = new RecordingWindow(new IntPtr(0xD03), Rectangle.FromSize(0, 0, 800, 600));
+            var other = new RecordingWindow(new IntPtr(0xD04), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(framed);
+            harness.Workspace.RaiseWindowAdded(other);
+            harness.Foreground.Handle = framed.Handle;
+            harness.Scheduler.Fire();
+
+            var drawn = harness.Border.Shown.Count;
+            harness.Workspace.RaiseWindowBoundsChanging(other, Rectangle.FromSize(0, 0, 1100, 700));
+
+            Assert.Equal(drawn, harness.Border.Shown.Count);
+        }
+    }
+
+    /// <summary>
     /// The strict rule is untouched where it still applies: with tiling ON, a window the WORKSPACE
     /// knows but the TREE does not hold is still not framed.
     /// </summary>

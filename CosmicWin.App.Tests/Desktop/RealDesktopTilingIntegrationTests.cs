@@ -377,6 +377,10 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
         public event EventHandler<WindowEventArgs>? WindowRemoved;
         public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
 
+#pragma warning disable CS0067
+        public event EventHandler<WindowBoundsChangingEventArgs>? WindowBoundsChanging;
+#pragma warning restore CS0067
+
         public bool IsOpen => false;
 
         public IReadOnlyList<IWindow> Snapshot => Array.Empty<IWindow>();

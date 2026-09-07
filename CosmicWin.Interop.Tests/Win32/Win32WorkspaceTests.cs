@@ -195,6 +195,81 @@ public class Win32WorkspaceTests
     }
 
     /// <summary>
+    /// The other half of the bracket, and it was missing. Withholding every intermediate frame is
+    /// right for anything that LAYS OUT and wrong for anything DRAWN over the window: reported from
+    /// real use, resizing a window with the mouse left CosmicWin's focus border frozen on the
+    /// pre-drag rectangle until the button came up.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanging_DuringADrag_ReportsEveryFrameOfTheGesture()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "resized", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var live = new List<Rectangle>();
+        workspace.WindowBoundsChanging += (_, e) => live.Add(e.Bounds);
+        workspace.Open();
+
+        source.SimulateMoveSizeStart(new IntPtr(1));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(0, 0, 440, 300));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(0, 0, 500, 340));
+        source.SimulateMoveSizeEnd(new IntPtr(1));
+
+        Assert.Equal(
+            [Rectangle.FromSize(0, 0, 440, 300), Rectangle.FromSize(0, 0, 500, 340)],
+            live);
+    }
+
+    /// <summary>
+    /// Nothing outside a gesture reaches it. A window moving itself is already reported at once
+    /// through <c>WindowBoundsChanged</c>, and saying it twice would give a listener two answers
+    /// about one move.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanging_OutsideADrag_IsNeverRaised()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "self-mover", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var live = new List<Rectangle>();
+        workspace.WindowBoundsChanging += (_, e) => live.Add(e.Bounds);
+        workspace.Open();
+
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(7, 7, 400, 300));
+
+        Assert.Empty(live);
+    }
+
+    /// <summary>
+    /// The live report leaves the window's own cache alone, and this is the fact that keeps it
+    /// honest. Writing each frame into the cache would leave it already equal to the final
+    /// rectangle at the drop, and <c>UpdateBounds</c> reports nothing when nothing changed -- so
+    /// the ONE event carrying <c>IsUserGesture</c>, the only one a hand-resize reshapes the tree
+    /// from, would stop firing altogether.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanging_DoesNotConsumeTheDrop_WhichStillReportsTheUsersGesture()
+    {
+        var source = new FakeNativeWindowSource();
+        source.SeedExistingWindow(new IntPtr(1), "resized", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var seenLive = 0;
+        var settled = new List<(Rectangle Bounds, bool Gesture)>();
+        workspace.WindowBoundsChanging += (_, _) => seenLive++;
+        workspace.WindowBoundsChanged += (_, e) => settled.Add((e.Window.Bounds, e.IsUserGesture));
+        workspace.Open();
+
+        source.SimulateMoveSizeStart(new IntPtr(1));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(0, 0, 520, 300));
+        source.SimulateMoveSizeEnd(new IntPtr(1));
+
+        Assert.Equal(1, seenLive);
+        var (bounds, gesture) = Assert.Single(settled);
+        Assert.Equal(Rectangle.FromSize(0, 0, 520, 300), bounds);
+        Assert.True(gesture);
+    }
+
+    /// <summary>
     /// Which of the two it was survives onto the event. The drop and an app moving itself are the
     /// same fact about geometry and a completely different one about intent -- only the drop is the
     /// user answering "how big should this be" -- and the App layer resizes the tree from exactly

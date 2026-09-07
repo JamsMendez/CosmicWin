@@ -61,6 +61,43 @@ public sealed class WindowEventArgs : EventArgs
 }
 
 /// <summary>
+/// Carries a rectangle a window is passing THROUGH, rather than one it has settled on.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Its own type, and not a flag on <see cref="WindowEventArgs"/>, because the two carry different
+/// GOODS. That one hands over a window whose <see cref="IWindow.Bounds"/> are the answer; this one
+/// hands over a rectangle the window's own cached bounds deliberately do NOT yet know about.
+/// </para>
+/// <para>
+/// Nothing that lays windows out may listen to this. A drag is one gesture and the layout answers
+/// it once, at the drop -- that is what <c>_beingDragged</c> exists to guarantee, and it was bought
+/// with a measured defect: a tiled window under the mouse flickering against its own snap-back
+/// dozens of times a second. This event exists for the one listener that must keep up with the
+/// gesture without joining it -- something DRAWN over the window, which changes nothing about where
+/// the window goes.
+/// </para>
+/// </remarks>
+public sealed class WindowBoundsChangingEventArgs(IWindow window, Rectangle bounds) : EventArgs
+{
+    /// <summary>The window the user is dragging or resizing right now.</summary>
+    public IWindow Window { get; } = window;
+
+    /// <summary>
+    /// Where it is at this instant, read fresh from the OS.
+    /// </summary>
+    /// <remarks>
+    /// Read from HERE rather than from <see cref="Window"/>, and the indirection is the whole
+    /// point: writing this into the window's cache mid-gesture would leave the cached rectangle
+    /// already equal to the final one at the drop, so the settled
+    /// <see cref="IWorkspace.WindowBoundsChanged"/> -- the only event carrying
+    /// <see cref="WindowEventArgs.IsUserGesture"/>, and the only one the tree resizes from -- would
+    /// see no change and never fire at all.
+    /// </remarks>
+    public Rectangle Bounds { get; } = bounds;
+}
+
+/// <summary>
 /// Tracks the set of top-level windows on the system. Trimmed to
 /// what WT-1 (window-tracking) requires: enumerate at startup, then track create/destroy/
 /// move/resize via events, with <see cref="Poll"/> as the reconciliation fallback for a missed
@@ -79,6 +116,18 @@ public interface IWorkspace : IDisposable
     /// cref="WindowEventArgs.IsUserGesture"/> says whether it was the user's own drag or resize.
     /// </summary>
     event EventHandler<WindowEventArgs>? WindowBoundsChanged;
+
+    /// <summary>
+    /// A tracked window is being dragged or resized BY HAND, right now, and has reached
+    /// <see cref="WindowBoundsChangingEventArgs.Bounds"/>. Raised once per frame of the gesture and
+    /// never outside one; <see cref="WindowBoundsChanged"/> reports the same gesture exactly once,
+    /// when the user lets go.
+    /// </summary>
+    /// <remarks>
+    /// For listeners that DRAW, never for listeners that MOVE -- see
+    /// <see cref="WindowBoundsChangingEventArgs"/>.
+    /// </remarks>
+    event EventHandler<WindowBoundsChangingEventArgs>? WindowBoundsChanging;
 
     /// <summary>Has <see cref="Open"/> been called.</summary>
     bool IsOpen { get; }

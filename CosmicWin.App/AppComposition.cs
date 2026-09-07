@@ -193,6 +193,39 @@ public sealed class AppComposition : IDisposable
         // moved to.
         var lastBorderDecision = string.Empty;
 
+        // The rectangle the framed window was last seen PASSING THROUGH, while a hand drag or
+        // resize is still in flight, and the handle it belongs to.
+        //
+        // It exists because the live report is an event and the tick is not. Measured on hardware
+        // the moment the live follow started working: over one three-second resize the border
+        // reached the new width fifteen times and snapped back to the pre-drag width five times --
+        // once per reconciliation interval, because the tick reads the only rectangle it has, the
+        // window's own, and that one is a gesture behind ON PURPOSE. Two answers, alternating, for
+        // the length of the drag.
+        //
+        // So the live rectangle outlives the event that carried it, until the gesture ends. It is a
+        // stand-in for a cache that is deliberately behind, and it is dropped the moment that cache
+        // catches up -- otherwise it would be the same staleness pointing the other way.
+        nint gestureHandle = 0;
+        var gestureBounds = default(Rectangle);
+
+        /// <summary>Where <paramref name="handle"/> is mid-gesture, or null if it is not in one.</summary>
+        Rectangle? GestureBoundsFor(nint handle) =>
+            gestureHandle != 0 && gestureHandle == handle ? gestureBounds : null;
+
+        /// <summary>
+        /// The gesture on <paramref name="handle"/> is over -- it was dropped, or the window it was
+        /// measured on is gone. Windows reuses handles, so a rectangle left behind here would land
+        /// on whatever takes this one next.
+        /// </summary>
+        void ForgetGesture(nint handle)
+        {
+            if (gestureHandle == handle)
+            {
+                gestureHandle = 0;
+            }
+        }
+
         void RecordBorderDecision(string decision)
         {
             if (decision == lastBorderDecision)
@@ -459,7 +492,15 @@ public sealed class AppComposition : IDisposable
         // border keep up -- Alt+O moves every window at once, and waiting for the tick left the
         // border on the old rectangle for up to half a second. The tick is the safety net for the
         // changes no chord caused: a mouse click landing on another window.
-        void UpdateFocusBorder()
+        void UpdateFocusBorder() => DrawFocusBorder(live: null);
+
+        /// <param name="live">
+        /// A rectangle the framed window is passing THROUGH, mid hand-drag, when there is one.
+        /// Null everywhere else, which means "read it from the window", and that is the ordinary
+        /// case: the window's own bounds are the answer for every change except the one the
+        /// workspace deliberately withholds until the user lets go.
+        /// </param>
+        void DrawFocusBorder(Rectangle? live)
         {
             if (focusBorder is null)
             {
@@ -493,7 +534,7 @@ public sealed class AppComposition : IDisposable
             // because that lookup is the very thing that cannot succeed in this mode.
             if (!tiling)
             {
-                FrameTheForegroundWindow(foregroundHandle);
+                FrameTheForegroundWindow(foregroundHandle, live);
                 return;
             }
 
@@ -524,7 +565,11 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            var framed = focusedWindow.Bounds;
+            // The DISPLAY is still resolved from the settled bounds above, not from this. A window
+            // dragged across a boundary has not changed which tree holds it -- that is decided at
+            // the drop -- and asking mid-gesture would have the border answer a question the layout
+            // has not answered yet.
+            var framed = live ?? GestureBoundsFor(focusedWindow.Handle) ?? focusedWindow.Bounds;
             RecordBorderDecision(
                 $"around 0x{foregroundHandle:X} [L={framed.Left} T={framed.Top} " +
                 $"W={framed.Width} H={framed.Height}]");
@@ -553,7 +598,7 @@ public sealed class AppComposition : IDisposable
         /// which window is ACTIVE -- a fact about the desktop, not about the layout.
         /// </para>
         /// </remarks>
-        void FrameTheForegroundWindow(nint foregroundHandle)
+        void FrameTheForegroundWindow(nint foregroundHandle, Rectangle? live)
         {
             // Resolved through the WORKSPACE, not the registry: the registry holds tiled leaves,
             // which in this mode is precisely the set that is empty. The workspace tracks every
@@ -611,7 +656,7 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            var framed = window.Bounds;
+            var framed = live ?? GestureBoundsFor(window.Handle) ?? window.Bounds;
             if (framed.Width <= 0 || framed.Height <= 0)
             {
                 RecordBorderDecision($"hidden: 0x{foregroundHandle:X} has no rectangle to frame");
@@ -650,22 +695,30 @@ public sealed class AppComposition : IDisposable
         // single refresh after the chord lands before the window has finished arriving, and the
         // border visibly trails it. This arrives once per frame of that movement, on the hook's own
         // thread, and costs one placement each.
+        // WHICH window the border is on, and asking the wrong way is not a near-miss: with tiling
+        // off there is no focused leaf at all, so a leaf-shaped question answers "none" for every
+        // window on the desktop and the border stops following anything. Dragging is the movement
+        // that mode exists to allow, so it is where trailing by a tick would be most visible.
+        nint FramedHandle() => tiling
+            ? executor.ResolveFocusedLeaf()?.Window.Handle ?? 0
+            : foreground.GetForegroundHandle();
+
         EventHandler<WindowEventArgs>? followFocusedWindow = null;
+        EventHandler<WindowBoundsChangingEventArgs>? followDraggedWindow = null;
+        EventHandler<WindowEventArgs>? forgetGestureOnRemoval = null;
         if (focusBorder is not null)
         {
             followFocusedWindow = (_, e) =>
             {
+                // The settled report is the drop, and it carries the caught-up bounds -- so
+                // whatever was being held over for this window has served its purpose. Done before
+                // the framed check, because a window dragged while ANOTHER holds focus still ends
+                // its own gesture here.
+                ForgetGesture(e.Window.Handle);
+
                 // Only the window being framed. During a reflow every tile reports a move, and
                 // redrawing the border for windows it is not on is work with nothing to show for it.
-                //
-                // WHICH window that is depends on the mode, and asking the wrong way is not a
-                // near-miss: with tiling off there is no focused leaf at all, so a leaf-shaped
-                // question answers "none" for every window on the desktop and the border stops
-                // following anything. Dragging is the movement that mode exists to allow, so it is
-                // the one place the border trailing by a tick would be most visible.
-                var framedHandle = tiling
-                    ? executor.ResolveFocusedLeaf()?.Window.Handle ?? 0
-                    : foreground.GetForegroundHandle();
+                var framedHandle = FramedHandle();
 
                 if (framedHandle != 0 && framedHandle == e.Window.Handle)
                 {
@@ -674,6 +727,35 @@ public sealed class AppComposition : IDisposable
             };
 
             workspace.WindowBoundsChanged += followFocusedWindow;
+
+            // The other half, and without it the border sat frozen for the length of a hand-resize.
+            // WindowBoundsChanged is withheld for every frame between MOVESIZESTART and MOVESIZEEND
+            // -- deliberately, and it stays that way: the layout answers a gesture ONCE, at the
+            // drop, and the alternative was measured as a tiled window flickering against its own
+            // snap-back dozens of times a second. The border moves nothing, so it may follow.
+            //
+            // The rectangle comes off the EVENT rather than off the window, because the window's
+            // own cached bounds are a gesture behind on purpose.
+            followDraggedWindow = (_, e) =>
+            {
+                gestureHandle = e.Window.Handle;
+                gestureBounds = e.Bounds;
+
+                var framedHandle = FramedHandle();
+
+                if (framedHandle != 0 && framedHandle == e.Window.Handle)
+                {
+                    DrawFocusBorder(e.Bounds);
+                }
+            };
+
+            workspace.WindowBoundsChanging += followDraggedWindow;
+
+            // The one gesture that never reaches the drop above: the window is destroyed while the
+            // user is still holding it. Windows reuses handles, so leaving the rectangle behind
+            // would frame the next window to take this one at a size it never had.
+            forgetGestureOnRemoval = (_, e) => ForgetGesture(e.Window.Handle);
+            workspace.WindowRemoved += forgetGestureOnRemoval;
         }
 
         var watchTick = 0;
@@ -798,6 +880,16 @@ public sealed class AppComposition : IDisposable
                 if (followFocusedWindow is not null)
                 {
                     workspace.WindowBoundsChanged -= followFocusedWindow;
+                }
+
+                if (followDraggedWindow is not null)
+                {
+                    workspace.WindowBoundsChanging -= followDraggedWindow;
+                }
+
+                if (forgetGestureOnRemoval is not null)
+                {
+                    workspace.WindowRemoved -= forgetGestureOnRemoval;
                 }
             });
     }

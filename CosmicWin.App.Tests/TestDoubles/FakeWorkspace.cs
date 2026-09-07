@@ -14,6 +14,8 @@ internal sealed class FakeWorkspace : IWorkspace
 
     public event EventHandler<WindowEventArgs>? WindowBoundsChanged;
 
+    public event EventHandler<WindowBoundsChangingEventArgs>? WindowBoundsChanging;
+
     public bool IsOpen { get; private set; }
 
     private readonly List<IWindow> _open = [];
@@ -70,6 +72,14 @@ internal sealed class FakeWorkspace : IWorkspace
     /// </param>
     public void RaiseWindowBoundsChanged(IWindow window, bool isUserGesture = false) =>
         WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture));
+
+    /// <summary>
+    /// Simulates one frame of a hand drag or resize: the window is somewhere new on screen and its
+    /// own <see cref="IWindow.Bounds"/> deliberately do not say so yet, exactly as the real
+    /// workspace withholds them until the user lets go.
+    /// </summary>
+    public void RaiseWindowBoundsChanging(IWindow window, Rectangle bounds) =>
+        WindowBoundsChanging?.Invoke(this, new WindowBoundsChangingEventArgs(window, bounds));
 
     public void Dispose()
     {
