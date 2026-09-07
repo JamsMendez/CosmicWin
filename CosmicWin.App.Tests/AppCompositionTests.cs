@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;

@@ -105,10 +105,15 @@ public static class CompositionRoot
     /// are MANDATORY for the reason every gate on this factory is: defaulted, a call site that
     /// dropped them would compile cleanly and silently ignore the user's persisted choice, which is
     /// the exact failure this factory's other parameters were made mandatory to prevent.
+    /// <paramref name="getTiling"/>/<paramref name="setTiling"/> are mandatory for that same reason,
+    /// and the cost of dropping them is higher still: the controller answers "tiling is on" when it
+    /// is not wired, so a silent omission would leave the user with a menu item that ticks itself
+    /// back on and a window manager that never stopped tiling.
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
         Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit,
+        Func<bool> getTiling, Action<bool> setTiling,
         Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null) =>
         new(
             () => hook.IsPaused,
@@ -118,5 +123,7 @@ public static class CompositionRoot
             () => exceptions.Reload(loadExceptions()),
             exit,
             getBorderColor,
-            setBorderColor);
+            setBorderColor,
+            getTiling,
+            setTiling);
 }

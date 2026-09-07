@@ -121,8 +121,16 @@ public sealed class AppComposition : IDisposable
         bool focusBorderEnabled = true,
         Action<bool>? persistFocusBorder = null,
         uint? focusBorderColor = null,
-        Action<uint?>? persistBorderColor = null)
+        Action<uint?>? persistBorderColor = null,
+        bool tilingEnabled = true,
+        Action<bool>? persistTiling = null)
     {
+        // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
+        // border flag below is: the tray item, the executor's chord gate and both window adapters
+        // all have to read ONE decision, and whichever of them kept its own copy would become a
+        // second owner of it.
+        var tiling = tilingEnabled;
+
         // The live answer to "is the border on", owned here because BOTH the tray item and
         // UpdateFocusBorder need it and neither may become the other's source of truth.
         var borderEnabled = focusBorderEnabled;
@@ -145,6 +153,7 @@ public sealed class AppComposition : IDisposable
         executor.FocusTrace = focusTrace;
         executor.VirtualDesktops = virtualDesktops;
         executor.DesktopTrace = desktopTrace;
+        executor.TilingEnabled = () => tiling;
 
         // The dimension is inert until something answers these. Left unset -- as every test does --
         // every tree is filed under Guid.Empty and the model behaves exactly as it did before.
@@ -232,8 +241,17 @@ public sealed class AppComposition : IDisposable
         // land, and there is no reason to leave a known-blind call site behind for them to find.
         treeManager.AfterArrange = AfterArrange;
 
+        // TWO switches, ONE gate, and the collapse is deliberate. Pausing stops everything; turning
+        // tiling off stops the layout and leaves the desktop chords alone -- but to anything that
+        // MOVES a window those are the same instruction, and giving the adapters a second flag to
+        // check would be two chances to check only one of them.
+        //
+        // The difference between the two switches lives where it belongs instead: in the chord path,
+        // which is the only place that can tell a desktop chord from a layout one.
+        bool LayoutIsFrozen() => hook.IsPaused || !tiling;
+
         var sessionAdapter = new MultiMonitorWorkspaceAdapter(
-            workspace, treeManager, registry, () => exceptionStore.Current, () => hook.IsPaused,
+            workspace, treeManager, registry, () => exceptionStore.Current, LayoutIsFrozen,
             executor.ResolveFocusedLeaf, AfterArrange)
         {
             ResolveWindowDesktop = resolveWindowDesktop,
@@ -304,6 +322,28 @@ public sealed class AppComposition : IDisposable
         // nobody exercises cannot rot.
         onOwningThread(() => focusBorder?.UseColor(borderColor));
 
+        // Everything that has to happen the moment the layout is put back on duty.
+        void ResumeTiling()
+        {
+            // The windows that opened while it was off were refused by the adapter, and the
+            // workspace considers them announced -- so nothing will ever mention them again. Asking
+            // for them BY NAME is the only route back; one already tiled costs a single lookup.
+            sessionAdapter.AdoptOpenWindows();
+
+            // Then EVERY display, not only the ones that gained a window. While tiling was off the
+            // user was free to drag and resize with the mouse, and switching it back on is a request
+            // to put the layout back -- which for a display where nothing opened or closed is a
+            // request nothing else in this composition would ever make.
+            foreach (var display in treeManager.Displays)
+            {
+                if (treeManager.TryGetTree(display, out var tree) && tree is not null)
+                {
+                    TreeArranger.ArrangeAndPosition(
+                        tree, registry, WorkAreaResolver.Resolve(display), AfterArrange);
+                }
+            }
+        }
+
         // TC-3-W1: Salir stops the logon trigger BEFORE tearing the process down -- after shutdown
         // there is no guarantee anything still runs. Disable, not uninstall: TC-3 says "disable the
         // Scheduled Task trigger" where ES-4 says "remove", so quitting once must not throw the
@@ -322,6 +362,27 @@ public sealed class AppComposition : IDisposable
                 // menu click must reach the screen now, not on the next tick -- a setting the user
                 // waits half a second to see reads as one that did not work.
                 onOwningThread(UpdateFocusBorder);
+            },
+            getTiling: () => tiling,
+            setTiling: enabled =>
+            {
+                tiling = enabled;
+
+                // Persisted BEFORE the layout is put back, the same order the border toggle uses
+                // and for the same reason: the choice must survive even if the reflow throws.
+                persistTiling?.Invoke(enabled);
+
+                if (enabled)
+                {
+                    // On the thread that owns the trees and the overlay. This arrives from a tray
+                    // click, and a reflow places windows and refreshes the border -- the WinEvent
+                    // hook's own thread does both everywhere else in this file.
+                    onOwningThread(ResumeTiling);
+                }
+
+                // Turning it OFF does nothing else on purpose. Every window is left exactly where
+                // the layout last put it, which is the honest starting point for a mode whose whole
+                // promise is that nothing moves any more.
             },
             getBorderColor: () => borderColor,
             setBorderColor: rgb =>
@@ -356,6 +417,20 @@ public sealed class AppComposition : IDisposable
         // still be wearing the previous desktop's geometry.
         void ApplyArrivingLayout()
         {
+            // The one layout path a desktop chord can still reach with tiling off, and it had to be
+            // stopped here rather than at the chord: the desktop chords are deliberately answered in
+            // that mode, and this hangs off a successful one. Caught by a fact -- Alt+2 with tiling
+            // off was placing two windows -- which is exactly the shape of defect a mode switch
+            // wired at only one of its seams produces.
+            //
+            // Paused counts too, and that closes a smaller pre-existing hole on the way past: the
+            // tick calls this for a switch CosmicWin did not make, so Win+Ctrl+arrow while paused
+            // used to re-lay the arriving desktop that nothing was supposed to be touching.
+            if (LayoutIsFrozen())
+            {
+                return;
+            }
+
             if (treeManager.TryGetTree(treeManager.Primary, out var arriving) && arriving is not null)
             {
                 TreeArranger.ArrangeAndPosition(
@@ -412,6 +487,16 @@ public sealed class AppComposition : IDisposable
             // window is ACTIVE, and when the active one is not tiled the honest answer is to draw
             // nothing.
             var foregroundHandle = foreground.GetForegroundHandle();
+
+            // With no layout in force there is no tree to ask, so the border answers from the
+            // WINDOW instead. Checked before the leaf lookup below rather than folded into it,
+            // because that lookup is the very thing that cannot succeed in this mode.
+            if (!tiling)
+            {
+                FrameTheForegroundWindow(foregroundHandle);
+                return;
+            }
+
             if (hook.IsPaused
                 || foregroundHandle == 0
                 || !registry.TryGetLeaf(foregroundHandle, out var focusedLeaf)
@@ -452,6 +537,76 @@ public sealed class AppComposition : IDisposable
                 dashed: isConstrained(focusedWindow.Handle));
         }
 
+        /// <summary>
+        /// Frames whatever the user is looking at, for the mode where nothing is tiled.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Reported the day the tiling switch landed: with tiling off, the windows on a second
+        /// virtual desktop wore no border. It was never about that desktop -- the trace read
+        /// "no framed window", not "is on another desktop's tree". The border only ever framed a
+        /// LEAF, and with the layout off nothing new becomes one; the first desktop kept its
+        /// borders only because its tree had been built before the switch was flipped.
+        /// </para>
+        /// <para>
+        /// So the coupling is cut where it was never wanted. The border is its own switch and says
+        /// which window is ACTIVE -- a fact about the desktop, not about the layout.
+        /// </para>
+        /// </remarks>
+        void FrameTheForegroundWindow(nint foregroundHandle)
+        {
+            // Resolved through the WORKSPACE, not the registry: the registry holds tiled leaves,
+            // which in this mode is precisely the set that is empty. The workspace tracks every
+            // top-level window, which is what "the window in front of the user" means here.
+            if (hook.IsPaused
+                || foregroundHandle == 0
+                || resolveAnyWindow(foregroundHandle) is not { IsAlive: true } window)
+            {
+                RecordBorderDecision(
+                    $"hidden: nothing to frame without a tree " +
+                    $"(paused={hook.IsPaused} foreground=0x{foregroundHandle:X})");
+                focusBorder!.Hide();
+                return;
+            }
+
+            // The tree used to answer "is this window on the desktop in view", and it was doing real
+            // work: GetForegroundWindow keeps naming the cloaked window from the desktop being left
+            // during the shell's transition. With no tree, the shell is asked directly.
+            //
+            // Guid.Empty is the shell DECLINING to say, which it answers for any window merely
+            // mid-creation. Reading that as "somewhere else" is a mistake this repository has
+            // already paid for once -- every arriving window was filed under a desktop nobody was
+            // looking at, and tiling stopped outright -- so it is read as "here" exactly as the
+            // arrival path reads it.
+            var named = resolveWindowDesktop?.Invoke(foregroundHandle) ?? Guid.Empty;
+            if (named != Guid.Empty && named != lastDesktop)
+            {
+                RecordBorderDecision($"hidden: 0x{foregroundHandle:X} is on another desktop");
+                focusBorder!.Hide();
+                return;
+            }
+
+            var framed = window.Bounds;
+            if (framed.Width <= 0 || framed.Height <= 0)
+            {
+                RecordBorderDecision($"hidden: 0x{foregroundHandle:X} has no rectangle to frame");
+                focusBorder!.Hide();
+                return;
+            }
+
+            RecordBorderDecision(
+                $"around 0x{foregroundHandle:X} untiled [L={framed.Left} T={framed.Top} " +
+                $"W={framed.Width} H={framed.Height}]");
+
+            // SOLID, always. The broken border means "a size this window refuses BITES the tile it
+            // is holding right now", and a window holding no tile makes no such claim -- drawing it
+            // dashed here would drift the mark back to "this window once refused a size", which is
+            // exactly what it was corrected away from.
+            focusBorder!.ShowAround(
+                window.Handle, framed, treeManager.ResolveDisplay(framed).Scaling,
+                BorderGeometry.DefaultThickness, dashed: false);
+        }
+
         // Unfiltered on purpose, unlike AfterArrange: a chord can change WHICH window is focused
         // without moving anything at all, and the border still has to go and find it.
         // Two things after every chord, in this order. A chord that reshapes the layout reaches the
@@ -477,7 +632,17 @@ public sealed class AppComposition : IDisposable
             {
                 // Only the window being framed. During a reflow every tile reports a move, and
                 // redrawing the border for windows it is not on is work with nothing to show for it.
-                if (executor.ResolveFocusedLeaf() is { } leaf && leaf.Window.Handle == e.Window.Handle)
+                //
+                // WHICH window that is depends on the mode, and asking the wrong way is not a
+                // near-miss: with tiling off there is no focused leaf at all, so a leaf-shaped
+                // question answers "none" for every window on the desktop and the border stops
+                // following anything. Dragging is the movement that mode exists to allow, so it is
+                // the one place the border trailing by a tick would be most visible.
+                var framedHandle = tiling
+                    ? executor.ResolveFocusedLeaf()?.Window.Handle ?? 0
+                    : foreground.GetForegroundHandle();
+
+                if (framedHandle != 0 && framedHandle == e.Window.Handle)
                 {
                     UpdateFocusBorder();
                 }
@@ -583,7 +748,7 @@ public sealed class AppComposition : IDisposable
         if (windowShown is not null)
         {
             dialogAdapter = new FloatingDialogAdapter(
-                windowShown, treeManager, () => exceptionStore.Current, () => hook.IsPaused)
+                windowShown, treeManager, () => exceptionStore.Current, LayoutIsFrozen)
             {
                 // Off unless asked for: one line per owned window shown anywhere on the desktop is
                 // diagnostic volume, not something to write during ordinary use.
@@ -659,7 +824,9 @@ public sealed class AppComposition : IDisposable
             focusBorderEnabled: settings.FocusBorder,
             persistFocusBorder: enabled => SettingsFile.Save(stored = stored with { FocusBorder = enabled }),
             focusBorderColor: settings.BorderColor,
-            persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }));
+            persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }),
+            tilingEnabled: settings.Tiling,
+            persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }));
     }
 
     /// <summary>

@@ -176,4 +176,57 @@ public sealed class SettingsTests
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
+
+    /// <summary>
+    /// Tiling is ON unless the file says otherwise, for the same reason the border is: a file that
+    /// has never been written must not turn the window manager's whole purpose off.
+    /// </summary>
+    [Fact]
+    public void TilingIsOn_UnlessTheFileSaysOtherwise()
+    {
+        Assert.True(Settings.Default.Tiling);
+        Assert.True(Settings.Parse(string.Empty).Tiling);
+    }
+
+    [Theory]
+    [InlineData("tiling = off")]
+    [InlineData("tiling=off")]
+    [InlineData("  TILING   =   Off  ")]
+    [InlineData("tiling = false")]
+    [InlineData("tiling = 0")]
+    public void TilingIsTurnedOff_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.False(Settings.Parse(line).Tiling);
+    }
+
+    /// <summary>Same rule as every other key: a value nobody recognises keeps the default.</summary>
+    [Theory]
+    [InlineData("tiling = quizas")]
+    [InlineData("tiling =")]
+    [InlineData("tiling")]
+    public void AnUnreadableTilingValue_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.True(Settings.Parse(line).Tiling);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void TilingIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\ntiling = off\nborder-color = azul");
+
+        Assert.False(settings.FocusBorder);
+        Assert.False(settings.Tiling);
+        Assert.Null(settings.BorderColor);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SerializeThenParse_RoundTripsTheTilingSwitch(bool tiling)
+    {
+        var original = new Settings(FocusBorder: true, BorderColor: null, Tiling: tiling);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
 }

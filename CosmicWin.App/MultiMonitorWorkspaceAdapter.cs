@@ -542,6 +542,38 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
+    /// Offers every open window to the tree again, as an ADOPTION.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the moment the tray's tiling switch comes back ON. While it was off this adapter refused
+    /// every announcement, and the workspace does not repeat itself -- a window it has already
+    /// announced is one it considers known, so <c>Poll</c> will never mention it again. Without
+    /// this, everything opened during that time would stay untiled for the rest of the session.
+    /// </para>
+    /// <para>
+    /// An ADOPTION rather than a birth, exactly like <see cref="RetryParkedOn"/>: these windows have
+    /// been sitting where the user left them, and a birth carries a desktop-redirect decision that
+    /// would drag them to whichever desktop the user is on now.
+    /// </para>
+    /// <para>
+    /// A window this adapter already owns is skipped rather than re-announced. The one-HWND-one-leaf
+    /// guard would absorb it, but only after the work of resolving it -- and asking about windows
+    /// that are already answered is how a cheap pass turns into a storm.
+    /// </para>
+    /// </remarks>
+    public void AdoptOpenWindows()
+    {
+        foreach (var window in _workspace.Snapshot.ToArray())
+        {
+            if (!_owners.ContainsKey(window.Handle))
+            {
+                OnWindowAdded(this, new WindowEventArgs(window, arrival: WindowArrival.Adopted));
+            }
+        }
+    }
+
+    /// <summary>
     /// Reshapes <paramref name="tree"/> so <paramref name="handle"/> stands beside its former
     /// siblings instead of among them, reporting whether that actually made its tile fit.
     /// </summary>

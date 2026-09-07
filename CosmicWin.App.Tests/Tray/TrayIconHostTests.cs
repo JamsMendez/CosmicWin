@@ -19,7 +19,7 @@ public sealed class TrayIconHostTests
     }
 
     /// <summary>
-    /// The order the maintainer asked for: the border first, then the pause, then the two items
+    /// The mode switch first, then the border and its colour, then the pause, then the two items
     /// that end something.
     /// </summary>
     /// <remarks>
@@ -28,10 +28,11 @@ public sealed class TrayIconHostTests
     /// in its own literal would assert nothing but its own copy.
     /// </remarks>
     [Fact]
-    public void TheMenuIsOrdered_BorderThenPauseThenReloadThenExit()
+    public void TheMenuIsOrdered_TilingThenBorderThenPauseThenReloadThenExit()
     {
         Assert.Equal(
             [
+                TrayMenuEntry.Tiling,
                 TrayMenuEntry.FocusBorder,
                 TrayMenuEntry.BorderColor,
                 TrayMenuEntry.Pause,

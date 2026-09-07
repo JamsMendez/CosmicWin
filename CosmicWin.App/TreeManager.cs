@@ -67,6 +67,17 @@ public sealed class TreeManager
     /// </summary>
     public Func<Guid>? CurrentDesktop { get; set; }
 
+    /// <summary>
+    /// Every monitor this manager holds trees for.
+    /// </summary>
+    /// <remarks>
+    /// Exists for the one caller that has to act on ALL of them at once rather than on the monitor
+    /// some window happens to be on: turning the tray's tiling switch back on re-applies every
+    /// layout, and a display whose windows were merely dragged about would otherwise be missed --
+    /// nothing arrived on it and nothing left it, so no per-window path ever names it.
+    /// </remarks>
+    public IReadOnlyCollection<IDisplay> Displays => _displays.Values;
+
     /// <summary>The tree for <paramref name="display"/> on the desktop currently being viewed.</summary>
     public bool TryGetTree(IDisplay display, out LayoutTree? tree) =>
         TryGetTree(CurrentDesktop?.Invoke() ?? Guid.Empty, display, out tree);

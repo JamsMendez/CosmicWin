@@ -11,6 +11,11 @@ namespace CosmicWin.App;
 /// The colour of that border as <c>0xRRGGBB</c>, or <see langword="null"/> to follow Windows' own
 /// accent -- which is what it drew before it could be configured at all.
 /// </param>
+/// <param name="Tiling">
+/// Whether CosmicWin lays windows out at all. Turned off, windows are left exactly where their
+/// applications put them and the layout chords go quiet, while the virtual-desktop chords keep
+/// working -- which is a legitimate way to use this app, not a degraded one.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -28,18 +33,21 @@ namespace CosmicWin.App;
 /// <see cref="SettingsFile"/> owns the reading and writing.
 /// </para>
 /// </remarks>
-public sealed record Settings(bool FocusBorder, uint? BorderColor = null)
+public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
     /// has never been written must not turn a feature off. Its colour is the system accent, which
-    /// is the one colour guaranteed to look deliberate on a desktop nobody has configured.
+    /// is the one colour guaranteed to look deliberate on a desktop nobody has configured. And
+    /// tiling is ON, for a stronger version of the same reason -- it is what the app is for.
     /// </summary>
     public static Settings Default { get; } = new(FocusBorder: true);
 
     private const string FocusBorderKey = "focus-border";
 
     private const string BorderColorKey = "border-color";
+
+    private const string TilingKey = "tiling";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
@@ -56,6 +64,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null)
     {
         var focusBorder = Default.FocusBorder;
         var borderColor = Default.BorderColor;
+        var tiling = Default.Tiling;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -90,9 +99,14 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null)
             {
                 borderColor = colour;
             }
+            else if (key.Equals(TilingKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var tilingFlag))
+            {
+                tiling = tilingFlag;
+            }
         }
 
-        return new Settings(focusBorder, borderColor);
+        return new Settings(focusBorder, borderColor, tiling);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -104,6 +118,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null)
 
          # {BorderColorKey}: #RRGGBB, or `{AccentValue}` to follow Windows' own accent colour.
          {BorderColorKey} = {(BorderColor is { } rgb ? $"#{rgb:X6}" : AccentValue)}
+
+         # {TilingKey}: on to lay windows out, off to leave them where they open. Off, the
+         # virtual-desktop chords keep working and only the layout ones go quiet.
+         {TilingKey} = {(Tiling ? "on" : "off")}
 
          """;
 

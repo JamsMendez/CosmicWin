@@ -186,4 +186,87 @@ public sealed class TrayMenuControllerTests
 
         controller.SetBorderColor(0xFF0000u);
     }
+
+    /// <summary>
+    /// The tiling switch is the same shape as the other two: it owns nothing, it reports what the
+    /// injected getter says, and flipping it returns the state the caller must now render.
+    /// </summary>
+    [Fact]
+    public void ToggleTiling_FlipsFromTrueToFalse_AndReturnsNewState()
+    {
+        var tiling = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            null, null, () => tiling, value => tiling = value);
+
+        var result = controller.ToggleTiling();
+
+        Assert.False(result);
+        Assert.False(tiling);
+    }
+
+    [Fact]
+    public void ToggleTiling_CalledTwice_ReturnsToOriginalState()
+    {
+        var tiling = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            null, null, () => tiling, value => tiling = value);
+
+        controller.ToggleTiling();
+        var result = controller.ToggleTiling();
+
+        Assert.True(result);
+        Assert.True(tiling);
+    }
+
+    /// <summary>No hidden state here either: the switch is persisted and can be edited by hand.</summary>
+    [Fact]
+    public void IsTilingEnabled_ReflectsInjectedGetter_NotInternalState()
+    {
+        var tiling = true;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            null, null, () => tiling, value => tiling = value);
+        Assert.True(controller.IsTilingEnabled);
+
+        tiling = false;
+
+        Assert.False(controller.IsTilingEnabled);
+    }
+
+    /// <summary>
+    /// Turning tiling off must not pause CosmicWin, and pausing must not turn tiling off. They are
+    /// two different sizes of the same idea and the whole point of the new item is that they differ.
+    /// </summary>
+    [Fact]
+    public void TheTilingSwitchAndThePause_DoNotDisturbEachOther()
+    {
+        var paused = false;
+        var tiling = true;
+        var controller = new TrayMenuController(
+            () => paused, value => paused = value, () => true, _ => { }, () => { }, () => { },
+            null, null, () => tiling, value => tiling = value);
+
+        controller.ToggleTiling();
+        Assert.False(paused);
+
+        controller.TogglePause();
+        Assert.False(tiling);
+    }
+
+    /// <summary>
+    /// Unwired -- as every caller that predates the switch is -- the app tiles, and the toggle
+    /// reports the state it could not change rather than a tick that lies about the world.
+    /// </summary>
+    [Fact]
+    public void WithNoTilingDelegatesWired_TheItemIsInertRatherThanBroken()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.True(controller.IsTilingEnabled);
+        Assert.True(controller.ToggleTiling());
+        Assert.True(controller.IsTilingEnabled);
+    }
 }

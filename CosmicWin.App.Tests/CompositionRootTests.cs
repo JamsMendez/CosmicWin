@@ -229,7 +229,9 @@ public sealed class CompositionRootTests
     {
         using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
-        var controller = CompositionRoot.BuildTrayMenuController(hook, exceptionStore, () => ExceptionList.Empty, () => true, _ => { }, () => { });
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore, () => ExceptionList.Empty, () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { });
 
         Assert.False(controller.IsPaused);
         var next = controller.TogglePause();
@@ -245,7 +247,9 @@ public sealed class CompositionRootTests
         using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
         var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
         var exitCount = 0;
-        var controller = CompositionRoot.BuildTrayMenuController(hook, exceptionStore, () => ExceptionList.Empty, () => true, _ => { }, () => exitCount++);
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore, () => ExceptionList.Empty, () => true, _ => { }, () => exitCount++,
+            getTiling: () => true, setTiling: _ => { });
 
         controller.Exit();
 
@@ -280,7 +284,8 @@ public sealed class CompositionRootTests
                 workspace, tree, registry, executor, exceptionStore, isPaused: () => false);
             using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
             var controller = CompositionRoot.BuildTrayMenuController(
-                hook, exceptionStore, () => ExceptionListFile.Load(path), () => true, _ => { }, () => { });
+                hook, exceptionStore, () => ExceptionListFile.Load(path), () => true, _ => { }, () => { },
+                getTiling: () => true, setTiling: _ => { });
 
             var before = new RecordingWindow(new IntPtr(910), Rectangle.FromSize(0, 0, 800, 600), processName: "Spotify.exe");
             workspace.RaiseWindowAdded(before);

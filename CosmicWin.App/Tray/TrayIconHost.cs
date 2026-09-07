@@ -39,6 +39,15 @@ public sealed class TrayIconHost : IDisposable
             previous?.Dispose();
         };
 
+        // A tick, for the same reason the border item below carries one: this says what the mode IS,
+        // where Pausar says what its click DOES. A verb would have to be "Desactivar tiling", and
+        // the state it leaves behind is the thing the user actually wants to read off the menu.
+        var tilingItem = new ToolStripMenuItem("Modo tiling")
+        {
+            Checked = controller.IsTilingEnabled,
+        };
+        tilingItem.Click += (_, _) => tilingItem.Checked = controller.ToggleTiling();
+
         // A TICK rather than a glyph, and deliberately so: a ToolStripMenuItem that carries an
         // Image renders it INSTEAD of its check mark, so a state this item exists to show would
         // have been hidden by decorating it. CheckOnClick is left off -- the controller owns the
@@ -82,6 +91,7 @@ public sealed class TrayIconHost : IDisposable
         // to MenuOrder, which a fact already pins.
         var items = new Dictionary<TrayMenuEntry, ToolStripMenuItem>
         {
+            [TrayMenuEntry.Tiling] = tilingItem,
             [TrayMenuEntry.FocusBorder] = borderItem,
             [TrayMenuEntry.BorderColor] = colorItem,
             [TrayMenuEntry.Pause] = _pauseItem,
@@ -132,9 +142,14 @@ public sealed class TrayIconHost : IDisposable
     public static string PauseLabel(bool isPaused) => isPaused ? "Reanudar" : "Pausar";
 
     /// <summary>
-    /// The order the items appear in: the border and its colour first, then the pause, then the two
-    /// that end something.
+    /// The order the items appear in: the mode switch first, then the border and its colour, then
+    /// the pause, then the two that end something.
     /// </summary>
+    /// <remarks>
+    /// Tiling leads because it is the biggest thing on this menu that is not an ending -- it says
+    /// whether CosmicWin is doing its job at all -- and it sits above Pausar rather than beside it
+    /// so the two "how much is this app doing" switches read from narrow to wide.
+    /// </remarks>
     /// <remarks>
     /// The constructor ADDS its items by walking this list, which is what makes it the decision
     /// rather than a description of one. Kept public so a fact can assert the real order instead of
@@ -143,6 +158,7 @@ public sealed class TrayIconHost : IDisposable
     /// </remarks>
     public static IReadOnlyList<TrayMenuEntry> MenuOrder { get; } =
     [
+        TrayMenuEntry.Tiling,
         TrayMenuEntry.FocusBorder,
         TrayMenuEntry.BorderColor,
         TrayMenuEntry.Pause,

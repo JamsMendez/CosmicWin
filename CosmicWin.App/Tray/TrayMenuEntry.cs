@@ -11,6 +11,12 @@ namespace CosmicWin.App.Tray;
 /// </remarks>
 public enum TrayMenuEntry
 {
+    /// <summary>
+    /// Lays windows out, or leaves them exactly where their applications put them. Off, the
+    /// virtual-desktop chords keep working -- which is what separates it from <see cref="Pause"/>.
+    /// </summary>
+    Tiling,
+
     /// <summary>Draws CosmicWin's own thicker focus border, or leaves only the one DWM draws.</summary>
     FocusBorder,
 

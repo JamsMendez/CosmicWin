@@ -87,7 +87,8 @@ public sealed class FocusBorderWiringTests
 
     private static Harness Wire(
         IVirtualDesktopService? virtualDesktops = null, bool focusBorderEnabled = true,
-        uint? focusBorderColor = null)
+        uint? focusBorderColor = null, bool tilingEnabled = true,
+        Func<nint, Guid>? resolveWindowDesktop = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -122,10 +123,12 @@ public sealed class FocusBorderWiringTests
             },
             focusBorder: border,
             virtualDesktops: virtualDesktops,
+            resolveWindowDesktop: resolveWindowDesktop,
             focusBorderEnabled: focusBorderEnabled,
             persistFocusBorder: persisted.Add,
             focusBorderColor: focusBorderColor,
-            persistBorderColor: persistedColours.Add);
+            persistBorderColor: persistedColours.Add,
+            tilingEnabled: tilingEnabled);
 
         return new Harness(
             composition, workspace, foreground, border, scheduler, hook!, platform, tray!, persisted,
@@ -643,6 +646,231 @@ public sealed class FocusBorderWiringTests
 
             Assert.False(harness.Tray.IsFocusBorderEnabled);
             Assert.Empty(harness.Persisted);
+        }
+    }
+
+    /// <summary>
+    /// With the tiling switch off, the border frames the window in FRONT of the user, tiled or not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reported from real use the day the switch landed: with tiling off, the windows on a second
+    /// virtual desktop wore no border. Measured, it was never about that desktop -- the trace read
+    /// <c>border hidden: no framed window</c> rather than <c>is on another desktop's tree</c>. The
+    /// border only ever framed a LEAF, and with the layout off nothing new becomes one. Desktop 1
+    /// kept its borders because its tree had been built before the switch was flipped; desktop 2's
+    /// windows are cloaked until the user walks over, so theirs never was.
+    /// </para>
+    /// <para>
+    /// The border is its own switch and says which window is ACTIVE. Making it a function of the
+    /// layout was a coupling nobody asked for, so with no layout in force it answers from the
+    /// window instead of from the tree.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WithTilingOff_TheBorderFramesTheForegroundWindow_ThoughNothingIsTiled()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC01), Rectangle.FromSize(300, 200, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            var call = harness.Border.Shown[^1];
+            Assert.Equal(window.Handle, call.Framed);
+
+            // Its OWN rectangle, not a tile: with tiling off nothing was moved, and the window is
+            // exactly where its application put it.
+            Assert.Equal(Rectangle.FromSize(300, 200, 800, 600), call.Window);
+            Assert.Equal(1.5, call.Scaling);
+            Assert.Equal(BorderGeometry.DefaultThickness, call.Thickness);
+        }
+    }
+
+    /// <summary>
+    /// Solid, always. The broken border means "a size this window refuses BITES the tile it is
+    /// holding", and a window holding no tile makes no such claim -- drawing it dashed would be
+    /// the mark drifting back to "this window once refused a size", which it was corrected away
+    /// from.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_TheBorderIsSolid_BecauseNoTileIsBeingClaimed()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC02), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.False(harness.Border.Shown[^1].Dashed);
+        }
+    }
+
+    /// <summary>
+    /// The tree used to be what kept the border off a window on a desktop nobody is looking at --
+    /// <c>GetForegroundWindow</c> can keep naming the cloaked window from the desktop being left.
+    /// With no tree to ask, the shell is asked directly instead.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_AWindowOnAnotherDesktopIsNotFramed()
+    {
+        var elsewhere = Guid.NewGuid();
+        var harness = Wire(
+            virtualDesktops: new MutableVirtualDesktops(Guid.Empty),
+            tilingEnabled: false,
+            resolveWindowDesktop: _ => elsewhere);
+
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC03), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > 0);
+        }
+    }
+
+    /// <summary>
+    /// A desktop of <see cref="Guid.Empty"/> is the shell DECLINING to say, which it answers for
+    /// any window merely mid-creation. This codebase has already paid once for reading that as
+    /// "nowhere" -- every arriving window was filed under a desktop nobody was looking at and
+    /// tiling stopped outright -- so it must not cost the window its border either.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_AWindowTheShellWillNotPlace_IsStillFramed()
+    {
+        var harness = Wire(
+            virtualDesktops: new MutableVirtualDesktops(Guid.NewGuid()),
+            tilingEnabled: false,
+            resolveWindowDesktop: _ => Guid.Empty);
+
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC04), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.Equal(window.Handle, harness.Border.Shown[^1].Framed);
+        }
+    }
+
+    /// <summary>The border's own switch still wins: tiling off is not a way to turn it back on.</summary>
+    [Fact]
+    public void WithTilingOff_TheBorderStillObeysItsOwnSwitch()
+    {
+        var harness = Wire(focusBorderEnabled: false, tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC05), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+        }
+    }
+
+    /// <summary>
+    /// And pausing still wins over both. Pause means the whole app stands down, which is exactly
+    /// the thing the tiling switch was built to be narrower than.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_PausingStillHidesTheBorder()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC06), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+            Assert.NotEmpty(harness.Border.Shown);
+
+            harness.Tray.TogglePause();
+            var drawn = harness.Border.Shown.Count;
+            harness.Scheduler.Fire();
+
+            Assert.Equal(drawn, harness.Border.Shown.Count);
+        }
+    }
+
+    /// <summary>
+    /// The border keeps up with a window being DRAGGED, which is the movement this mode exists to
+    /// allow. Waiting for the tick would leave it trailing the window by up to a full interval --
+    /// the same defect the tiled path already has its own callback for.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_TheBorderFollowsAnUntiledWindowAsItMoves()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(0xC07), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            window.SimulateExternalMove(Rectangle.FromSize(640, 360, 400, 300));
+            harness.Workspace.RaiseWindowBoundsChanged(window);
+
+            Assert.Equal(Rectangle.FromSize(640, 360, 400, 300), harness.Border.Shown[^1].Window);
+        }
+    }
+
+    /// <summary>
+    /// The strict rule is untouched where it still applies: with tiling ON, a window the WORKSPACE
+    /// knows but the TREE does not hold is still not framed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The window is announced and then evicted for refusing to be repositioned, which leaves it in
+    /// the workspace's snapshot and out of the tree -- the real shape of the Sticky Notes defect,
+    /// where an app that is visible and known is simply not part of the layout.
+    /// </para>
+    /// <para>
+    /// A handle the workspace never heard of would NOT pin this, and that is not a hypothetical: it
+    /// was the first version of this fact, and the mutation that routes the tiled path through the
+    /// untiled one walked straight past it -- an unknown handle resolves to no window either way,
+    /// so both branches hid the border and the test could not tell them apart.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WithTilingOn_AWindowTheTreeDoesNotHold_IsStillNotFramed()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var tiled = new RecordingWindow(new IntPtr(0xC08), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(tiled);
+            harness.Foreground.Handle = tiled.Handle;
+            harness.Scheduler.Fire();
+            Assert.Equal(tiled.Handle, harness.Border.Shown[^1].Framed);
+
+            var evicted = new RecordingWindow(new IntPtr(0xC09), Rectangle.FromSize(900, 0, 800, 600));
+            evicted.FailNextSetPosition();
+            harness.Workspace.RaiseWindowAdded(evicted);
+
+            // In the workspace, out of the tree: exactly the state the border must read as "not
+            // mine to frame".
+            Assert.Contains(harness.Workspace.Snapshot, open => open.Handle == evicted.Handle);
+
+            harness.Foreground.Handle = evicted.Handle;
+            var drawn = harness.Border.Shown.Count;
+            harness.Scheduler.Fire();
+
+            Assert.Equal(drawn, harness.Border.Shown.Count);
         }
     }
 }

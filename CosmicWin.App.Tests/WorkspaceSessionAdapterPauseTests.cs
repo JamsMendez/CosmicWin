@@ -202,7 +202,8 @@ public sealed class WorkspaceSessionAdapterPauseTests
         var exceptions = new ExceptionListStore(ExceptionList.Empty);
         var controller = CompositionRoot.BuildTrayMenuController(
             hook, exceptions, loadExceptions: () => ExceptionList.Empty,
-            getFocusBorder: () => true, setFocusBorder: _ => { }, exit: () => { });
+            getFocusBorder: () => true, setFocusBorder: _ => { }, exit: () => { },
+            getTiling: () => true, setTiling: _ => { });
         var (_, executor) = CompositionRoot.Build(
             new RecordingTilingEngine(), registry, new StaticForegroundWindowSource(IntPtr.Zero),
             new Rect(0, 0, 1920, 1080));

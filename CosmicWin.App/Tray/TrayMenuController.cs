@@ -12,7 +12,8 @@ public sealed class TrayMenuController(
     Func<bool> getPaused, Action<bool> setPaused,
     Func<bool> getFocusBorder, Action<bool> setFocusBorder,
     Action reload, Action exit,
-    Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null)
+    Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
+    Func<bool>? getTiling = null, Action<bool>? setTiling = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -64,6 +65,43 @@ public sealed class TrayMenuController(
     /// nobody asked for -- the picker already showed the user exactly what they chose.
     /// </remarks>
     public void SetBorderColor(uint? rgb) => setBorderColor?.Invoke(rgb);
+
+    /// <summary>
+    /// Whether CosmicWin is laying windows out at all. Read through the getter for the same reason
+    /// the border's is: it is persisted, and the settings file can be edited while the menu is shut.
+    /// </summary>
+    /// <remarks>
+    /// Answers YES when no getter was wired, because a composition without this switch is one that
+    /// tiles -- which is what every caller written before it did.
+    /// </remarks>
+    public bool IsTilingEnabled => getTiling?.Invoke() ?? true;
+
+    /// <summary>
+    /// Turns the layout on or off, returning the new state so the caller can render the tick.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT a second <see cref="TogglePause"/>. Pausing stops the keyboard hook and with
+    /// it every chord; this stops only the LAYOUT, so walking between virtual desktops and sending
+    /// windows to them keeps working. The two are separate items because they answer different
+    /// questions: "stop touching my keyboard" and "stop arranging my windows".
+    /// </para>
+    /// <para>
+    /// Unwired, it reports the state it could not change rather than a state it wishes for. A tick
+    /// that says "off" over a window manager still tiling is worse than an item that does nothing.
+    /// </para>
+    /// </remarks>
+    public bool ToggleTiling()
+    {
+        if (setTiling is null)
+        {
+            return IsTilingEnabled;
+        }
+
+        var next = !IsTilingEnabled;
+        setTiling(next);
+        return next;
+    }
 
     /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();

@@ -81,6 +81,17 @@ public sealed class ActionExecutor(
     public Rect WorkArea { get; set; }
 
     /// <summary>
+    /// Whether the tray's tiling switch is on. Unset -- as in every test and call site that
+    /// predates it -- it always is, which is exactly how this executor behaved before.
+    /// </summary>
+    /// <remarks>
+    /// A delegate rather than a bool, for the reason every other gate here is one: the switch lives
+    /// in the composition, is written by a tray click and persisted to disk, and an executor holding
+    /// its own copy would be a second owner of one decision.
+    /// </remarks>
+    public Func<bool> TilingEnabled { get; set; } = () => true;
+
+    /// <summary>
     /// When set, every mutation resolves and arranges
     /// the FOCUSED window's OWN monitor tree/work area, instead of always the primary <paramref
     /// name="engine"/>/<see cref="WorkArea"/> — restoring tree/screen agreement on secondary
@@ -141,6 +152,17 @@ public sealed class ActionExecutor(
         // about the tree. Letting it fall through to the tiling path would aim it at the last
         // tracked leaf instead -- closing a window the user is not even looking at.
         if (TryDispatchClose(action, foregroundHandle))
+        {
+            return;
+        }
+
+        // Tiling switched off in the tray. Everything BELOW this line reaches the tree, and with no
+        // layout in force there is nothing for a focus walk to walk or a move to move. Everything
+        // ABOVE it is deliberately answered anyway: the desktop chords are about which desktop the
+        // user is looking at, and Alt+Q is about the window in front of them -- neither is a
+        // statement about the layout, and dropping them here would make this switch a second, wider
+        // Pause rather than the narrower thing it exists to be.
+        if (!TilingEnabled())
         {
             return;
         }
