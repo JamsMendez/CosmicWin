@@ -586,6 +586,31 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
+            // Reported the same day: with tiling off the TASKBAR wore a border, and so did the
+            // notification-area flyout -- clicking either makes it the foreground window, and this
+            // path frames whatever the foreground is.
+            //
+            // Interop's trackability gate is no help and never claimed to be: Shell_TrayWnd is
+            // visible, unowned, uncloaked and not a child, so it clears that gate outright and sits
+            // in the snapshot like any application window. WS_EX_TOOLWINDOW is what separates
+            // chrome from a window, and IsAutoExcluded is where that verdict already lives -- the
+            // very same one that keeps the taskbar out of the TREE.
+            //
+            // Which is the point: with tiling ON, chrome went unframed only because it could never
+            // become a leaf. That was the tree answering a question about the LAYOUT and getting a
+            // question about the DESKTOP right by accident. With no tree to lean on, the border
+            // asks directly, and now both modes answer from the same rule.
+            //
+            // AUTO exclusions only, not the user's list. A listed app is one the user asked not to
+            // TILE; it is still a window they can be looking at, and the border says which window
+            // is active.
+            if (WindowFilters.IsAutoExcluded(WindowDescriptorBuilder.Build(window)))
+            {
+                RecordBorderDecision($"hidden: 0x{foregroundHandle:X} is shell chrome, not a window");
+                focusBorder!.Hide();
+                return;
+            }
+
             var framed = window.Bounds;
             if (framed.Width <= 0 || framed.Height <= 0)
             {

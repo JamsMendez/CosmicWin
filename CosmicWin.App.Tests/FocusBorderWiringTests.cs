@@ -830,6 +830,71 @@ public sealed class FocusBorderWiringTests
     }
 
     /// <summary>
+    /// Reported from real use: with tiling off, the TASKBAR wore a focus border, and so did the
+    /// notification-area flyout. Clicking either makes it the foreground window, and the untiled
+    /// path frames whatever the foreground is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Interop's trackability gate cannot help here and was never meant to: <c>Shell_TrayWnd</c> is
+    /// visible, unowned, uncloaked and not a child, so it clears that gate outright and sits in the
+    /// workspace snapshot like any application window. The gate that knows the difference is
+    /// <see cref="WindowFilters.IsAutoExcluded"/>, on the <c>WS_EX_TOOLWINDOW</c> every piece of
+    /// shell chrome carries -- the same verdict that already keeps the taskbar out of the TREE.
+    /// </para>
+    /// <para>
+    /// So the two paths now agree. With tiling on, chrome went unframed only because it could never
+    /// become a leaf; that was the tree answering a question about the LAYOUT and getting a question
+    /// about the DESKTOP right by accident. With no tree to lean on, the border has to ask directly.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void WithTilingOff_ShellChromeIsNeverFramed_ThoughItIsTheForegroundWindow()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var taskbar = new RecordingWindow(
+                new IntPtr(0xC08), Rectangle.FromSize(0, 1032, 1920, 48),
+                className: "Shell_TrayWnd", exStyle: WindowStyleFlags.ExToolWindow);
+            harness.Workspace.RaiseWindowAdded(taskbar);
+            harness.Foreground.Handle = taskbar.Handle;
+
+            harness.Scheduler.Fire();
+
+            Assert.Empty(harness.Border.Shown);
+            Assert.True(harness.Border.HideCallCount > 0);
+        }
+    }
+
+    /// <summary>
+    /// And an ordinary window is still framed, so the guard above is a filter and not a wall.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_AnOrdinaryWindowIsStillFramed_AfterChromeIsFilteredOut()
+    {
+        var harness = Wire(tilingEnabled: false);
+        using (harness.Composition)
+        {
+            var taskbar = new RecordingWindow(
+                new IntPtr(0xC09), Rectangle.FromSize(0, 1032, 1920, 48),
+                className: "Shell_TrayWnd", exStyle: WindowStyleFlags.ExToolWindow);
+            var window = new RecordingWindow(new IntPtr(0xC0A), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(taskbar);
+            harness.Workspace.RaiseWindowAdded(window);
+
+            harness.Foreground.Handle = taskbar.Handle;
+            harness.Scheduler.Fire();
+            Assert.Empty(harness.Border.Shown);
+
+            harness.Foreground.Handle = window.Handle;
+            harness.Scheduler.Fire();
+
+            Assert.Equal(window.Handle, harness.Border.Shown[^1].Framed);
+        }
+    }
+
+    /// <summary>
     /// The strict rule is untouched where it still applies: with tiling ON, a window the WORKSPACE
     /// knows but the TREE does not hold is still not framed.
     /// </summary>
