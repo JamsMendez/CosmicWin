@@ -123,7 +123,15 @@ public sealed class AppComposition : IDisposable
         uint? focusBorderColor = null,
         Action<uint?>? persistBorderColor = null,
         bool tilingEnabled = true,
-        Action<bool>? persistTiling = null)
+        Action<bool>? persistTiling = null,
+        // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
+        // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
+        // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
+        // implementation and every test double of that interface would have to grow a second
+        // ordering guarantee to carry ONE optional composition-site fact that only this one caller
+        // needs. Unset -- as in every test that predates it -- ResolveFloatingWindows stays unset
+        // too, so the behaviour is exactly what it is today.
+        Func<IReadOnlyList<nint>>? zOrder = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -410,6 +418,40 @@ public sealed class AppComposition : IDisposable
                 window.SetPosition(resized);
             }
         };
+
+        // The focus chord's answer when there is no tree to walk -- FloatingFocus.Toward reads this
+        // once per chord for its candidate list. Left unset when zOrder is null, exactly like every
+        // other floating-mode delegate above: unwired, ActionExecutor's own untiled focus branch
+        // stays the no-op it already was for every caller that has not opted in.
+        if (zOrder is not null)
+        {
+            executor.ResolveFloatingWindows = () => zOrder()
+                .Select(handle => (Handle: handle, Window: resolveAnyWindow(handle)))
+                // ALIVE only, the same liveness gate every other resolution in this file applies --
+                // a handle Windows has already reused for something else must not be handed to the
+                // geometry as if it were still the window that used to live there.
+                .Where(candidate => candidate.Window is { IsAlive: true })
+                // The FULL exclusion rule, user list included -- the same reasoning written above
+                // executor.ResizeFloatingWindow, and for the same reason it applies here too: this
+                // is a chord that MOVES focus onto whatever it names, and the taskbar (auto-excluded,
+                // visible and unowned the instant it is clicked) and the user's own "leave this app
+                // alone" list must both be honoured, not only the automatic half the focus border
+                // reads.
+                .Where(candidate => !WindowFilters.IsExcluded(
+                    WindowDescriptorBuilder.Build(candidate.Window!), exceptionStore.Current))
+                .Select(candidate => (candidate.Handle, candidate.Window!.Bounds))
+                .ToList();
+        }
+
+        // Deliberately NOT filtered to the origin's own monitor, unlike the tiled path's
+        // NearestTileToward, which searches only trees.ResolveDisplay(from). That restriction is a
+        // property of the TREE -- a tree belongs to one display, so its own leaves are the only
+        // candidates it could ever offer -- not a property of the question being asked. With no
+        // layout in force there is no tree to be scoped to, and a window sitting on the monitor to
+        // the right genuinely IS the window to the right; refusing to look past a display edge that
+        // exists only in the tiled model would make this path answer a narrower question than the
+        // one the user actually asked by pressing a direction.
+
         isConstrained = sessionAdapter.IsConstrained;
         workspace.Open();
         hook.Start();
@@ -1027,6 +1069,11 @@ public sealed class AppComposition : IDisposable
         // every time somebody toggled the border, and vice versa.
         var stored = settings;
 
+        // ONE hoisted instance for the life of the process, read once per untiled focus chord --
+        // not reconstructed per chord, which would pay Win32NativeWindowSource's own construction
+        // cost on every keypress for no benefit, since it carries no per-call state to keep fresh.
+        var zOrderSource = new Win32ZOrderSource();
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -1049,7 +1096,8 @@ public sealed class AppComposition : IDisposable
             focusBorderColor: settings.BorderColor,
             persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
-            persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }));
+            persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
+            zOrder: zOrderSource.EnumerateTopLevelWindows);
     }
 
     /// <summary>

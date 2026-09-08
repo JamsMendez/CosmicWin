@@ -187,6 +187,18 @@ public sealed class ActionExecutor(
         // Pause rather than the narrower thing it exists to be.
         if (!TilingEnabled())
         {
+            // FOCUS now survives the loss of the tree too, and for exactly the argument the RESIZE
+            // clause below already makes for itself: a direction is a statement about where windows
+            // ARE on screen, and that stays true whether or not a layout is in force. There is no
+            // leaf to walk from and no tree to walk it in, so FocusFloating reads the geometry
+            // straight off the windows' own rectangles instead -- the same shape of substitution
+            // ResizeFloatingWindow already makes below, one clause down.
+            if (FocusDirectionOf(action.Kind) is { } untiled)
+            {
+                FocusFloating(untiled, foregroundHandle);
+                return;
+            }
+
             // Except a RESIZE, which is the one layout-shaped chord that still has a subject out
             // here. It cannot move a boundary -- there is no tree and no neighbour to divide a
             // region with -- but the WINDOW is still a rectangle, and "make the thing in front of
@@ -194,8 +206,8 @@ public sealed class ActionExecutor(
             //
             // Move and toggle-axis are deliberately NOT offered the same way. A move means "put
             // this window somewhere else in the layout", and with no layout there is nowhere to put
-            // it; a window in no group has no split axis to toggle. Only the resize survives the
-            // loss of the tree with its meaning intact.
+            // it; a window in no group has no split axis to toggle. Only resize and focus survive
+            // the loss of the tree with their meaning intact.
             if (ResizeDirectionOf(action.Kind) is { } floating)
             {
                 ResizeFloatingWindow?.Invoke(foregroundHandle, floating);
@@ -297,6 +309,22 @@ public sealed class ActionExecutor(
     /// the same split, and the same reason, as <see cref="ActivateUntrackedWindow"/>.
     /// </remarks>
     public Func<nint, Interop.Rectangle?>? ResolveWindowBounds { get; set; }
+
+    /// <summary>
+    /// Every window on screen, in Z-ORDER, TOPMOST FIRST, for a focus chord with no tree to walk.
+    /// Unset -- as in every test and call site that predates it -- an untiled focus chord stays the
+    /// no-op it was.
+    /// </summary>
+    /// <remarks>
+    /// The ordering is part of the CONTRACT, not an incidental property of whatever produced the
+    /// list: <see cref="FloatingFocus.Toward"/>'s stack pass answers "the next window BEHIND the
+    /// current one" by position in this list, and that question has a stable answer only when the
+    /// list is genuinely the desktop's paint order. A caller handing it over sorted some other way
+    /// would not throw -- it would silently make a repeated press land somewhere other than the next
+    /// window down the pile, which is a worse failure than a compile error because nothing on real
+    /// hardware would say so.
+    /// </remarks>
+    public Func<IReadOnlyList<(nint Handle, Interop.Rectangle Bounds)>>? ResolveFloatingWindows { get; set; }
 
     /// <summary>
     /// Puts focus back on a window the TREE does not hold, reporting whether it took. Unset -- as
@@ -1055,6 +1083,45 @@ public sealed class ActionExecutor(
             activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed, outcome);
 
         return true;
+    }
+
+    /// <summary>
+    /// Answers a focus chord with no tree to walk, purely by GEOMETRY: the nearest window lying in
+    /// <paramref name="direction"/> from the foreground window's own rectangle, or -- when nothing
+    /// lies that way -- the next window behind it in z-order that overlaps it.
+    /// <see cref="FloatingFocus.Toward"/> is the actual geometry; this method is entirely about
+    /// resolving its inputs and reporting the result, the same split <see cref="TryEnterTheTree"/>
+    /// makes for the tiled equivalent.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="_focused"/> and <see cref="_focusScope"/> are deliberately left untouched. Both
+    /// name a LEAF, and with no tree in force there is no leaf for either to name -- writing to them
+    /// here would let a later chord, once tiling comes back on, read a stale tiled focus that an
+    /// untiled chord never actually visited.
+    /// </remarks>
+    private void FocusFloating(Direction direction, nint foregroundHandle)
+    {
+        if (ResolveWindowBounds?.Invoke(foregroundHandle) is not { } from
+            || from.Width <= 0 || from.Height <= 0
+            || ResolveFloatingWindows is not { } resolveCandidates)
+        {
+            // Recorded rather than dropped, exactly like the tiled path's own UnresolvedFocus line:
+            // a silent focus chord on real hardware must stay tellable from a broken one.
+            Trace(direction, foregroundHandle, 0, 0, FocusTraceOutcome.UnresolvedFocus);
+            return;
+        }
+
+        if (FloatingFocus.Toward(from, foregroundHandle, direction, resolveCandidates()) is not { } target)
+        {
+            Trace(direction, foregroundHandle, 0, 0, FocusTraceOutcome.NoMatch);
+            return;
+        }
+
+        // No ActivationOutcome to carry: ActivateUntrackedWindow answers with a plain bool, not the
+        // rung reading Activate() gives the tiled path.
+        var activated = ActivateUntrackedWindow?.Invoke(target) ?? false;
+        Trace(direction, foregroundHandle, 0, target,
+            activated ? FocusTraceOutcome.Activated : FocusTraceOutcome.ActivateFailed);
     }
 
     /// <summary>
