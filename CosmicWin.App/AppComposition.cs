@@ -550,6 +550,7 @@ public sealed class AppComposition : IDisposable
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
         // disagreeing with the desktop, and nothing else ever looks again.
         string? lastReportedUnmatched = null;
+        var lastReportedDropped = 0;
         var lastReportedReinstalls = 0;
 
         // The arriving desktop's own layout, applied to the work area in force NOW. Its windows
@@ -930,6 +931,24 @@ public sealed class AppComposition : IDisposable
             {
                 lastReportedUnmatched = unmatched;
                 desktopTrace?.Record($"unmatched chord: {unmatched}");
+            }
+
+            // Published here for the same reason as the unmatched-chord line above: a hook that
+            // touches a file is a hook Windows uninstalls, so the count is only ever written off the
+            // hook thread, from this tick.
+            //
+            // This is the hole in the instrument the seven days of trace evidence pointed at: a
+            // chord that MATCHED can still be discarded silently. TryWrite on a full channel with
+            // FullMode.Wait does not block -- it returns false -- and RecordUnmatched above never
+            // fires for it, because the chord matched. Without this line, that dead stretch wrote
+            // NOTHING at all.
+            var dropped = hook.DroppedChords;
+            if (dropped != lastReportedDropped)
+            {
+                desktopTrace?.Record(
+                    $"chord dropped -- queue full: total={dropped} " +
+                    $"(+{dropped - lastReportedDropped} since last report) last={hook.LastDroppedChord}");
+                lastReportedDropped = dropped;
             }
 
             // Windows silently uninstalls a low-level keyboard hook whose callback overruns

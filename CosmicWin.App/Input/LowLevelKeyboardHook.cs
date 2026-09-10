@@ -24,6 +24,20 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
     public volatile string? LastUnmatched;
 
     /// <summary>
+    /// How many matched chords <see cref="Process"/> discarded because the dispatcher channel was
+    /// full. Touched only from <see cref="RecordDropped"/>, on the hook's own thread; read from
+    /// anywhere with <see cref="Volatile.Read(ref int)"/>, matching the discipline already used for
+    /// the watchdog counters on <see cref="LowLevelKeyboardHook"/>.
+    /// </summary>
+    private int _dropped;
+
+    /// <summary>See <see cref="_dropped"/>.</summary>
+    public int Dropped => Volatile.Read(ref _dropped);
+
+    /// <summary>The last dropped chord's description, in the form <c>{modifiers}+{key}</c>. Never null-cleared, mirroring <see cref="LastUnmatched"/>.</summary>
+    public volatile string? LastDropped;
+
+    /// <summary>
     /// The modifier keys PHYSICALLY down, by side, as a short string -- empty when none are.
     /// Unset leaves the diagnosis exactly as narrow as it was before it existed.
     /// </summary>
@@ -73,13 +87,63 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             return false;
         }
 
-        // The run ends here. The count answers "how many times in a row did THIS chord fail", and a
-        // chord that worked in between means the user was not staring at a dead keyboard. Only the
-        // run is reset -- LastUnmatched itself is never null-cleared, so the last real failure stays
-        // readable for as long as the app runs.
-        _repeating = null;
-        _repeats = 0;
-        return _acceptedKeyDown[keyIndex] = writer.TryWrite(action);
+        var accepted = writer.TryWrite(action);
+        if (accepted)
+        {
+            // The run ends here. The count answers "how many times in a row did THIS chord fail", and
+            // a chord that worked in between means the user was not staring at a dead keyboard. Only
+            // the run is reset -- LastUnmatched itself is never null-cleared, so the last real failure
+            // stays readable for as long as the app runs.
+            //
+            // Gated on ACCEPTANCE, deliberately. A chord that matched but was then dropped below is
+            // not the keyboard coming back to life -- it is the same failure the user is living
+            // through, wearing a different cause. Resetting the run for it would under-report exactly
+            // the dead stretch this diagnosis exists to measure.
+            _repeating = null;
+            _repeats = 0;
+        }
+        else
+        {
+            // TryWrite on a channel with FullMode.Wait does NOT block -- it returns false, and the
+            // chord that DID match vanishes with nothing to show for it. RecordUnmatched cannot see
+            // this: the chord matched, so its path never runs.
+            RecordDropped(key, modifiers);
+        }
+
+        return _acceptedKeyDown[keyIndex] = accepted;
+    }
+
+    /// <summary>
+    /// Records a matched chord that <see cref="ChannelWriter{T}.TryWrite"/> discarded because the
+    /// dispatcher channel was full.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Channel.CreateBounded</c> with <c>FullMode.Wait</c> reads as "this write blocks until
+    /// there is room", and <c>TryWrite</c> is the one member on that same channel that never blocks
+    /// at all -- on a full channel it returns <c>false</c> immediately, and the action that would
+    /// have run vanishes with nothing to show for it. <see cref="RecordUnmatched"/> cannot see this
+    /// failure: it runs only when <see cref="ChordTable.TryMatch"/> returns <c>false</c>, and a
+    /// dropped chord is one <c>TryMatch</c> already said yes to.
+    /// </para>
+    /// <para>
+    /// PRIVACY NOTE: <see cref="RecordUnmatched"/> deliberately refuses to record when nothing is
+    /// held, because it would otherwise write the user's own typing -- passwords included -- to a
+    /// file that lives for as long as the app runs. That floor does NOT apply here, and the reason
+    /// is worth stating: a dropped chord is by definition one that MATCHED the chord table, so it is
+    /// always one of our own registered combinations and never ordinary typing.
+    /// </para>
+    /// <para>
+    /// Deliberately its own counter and its own last-description, never the
+    /// <see cref="Publish(string)"/>/<see cref="_repeating"/>/<see cref="_repeats"/> machinery below
+    /// -- that machinery answers "how many times running did THIS chord fail to match", and a
+    /// dropped chord matched.
+    /// </para>
+    /// </remarks>
+    private void RecordDropped(KeyboardKey key, ModifierKeys modifiers)
+    {
+        Interlocked.Increment(ref _dropped);
+        LastDropped = $"{modifiers}+{key}";
     }
 
     /// <summary>
@@ -224,6 +288,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
 
     /// <summary>The last chord that matched nothing, so a "this key does nothing" report can be answered with what actually arrived.</summary>
     public string? LastUnmatchedChord => _processor.LastUnmatched;
+
+    /// <summary>How many matched chords were discarded because the dispatcher channel was full.</summary>
+    public int DroppedChords => _processor.Dropped;
+
+    /// <summary>The last matched chord dropped for a full channel, so a dead stretch caused by this can be told apart from one caused by a lost modifier.</summary>
+    public string? LastDroppedChord => _processor.LastDropped;
 
     public LowLevelKeyboardHook(ChannelWriter<HotkeyAction> writer)
         : this(writer, new WindowsKeyboardHookPlatform(), DefaultWatchdogInterval) { }
