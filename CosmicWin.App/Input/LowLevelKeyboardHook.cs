@@ -223,6 +223,13 @@ internal interface IKeyboardHookPlatform
     /// say. Answered without a hook, which is what makes it usable as evidence ABOUT the hook.
     /// </summary>
     long? MillisecondsSinceSystemInput();
+
+    /// <summary>
+    /// Where the cursor is right now, or <c>null</c> when the shell will not say. Answered without
+    /// a hook, exactly like <see cref="MillisecondsSinceSystemInput"/>, which is what makes it
+    /// usable as evidence about whether missed input could have been a KEY rather than the mouse.
+    /// </summary>
+    (int X, int Y)? CursorPosition();
 }
 
 public sealed class LowLevelKeyboardHook : IDisposable
@@ -259,6 +266,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private long _lastActivity;
     private int _watchdogReinstalls;
     private int _watchdogFoundHookGone;
+
+    /// <summary>The cursor as of the last <see cref="SampleCursor"/> call, or <c>null</c> before the first sample. Touched only from the hook's own thread.</summary>
+    private (int X, int Y)? _lastCursor;
+
+    /// <summary><see cref="_clock"/> reading at the last cursor MOVE (never the first sample, which has nothing to compare against). Read from <see cref="ShouldReinstall"/> with <see cref="Volatile"/>, matching <see cref="_lastActivity"/>'s discipline.</summary>
+    private long _lastCursorMove;
 
     public bool? UnhookSucceeded { get; private set; }
 
@@ -326,11 +339,13 @@ public sealed class LowLevelKeyboardHook : IDisposable
         try
         {
             _lastActivity = _clock();
+            _lastCursorMove = _lastActivity;
             _platform.Install(OnKeyboardEvent);
             _started.Set();
             while (!_stop.IsCancellationRequested)
             {
                 _platform.PumpMessages();
+                SampleCursor();
                 if (ShouldReinstall())
                 {
                     // The result is the diagnosis. This unhook succeeds on a handle Windows still
@@ -365,6 +380,27 @@ public sealed class LowLevelKeyboardHook : IDisposable
     }
 
     /// <summary>
+    /// Records where the cursor is, and when it last MOVED.
+    /// </summary>
+    /// <remarks>
+    /// The FIRST sample only records the position -- there is nothing yet to compare it against, so
+    /// it must not count as a move, or every hook would start out looking like the mouse just
+    /// jumped to wherever it happened to be sitting.
+    /// </remarks>
+    private void SampleCursor()
+    {
+        if (_platform.CursorPosition() is not { } position) return;
+        if (_lastCursor is not { } previous)
+        {
+            _lastCursor = position;
+            return;
+        }
+        if (previous == position) return;
+        _lastCursor = position;
+        Volatile.Write(ref _lastCursorMove, _clock());
+    }
+
+    /// <summary>
     /// Whether the hook looks GONE, which is not the same question as whether anyone has typed.
     /// </summary>
     /// <remarks>
@@ -388,23 +424,41 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// always reads as slightly YOUNGER than the session and can never trip the test.
     /// </para>
     /// <para>
-    /// KNOWN IMPRECISION, stated rather than hidden and since MEASURED: GetLastInputInfo counts
-    /// mouse input, and a low-level KEYBOARD hook does not. One injected click on a window, with no
-    /// key pressed for a minute beforehand, produced exactly one `hook reinstalled by watchdog --
-    /// total=1 foundGone=0`. So mousing without typing does reinstall, and the hook it replaces is
-    /// alive. That is still far better than firing on an idle machine forever -- 39 reinstalls in
-    /// 200 idle seconds became 0 -- and `foundGone` in the trace is what will say whether any
-    /// reinstall, from either trigger, ever finds a hook that is actually gone. It never has.
+    /// MEASURED AND CORRECTED: GetLastInputInfo counts mouse input, and a low-level KEYBOARD hook
+    /// does not, so a person who moves the mouse without typing held `sessionAge` near zero while
+    /// `ourAge` grew without bound. Mouse-only injected input reinstalled a live hook every ~4.9
+    /// seconds (12.2/min) -- 72 times in one session -- three times the 4.34/min average measured
+    /// over seven days of logs, which totalled 8269 reinstalls with `foundGone=0` on every single
+    /// one. The watchdog has never once found a hook that was actually gone.
+    /// </para>
+    /// <para>
+    /// The correction: missed input is evidence of a dead KEYBOARD hook only if the input could
+    /// have been a KEY. A cursor that has moved since this hook last saw a key names the mouse as
+    /// the source, and that reading needs no hook at all -- <see cref="SampleCursor"/> takes it on
+    /// every loop pass, exactly like <see cref="OnKeyboardEvent"/> takes <see cref="_lastActivity"/>
+    /// on every key. So a stale <see cref="_lastCursorMove"/> -- no later than the last key this
+    /// hook saw -- is what a keypress, and only a keypress, looks like.
+    /// </para>
+    /// <para>
+    /// The REMAINING imprecision, stated rather than hidden: a click or a scroll wheel with a still
+    /// cursor still reads as keyboard-shaped and will reinstall. That residue is far smaller than
+    /// cursor movement, which was 100% of the churn measured, and closing it would need a mouse hook
+    /// or raw input registration -- more machinery than the residue is worth.
+    /// </para>
+    /// <para>
+    /// Fast recovery is preserved for the case that matters: a genuinely dead hook while someone is
+    /// TYPING leaves the cursor still, so the gate still reinstalls within one interval.
     /// </para>
     /// <para>
     /// A refusal is not an idle machine. GetLastInputInfo fails off the interactive desktop, and
     /// reading that as "nothing happened" would retire the watchdog exactly where nobody can watch
-    /// it, so an unanswered question reinstalls.
+    /// it, so an unanswered question reinstalls -- and the same holds for a refused cursor reading.
     /// </para>
     /// </remarks>
     private bool ShouldReinstall()
     {
-        var ourAge = _clock() - Volatile.Read(ref _lastActivity);
+        var lastActivity = Volatile.Read(ref _lastActivity);
+        var ourAge = _clock() - lastActivity;
         if (ourAge < _watchdogInterval.TotalMilliseconds)
         {
             return false;
@@ -417,7 +471,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
             return true;
         }
 
-        return _platform.MillisecondsSinceSystemInput() is not { } sessionAge || sessionAge < ourAge;
+        if (_platform.MillisecondsSinceSystemInput() is not { } sessionAge) return true;
+        if (sessionAge >= ourAge) return false;
+
+        // The session saw something this hook did not, but only a KEY could mean the hook is dead --
+        // a cursor that has moved since our last key names the mouse as the source instead.
+        return Volatile.Read(ref _lastCursorMove) <= lastActivity;
     }
 
     private bool OnKeyboardEvent(KeyboardKey key, bool isKeyDown, ModifierKeys modifiers)
@@ -491,6 +550,20 @@ internal sealed unsafe class WindowsKeyboardHookPlatform : IKeyboardHookPlatform
         }
 
         return unchecked(PInvoke.GetTickCount() - info.dwTime);
+    }
+
+    /// <summary>
+    /// Answered through <c>GetCursorPos</c>, which -- like <see cref="MillisecondsSinceSystemInput"/>
+    /// -- reports without needing a keyboard hook of any kind.
+    /// </summary>
+    public (int X, int Y)? CursorPosition()
+    {
+        if (!PInvoke.GetCursorPos(out var point))
+        {
+            return null;
+        }
+
+        return (point.X, point.Y);
     }
 
     public void PumpMessages()

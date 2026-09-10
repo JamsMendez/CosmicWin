@@ -369,6 +369,92 @@ public sealed class KeyboardHookTests
         Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
     }
 
+    /// <summary>
+    /// The measured defect: <c>GetLastInputInfo</c> counts the mouse, and a keyboard hook does not
+    /// see it. A cursor that has moved since our last key names the mouse as the source, so this
+    /// missed input is not evidence of a dead hook.
+    /// </summary>
+    /// <remarks>
+    /// Measured on hardware with mouse-only input: a reinstall every ~4.9 seconds, 72 times in one
+    /// session, `foundGone=0` on every single one -- the watchdog tearing down a hook that was never
+    /// gone.
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WhenTheMissedInputWasTheCursorMoving_LeavesTheHookAlone()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, MoveCursorOnEveryReading = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+
+        // Advanced in TWO steps, because a fake clock jumps where the real one creeps. The loop's
+        // very first cursor sample only establishes a baseline -- it cannot yet tell whether the
+        // cursor has moved -- so the hook needs a baseline AND one move on the clock before ourAge
+        // is allowed past the interval. This first advance stays under it, which makes the wait
+        // race-free rather than merely narrow: no pass can decide to reinstall while it happens.
+        // The production loop, at ~5ms a pass, has a thousand of them before five seconds are up.
+        clock.Advance(1000);
+        var reads = platform.CursorReadCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount > reads + 1, TimeSpan.FromSeconds(2)));
+        clock.Advance(4000);
+
+        // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
+        // decided to do nothing, which a timeout would only have guessed at.
+        var pumps = platform.PumpCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
+
+        Assert.Equal(1, platform.InstallCount);
+        Assert.Equal(0, hook.WatchdogReinstalls);
+    }
+
+    /// <summary>The recovery this whole reading exists for, preserved: the session saw input and the cursor never moved, so the missed input could only have been a key.</summary>
+    [Fact]
+    public void Watchdog_WhenTheSessionSawInputAndTheCursorHasNotMoved_PutsItBack()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500 };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>An unanswered cursor question is not evidence of an idle mouse, so it reinstalls -- the same rule already applied to a refused input reading.</summary>
+    [Fact]
+    public void Watchdog_WhenTheShellWillNotSayWhereTheCursorIs_PutsItBack()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, RefuseCursorQuestion = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+
+        hook.Start();
+        clock.Advance(5000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>The backstop floor still holds even while the cursor keeps moving: a long enough silence puts the hook back regardless.</summary>
+    [Fact]
+    public void Watchdog_AfterTheBackstop_PutsTheHookBackEvenWhileTheCursorMoves()
+    {
+        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, MoveCursorOnEveryReading = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(300));
+
+        hook.Start();
+        clock.Advance(300_000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+    }
+
     /// <summary>Shutting down is not a rescue: the unhook in Dispose never moves that counter.</summary>
     [Fact]
     public void Disposing_ADeadHook_IsNotCountedAsAWatchdogRescue()
