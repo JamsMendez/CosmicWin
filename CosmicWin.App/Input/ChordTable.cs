@@ -59,6 +59,11 @@ public sealed class ChordTable
         table.Register(ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation);
         table.Register(ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow);
 
+        // The mode switch the tray already carries, reachable without the mouse. Alt+T for TILING,
+        // the same single-letter shape Alt+O and Alt+Q already use -- and the only chord here that
+        // is about CosmicWin itself rather than about a window or a desktop.
+        table.Register(ModifierKeys.Alt, KeyboardKey.T, HotkeyActionKind.ToggleTiling);
+
         // Shift over the SAME key that closes a window, the way Shift over a desktop digit turns
         // "go there" into "send there". Closing the desktop is the bigger version of closing the
         // thing in front of you, and one modifier keeping one meaning is worth more than a mnemonic.

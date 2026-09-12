@@ -352,6 +352,52 @@ public sealed class TilingModeTests
     }
 
     /// <summary>
+    /// Alt+T flips the mode from the keyboard, driven through the real hook so the chord cannot be
+    /// satisfied by an executor that is simply never reached -- and it persists like a tray click,
+    /// because it is the SAME switch and not a second copy of one.
+    /// </summary>
+    [Fact]
+    public async Task TheTilingChord_TurnsTheModeOff()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            Assert.True(harness.Platform.Raise(KeyboardKey.T, isKeyDown: true, ModifierKeys.Alt));
+
+            Assert.True(await WaitUntil(() => !harness.Tray.IsTilingEnabled));
+            Assert.Equal([false], harness.Persisted);
+        }
+    }
+
+    /// <summary>
+    /// The half that actually matters: with the layout already off, Alt+T puts it BACK.
+    /// </summary>
+    /// <remarks>
+    /// This chord is answered above the executor's layout gate, unlike every chord that reaches the
+    /// tree. Below it, the only thing the keyboard could ever do to this mode is switch it off --
+    /// a one-way door out, with the tray the sole way home.
+    /// </remarks>
+    [Fact]
+    public async Task TheTilingChord_TurnsTheModeBackOn_AndPutsTheLayoutBack()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4001), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+
+            harness.Tray.ToggleTiling();
+            window.SimulateExternalMove(Rectangle.FromSize(640, 360, 400, 300));
+
+            Assert.True(harness.Platform.Raise(KeyboardKey.T, isKeyDown: true, ModifierKeys.Alt));
+
+            Assert.True(await WaitUntil(() => harness.Tray.IsTilingEnabled));
+            Assert.True(await WaitUntil(() => window.Bounds.Width == 1920));
+            Assert.Equal(Rectangle.FromSize(0, 0, 1920, 1080), window.Bounds);
+        }
+    }
+
+    /// <summary>
     /// Persisted on every flip, so the mode survives a restart the way the border already does.
     /// </summary>
     [Fact]

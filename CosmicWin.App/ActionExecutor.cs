@@ -115,6 +115,20 @@ public sealed class ActionExecutor(
     public Func<bool> TilingEnabled { get; set; } = () => true;
 
     /// <summary>
+    /// Flips that same switch from the keyboard. Unset -- as in every test and call site that
+    /// predates it -- the chord is answered and does nothing, which is what a composition with no
+    /// tray to flip should do.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT a setter this class calls on its own state: the switch is owned by the
+    /// composition, written by a tray click and persisted to disk, and a chord that kept its own
+    /// copy would be a second owner of one decision -- the very thing
+    /// <see cref="TilingEnabled"/> being a delegate exists to avoid. The composition points this at
+    /// the SAME toggle the tray item uses, so the two can never disagree.
+    /// </remarks>
+    public Action? ToggleTilingRequested { get; set; }
+
+    /// <summary>
     /// When set, every mutation resolves and arranges
     /// the FOCUSED window's OWN monitor tree/work area, instead of always the primary <paramref
     /// name="engine"/>/<see cref="WorkArea"/> — restoring tree/screen agreement on secondary
@@ -161,6 +175,17 @@ public sealed class ActionExecutor(
     private void Execute(HotkeyAction action)
     {
         var foregroundHandle = foreground.GetForegroundHandle();
+
+        // FIRST, and above the layout gate further down -- that placement IS the feature. Every
+        // chord below that gate is dropped while tiling is off, so this one answered down there
+        // could only ever switch the mode OFF: a one-way door out, with the tray the only way back
+        // in. It is also the one chord here that is about CosmicWin itself rather than about a
+        // window or a desktop, so it needs neither a foreground window nor a tree to mean something.
+        if (action.Kind is HotkeyActionKind.ToggleTiling)
+        {
+            ToggleTilingRequested?.Invoke();
+            return;
+        }
 
         // Desktop chords are answered BEFORE focus is resolved. They are about which desktop the
         // user is looking at, not about the tiling tree, and they must keep working when the

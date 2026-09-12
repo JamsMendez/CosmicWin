@@ -104,6 +104,13 @@ public sealed class TrayIconHost : IDisposable
             menu.Items.Add(items[entry]);
         }
 
+        // Re-read on every open, because this item is no longer the only thing that can change it:
+        // Alt+T flips the same switch without ever touching the menu. The click handler above sets
+        // the tick for the click it just handled; this is what keeps it true for every flip it did
+        // not. A tick left saying "on" over a window manager that stopped tiling is worse than no
+        // tick at all -- and this item exists to say what the mode IS.
+        menu.Opening += (_, _) => tilingItem.Checked = controller.IsTilingEnabled;
+
         _ownedIcon = LoadTrayIcon();
         _icon = new NotifyIcon
         {

@@ -542,6 +542,14 @@ public sealed class AppComposition : IDisposable
                 disableTaskTrigger();
                 shutdown();
             });
+        // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
+        // flip. Everything that makes the switch honest -- persisting it, and putting the layout
+        // back when it comes on -- lives in the setTiling closure above, and a chord reaching past
+        // it would be a mode that forgets itself on restart and leaves the windows where they lay.
+        //
+        // Wired HERE, not where the executor is built, because the controller that owns the toggle
+        // does not exist yet up there.
+        executor.ToggleTilingRequested = () => trayController.ToggleTiling();
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);

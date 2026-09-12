@@ -26,6 +26,7 @@ public sealed class ChordTableTests
         { ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Down, HotkeyActionKind.MoveDown },
         { ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation },
         { ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow },
+        { ModifierKeys.Alt, KeyboardKey.T, HotkeyActionKind.ToggleTiling },
 
         // Deliberately Shift over the SAME key that closes a window, the way Shift over a desktop
         // digit turns "go there" into "send there": one modifier, one consistent meaning.
