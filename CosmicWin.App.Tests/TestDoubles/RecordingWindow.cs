@@ -240,6 +240,27 @@ internal sealed class RecordingWindow : IWindow
     }
 
     /// <summary>
+    /// Clears <c>WS_CAPTION</c> and <c>WS_THICKFRAME</c> and covers <paramref name="monitor"/>,
+    /// which is what Chrome and Brave measured as doing for F11 and video fullscreen. Deliberately
+    /// leaves <c>WS_MAXIMIZE</c> alone: they never set it.
+    /// </summary>
+    public void SimulateFullscreen(Rectangle monitor)
+    {
+        Style &= ~(WindowStyleFlags.Caption | WindowStyleFlags.ThickFrame);
+        Bounds = monitor;
+    }
+
+    /// <summary>
+    /// The way back: the caption and the resize border return and the window is wherever it put
+    /// itself, which is its own pre-fullscreen bounds and not necessarily its tile.
+    /// </summary>
+    public void SimulateLeaveFullscreen(Rectangle bounds)
+    {
+        Style |= WindowStyleFlags.Caption | WindowStyleFlags.ThickFrame;
+        Bounds = bounds;
+    }
+
+    /// <summary>
     /// Sets/clears <c>WS_MINIMIZE</c> and parks the window at Win32's canonical minimized spot,
     /// so a test can reproduce a real minimize/restore rather than only a move.
     /// </summary>

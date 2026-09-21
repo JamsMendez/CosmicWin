@@ -109,6 +109,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly HashSet<nint> _clampsInsideItsTile = [];
 
     /// <summary>
+    /// Windows currently known to be fullscreen, so entering it is traced once instead of on every
+    /// poll for as long as it lasts. Cleared when the window is a window again, so a second entry
+    /// is reported too.
+    /// </summary>
+    private readonly HashSet<nint> _fullscreen = [];
+
+    /// <summary>
     /// The size a window has PROVEN it will not go OVER, measured the same way as its floor.
     /// </summary>
     /// <remarks>
@@ -1130,6 +1137,49 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         arrivedAt.Width > tile.Width || arrivedAt.Height > tile.Height;
 
     /// <summary>
+    /// How far short of the monitor's edge a fullscreen window may stop and still be one, in pixels
+    /// per edge.
+    /// </summary>
+    /// <remarks>
+    /// Measured, not chosen: Chrome on a 3440x1440 monitor settles at [0,0 3440x1440] and also, some
+    /// of the time, at [0,0 3440x1439] -- one pixel short. "Covers the monitor exactly" therefore
+    /// misses real fullscreen windows. Two is that pixel with one to spare, and small enough that a
+    /// window merely sized large is still a window.
+    /// </remarks>
+    private const int FullscreenTolerance = 2;
+
+    /// <summary>
+    /// Whether <paramref name="window"/> is fullscreen on <paramref name="display"/>: no caption, not
+    /// maximised, and covering the monitor to within <see cref="FullscreenTolerance"/>.
+    /// </summary>
+    /// <remarks>
+    /// Measured with Chrome. Tiled it has style 0x16CF0000; fullscreen it has 0x160B0000 -- <c>WS_CAPTION</c>
+    /// and <c>WS_THICKFRAME</c> cleared, <c>WS_MAXIMIZE</c> never set -- on the whole monitor. All three
+    /// conditions are needed. A MAXIMISED window on a monitor with an auto-hide taskbar covers the
+    /// monitor too but keeps its caption and <c>WS_MAXIMIZE</c>, and must stay on the ordinary path.
+    /// <c>WS_CAPTION</c> is two bits (<c>WS_BORDER | WS_DLGFRAME</c>) and both must be set for a window
+    /// to have one.
+    /// </remarks>
+    private static bool IsFullscreen(IWindow window, IDisplay display)
+    {
+        var style = window.Style;
+
+        if ((style & WindowStyleFlags.Caption) == WindowStyleFlags.Caption ||
+            (style & WindowStyleFlags.Maximized) != 0)
+        {
+            return false;
+        }
+
+        var bounds = window.Bounds;
+        var monitor = display.Bounds;
+
+        return bounds.Left <= monitor.Left + FullscreenTolerance &&
+               bounds.Top <= monitor.Top + FullscreenTolerance &&
+               bounds.Right >= monitor.Right - FullscreenTolerance &&
+               bounds.Bottom >= monitor.Bottom - FullscreenTolerance;
+    }
+
+    /// <summary>
     /// Takes a window out of the tree and hands its space back to the survivors, leaving it
     /// floating where it is. The shared half of giving up and of parking a window that cannot fit.
     /// </summary>
@@ -1160,6 +1210,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _minimumSize.Remove(handle);
         _maximumSize.Remove(handle);
         _clampsInsideItsTile.Remove(handle);
+        _fullscreen.Remove(handle);
 
         if (!_owners.TryGetValue(handle, out var display) ||
             !_treeManager.TryGetTree(display, out var tree) || tree is null)
@@ -1268,6 +1319,35 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var before = window.Bounds;
+
+        // A fullscreen window is on the whole monitor, which is deliberately not its tile, so it is
+        // neither judged nor arranged. Judging it is the defect: measured with Chrome and Brave, the
+        // reconcile poll reported it every ~2 s, the reflow below put it back on its tile, Chrome
+        // snapped straight back to fullscreen, and the twelfth miss evicted the handle for life --
+        // so leaving fullscreen brought back a window that was no longer in the tree.
+        //
+        // Left in the tree, NOT removed: the leaf keeps its slot, and the first bounds change after
+        // Chrome leaves fullscreen (its style regains the caption, its bounds go back to what it had)
+        // is an ordinary one and lands it on its tile. The one thing this cannot stop is an unrelated
+        // reflow (a neighbour opening or closing) repositioning it once; Chrome snaps back and the
+        // next poll is ignored here.
+        if (IsFullscreen(window, display))
+        {
+            _misses.Remove(handle);
+
+            // Once per entry rather than once per poll, like `clamps itself`: the poll re-reports the
+            // same window every two seconds for as long as the video plays.
+            if (_fullscreen.Add(handle))
+            {
+                Trace?.Record(
+                    $"fullscreen hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                    $"-- left alone until it is a window again");
+            }
+
+            return;
+        }
+
+        _fullscreen.Remove(handle);
 
         // The user's own hand-resize is the one bounds change that carries an INTENT about the
         // layout, so it is written into the tree first and the reflow below then lands it. Every

@@ -33,6 +33,17 @@ public static class WindowStyleFlags
     public const uint ThickFrame = 0x00040000;
 
     /// <summary>
+    /// GWL_STYLE bits: <c>WS_CAPTION</c>, which Win32 defines as <c>WS_BORDER | WS_DLGFRAME</c>. A
+    /// window HAS a caption only when BOTH bits are set, so test it as
+    /// <c>(style &amp; Caption) == Caption</c>, never as <c>!= 0</c>.
+    /// </summary>
+    /// <remarks>
+    /// The bit a window drops when it goes fullscreen: Chrome and Brave clear it (and
+    /// <see cref="ThickFrame"/>) for F11 and video fullscreen, and set it again on the way back.
+    /// </remarks>
+    public const uint Caption = 0x00C00000;
+
+    /// <summary>
     /// GWL_STYLE bit: <c>WS_MAXIMIZE</c>. Like <see cref="Minimized"/> it is TRANSIENT -- Windows
     /// sets it while the window is maximised and clears it on restore. Unlike it, this bit is not
     /// an exclusion: a maximised window keeps its tile. It marks the one thing a maximised window
