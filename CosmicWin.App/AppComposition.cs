@@ -131,13 +131,23 @@ public sealed class AppComposition : IDisposable
         // ordering guarantee to carry ONE optional composition-site fact that only this one caller
         // needs. Unset -- as in every test that predates it -- ResolveFloatingWindows stays unset
         // too, so the behaviour is exactly what it is today.
-        Func<IReadOnlyList<nint>>? zOrder = null)
+        Func<IReadOnlyList<nint>>? zOrder = null,
+        // Re-reads the monitors and returns the ones whose geometry changed since the last call,
+        // each reported ONCE. A delegate for the reason zOrder is: the only real answer is
+        // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
+        // test that predates it -- the work area stays what it was at startup, exactly as before.
+        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
         // all have to read ONE decision, and whichever of them kept its own copy would become a
         // second owner of it.
         var tiling = tilingEnabled;
+
+        // Displays whose work area changed and whose layout has not been redone yet. Kept apart from
+        // the refresh because the display reports a change ONCE: a change that arrives while the
+        // layout is frozen (paused, or tiling off) has to wait here, or it is gone for good.
+        var displaysAwaitingReflow = new List<IDisplay>();
 
         // The live answer to "is the border on", owned here because BOTH the tray item and
         // UpdateFocusBorder need it and neither may become the other's source of truth.
@@ -465,6 +475,11 @@ public sealed class AppComposition : IDisposable
         // Everything that has to happen the moment the layout is put back on duty.
         void ResumeTiling()
         {
+            // The loop below lays every display out on its CURRENT work area, which is all a
+            // change that arrived while tiling was off was waiting for. Left in the list, the next
+            // tick would move every window a second time to where it already is.
+            displaysAwaitingReflow.Clear();
+
             // The windows that opened while it was off were refused by the adapter, and the
             // workspace considers them announced -- so nothing will ever mention them again. Asking
             // for them BY NAME is the only route back; one already tiled costs a single lookup.
@@ -934,6 +949,39 @@ public sealed class AppComposition : IDisposable
                 workspace.Poll();
             }
 
+            // The taskbar hiding, moving to another edge or being resized changes the work area
+            // and nothing else: no window moves, so nothing we subscribe to fires. Asking is the
+            // only way to notice, and it goes BEFORE the desktop handling below so an arriving
+            // layout is computed on the geometry that is true now.
+            if (refreshDisplays is not null)
+            {
+                foreach (var changed in refreshDisplays())
+                {
+                    if (!displaysAwaitingReflow.Contains(changed))
+                    {
+                        displaysAwaitingReflow.Add(changed);
+                    }
+
+                    var area = changed.WorkArea;
+                    desktopTrace?.Record(
+                        $"work area changed on 0x{changed.Handle:X}: " +
+                        $"{area.Left},{area.Top} {area.Width}x{area.Height}");
+                }
+
+                if (displaysAwaitingReflow.Count > 0 && !LayoutIsFrozen())
+                {
+                    // Emptied BEFORE the reflow, so a display that throws costs one failed tick
+                    // (recorded by the catch around this one) instead of a retry every interval.
+                    var due = displaysAwaitingReflow.ToArray();
+                    displaysAwaitingReflow.Clear();
+
+                    foreach (var display in due)
+                    {
+                        treeManager.OnDisplayChanged(display, WorkAreaResolver.Resolve(display));
+                    }
+                }
+            }
+
             // Publishes off the hook thread, so the hook itself never waits on a file.
             if (hook.LastUnmatchedChord is { } unmatched && unmatched != lastReportedUnmatched)
             {
@@ -1124,7 +1172,8 @@ public sealed class AppComposition : IDisposable
             persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
-            zOrder: zOrderSource.EnumerateTopLevelWindows);
+            zOrder: zOrderSource.EnumerateTopLevelWindows,
+            refreshDisplays: displayManager.Refresh);
     }
 
     /// <summary>

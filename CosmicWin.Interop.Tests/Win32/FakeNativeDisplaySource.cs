@@ -17,5 +17,20 @@ internal sealed class FakeNativeDisplaySource : INativeDisplaySource
         return this;
     }
 
-    public IReadOnlyList<NativeDisplayInfo> EnumerateDisplays() => _displays;
+    /// <summary>Rewrites what the "OS" reports for one monitor from now on -- the taskbar moving, hiding, or being resized.</summary>
+    public FakeNativeDisplaySource Change(nint handle, Func<NativeDisplayInfo, NativeDisplayInfo> change)
+    {
+        var index = _displays.FindIndex(d => d.Handle == handle);
+        _displays[index] = change(_displays[index]);
+        return this;
+    }
+
+    /// <summary>A monitor that stops being reported, as when it is unplugged mid-session.</summary>
+    public FakeNativeDisplaySource Remove(nint handle)
+    {
+        _displays.RemoveAll(d => d.Handle == handle);
+        return this;
+    }
+
+    public IReadOnlyList<NativeDisplayInfo> EnumerateDisplays() => _displays.ToList();
 }

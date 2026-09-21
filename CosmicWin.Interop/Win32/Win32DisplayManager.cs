@@ -12,6 +12,7 @@ namespace CosmicWin.Interop.Win32;
 public sealed class Win32DisplayManager : IDisplayManager
 {
     private readonly List<Win32Display> _displays;
+    private readonly INativeDisplaySource _nativeSource;
 
     public Win32DisplayManager()
         : this(new Win32NativeDisplaySource())
@@ -20,6 +21,7 @@ public sealed class Win32DisplayManager : IDisplayManager
 
     internal Win32DisplayManager(INativeDisplaySource nativeSource)
     {
+        _nativeSource = nativeSource;
         var infos = nativeSource.EnumerateDisplays();
         if (infos.Count == 0)
         {
@@ -30,6 +32,47 @@ public sealed class Win32DisplayManager : IDisplayManager
     }
 
     public IReadOnlyList<IDisplay> Displays => _displays;
+
+    /// <summary>
+    /// Re-reads every known monitor from the OS and returns the ones whose bounds, work area, scaling
+    /// or primary flag differ from what they last reported. The <see cref="IDisplay"/> objects are the
+    /// same ones <see cref="Displays"/> already holds, updated in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is how a taskbar that hides, moves to another edge or is resized reaches the layout: the
+    /// work area is the one thing that changes while every window and monitor stays put, and Windows
+    /// raises nothing this process subscribes to for it.
+    /// </para>
+    /// <para>
+    /// A monitor that is no longer enumerated is left as last known and not reported. Hot-plug is a
+    /// different event with its own handling; treating a short enumeration as "the work area shrank
+    /// to nothing" would tear the layout down on every unplug.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<IDisplay> Refresh()
+    {
+        var current = _nativeSource.EnumerateDisplays();
+        var changed = new List<IDisplay>();
+
+        foreach (var display in _displays)
+        {
+            foreach (var info in current)
+            {
+                if (info.Handle == display.Handle)
+                {
+                    if (display.Refresh(info))
+                    {
+                        changed.Add(display);
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        return changed;
+    }
 
     public IDisplay Primary => _displays.FirstOrDefault(d => d.IsPrimary) ?? _displays[0];
 }

@@ -22,7 +22,8 @@ internal sealed class FakeDisplay : IDisplay
 
     public Rectangle Bounds { get; }
 
-    public Rectangle WorkArea { get; }
+    /// <summary>Settable so a test can move the taskbar; the real display updates itself in place the same way.</summary>
+    public Rectangle WorkArea { get; set; }
 
     public double Scaling { get; }
 
