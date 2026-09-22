@@ -55,6 +55,30 @@ public sealed class AppComposition : IDisposable
     private readonly IVideoWallpaperPlayer? _videoWallpaperPlayer;
     private readonly Action _disposeVideoWallpaper;
 
+    /// <summary>
+    /// F5 (video-wallpaper-review-followups, <c>R3-keepalive-flag-cross-thread</c>): a plain
+    /// <c>bool</c> read on one thread and written on another is not guaranteed to observe the
+    /// latest write -- the CLR permits caching a field's value in a register across loop
+    /// iterations/method calls absent a memory barrier. <c>videoWallpaperActive</c> and
+    /// <c>videoWallpaperKeepAlivePending</c> in <see cref="Wire"/> are exactly that: written from
+    /// the video-wallpaper thread, read from the UI thread's watch tick (or vice versa for the
+    /// pending flag). Local variables captured by a closure cannot be marked <c>volatile</c> --
+    /// C# only allows that on a field -- so this tiny holder gives each flag a real field behind
+    /// <see cref="System.Threading.Volatile"/>, while staying a plain boolean at every call site.
+    /// <see cref="System.Threading.Interlocked"/> is not needed here: every access is a bare
+    /// read or a bare write, never a read-modify-write that has to be atomic as one step.
+    /// </summary>
+    private sealed class VolatileFlag
+    {
+        private int _value;
+
+        public bool Value
+        {
+            get => Volatile.Read(ref _value) != 0;
+            set => Volatile.Write(ref _value, value ? 1 : 0);
+        }
+    }
+
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
         MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile,
@@ -306,13 +330,16 @@ public sealed class AppComposition : IDisposable
         // The 400ms watch tick below reads this to decide whether the keep-alive TryAttach below
         // is worth posting at all; an unconfigured wallpaper, or one whose last activation failed,
         // must cost the tick nothing.
-        var videoWallpaperActive = false;
+        // F5: a VolatileFlag, not a plain bool -- written on the video-wallpaper thread, read on
+        // the UI thread's watch tick.
+        var videoWallpaperActive = new VolatileFlag();
 
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
         // never both true at once for longer than one video-wallpaper work item. Without this a
         // video-wallpaper thread slower than 400ms would see its queue grow one item per tick
-        // instead of the single standing keep-alive the task calls for.
-        var videoWallpaperKeepAlivePending = false;
+        // instead of the single standing keep-alive the task calls for. F5: also a VolatileFlag --
+        // set on the UI thread, cleared on the video-wallpaper thread.
+        var videoWallpaperKeepAlivePending = new VolatileFlag();
 
         void ActivateVideoWallpaper(string phase, string path)
         {
@@ -329,7 +356,7 @@ public sealed class AppComposition : IDisposable
                 played = videoWallpaperPlayer.TryPlay(videoWallpaperHost, path);
             }
 
-            videoWallpaperActive = attached && played == true;
+            videoWallpaperActive.Value = attached && played == true;
 
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
@@ -671,7 +698,7 @@ public sealed class AppComposition : IDisposable
                     // further down) overwrites this with the real outcome; only the "import threw
                     // and there is no previous path to restore" branch returns without calling it,
                     // and this is what keeps that branch honest too.
-                    videoWallpaperActive = false;
+                    videoWallpaperActive.Value = false;
 
                     // Read HERE, inside the work item, never on the tray thread before posting it.
                     // Work items run one at a time in order, so this sees whatever the pick queued
@@ -1237,12 +1264,12 @@ public sealed class AppComposition : IDisposable
             // tick is what actually notices; gated on videoWallpaperActive so a never-activated or
             // failed video wallpaper posts nothing, and on the pending flag so a slow
             // video-wallpaper thread never gets a second one queued behind the one it has not run.
-            if (videoWallpaperActive && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending)
+            if (videoWallpaperActive.Value && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending.Value)
             {
-                videoWallpaperKeepAlivePending = true;
+                videoWallpaperKeepAlivePending.Value = true;
                 onVideoWallpaperThread(() =>
                 {
-                    videoWallpaperKeepAlivePending = false;
+                    videoWallpaperKeepAlivePending.Value = false;
                     videoWallpaperHost.TryAttach();
                 });
             }
