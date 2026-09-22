@@ -16,6 +16,11 @@ namespace CosmicWin.App;
 /// applications put them and the layout chords go quiet, while the virtual-desktop chords keep
 /// working -- which is a legitimate way to use this app, not a degraded one.
 /// </param>
+/// <param name="VideoWallpaperPath">
+/// The absolute path to the MP4 CosmicWin loops as the desktop wallpaper, or <see langword="null"/>
+/// for none -- which is what every machine has before anyone has picked a video, and a legitimate
+/// way to run this app forever, not a half-configured one.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -33,7 +38,8 @@ namespace CosmicWin.App;
 /// <see cref="SettingsFile"/> owns the reading and writing.
 /// </para>
 /// </remarks>
-public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true)
+public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
+    string? VideoWallpaperPath = null)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -48,6 +54,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string BorderColorKey = "border-color";
 
     private const string TilingKey = "tiling";
+
+    private const string VideoWallpaperPathKey = "video-wallpaper-path";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
@@ -65,6 +73,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var focusBorder = Default.FocusBorder;
         var borderColor = Default.BorderColor;
         var tiling = Default.Tiling;
+        var videoWallpaperPath = Default.VideoWallpaperPath;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -104,9 +113,14 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 tiling = tilingFlag;
             }
+            else if (key.Equals(VideoWallpaperPathKey, StringComparison.OrdinalIgnoreCase)
+                && value.Length > 0)
+            {
+                videoWallpaperPath = value;
+            }
         }
 
-        return new Settings(focusBorder, borderColor, tiling);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -122,6 +136,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # {TilingKey}: on to lay windows out, off to leave them where they open. Off, the
          # virtual-desktop chords keep working and only the layout ones go quiet.
          {TilingKey} = {(Tiling ? "on" : "off")}
+
+         # {VideoWallpaperPathKey}: absolute path to an MP4 file to loop as the desktop wallpaper,
+         # or blank for none.
+         {VideoWallpaperPathKey} = {VideoWallpaperPath ?? ""}
 
          """;
 

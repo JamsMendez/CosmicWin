@@ -229,4 +229,47 @@ public sealed class SettingsTests
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
+
+    /// <summary>
+    /// No video configured is the correct default, for the same reason no border colour is: a
+    /// settings file that has never been written must not start playing a video nobody chose.
+    /// </summary>
+    [Fact]
+    public void NoVideoWallpaperPath_IsTheDefault()
+    {
+        Assert.Null(Settings.Default.VideoWallpaperPath);
+        Assert.Null(Settings.Parse(string.Empty).VideoWallpaperPath);
+    }
+
+    [Theory]
+    [InlineData("video-wallpaper-path = C:\\some\\path.mp4")]
+    [InlineData("video-wallpaper-path=C:\\some\\path.mp4")]
+    [InlineData("  VIDEO-WALLPAPER-PATH   =   C:\\some\\path.mp4  ")]
+    public void AVideoWallpaperPathIsRead_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.Equal("C:\\some\\path.mp4", Settings.Parse(line).VideoWallpaperPath);
+    }
+
+    /// <summary>
+    /// Same rule as every other key: a blank value is not a path. Reading it as an empty string
+    /// would turn "nothing configured" into a path nothing can open.
+    /// </summary>
+    [Theory]
+    [InlineData("video-wallpaper-path =")]
+    [InlineData("video-wallpaper-path")]
+    public void ABlankVideoWallpaperPath_LeavesTheDefaultAlone(string line)
+    {
+        Assert.Null(Settings.Parse(line).VideoWallpaperPath);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("C:\\some\\path.mp4")]
+    public void SerializeThenParse_RoundTripsTheVideoWallpaperPath(string? videoWallpaperPath)
+    {
+        var original = new Settings(FocusBorder: true, BorderColor: null, Tiling: true,
+            VideoWallpaperPath: videoWallpaperPath);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
 }
