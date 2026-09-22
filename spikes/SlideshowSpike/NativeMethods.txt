@@ -1,0 +1,9 @@
+IDesktopWallpaper
+SHCreateItemFromParsingName
+SHCreateShellItemArrayFromShellItem
+DesktopWallpaper
+DESKTOP_SLIDESHOW_DIRECTION
+DESKTOP_SLIDESHOW_OPTIONS
+DESKTOP_SLIDESHOW_STATE
+CoInitializeEx
+CoUninitialize
