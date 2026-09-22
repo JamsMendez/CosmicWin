@@ -607,6 +607,83 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// F1 (video-wallpaper-review-followups, <c>R3-stale-active-after-failed-pick</c>): after
+    /// <c>Stop()</c> nothing is playing, so a pick whose import fails must never leave the "active"
+    /// flag on for a restore that itself fails to play -- the tick must post no keep-alive for a
+    /// wallpaper that is not actually showing. The exact finding scenario ("no previous path" after
+    /// a live activation) turns out unreachable: <c>currentVideoWallpaperPath</c> is only ever
+    /// non-null once something has genuinely activated, so a live "active" flag always has a
+    /// non-null previous path to fall back to. This is the reachable equivalent -- restoring the
+    /// previous video ALSO fails to play.
+    /// </summary>
+    [Fact]
+    public void PickingAVideo_WhenImportThrowsAndTheRestoreAlsoFailsToPlay_ReconcileTickPostsNoKeepAlive()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            // Drains the startup activation, which genuinely plays -- the wallpaper is active and
+            // has a previous path (the startup path itself) to fall back to.
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, player.TryPlayCallCount);
+
+            // The restore below must fail to play too, so the flag has to come down rather than
+            // riding on the restore's own success.
+            player.TryPlayReturns = false;
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+            queued.Dequeue().Invoke();
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+        }
+    }
+
+    /// <summary>
+    /// F1's other reachable variant: a first-ever pick (nothing was configured at startup, so
+    /// nothing ever played) whose import fails has no previous path to restore. The flag was never
+    /// set in the first place, so the tick must still post nothing -- this pins that invariant
+    /// rather than leaving it to be broken silently by a later refactor.
+    /// </summary>
+    [Fact]
+    public void FirstEverPick_WhenImportThrowsWithNoPreviousPath_ReconcileTickPostsNoKeepAlive()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            // No startup activation was queued: nothing was configured.
+            Assert.Empty(queued);
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+            queued.Dequeue().Invoke();
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+            Assert.Equal(0, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>
     /// Guards against the queue piling up when the video-wallpaper thread is slower than the
     /// 400ms tick: a second tick before the first posted keep-alive has even run must not queue a
     /// second one.

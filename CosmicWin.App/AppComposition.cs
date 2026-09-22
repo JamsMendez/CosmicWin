@@ -663,6 +663,16 @@ public sealed class AppComposition : IDisposable
                     // destination file so the import below can overwrite it.
                     videoWallpaperPlayer.Stop();
 
+                    // F1 (video-wallpaper-review-followups, R3-stale-active-after-failed-pick):
+                    // nothing is playing the instant Stop() returns, so the flag the watch tick
+                    // reads must say so immediately -- not only once an ActivateVideoWallpaper call
+                    // happens to run below. Every path that goes on to actually (re)play
+                    // (ActivateVideoWallpaper, on both the restore and the pick-success branches
+                    // further down) overwrites this with the real outcome; only the "import threw
+                    // and there is no previous path to restore" branch returns without calling it,
+                    // and this is what keeps that branch honest too.
+                    videoWallpaperActive = false;
+
                     // Read HERE, inside the work item, never on the tray thread before posting it.
                     // Work items run one at a time in order, so this sees whatever the pick queued
                     // ahead of this one actually landed; read at click time, a second pick queued
