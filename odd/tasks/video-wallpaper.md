@@ -209,14 +209,58 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
   build 0 errors, `CosmicWin.Interop.Tests` 165/0/31, `CosmicWin.App.Tests` 748/0/6 — both matching
   what was reported, no regressions.
 
+## KNOWN BLOCKER — not yet fixed, discovered in final end-to-end verification (2026-09-22)
+
+All six tasks (T1-T6) are done, committed, and every automated test is green. But the one
+end-to-end check that actually matters — launching the real, elevated `CosmicWin.App.exe` with a
+video configured and watching it play — **failed**. Diagnosed, not guessed:
+
+- Ran `scripts/run.ps1` (elevated, UAC approved by the user) with `settings.conf`'s
+  `video-wallpaper-path` pointing at a real MP4. Screen stayed black for 20+ seconds.
+- Checked the live window via a small P/Invoke probe: the host window (class
+  `CosmicWinVideoWallpaperHost-<guid>`) DOES exist, but `IsWindowVisible = False` and
+  `GetParent = 0` — `TryAttach()` created the window but never successfully parented it to
+  Progman.
+- Ruled out a code regression: ran `spikes/AttachSpike/Program.cs` (already proven working, see
+  §3.6 of the research doc) **unelevated, in the same session, moments later** — Progman found,
+  attach succeeded, magenta rectangle visible, exactly as before.
+- The one variable that changed: `CosmicWin.App.exe` runs elevated (`app.manifest` declares
+  `requireAdministrator`), so it runs at **high integrity**. `explorer.exe`/Progman/WorkerW run at
+  **medium integrity** (Explorer effectively never runs elevated on Windows). `SetParent` across
+  that boundary can fail silently — this is a genuine Windows security boundary, not a bug in the
+  T3/T4 code itself, and it was never exercised before because every prior verification
+  (`[RequiresDesktopSessionFact]` tests, the manual harness) ran from an unelevated `dotnet test`
+  process. **This is the first time the feature was tested from a build that matches how CosmicWin
+  actually ships.**
+
+Not yet investigated: whether this is fixable by creating just the wallpaper host window (or its
+thread) at a lowered integrity level while the rest of the process stays elevated, or whether
+`requireAdministrator` on `CosmicWin.App` is even still load-bearing for the app as a whole (vs.
+only for the specific elevated features like the Scheduled Task installer,
+`TaskInstallerElevatedTests`) and could be dropped or split out. Explicitly user's call, not
+decided yet.
+
+**Cleanup done**: the user's real `%LOCALAPPDATA%\CosmicWin\settings.conf` and
+`video-wallpaper.mp4` (temporarily written for this test) were restored/removed before closing
+out — verified clean afterward.
+
+**Resume plan**: user is restarting with an elevated terminal session specifically so any fix here
+(which may need relaunching/restarting the elevated app repeatedly) doesn't keep blocking on a
+UAC-approval round-trip. Next session should re-read this file in full before touching anything.
+
 ## Delivery strategy
 
 `ask-on-risk` (default) — triggered after T5 (running total ~2246 lines across the branch, well
 past the ~400-line heuristic). User chose a single PR for the whole branch (research+spikes,
-T1-T6) over a chained-PR split — open it once T6 closes.
+T1-T6) over a chained-PR split. **Not opened yet** — the elevation blocker above means the feature
+does not actually work end-to-end in the shipping app yet; do not open the PR until it does.
 
 ## Progress log
 
 - 2026-09-21: research doc updated with spike findings (commit 73f7bd3); this task file created;
   scope confirmed minimal (primary monitor, H.264 only, no pause-on-coverage) by explicit user
   choice; architecture mapped via delegated exploration (see conversation for full report).
+- 2026-09-22: T3 (commit 6ee4ae8), T4 (commit 2ef26bd), T5 (commit 3d987a9), T6 (commit bf592df)
+  done, all verified independently (build + full test suites + real hardware for T3/T4). Delivery
+  strategy resolved (single PR). Final end-to-end check on the real elevated app found the
+  integrity-boundary blocker above — session closed here, resuming with an elevated terminal.
