@@ -73,11 +73,17 @@ RDD: on (global).
   the host; at t+900ms the old WorkerW is destroyed. Final order: DefView, WorkerW(new), host ->
   the host is covered by the new wallpaper layer. Nothing re-raises it: `AttachToDesktop`
   returns early when the parent already matches, so even a re-attach skips the z-order step.
-- [ ] **T3 — Keep the host directly below DefView.** Route: delegated direct (writer trigger:
+- [x] **T3 — Keep the host directly below DefView.** Route: delegated direct (writer trigger:
   Interop host + composition + tests). `AttachToDesktop`'s early return must also verify the host
   sits directly after DefView and re-apply the z-order when it does not; the existing 400 ms
   watch tick re-runs `TryAttach` on the video thread while a video is active. Accepted cost: up
   to one tick of the static wallpaper showing after a slideshow change.
+  **Done** — commit `b26769a`. RED observed (App: 2 keep-alive tests `Expected 1, Actual 0`;
+  desktop: host handle not after DefView), then GREEN. Checks: `dotnet build CosmicWin.sln` OK;
+  App.Tests 761 passed / 6 skipped / 0 failed; Interop.Tests 167 / 32 skipped / 0 failed;
+  `COSMICWIN_RUN_DESKTOP_TESTS=1` real-attach tests 3/3 passed. Live E2E 19:42Z (parent):
+  slideshow advanced, new WorkerW covered the host at t+300ms, host back directly after DefView
+  at t+450ms and stayed there after the old WorkerW was destroyed.
 
 ## Progress
 
@@ -85,6 +91,6 @@ RDD: on (global).
 
 ## Next step
 
-T3.
+RDD review of the slice (main..HEAD), then delivery under ordinary policy (maintainer pushes).
 
 Engram mirror: PENDING (mem_save failed: multiple active runtime sessions).
