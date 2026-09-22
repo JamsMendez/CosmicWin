@@ -117,12 +117,25 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
   `Type.GetTypeFromCLSID`, as the spike already does). Whole-solution build confirmed clean
   (`dotnet build CosmicWin.sln`), two pre-existing unrelated nullable warnings in
   `MultiMonitorWorkspaceAdapter.cs` untouched.
-- [ ] **T3 — Wallpaper host window.** Port the spike's window-class/WndProc/Progman-WorkerW-
+- [x] **T3 — Wallpaper host window.** Port the spike's window-class/WndProc/Progman-WorkerW-
   attach/D3D-swapchain sequence into `CosmicWin.Interop` behind a narrow seam interface (shape:
   `INativeDisplaySource`/`FakeNativeDisplaySource`), plus `TaskbarCreated` re-attach in the
   `WndProc`. Unit tests against the fake; a `[RequiresDesktopFact]` test for the real attach.
   Route: delegated writer — this is the highest-novelty piece (no existing new-HWND precedent in
-  this codebase), brief the writer with the exact spike file paths.
+  this codebase), brief the writer with the exact spike file paths. **Done** — commit `6ee4ae8`.
+  Re-verified independently on real hardware after a session gap (fresh `dotnet build` +
+  `COSMICWIN_RUN_DESKTOP_TESTS=1 dotnet test`, same 2/2 real-attach result) before committing.
+  Implementation adds `IVideoWallpaperHost`, `Win32VideoWallpaperHost`, `DesktopLayoutDetector`,
+  and focused interop tests. The host creates a real DXGI/D3D11 swapchain against the desktop-
+  attached HWND and presents a black test pattern only; Media Foundation video playback remains T4.
+  Review fixes included a hidden top-level `TaskbarCreated` receiver (the visible host becomes
+  `WS_CHILD`, so it cannot be trusted to receive the broadcast), idempotent retry after partial
+  attach/D3D failure, exact parent validation after `SetParent`, safe CsWin32 COM wrapper cleanup,
+  class unregister on dispose, disposed-`WndProc` guarding, and cleanup if the initial `Present()`
+  fails. Verification: `COSMICWIN_RUN_DESKTOP_TESTS=1 dotnet test CosmicWin.Interop.Tests/
+  CosmicWin.Interop.Tests.csproj --filter "FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests"`
+  => 2 passed, 0 failed; `dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj`
+  => 163 passed, 28 skipped, 0 failed.
 - [ ] **T4 — Media Foundation frame-server playback.** Wrap `IMFMediaEngine` in **frame-server**
   mode (own D3D11 device + `TransferVideoFrame` into the host's swapchain) — genuinely new work,
   not a port: the spike's `PlaybackSpike` used legacy HWND mode for the loop-seam test only, and
