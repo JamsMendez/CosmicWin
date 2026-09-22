@@ -64,9 +64,20 @@ RDD: on (global).
   Review assess (base main, committed-only): medium, `under_budget` (351 lines) — pending in slice.
   Known residual: a copy that fails midway leaves a partial destination, which the restore then
   replays.
-- [ ] **T2 — Reproduce and diagnose the slideshow disappearance.** Route: inline, live on
+- [x] **T2 — Reproduce and diagnose the slideshow disappearance.** Route: inline, live on
   hardware. Capture the Progman/WorkerW/host tree before and after a slideshow change.
-- [ ] **T3 — Fix bug 2** once T2 proves the cause.
+  **Done — cause proven 2026-09-22 19:28Z** (app launched via `scripts/run.ps1`, elevated shell,
+  slideshow advanced with `IDesktopWallpaper::AdvanceSlideshow`, tree sampled every 150 ms):
+  before: Progman children = DefView, **host**, WorkerW(0xD20990, wallpaper). At t+300ms Explorer
+  creates a NEW wallpaper WorkerW (0x32096E) and inserts it directly after DefView, i.e. ABOVE
+  the host; at t+900ms the old WorkerW is destroyed. Final order: DefView, WorkerW(new), host ->
+  the host is covered by the new wallpaper layer. Nothing re-raises it: `AttachToDesktop`
+  returns early when the parent already matches, so even a re-attach skips the z-order step.
+- [ ] **T3 — Keep the host directly below DefView.** Route: delegated direct (writer trigger:
+  Interop host + composition + tests). `AttachToDesktop`'s early return must also verify the host
+  sits directly after DefView and re-apply the z-order when it does not; the existing 400 ms
+  watch tick re-runs `TryAttach` on the video thread while a video is active. Accepted cost: up
+  to one tick of the static wallpaper showing after a slideshow change.
 
 ## Progress
 
@@ -74,7 +85,6 @@ RDD: on (global).
 
 ## Next step
 
-T2: live repro with `desktop-tree.ps1 -Advance` (scratchpad script: snapshots Progman's
-children, calls `IDesktopWallpaper::AdvanceSlideshow`, snapshots again).
+T3.
 
 Engram mirror: PENDING (mem_save failed: multiple active runtime sessions).
