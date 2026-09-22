@@ -1,0 +1,139 @@
+# Video wallpaper (v1, minimal scope)
+
+## Objective
+
+Let the user pick an MP4 file from the tray menu and have it play, looping forever, as the
+desktop wallpaper (behind the desktop icons, in front of nothing — the real wallpaper).
+
+## Why
+
+User request, after the feasibility research (`docs/research/video-wallpaper-feasibility.md`)
+and two working spikes (`spikes/AttachSpike`, `spikes/PlaybackSpike`, both uncommitted-turned-
+committed as research evidence in 73f7bd3) confirmed the mechanism works on this machine, with
+one hard requirement the original research missed: the host window must present through a
+DXGI/D3D swapchain, never GDI (Progman carries `WS_EX_NOREDIRECTIONBITMAP` on this Windows
+build; six independent GDI-painted configurations rendered zero pixels, a D3D swapchain worked
+on the first try). See the research doc §3.6 for the full trail.
+
+## Scope (v1 — explicitly minimal, user-selected 2026-09-21)
+
+In scope:
+- Primary monitor only.
+- H.264 MP4 only.
+- Copy the chosen file into `%LOCALAPPDATA%\CosmicWin\` (don't break if the user moves/deletes
+  the original).
+- One new tray menu entry ("Set video wallpaper…") opening a file picker.
+- Persist the chosen (copied) path in the existing settings file.
+- Loop forever (`SetLoop(true)`), muted.
+- Re-attach after `TaskbarCreated` (Explorer restart) — the research doc flags this as the
+  cheapest, most important recovery case to cover; nothing else from §3.5 (session lock, RDP,
+  battery) is in scope for v1.
+
+Explicitly out of scope for v1 (tracked as gaps in the research doc, not forgotten):
+- Multi-monitor (one host per display, spanning, or duplicate).
+- Pause-on-coverage / fullscreen-detection logic — the video keeps playing even if something
+  covers it. Acceptable for v1: it's muted and behind everything else anyway.
+- HEVC/VP9/AV1 or any codec beyond H.264 MP4.
+- DPI-aware per-monitor placement beyond whatever the primary monitor's work area already gives.
+
+## Constraints
+
+- Native Win32 / .NET only. No third-party runtime dependency (CsWin32 is a source generator,
+  already used throughout `CosmicWin.Interop` — consistent with existing dependency hygiene).
+- `CosmicWin.Interop` is the only project allowed to touch Win32 (design D1/D8, existing rule).
+- The host window must be `WS_CHILD` so the tiler's existing `IsTrackable` check excludes it with
+  zero extra work (confirmed by the architecture mapping below — already pinned by
+  `ChildWindowTrackabilityTests`).
+- **Never fall back to GDI painting for the host window.** `IMFMediaEngine` must run in
+  frame-server mode (own D3D11 device + DXGI swapchain, present via `TransferVideoFrame`), not
+  legacy HWND mode — legacy HWND mode plausibly hits the same composition wall that killed six
+  GDI attempts in the spike, and was never itself tested in production conditions.
+
+## Architecture map (from delegated exploration, 2026-09-21 — see task log for full report)
+
+- **Tray menu**: `CosmicWin.App/Tray/TrayMenuEntry.cs` (enum) → `TrayIconHost.MenuOrder`
+  (`CosmicWin.App/Tray/TrayIconHost.cs:166`) → `TrayMenuController` (pure, delegate-injected,
+  `CosmicWin.App/Tray/TrayMenuController.cs`) → wired in `TrayIconHost`'s constructor and in
+  `CompositionRoot.BuildTrayMenuController` + `AppComposition.WireProduction`
+  (`CosmicWin.App/AppComposition.cs:1160`). File-picker precedent: `TrayIconHost.PickBorderColor`
+  (`CosmicWin.App/Tray/TrayIconHost.cs:192`) — same shape, `OpenFileDialog` instead of
+  `ColorDialog`.
+- **Settings**: `CosmicWin.App/Settings.cs` (pure record: `Default`, `Parse`, `Serialize`) +
+  `CosmicWin.App/SettingsFile.cs` (disk I/O, `%LOCALAPPDATA%\CosmicWin\settings.conf`, never
+  throws). Add `VideoWallpaperPath` as a fourth optional field, same pattern as `BorderColor`.
+  Wired once in `AppComposition.WireProduction` (`persistX: value => SettingsFile.Save(stored =
+  stored with { X = value })`).
+- **New-HWND precedent**: none exists yet in `CosmicWin.Interop` — every existing Win32 wrapper
+  (`Win32OverlayWindow`, `Win32WindowBorder`) is a static helper over an HWND it does *not* own.
+  The actual precedent is the spike code: `spikes/AttachSpike/Program.cs` (window class
+  registration, `WndProc`, Progman/WorkerW attach, D3D11/DXGI swapchain) and
+  `spikes/PlaybackSpike/Program.cs` (`IMFMediaEngine` host, `Type.GetTypeFromCLSID` for the
+  `MFMediaEngineClassFactory` coclass CsWin32 doesn't project). Both spikes' `NativeMethods.txt`
+  list the exact new Win32/D3D11/DXGI/Media-Foundation symbols to merge into
+  `CosmicWin.Interop/NativeMethods.txt` (currently 63 entries, none of them window-creation or
+  D3D/MF related).
+- **Tiler exclusion**: `Win32NativeWindowSource.IsTrackable` (`CosmicWin.Interop/Win32/
+  Win32NativeWindowSource.cs:344`) short-circuits `false` the instant `isChild` is true, before
+  ever reaching `WindowFilters.IsAutoExcluded`. A `WS_CHILD` host is excluded automatically.
+- **App composition / lifecycle**: `AppComposition.WireProduction` (`AppComposition.cs:1121`) is
+  the sole production factory; long-lived optional collaborators follow the nullable-field +
+  `?.Dispose()`-in-`Dispose()` pattern already used for `_windowShown`/`_dialogAdapter`.
+  `Dispose()` order is explicit and documented — the wallpaper host disposes in that same
+  ordered block. No `TaskbarCreated` handling exists anywhere yet; it's new work, done inside the
+  host's own `WndProc`.
+- **Test seams**: `INativeDisplaySource` / `FakeNativeDisplaySource`
+  (`CosmicWin.Interop/Win32/INativeDisplaySource.cs`, `CosmicWin.Interop.Tests/Win32/
+  FakeNativeDisplaySource.cs`) is the shape to copy — one narrow interface, a real CsWin32-backed
+  implementation, an in-memory fake for unit tests. Desktop-touching facts use
+  `[RequiresDesktopFact]` / `COSMICWIN_RUN_DESKTOP_TESTS=1` +
+  `COSMICWIN_DESKTOP_TEST_TERMINAL=<path>` (both required together, `CosmicWin.App` must be
+  closed first, `docs/notes.md` has the exact commands).
+
+## TDD mode
+
+**Strict TDD: enabled** — source: user's global development instructions (no repo-level override
+found). Red → Green → Refactor for every task below. Runner: `dotnet test
+<Project>.Tests/<Project>.Tests.csproj` per project (not solution-wide — desktop tests within a
+project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across projects).
+
+## Tasks
+
+- [ ] **T1 — Settings: `VideoWallpaperPath`.** Add the field to `Settings` (record, `Parse`,
+  `Serialize`), round-trip tests in `SettingsTests.cs` / `SettingsFileTests.cs`. Route: delegated
+  writer (2+ files). No Win32.
+- [ ] **T2 — Merge native surface.** Add the new Win32/D3D11/DXGI/Media-Foundation entries from
+  both spikes' `NativeMethods.txt` into `CosmicWin.Interop/NativeMethods.txt`; confirm the
+  project still builds and CsWin32 generates clean bindings (no interop the spikes didn't already
+  prove out). Route: delegated writer.
+- [ ] **T3 — Wallpaper host window.** Port the spike's window-class/WndProc/Progman-WorkerW-
+  attach/D3D-swapchain sequence into `CosmicWin.Interop` behind a narrow seam interface (shape:
+  `INativeDisplaySource`/`FakeNativeDisplaySource`), plus `TaskbarCreated` re-attach in the
+  `WndProc`. Unit tests against the fake; a `[RequiresDesktopFact]` test for the real attach.
+  Route: delegated writer — this is the highest-novelty piece (no existing new-HWND precedent in
+  this codebase), brief the writer with the exact spike file paths.
+- [ ] **T4 — Media Foundation frame-server playback.** Wrap `IMFMediaEngine` in **frame-server**
+  mode (own D3D11 device + `TransferVideoFrame` into the host's swapchain) — genuinely new work,
+  not a port: the spike's `PlaybackSpike` used legacy HWND mode for the loop-seam test only, and
+  that mode is explicitly out per the constraints above. Verify manually on hardware (per user
+  preference: drive it yourself, don't just claim success) that video actually renders behind the
+  icons before calling this done. Route: delegated writer, flag the frame-server-vs-legacy
+  distinction explicitly in the brief.
+- [ ] **T5 — Tray entry + file picker + settings wiring.** `TrayMenuEntry` value, `MenuOrder`,
+  `TrayMenuController` delegate, `TrayIconHost` `OpenFileDialog` handler (mirror
+  `PickBorderColor`), copy the picked file into `%LOCALAPPDATA%\CosmicWin\`, persist via T1's
+  `VideoWallpaperPath`. Route: delegated writer.
+- [ ] **T6 — AppComposition wiring.** Construct the T3/T4 host+playback service in
+  `WireProduction` when `settings.VideoWallpaperPath is not null`; wire the T5 picker to
+  (re)start playback on selection; dispose in the existing ordered `Dispose()` block. Route:
+  delegated writer.
+
+## Delivery strategy
+
+`ask-on-risk` (default) — not yet triggered; revisit if the running changed-line count clears
+~400 authored lines before T6 closes.
+
+## Progress log
+
+- 2026-09-21: research doc updated with spike findings (commit 73f7bd3); this task file created;
+  scope confirmed minimal (primary monitor, H.264 only, no pause-on-coverage) by explicit user
+  choice; architecture mapped via delegated exploration (see conversation for full report).
