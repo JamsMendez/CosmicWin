@@ -42,8 +42,11 @@ internal interface IVideoWallpaperHost : IDisposable
     ID3D11Texture2D GetBackBuffer();
 
     /// <summary>
-    /// Presents the current back buffer. Until real video frames are wired in by a later task, this
-    /// clears to a fixed test-pattern colour first, so presentation itself is provably working.
+    /// Presents the current back buffer as-is (no clear). A caller that wants to present its own
+    /// content -- e.g. <c>MediaFoundationVideoWallpaperPlayer</c> writing decoded video frames via
+    /// <c>TransferVideoFrame</c> -- writes into <see cref="GetBackBuffer"/> first, then calls this.
+    /// The one-time test-pattern clear proving presentation itself works happens once, internally,
+    /// during the first successful <see cref="TryAttach"/>.
     /// </summary>
     void Present();
 }

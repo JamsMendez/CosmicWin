@@ -136,13 +136,40 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
   CosmicWin.Interop.Tests.csproj --filter "FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests"`
   => 2 passed, 0 failed; `dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj`
   => 163 passed, 28 skipped, 0 failed.
-- [ ] **T4 — Media Foundation frame-server playback.** Wrap `IMFMediaEngine` in **frame-server**
+- [x] **T4 — Media Foundation frame-server playback.** Wrap `IMFMediaEngine` in **frame-server**
   mode (own D3D11 device + `TransferVideoFrame` into the host's swapchain) — genuinely new work,
   not a port: the spike's `PlaybackSpike` used legacy HWND mode for the loop-seam test only, and
-  that mode is explicitly out per the constraints above. Verify manually on hardware (per user
-  preference: drive it yourself, don't just claim success) that video actually renders behind the
-  icons before calling this done. Route: delegated writer, flag the frame-server-vs-legacy
-  distinction explicitly in the brief.
+  that mode is explicitly out per the constraints above. Route: delegated writer.
+
+  **Done, after a real debugging detour worth recording.** First draft ticked the engine from a
+  `WM_TIMER` on the same STA thread (`CoInitializeEx(COINIT_APARTMENTTHREADED)`) that owned a
+  private pump window. That deadlocked **intermittently** on real hardware (found only by manual
+  hardware verification — a temporary xunit fact pumping real Win32 messages, since production's
+  WPF Dispatcher does this for free but a bare xunit test host does not; the automated test suite
+  stayed green throughout because it never exercises a real video file). Two follow-up guesses
+  (fetching `GetBackBuffer()` fresh per `DXGI_SWAP_EFFECT_FLIP_DISCARD` semantics, and setting
+  `MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT`) were tried and reverted — neither was the real cause, and
+  a "clean" 15-second run at one point turned out to be a timing coincidence, not a fix, when the
+  identical code hung on a later run.
+
+  A research pass confirmed the actual root cause: Media Foundation does not marshal STA objects
+  to its internal MTA work-queue threads, and `IMFMediaEngineNotify` callbacks run on those MTA
+  threads — an STA thread blocked synchronously inside an MF call at the wrong moment is a
+  circular-wait COM deadlock (Microsoft's own "Media Foundation and COM" docs). Microsoft's own
+  `meplayer.cpp` reference sample doesn't tick from the UI thread at all; it runs the whole
+  per-frame loop on a dedicated worker thread. Fixed by matching that model exactly: engine
+  creation, ticking, and teardown all run on one dedicated background `Thread` initialized with
+  `CoInitializeEx(COINIT_MULTITHREADED)`, never a window or message loop. Also added
+  `ID3D10Multithread::SetMultithreadProtected(true)` on the shared D3D11 device as defense-in-depth
+  per Microsoft's D3D11-decoding guidance.
+
+  **Verified twice, directly, on screen** — not inferred from a lack of exceptions: with
+  `CosmicWin.App` closed and `COSMICWIN_RUN_DESKTOP_TESTS=1`, the manual harness attached the real
+  host, played the real trimmed clip, and the actual video (not a black frame, not the earlier
+  test pattern) was screenshotted rendering full-screen behind the desktop icons, twice in a row,
+  full 15-second runs, zero hangs. The temporary manual-verification test file was deleted
+  afterward per its own header comment. `dotnet test CosmicWin.Interop.Tests/
+  CosmicWin.Interop.Tests.csproj` (full suite): 165 passed, 0 failed, 31 skipped, 196 total.
 - [ ] **T5 — Tray entry + file picker + settings wiring.** `TrayMenuEntry` value, `MenuOrder`,
   `TrayMenuController` delegate, `TrayIconHost` `OpenFileDialog` handler (mirror
   `PickBorderColor`), copy the picked file into `%LOCALAPPDATA%\CosmicWin\`, persist via T1's

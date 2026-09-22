@@ -119,12 +119,16 @@ internal sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_context is null || _rtv is null || _swapChain is null)
+        if (_swapChain is null)
         {
             throw new InvalidOperationException("TryAttach must succeed before Present can be called.");
         }
 
-        _context.ClearRenderTargetView(_rtv, TestPatternColor);
+        // No clear here: a caller (e.g. the T4 Media Foundation frame-server player) may have
+        // already written real content into the back buffer via TransferVideoFrame, and clearing
+        // unconditionally on every Present would wipe it out. The one-time test-pattern clear that
+        // proves presentation itself works happens once, directly, in
+        // CreateSwapChainAndPresentTestPattern -- before this method is ever reachable from it.
         _swapChain.Present(1, 0);
     }
 
@@ -390,6 +394,11 @@ internal sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
             try
             {
+                // One-time test-pattern clear, done directly here (not inside Present()) -- proves
+                // presentation itself works without making every later Present() call clear over
+                // whatever real content a caller (e.g. the Media Foundation frame-server player)
+                // already wrote into the back buffer.
+                _context.ClearRenderTargetView(_rtv, TestPatternColor);
                 Present();
             }
             catch
