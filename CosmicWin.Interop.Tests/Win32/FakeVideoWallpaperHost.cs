@@ -1,4 +1,4 @@
-using CosmicWin.Interop.Win32;
+using CosmicWin.Interop;
 using Windows.Win32.Graphics.Direct3D11;
 
 namespace CosmicWin.Interop.Tests.Win32;

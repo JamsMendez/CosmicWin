@@ -46,11 +46,16 @@ public sealed class AppComposition : IDisposable
     private readonly IWindowShownWatcher? _windowShown;
     private readonly FloatingDialogAdapter? _dialogAdapter;
 
+    /// <summary>Both null unless a video wallpaper host/player were supplied -- see <see cref="Wire"/>'s startup activation and the tray's <c>setVideoWallpaperPath</c> hook.</summary>
+    private readonly IVideoWallpaperHost? _videoWallpaperHost;
+    private readonly IVideoWallpaperPlayer? _videoWallpaperPlayer;
+
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
         MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile,
         IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter,
-        IFocusBorder? focusBorder, Action unfollowFocusedWindow)
+        IFocusBorder? focusBorder, IVideoWallpaperHost? videoWallpaperHost,
+        IVideoWallpaperPlayer? videoWallpaperPlayer, Action unfollowFocusedWindow)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -61,6 +66,8 @@ public sealed class AppComposition : IDisposable
         _windowShown = windowShown;
         _dialogAdapter = dialogAdapter;
         _focusBorder = focusBorder;
+        _videoWallpaperHost = videoWallpaperHost;
+        _videoWallpaperPlayer = videoWallpaperPlayer;
         _unfollowFocusedWindow = unfollowFocusedWindow;
     }
 
@@ -132,6 +139,14 @@ public sealed class AppComposition : IDisposable
         Action<bool>? persistTiling = null,
         // Optional, same as the persistX delegates above.
         Action<string>? persistVideoWallpaperPath = null,
+        // The T3/T4 collaborators. Both null (the default in every test that predates T6) means
+        // "nothing to attach or play" -- construction alone never attaches or plays anything, only
+        // TryAttach/TryPlay do, and those only run when a path is ALSO present (see below).
+        IVideoWallpaperHost? videoWallpaperHost = null,
+        IVideoWallpaperPlayer? videoWallpaperPlayer = null,
+        // Already-resolved from Settings before Wire is called, same as focusBorderColor/
+        // tilingEnabled above -- not re-read from disk in here.
+        string? videoWallpaperPath = null,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -565,9 +580,23 @@ public sealed class AppComposition : IDisposable
                 var imported = importVideoWallpaper(path);
                 persistVideoWallpaperPath?.Invoke(imported);
 
-                // T6 hooks in here: (re)start playback with `imported` once the video-wallpaper
-                // host/player are wired into this composition. Left as a no-op for now -- T5's
-                // scope stops at persisting the imported path.
+                // (Re)start playback with the IMPORTED path -- never the raw one the user picked,
+                // since that is what actually landed on disk. Handles both the first-ever pick
+                // (the startup activation below never ran, because no path was configured yet) and
+                // every later re-pick identically: TryAttach is documented idempotent and TryPlay
+                // is documented to tear down and restart cleanly, so there is no need to branch on
+                // whether this is the first attach. On the thread whose message loop pumps the host
+                // window, same as the startup activation below.
+                if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
+                {
+                    onOwningThread(() =>
+                    {
+                        if (videoWallpaperHost.TryAttach())
+                        {
+                            videoWallpaperPlayer.TryPlay(videoWallpaperHost, imported);
+                        }
+                    });
+                }
             },
             exit: () =>
             {
@@ -1112,9 +1141,26 @@ public sealed class AppComposition : IDisposable
             windowShown.Open();
         }
 
+        // T6 startup activation: attach and start playback once, but only when there is already a
+        // path configured -- the user's FIRST-ever pick has no path here yet and is instead handled
+        // entirely by the setVideoWallpaperPath closure above. On the thread whose message loop will
+        // pump the host window: Win32VideoWallpaperHost's own doc comment requires this (its
+        // TaskbarCreated re-attach depends on being pumped), and onOwningThread is already how every
+        // other Win32-window-touching callback in this method reaches that thread.
+        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null && videoWallpaperPath is not null)
+        {
+            onOwningThread(() =>
+            {
+                if (videoWallpaperHost.TryAttach())
+                {
+                    videoWallpaperPlayer.TryPlay(videoWallpaperHost, videoWallpaperPath);
+                }
+            });
+        }
+
         return new AppComposition(
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
-            focusBorder,
+            focusBorder, videoWallpaperHost, videoWallpaperPlayer,
             unfollowFocusedWindow: () =>
             {
                 if (followFocusedWindow is not null)
@@ -1191,6 +1237,12 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
+            // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
+            // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
+            // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.
+            videoWallpaperHost: new Win32VideoWallpaperHost(),
+            videoWallpaperPlayer: new MediaFoundationVideoWallpaperPlayer(),
+            videoWallpaperPath: settings.VideoWallpaperPath,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }
@@ -1306,6 +1358,14 @@ public sealed class AppComposition : IDisposable
         _dialogAdapter?.Dispose();
         _windowShown?.Dispose();
         _focusBorder?.Dispose();
+
+        // Player before host: the player's worker thread reads the host's D3D11 device and
+        // swapchain on every tick (Win32VideoWallpaperHost.Device/GetBackBuffer), so stopping the
+        // player first guarantees no tick can touch a host mid-teardown or already destroyed.
+        // MediaFoundationVideoWallpaperPlayer.Dispose() joins that thread (bounded) before returning.
+        _videoWallpaperPlayer?.Dispose();
+        _videoWallpaperHost?.Dispose();
+
         _sessionAdapter.Dispose();
         _workspace.Dispose();
         _dispatcher.DisposeAsync().AsTask().GetAwaiter().GetResult();

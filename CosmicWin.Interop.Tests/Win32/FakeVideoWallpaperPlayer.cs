@@ -1,4 +1,4 @@
-using CosmicWin.Interop.Win32;
+using CosmicWin.Interop;
 
 namespace CosmicWin.Interop.Tests.Win32;
 

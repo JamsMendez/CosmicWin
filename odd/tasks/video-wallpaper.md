@@ -186,10 +186,28 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
   playback wiring in this task, by design. Spot-checked: `dotnet test
   CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` => 742 passed, 0 failed, 6 skipped (same skips
   as T1's baseline, +10 new tests), confirmed myself before committing.
-- [ ] **T6 — AppComposition wiring.** Construct the T3/T4 host+playback service in
+- [x] **T6 — AppComposition wiring.** Construct the T3/T4 host+playback service in
   `WireProduction` when `settings.VideoWallpaperPath is not null`; wire the T5 picker to
   (re)start playback on selection; dispose in the existing ordered `Dispose()` block. Route:
-  delegated writer.
+  delegated writer. **Done.** Found and solved a real problem the brief didn't anticipate:
+  `IVideoWallpaperHost`/`IVideoWallpaperPlayer` were `internal` to `CosmicWin.Interop`, and
+  `InternalsVisibleTo` only reaches the two test projects, not `CosmicWin.App` itself — moved both
+  interfaces to the root `CosmicWin.Interop` namespace as `public` (matching the existing
+  `IWindowShownWatcher`/`Win32WindowShownWatcher` precedent exactly), and made
+  `Win32VideoWallpaperHost`/`MediaFoundationVideoWallpaperPlayer` `public sealed`. A second,
+  finer problem surfaced from that: `Device`/`GetBackBuffer()` return CsWin32-generated D3D types
+  that are themselves `internal` to `CosmicWin.Interop`, so a `public` interface couldn't expose
+  them (CS0050/CS0053) without making the whole D3D surface public solution-wide. Fixed by marking
+  just those two interface members `internal` (C# 11+ per-member interface accessibility) and
+  implementing them via explicit interface implementation forwarding to ordinary internal members
+  on the concrete class — keeps "only `CosmicWin.Interop` touches Win32" intact. `Wire(...)` gained
+  `videoWallpaperHost`/`videoWallpaperPlayer`/`videoWallpaperPath` (all optional, mirroring
+  `windowShown`); startup activation and the T5 tray hook both call `TryAttach()` then `TryPlay()`
+  on the owning thread (`Win32VideoWallpaperHost` needs its window's messages pumped by the thread
+  that created it, for `TaskbarCreated` re-attach). `Dispose()` stops the player before the host
+  (its worker thread reads the host's D3D device on every tick). Verified myself: whole-solution
+  build 0 errors, `CosmicWin.Interop.Tests` 165/0/31, `CosmicWin.App.Tests` 748/0/6 — both matching
+  what was reported, no regressions.
 
 ## Delivery strategy
 

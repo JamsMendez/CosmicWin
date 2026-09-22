@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
+using CosmicWin.Interop;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Direct3D10;
@@ -62,7 +63,7 @@ namespace CosmicWin.Interop.Win32;
 /// try/catch, unchanged from before; this is a correctness nice-to-have, not part of this fix.
 /// </para>
 /// </remarks>
-internal sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaperPlayer
+public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaperPlayer
 {
     // CLSID_MFMediaEngineClassFactory, from mfmediaengine.h / wine-mirror mfmediaengine.idl --
     // same GUID spikes/PlaybackSpike/Program.cs uses and cross-checked the same way.

@@ -1,4 +1,6 @@
-namespace CosmicWin.Interop.Win32;
+using CosmicWin.Interop.Win32;
+
+namespace CosmicWin.Interop;
 
 /// <summary>
 /// Abstracts looping video playback into an already-attached <see cref="IVideoWallpaperHost"/>.
@@ -9,9 +11,12 @@ namespace CosmicWin.Interop.Win32;
 /// HWND) so it pulls decoded frames into the host's own swapchain via <c>TransferVideoFrame</c>
 /// rather than rendering into a window itself -- see that class's remarks and
 /// <c>odd/tasks/video-wallpaper.md</c> for why legacy HWND mode is out of scope. Tests substitute
-/// an in-memory <c>FakeVideoWallpaperPlayer</c>.
+/// an in-memory <c>FakeVideoWallpaperPlayer</c>. Public (root <c>CosmicWin.Interop</c> namespace),
+/// same reason as <see cref="IVideoWallpaperHost"/>: <c>CosmicWin.App</c>'s <c>AppComposition</c>
+/// (T6) constructs the real implementation directly and is not covered by this project's
+/// <c>InternalsVisibleTo</c>.
 /// </remarks>
-internal interface IVideoWallpaperPlayer : IDisposable
+public interface IVideoWallpaperPlayer : IDisposable
 {
     /// <summary>
     /// Starts (or restarts, if already playing) looping, muted playback of the file at

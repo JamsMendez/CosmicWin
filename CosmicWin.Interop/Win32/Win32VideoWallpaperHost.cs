@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using CosmicWin.Interop;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Direct3D;
@@ -32,7 +33,7 @@ namespace CosmicWin.Interop.Win32;
 /// measured.
 /// </para>
 /// </remarks>
-internal sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
+public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 {
     private const string ClassName = "CosmicWinVideoWallpaperHost";
 
@@ -67,11 +68,23 @@ internal sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// <summary>Hidden top-level message receiver that survives after the visible host becomes a child window.</summary>
     internal nint TaskbarMessageHwnd => (nint)_taskbarMessageHwnd.Value;
 
-    public ID3D11Device Device =>
+    // Internal, matching IVideoWallpaperHost's own internal Device/GetBackBuffer members -- see
+    // that interface's remarks for why (CsWin32's D3D types are internal to this assembly, and a
+    // public member cannot return a less-accessible type). Kept as ordinary internal members (not
+    // only explicit interface implementations) because Win32VideoWallpaperHostRealAttachTests
+    // calls GetBackBuffer() directly on the concrete type, not through the interface.
+    internal ID3D11Device Device =>
         _device ?? throw new InvalidOperationException("TryAttach must succeed before Device is available.");
 
-    public ID3D11Texture2D GetBackBuffer() =>
+    internal ID3D11Texture2D GetBackBuffer() =>
         _backBuffer ?? throw new InvalidOperationException("TryAttach must succeed before a back buffer is available.");
+
+    // Explicit interface implementations forwarding to the members above: a non-public interface
+    // member (Device/GetBackBuffer are `internal` on IVideoWallpaperHost) cannot be satisfied
+    // implicitly -- C# requires an explicit implementation for it (CS0737).
+    ID3D11Device IVideoWallpaperHost.Device => Device;
+
+    ID3D11Texture2D IVideoWallpaperHost.GetBackBuffer() => GetBackBuffer();
 
     public bool TryAttach()
     {
