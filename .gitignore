@@ -19,3 +19,5 @@ obj/
 
 # Unlocked copy the app is launched from (scripts/run.ps1), so the build tree stays writable.
 run/
+# Local Pi runtime state
+.atl/

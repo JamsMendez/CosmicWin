@@ -5,6 +5,7 @@ GetWindowTextLengthW
 IsWindow
 IsWindowVisible
 GetWindow
+GetParent
 SetWinEventHook
 UnhookWinEvent
 SetWindowPos
@@ -47,8 +48,7 @@ PEEK_MESSAGE_REMOVE_TYPE
 TranslateMessage
 DispatchMessage
 DwmSetWindowAttribute
-GetWindowLongPtrW
-SetWindowLongPtrW
+SetWindowLongW
 WINDOW_EX_STYLE
 WINDOW_LONG_PTR_INDEX
 CreateRoundRectRgn
@@ -64,6 +64,7 @@ FindWindowW
 FindWindowExW
 SendMessageTimeoutW
 RegisterClassExW
+UnregisterClassW
 CreateWindowExW
 DefWindowProcW
 SetParent
@@ -75,11 +76,12 @@ LoadCursorW
 IDC_ARROW
 PeekMessageW
 WM_DESTROY
-HWND_BOTTOM
 MonitorFromWindow
 MONITOR_DEFAULTTOPRIMARY
 GWL_STYLE
 WS_EX_NOREDIRECTIONBITMAP
+WS_EX_TOOLWINDOW
+WS_EX_NOACTIVATE
 WS_POPUP
 WS_CHILD
 SWP_FRAMECHANGED
@@ -111,3 +113,4 @@ MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA
 CoInitializeEx
 CoUninitialize
 COINIT_APARTMENTTHREADED
+RegisterWindowMessageW
