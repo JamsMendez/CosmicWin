@@ -98,13 +98,25 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
 
 ## Tasks
 
-- [ ] **T1 — Settings: `VideoWallpaperPath`.** Add the field to `Settings` (record, `Parse`,
+- [x] **T1 — Settings: `VideoWallpaperPath`.** Add the field to `Settings` (record, `Parse`,
   `Serialize`), round-trip tests in `SettingsTests.cs` / `SettingsFileTests.cs`. Route: delegated
-  writer (2+ files). No Win32.
-- [ ] **T2 — Merge native surface.** Add the new Win32/D3D11/DXGI/Media-Foundation entries from
+  writer (2+ files). No Win32. **Done** — commit `aa2b3c7`. TDD: RED (compile failure on the new
+  tests) → GREEN (732 passed, 0 failed, 6 pre-existing skips) → REFACTOR (diff reviewed, minimal,
+  faithful to the `BorderColor`/`Tiling` shape). Spot-checked by re-running `dotnet test
+  CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` myself before committing.
+- [x] **T2 — Merge native surface.** Add the new Win32/D3D11/DXGI/Media-Foundation entries from
   both spikes' `NativeMethods.txt` into `CosmicWin.Interop/NativeMethods.txt`; confirm the
   project still builds and CsWin32 generates clean bindings (no interop the spikes didn't already
-  prove out). Route: delegated writer.
+  prove out). **Done** — commit `b44126e`, done directly (mechanical, no behavior/tests). Learned
+  along the way: CsWin32's `NativeMethods.txt` does **not** support `#` comments (each line is
+  resolved as a symbol name; a comment line produces a `PInvoke001` "not found" warning) — keep it
+  plain, one symbol per line, no annotations. Deliberately excluded: `SetLayeredWindowAttributes`/
+  `WS_EX_LAYERED`/`LWA_ALPHA` (proven unnecessary), all GDI paint symbols (`FillRect`,
+  `BeginPaint`, `WM_PAINT`, ...), `MF_MEDIA_ENGINE_PLAYBACK_HWND` (legacy mode, out of scope), and
+  `MFMediaEngineClassFactory` (not a resolvable symbol — the coclass is activated via
+  `Type.GetTypeFromCLSID`, as the spike already does). Whole-solution build confirmed clean
+  (`dotnet build CosmicWin.sln`), two pre-existing unrelated nullable warnings in
+  `MultiMonitorWorkspaceAdapter.cs` untouched.
 - [ ] **T3 — Wallpaper host window.** Port the spike's window-class/WndProc/Progman-WorkerW-
   attach/D3D-swapchain sequence into `CosmicWin.Interop` behind a narrow seam interface (shape:
   `INativeDisplaySource`/`FakeNativeDisplaySource`), plus `TaskbarCreated` re-attach in the
