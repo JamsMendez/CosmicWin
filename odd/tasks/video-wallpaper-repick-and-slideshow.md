@@ -89,8 +89,24 @@ RDD: on (global).
 
 - 2026-09-22: branch `fix/video-wallpaper-repick-and-slideshow` created; doc written.
 
+## Review
+
+RDD: medium, `slice_budget_reached` (808 lines, main..`372d77c`+T3 doc). Consent granted by the
+maintainer; lens `review-reliability`; **approved**, acknowledged, authority burned (lineage
+`review-bef9cebedab5988f`). Non-blocking follow-ups (not in this slice):
+
+- WARNING `R3-stale-active-after-failed-pick`: an import failure with no previous path leaves
+  `videoWallpaperActive` true after `Stop()`, so the tick keeps posting TryAttach for nothing.
+- WARNING `R3-restore-replays-partial-copy`: copy to a temp file then rename, so a copy that
+  fails midway cannot damage the previous import.
+- SUGGESTION `R3-stop-release-unproved`: no desktop test proves `Stop()` releases the file.
+- SUGGESTION `R3-realattach-assumes-raised-layout`: the new real-attach test fails instead of
+  skipping on the legacy WorkerW layout.
+- SUGGESTION `R3-keepalive-flag-cross-thread`: the keep-alive flags cross threads without
+  volatile/Interlocked.
+
 ## Next step
 
-RDD review of the slice (main..HEAD), then delivery under ordinary policy (maintainer pushes).
+Delivery under ordinary policy (the maintainer pushes). Then, if wanted, the follow-ups above.
 
 Engram mirror: PENDING (mem_save failed: multiple active runtime sessions).
