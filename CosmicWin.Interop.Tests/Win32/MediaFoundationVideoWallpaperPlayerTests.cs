@@ -114,6 +114,61 @@ public sealed class MediaFoundationVideoWallpaperPlayerTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// F3 (video-wallpaper-review-followups, <c>R3-stop-release-unproved</c>): the one gap the
+    /// class remarks above name honestly -- until now, nothing here ever played a REAL video, so
+    /// nothing proved <see cref="MediaFoundationVideoWallpaperPlayer.Stop"/> actually releases the
+    /// file it was playing (the very property the T1 fix in
+    /// <c>odd/tasks/video-wallpaper-repick-and-slideshow.md</c> depends on: the re-pick closure in
+    /// <c>AppComposition</c> calls <c>Stop()</c> and then immediately overwrites that same file).
+    /// Plays a tiny, real, checked-in H.264 MP4 (<c>Fixtures/tiny-h264.mp4</c>), stops, then opens
+    /// the SAME file for exclusive read/write -- which only succeeds if no handle is still held.
+    /// </summary>
+    /// <remarks>
+    /// Copied to a fresh temp path first so the exclusive open never touches the checked-in fixture
+    /// file itself, and so a failed run cannot leave that fixture locked or dirtied for the next one.
+    /// </remarks>
+    [RequiresDesktopSessionFact]
+    public void TryPlay_ThenStop_ReleasesTheFileForExclusiveAccess()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "tiny-h264.mp4");
+        Assert.True(File.Exists(fixturePath), $"Fixture not found at {fixturePath}.");
+
+        var playedPath = Path.Combine(Path.GetTempPath(), $"cosmicwin-stop-release-{Guid.NewGuid():N}.mp4");
+        File.Copy(fixturePath, playedPath);
+
+        try
+        {
+            using var host = new Win32VideoWallpaperHost();
+            Assert.True(host.TryAttach(), "TryAttach should succeed on a real interactive desktop session.");
+
+            using var player = new MediaFoundationVideoWallpaperPlayer();
+
+            Assert.True(player.TryPlay(host, playedPath), "TryPlay should succeed against a real, valid MP4.");
+
+            // Gives the engine's async source resolution time to actually open the file before
+            // Stop() is asked to release it -- SetSource is documented asynchronous, and calling
+            // Stop() in the same instant TryPlay returns could race ahead of the open itself.
+            Thread.Sleep(300);
+
+            player.Stop();
+
+            // Exclusive: FileShare.None. This throws IOException (sharing violation) if Media
+            // Foundation's worker thread still holds any handle open on the file.
+            var exception = Record.Exception(() =>
+            {
+                using var exclusive = new FileStream(
+                    playedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            });
+
+            Assert.Null(exception);
+        }
+        finally
+        {
+            File.Delete(playedPath);
+        }
+    }
+
     [RequiresDesktopSessionFact]
     public void Dispose_AfterAFailedTryPlay_IsSafe()
     {
