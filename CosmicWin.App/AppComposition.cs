@@ -635,11 +635,6 @@ public sealed class AppComposition : IDisposable
                     return;
                 }
 
-                // Read HERE, on the tray thread, before handing off below -- not inside the posted
-                // work item, where a second pick arriving before this one finishes could read a
-                // value the first pick has already started changing.
-                var previous = currentVideoWallpaperPath;
-
                 // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
                 // ONE work item on the video wallpaper thread, in that order. Bug 1 was exactly this
                 // ordering: import ran on the tray thread BEFORE playback stopped, so Media
@@ -652,6 +647,12 @@ public sealed class AppComposition : IDisposable
                     // Idempotent and never throws, per the interface contract -- releases the fixed
                     // destination file so the import below can overwrite it.
                     videoWallpaperPlayer.Stop();
+
+                    // Read HERE, inside the work item, never on the tray thread before posting it.
+                    // Work items run one at a time in order, so this sees whatever the pick queued
+                    // ahead of this one actually landed; read at click time, a second pick queued
+                    // behind a first-ever one would see null and have nothing to fall back to.
+                    var previous = currentVideoWallpaperPath;
 
                     string imported;
                     try

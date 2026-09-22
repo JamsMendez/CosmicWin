@@ -465,4 +465,41 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.Contains("video-wallpaper phase=pick import-failed error=IOException", trace.Lines);
         }
     }
+
+    /// <summary>
+    /// Two picks queued before the video thread runs either: the second one's fallback must be the
+    /// video the FIRST one landed, not whatever was configured when the second was clicked. On a
+    /// machine's first-ever pick that earlier value is null, and a fallback read too early leaves
+    /// the wallpaper dead even though the first pick succeeded.
+    /// </summary>
+    [Fact]
+    public void TwoQueuedPicks_WhenTheSecondImportThrows_RestoresTheVideoTheFirstPickLanded()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var landed = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        var imports = new Queue<Func<string>>(
+            [() => landed, () => throw new IOException("sharing violation")]);
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, desktopTrace: trace,
+            scheduleVideoWallpaperWork: queued.Enqueue,
+            importVideoWallpaper: _ => imports.Dequeue()());
+        using (harness.Composition)
+        {
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\first.mp4");
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\second.mp4");
+            while (queued.Count > 0)
+            {
+                queued.Dequeue().Invoke();
+            }
+
+            Assert.Contains(
+                trace.Lines,
+                line => line.StartsWith("video-wallpaper phase=restore") && line.Contains("tryPlay=True"));
+            Assert.Equal(landed, player.LastVideoPath);
+        }
+    }
 }
