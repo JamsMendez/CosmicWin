@@ -36,15 +36,16 @@ public static class VideoWallpaperImport
     /// Settings)"/>. A failed settings write is invisible and not worth crashing a running window
     /// manager over; a failed video import is something the user picking a file right now needs to
     /// know about immediately -- the source could be on removable media that was just ejected, or
-    /// locked by another process -- so <see cref="File.Copy(string, string, bool)"/> and <see
-    /// cref="Directory.CreateDirectory(string)"/> are left to throw normally. The one exception is
-    /// the same-file short-circuit above: that is not a copy failure, it is a copy that was never
-    /// necessary in the first place.
+    /// locked by another process -- so <see cref="File.Copy(string, string, bool)"/>, <see
+    /// cref="File.Move(string, string, bool)"/> and <see cref="Directory.CreateDirectory(string)"/>
+    /// are left to throw normally. The one exception is the same-file short-circuit above: that is
+    /// not a copy failure, it is a copy that was never necessary in the first place.
     /// </remarks>
     public static string Import(string directory, string sourcePath)
     {
         Directory.CreateDirectory(directory);
-        var destination = Path.Combine(directory, "video-wallpaper" + Path.GetExtension(sourcePath).ToLowerInvariant());
+        var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        var destination = Path.Combine(directory, "video-wallpaper" + extension);
 
         // Compared as full, normalised paths -- Windows paths are case-insensitive, and the raw
         // path handed in here need not already be in the same casing or use the same directory
@@ -55,7 +56,40 @@ public static class VideoWallpaperImport
             return destination;
         }
 
-        File.Copy(sourcePath, destination, overwrite: true);
+        // F2 (video-wallpaper-review-followups, R3-restore-replays-partial-copy): copying STRAIGHT
+        // onto the fixed destination used to mean a copy that failed midway -- the source ejected,
+        // or an I/O error partway through a multi-gigabyte file -- left a partially overwritten
+        // destination in place, and the constraint's own restore path would then happily replay
+        // that half-written file as if it were the previous, working import. Copying to a temporary
+        // file BESIDE the destination first, then moving it into place, means the destination is
+        // only ever replaced by a file that copied completely: a failure before the move leaves the
+        // previous import exactly as it was.
+        var temp = Path.Combine(directory, $"video-wallpaper{extension}.tmp-{Guid.NewGuid():N}");
+        try
+        {
+            File.Copy(sourcePath, temp, overwrite: true);
+            File.Move(temp, destination, overwrite: true);
+        }
+        catch
+        {
+            // Best effort, and deliberately never lets a cleanup failure mask the original one --
+            // the caller needs to see WHY the import failed, not why the leftover temp file could
+            // not be removed.
+            try
+            {
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+            catch
+            {
+                // Best effort, see above.
+            }
+
+            throw;
+        }
+
         return destination;
     }
 }
