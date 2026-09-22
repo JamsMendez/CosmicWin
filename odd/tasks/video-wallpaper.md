@@ -91,7 +91,7 @@ Explicitly out of scope for v1 (tracked as gaps in the research doc, not forgott
 
 ## TDD mode
 
-**Strict TDD: enabled** — source: user's global development instructions (no repo-level override
+**Strict TDD: enabled** — source: user's global development instructionsdevelopment instructions (no repo-level override
 found). Red → Green → Refactor for every task below. Runner: `dotnet test
 <Project>.Tests/<Project>.Tests.csproj` per project (not solution-wide — desktop tests within a
 project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across projects).
@@ -244,9 +244,34 @@ decided yet.
 `video-wallpaper.mp4` (temporarily written for this test) were restored/removed before closing
 out — verified clean afterward.
 
-**Resume plan**: user is restarting with an elevated terminal session specifically so any fix here
-(which may need relaunching/restarting the elevated app repeatedly) doesn't keep blocking on a
-UAC-approval round-trip. Next session should re-read this file in full before touching anything.
+**Resolved 2026-09-22**: the first diagnosis was too broad. Running the existing real attach
+test from an elevated terminal showed `Win32VideoWallpaperHost.TryAttach()` can attach to
+Progman/WorkerW even from high integrity. The production failure was the next step: WPF startup
+created the host's D3D11 device on the UI Dispatcher's STA thread, and
+`MediaFoundationVideoWallpaperPlayer.TryPlay()` failed from that STA-created host. A temporary
+probe confirmed the distinction exactly: same generated H.264 MP4, same host/player classes,
+MTA-created host returned `attach=True play=True`; STA-created host returned `attach=True
+play=False`. Fixed by moving production video-wallpaper activation and teardown to a dedicated
+MTA action thread while leaving the rest of CosmicWin elevated/WPF-owned. Added one-line bounded
+trace evidence for each startup/pick attempt through `desktop-trace.log`.
+
+Verification after the fix:
+- `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj --filter FullyQualifiedName~VideoWallpaperPlaybackWiringTests` => 10 passed, 0 failed.
+- Elevated real app via `scripts/run.ps1` with a generated H.264 MP4 configured => trace recorded
+  `video-wallpaper phase=startup pathExists=True tryAttach=True tryPlay=True`; screen pixel grid
+  changed from uniform `#171717` black to varied video colours.
+- `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` => 752 passed, 6 skipped, 0 failed.
+- `dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj` => 165 passed, 31 skipped,
+  0 failed.
+- RDD review `review-8d6e0f6d32b12788` approved after one bounded correction for
+  `R3-unbounded-wallpaper-teardown`: `MtaActionThread.Invoke` now waits at most 5 seconds instead
+  of indefinitely if teardown is queued behind a stalled attach/play operation. A targeted validator
+  accepted the correction and `acknowledge-approved` burned authority for corrected target
+  `sha256:5e40e3002264cafbf2e44cfb390ebb06bd65e962229df3433d9d03abd60f58ed`. Non-blocking advisory
+  follow-up: `R3-silent-wallpaper-exceptions` (warning) notes that posted wallpaper-work exceptions
+  are swallowed.
+- Post-correction `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` => 752 passed,
+  6 skipped, 0 failed.
 
 ## Delivery strategy
 

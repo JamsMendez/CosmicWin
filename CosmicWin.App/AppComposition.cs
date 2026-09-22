@@ -1,7 +1,11 @@
-﻿using System.IO;
+﻿using System.Collections.Concurrent;
+using System.IO;
 using System.Threading.Channels;
 using System.Windows.Threading;
 using CosmicWin.App.Diagnostics;
+using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.UI.WindowsAndMessaging;
 using CosmicWin.App.Input;
 using CosmicWin.App.Startup;
 using CosmicWin.App.Tray;
@@ -49,13 +53,15 @@ public sealed class AppComposition : IDisposable
     /// <summary>Both null unless a video wallpaper host/player were supplied -- see <see cref="Wire"/>'s startup activation and the tray's <c>setVideoWallpaperPath</c> hook.</summary>
     private readonly IVideoWallpaperHost? _videoWallpaperHost;
     private readonly IVideoWallpaperPlayer? _videoWallpaperPlayer;
+    private readonly Action _disposeVideoWallpaper;
 
     private AppComposition(
         ActionDispatcher dispatcher, LowLevelKeyboardHook hook, IWorkspace workspace,
         MultiMonitorWorkspaceAdapter sessionAdapter, IDisposable tray, IDisposable reconcile,
         IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter,
         IFocusBorder? focusBorder, IVideoWallpaperHost? videoWallpaperHost,
-        IVideoWallpaperPlayer? videoWallpaperPlayer, Action unfollowFocusedWindow)
+        IVideoWallpaperPlayer? videoWallpaperPlayer, Action disposeVideoWallpaper,
+        Action unfollowFocusedWindow)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -68,6 +74,7 @@ public sealed class AppComposition : IDisposable
         _focusBorder = focusBorder;
         _videoWallpaperHost = videoWallpaperHost;
         _videoWallpaperPlayer = videoWallpaperPlayer;
+        _disposeVideoWallpaper = disposeVideoWallpaper;
         _unfollowFocusedWindow = unfollowFocusedWindow;
     }
 
@@ -144,6 +151,8 @@ public sealed class AppComposition : IDisposable
         // TryAttach/TryPlay do, and those only run when a path is ALSO present (see below).
         IVideoWallpaperHost? videoWallpaperHost = null,
         IVideoWallpaperPlayer? videoWallpaperPlayer = null,
+        Action<Action>? scheduleVideoWallpaperWork = null,
+        Action? disposeVideoWallpaper = null,
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
@@ -222,6 +231,12 @@ public sealed class AppComposition : IDisposable
         // wants. Declared HERE, above the first collaborator that has to reach the border, rather
         // than beside its other use further down.
         var onOwningThread = scheduleOnOwningThread ?? (work => work());
+        var onVideoWallpaperThread = scheduleVideoWallpaperWork ?? onOwningThread;
+        disposeVideoWallpaper ??= () =>
+        {
+            videoWallpaperPlayer?.Dispose();
+            videoWallpaperHost?.Dispose();
+        };
 
         // What the border was last told to do. Three focus-border defects have been fixed so far and
         // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
@@ -276,6 +291,26 @@ public sealed class AppComposition : IDisposable
 
             lastBorderDecision = decision;
             desktopTrace?.Record($"border {decision}");
+        }
+
+        void ActivateVideoWallpaper(string phase, string path)
+        {
+            if (videoWallpaperHost is null || videoWallpaperPlayer is null)
+            {
+                return;
+            }
+
+            var pathExists = File.Exists(path);
+            var attached = videoWallpaperHost.TryAttach();
+            bool? played = null;
+            if (attached)
+            {
+                played = videoWallpaperPlayer.TryPlay(videoWallpaperHost, path);
+            }
+
+            desktopTrace?.Record(
+                $"video-wallpaper phase={phase} pathExists={pathExists} " +
+                $"tryAttach={attached} tryPlay={(played is { } result ? result.ToString() : "skipped")}");
         }
 
         /// <summary>
@@ -589,13 +624,7 @@ public sealed class AppComposition : IDisposable
                 // window, same as the startup activation below.
                 if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
                 {
-                    onOwningThread(() =>
-                    {
-                        if (videoWallpaperHost.TryAttach())
-                        {
-                            videoWallpaperPlayer.TryPlay(videoWallpaperHost, imported);
-                        }
-                    });
+                    onVideoWallpaperThread(() => ActivateVideoWallpaper("pick", imported));
                 }
             },
             exit: () =>
@@ -1149,18 +1178,12 @@ public sealed class AppComposition : IDisposable
         // other Win32-window-touching callback in this method reaches that thread.
         if (videoWallpaperHost is not null && videoWallpaperPlayer is not null && videoWallpaperPath is not null)
         {
-            onOwningThread(() =>
-            {
-                if (videoWallpaperHost.TryAttach())
-                {
-                    videoWallpaperPlayer.TryPlay(videoWallpaperHost, videoWallpaperPath);
-                }
-            });
+            onVideoWallpaperThread(() => ActivateVideoWallpaper("startup", videoWallpaperPath));
         }
 
         return new AppComposition(
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
-            focusBorder, videoWallpaperHost, videoWallpaperPlayer,
+            focusBorder, videoWallpaperHost, videoWallpaperPlayer, disposeVideoWallpaper,
             unfollowFocusedWindow: () =>
             {
                 if (followFocusedWindow is not null)
@@ -1212,6 +1235,10 @@ public sealed class AppComposition : IDisposable
         // cost on every keypress for no benefit, since it carries no per-call state to keep fresh.
         var zOrderSource = new Win32ZOrderSource();
 
+        var videoWallpaperHost = new Win32VideoWallpaperHost();
+        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
+        var videoWallpaperThread = new MtaActionThread("CosmicWinVideoWallpaperHost");
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -1240,8 +1267,20 @@ public sealed class AppComposition : IDisposable
             // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
             // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
             // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.
-            videoWallpaperHost: new Win32VideoWallpaperHost(),
-            videoWallpaperPlayer: new MediaFoundationVideoWallpaperPlayer(),
+            // The attach/play work runs on a dedicated MTA thread, not the WPF Dispatcher STA:
+            // IMFMediaEngine frame-server setup fails when the host D3D11 device is created on STA.
+            videoWallpaperHost: videoWallpaperHost,
+            videoWallpaperPlayer: videoWallpaperPlayer,
+            scheduleVideoWallpaperWork: videoWallpaperThread.Post,
+            disposeVideoWallpaper: () =>
+            {
+                videoWallpaperThread.Invoke(() =>
+                {
+                    videoWallpaperPlayer.Dispose();
+                    videoWallpaperHost.Dispose();
+                });
+                videoWallpaperThread.Dispose();
+            },
             videoWallpaperPath: settings.VideoWallpaperPath,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
@@ -1342,6 +1381,121 @@ public sealed class AppComposition : IDisposable
         }
     }
 
+    private sealed class MtaActionThread : IDisposable
+    {
+        private readonly BlockingCollection<Action> _queue = [];
+        private readonly Thread _thread;
+        private bool _disposed;
+
+        public MtaActionThread(string name)
+        {
+            _thread = new Thread(Run) { IsBackground = true, Name = name };
+            _thread.SetApartmentState(ApartmentState.MTA);
+            _thread.Start();
+        }
+
+        public void Post(Action work) => _ = TryPost(work);
+
+        public void Invoke(Action work)
+        {
+            if (Thread.CurrentThread == _thread)
+            {
+                work();
+                return;
+            }
+
+            var completed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!TryPost(() =>
+            {
+                try
+                {
+                    work();
+                    completed.TrySetResult(null);
+                }
+                catch (Exception exception)
+                {
+                    completed.TrySetResult(exception);
+                }
+            }))
+            {
+                return;
+            }
+
+            if (!completed.Task.Wait(TimeSpan.FromSeconds(5)))
+            {
+                return;
+            }
+
+            if (completed.Task.Result is { } failure)
+            {
+                throw new InvalidOperationException("Video wallpaper thread work failed.", failure);
+            }
+        }
+
+        private bool TryPost(Action work)
+        {
+            if (_disposed)
+            {
+                return false;
+            }
+
+            try
+            {
+                _queue.Add(work);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _queue.CompleteAdding();
+            if (_thread.Join(TimeSpan.FromSeconds(5)))
+            {
+                _queue.Dispose();
+            }
+        }
+
+        private void Run()
+        {
+            while (!_queue.IsCompleted)
+            {
+                if (_queue.TryTake(out var work, millisecondsTimeout: 16))
+                {
+                    try
+                    {
+                        work();
+                    }
+                    catch
+                    {
+                        // Posted wallpaper work must not kill the thread that owns the host HWND.
+                        // Synchronous Invoke callers wrap their own failures before they get here.
+                    }
+                }
+
+                PumpThreadMessages();
+            }
+        }
+
+        private static void PumpThreadMessages()
+        {
+            while (PInvoke.PeekMessage(out MSG message, HWND.Null, 0, 0, PEEK_MESSAGE_REMOVE_TYPE.PM_REMOVE))
+            {
+                PInvoke.TranslateMessage(message);
+                PInvoke.DispatchMessage(message);
+            }
+        }
+    }
+
     /// <summary>Mirrors <c>App.OnExit</c>'s exact disposal order, after stopping WT-1's reconciliation pass: tray, hook, adapter, workspace, dispatcher.</summary>
     public void Dispose()
     {
@@ -1363,8 +1517,7 @@ public sealed class AppComposition : IDisposable
         // swapchain on every tick (Win32VideoWallpaperHost.Device/GetBackBuffer), so stopping the
         // player first guarantees no tick can touch a host mid-teardown or already destroyed.
         // MediaFoundationVideoWallpaperPlayer.Dispose() joins that thread (bounded) before returning.
-        _videoWallpaperPlayer?.Dispose();
-        _videoWallpaperHost?.Dispose();
+        _disposeVideoWallpaper();
 
         _sessionAdapter.Dispose();
         _workspace.Dispose();

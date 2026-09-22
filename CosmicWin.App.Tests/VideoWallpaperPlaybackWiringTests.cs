@@ -32,6 +32,13 @@ public sealed class VideoWallpaperPlaybackWiringTests
         }
     }
 
+    private sealed class RecordingDesktopTrace : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
     /// <summary>
     /// In-memory <see cref="IVideoWallpaperHost"/>. Mirrors
     /// <c>CosmicWin.Interop.Tests.Win32.FakeVideoWallpaperHost</c>'s call-recording shape, but is
@@ -114,7 +121,10 @@ public sealed class VideoWallpaperPlaybackWiringTests
         IVideoWallpaperHost? videoWallpaperHost = null,
         IVideoWallpaperPlayer? videoWallpaperPlayer = null,
         string? videoWallpaperPath = null,
-        Func<string, string>? importVideoWallpaper = null)
+        Func<string, string>? importVideoWallpaper = null,
+        CosmicWin.App.Diagnostics.IDesktopTrace? desktopTrace = null,
+        Action<Action>? scheduleVideoWallpaperWork = null,
+        Action? disposeVideoWallpaper = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -139,8 +149,11 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 return new NullDisposable();
             },
             importVideoWallpaper: importVideoWallpaper ?? (path => path),
+            desktopTrace: desktopTrace,
             videoWallpaperHost: videoWallpaperHost,
             videoWallpaperPlayer: videoWallpaperPlayer,
+            scheduleVideoWallpaperWork: scheduleVideoWallpaperWork,
+            disposeVideoWallpaper: disposeVideoWallpaper,
             videoWallpaperPath: videoWallpaperPath);
 
         return new Harness(composition, tray!);
@@ -152,9 +165,12 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var events = new List<string>();
         var host = new FakeVideoWallpaperHost(events);
         var player = new FakeVideoWallpaperPlayer(events);
-        const string path = @"C:\LOCALAPPDATA\CosmicWin\video-wallpaper.mp4";
+        var trace = new RecordingDesktopTrace();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
 
-        var harness = Wire(videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path);
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            desktopTrace: trace);
         using (harness.Composition)
         {
             Assert.Equal(1, host.TryAttachCallCount);
@@ -162,6 +178,9 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.Same(host, player.LastHost);
             Assert.Equal(path, player.LastVideoPath);
             Assert.Equal(["host.TryAttach", "player.TryPlay"], events);
+            Assert.Equal(
+                ["video-wallpaper phase=startup pathExists=True tryAttach=True tryPlay=True"],
+                trace.Lines);
         }
     }
 
@@ -191,6 +210,47 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     [Fact]
+    public void Startup_UsesTheVideoWallpaperSchedulerInsteadOfRunningOnTheCallerThread()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue);
+        using (harness.Composition)
+        {
+            Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, player.TryPlayCallCount);
+        }
+    }
+
+    [Fact]
+    public void Disposing_UsesTheSuppliedVideoWallpaperDisposer()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var disposed = false;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            disposeVideoWallpaper: () => disposed = true);
+
+        harness.Composition.Dispose();
+
+        Assert.True(disposed);
+        Assert.Equal(0, player.DisposeCallCount);
+        Assert.Equal(0, host.DisposeCallCount);
+    }
+
+    [Fact]
     public void PickingAVideo_AttachesAndPlaysWithTheImportedPath()
     {
         var host = new FakeVideoWallpaperHost();
@@ -208,6 +268,51 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.Equal(1, player.TryPlayCallCount);
             Assert.Same(host, player.LastHost);
             Assert.Equal(imported, player.LastVideoPath);
+        }
+    }
+
+    [Fact]
+    public void Startup_WhenAttachFails_RecordsPathAndSkippedPlayResult()
+    {
+        var host = new FakeVideoWallpaperHost { TryAttachReturns = false };
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        const string missingPath = @"C:\LOCALAPPDATA\CosmicWin\missing-video-wallpaper.mp4";
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: missingPath,
+            desktopTrace: trace);
+        using (harness.Composition)
+        {
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+            Assert.Equal(
+                ["video-wallpaper phase=startup pathExists=False tryAttach=False tryPlay=skipped"],
+                trace.Lines);
+        }
+    }
+
+    [Fact]
+    public void PickingAVideo_RecordsImportedPathAttachAndPlayResults()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer { TryPlayReturns = false };
+        var trace = new RecordingDesktopTrace();
+        var imported = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            importVideoWallpaper: _ => imported,
+            desktopTrace: trace);
+        using (harness.Composition)
+        {
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, player.TryPlayCallCount);
+            Assert.Equal(
+                ["video-wallpaper phase=pick pathExists=True tryAttach=True tryPlay=False"],
+                trace.Lines);
         }
     }
 
