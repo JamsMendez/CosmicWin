@@ -31,19 +31,33 @@ Strategy: `ask-on-risk` (default). Forecast: under 400 authored lines. RDD: on (
 
 ## Tasks
 
-- [ ] **F1 — Clear the active flag on a failed pick** (`R3-stale-active-after-failed-pick`,
+- [x] **F1 — Clear the active flag on a failed pick** (`R3-stale-active-after-failed-pick`,
   WARNING). After `Stop()` the wallpaper is not playing; an import failure with no previous
   path must leave `videoWallpaperActive` false so the watch tick stops posting keep-alives.
-- [ ] **F2 — Import through a temporary file** (`R3-restore-replays-partial-copy`, WARNING).
+  **Done** `e9b3fb7`. RED not observable: the exact finding scenario is unreachable (a true
+  active flag implies a non-null previous path, and `ActivateVideoWallpaper` recomputes the flag);
+  the flag is now cleared right after `Stop()` as an invariant, with 2 tests for the reachable
+  variants (restore also fails; first-ever pick fails).
+- [x] **F2 — Import through a temporary file** (`R3-restore-replays-partial-copy`, WARNING).
   Copy to a temp file beside the destination, then move it into place, so a copy that fails
   midway leaves the previous import intact.
-- [ ] **F3 — Prove `Stop()` releases the file** (`R3-stop-release-unproved`, SUGGESTION).
+  **Done** `bf4ee27`. RED observed: locked destination made the final move fail, leaving partial
+  state (`UnauthorizedAccessException`); GREEN after. Mid-transfer corruption (disk full, media
+  ejected) cannot be forced in a unit test; Windows copy fails at open time for injectable faults.
+- [x] **F3 — Prove `Stop()` releases the file** (`R3-stop-release-unproved`, SUGGESTION).
   Desktop test: play a real tiny H.264 MP4 fixture, `Stop()`, then open it for exclusive write.
-- [ ] **F4 — Real-attach test not applicable on the legacy layout**
+  **Done** `066264f`. Fixture `CosmicWin.Interop.Tests/Fixtures/tiny-h264.mp4` (2.8 KB, ffmpeg).
+  RED observed with `Stop()` sabotaged to a no-op (needs a 300 ms settle after TryPlay), GREEN
+  restored.
+- [x] **F4 — Real-attach test not applicable on the legacy layout**
   (`R3-realattach-assumes-raised-layout`, SUGGESTION). Skip instead of failing when DefView is
   not under the resolved host parent.
-- [ ] **F5 — Keep-alive flags safe across threads** (`R3-keepalive-flag-cross-thread`,
+  **Done** `e1b144c`. `RequiresRaisedDesktopLayoutFact` + 7 `DesktopGateTests`. RED not
+  observable on this raised-layout machine; the test still runs and passes here.
+- [x] **F5 — Keep-alive flags safe across threads** (`R3-keepalive-flag-cross-thread`,
   SUGGESTION). Volatile/Interlocked for the flags the tick and the video thread share.
+  **Done** `cce2839`. `VolatileFlag` holder (Volatile.Read/Write). No test: a visibility race is
+  not deterministically testable.
 
 Route for all: delegated direct, one writer (writer trigger: composition, import, interop tests).
 
@@ -51,6 +65,12 @@ Route for all: delegated direct, one writer (writer trigger: composition, import
 
 - 2026-09-22: branch `fix/video-wallpaper-review-followups` created; doc written.
 
+## Verification
+
+`dotnet build CosmicWin.sln` OK; App.Tests 766 passed / 6 skipped / 0 failed (writer + parent
+rerun); Interop.Tests 171 / 33 skipped / 0 failed; desktop-enabled MF player + real-attach tests
+11 / 0 skipped / 0 failed. Branch diff: 486 insertions, 14 deletions.
+
 ## Next step
 
-F1–F5 via one writer, one commit per task.
+RDD review of the slice, then local merge on the maintainer's word.
