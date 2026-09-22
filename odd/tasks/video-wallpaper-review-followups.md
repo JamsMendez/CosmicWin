@@ -71,6 +71,18 @@ Route for all: delegated direct, one writer (writer trigger: composition, import
 rerun); Interop.Tests 171 / 33 skipped / 0 failed; desktop-enabled MF player + real-attach tests
 11 / 0 skipped / 0 failed. Branch diff: 486 insertions, 14 deletions.
 
+## Review
+
+RDD: medium, `slice_budget_reached` (520 lines). Consent granted by the maintainer; lens
+`review-reliability`; **approved**, acknowledged, authority burned (lineage
+`review-f2810250f781e607`). Non-blocking suggestions (not in this slice):
+
+- `R3-f1-tests-do-not-discriminate`: no test fails if F1's line is removed (known, see F1).
+- `R3-stop-release-fixed-sleep`: F3 waits a fixed 300 ms; wait on an observable open/playing
+  state instead, or the test can pass vacuously on a slow machine.
+- `R3-orphaned-temp-on-crash`: a crash mid-copy leaves a GUID temp file nobody removes; sweep
+  stale `video-wallpaper*.tmp-*` files at the start of Import.
+
 ## Next step
 
-RDD review of the slice, then local merge on the maintainer's word.
+Local merge on the maintainer's word (the maintainer pushes).
