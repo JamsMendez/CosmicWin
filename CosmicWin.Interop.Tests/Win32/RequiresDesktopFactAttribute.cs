@@ -22,6 +22,30 @@ internal sealed class RequiresDesktopSessionFactAttribute : FactAttribute
 }
 
 /// <summary>
+/// The session gate PLUS the raised-desktop (24H2+) layout (see <see
+/// cref="DesktopGate.RaisedLayoutSkipReason()"/>).
+/// </summary>
+/// <remarks>
+/// F4 (video-wallpaper-review-followups, <c>R3-realattach-assumes-raised-layout</c>): a fact whose
+/// own assertions assume <c>SHELLDLL_DefView</c> sits directly under the video wallpaper host's
+/// resolved parent must SKIP on the legacy WorkerW layout instead of reporting a failure that is
+/// not actually a defect there -- xunit 2 cannot skip from inside a running test body (see the
+/// <see cref="MeasuresAdmissionFactAttribute"/> remarks below for the same point made about a
+/// second opt-in), so the runtime-observed machine characteristic has to be decided here, in the
+/// attribute constructor, exactly like every other gate in this file.
+/// </remarks>
+internal sealed class RequiresRaisedDesktopLayoutFactAttribute : FactAttribute
+{
+    public RequiresRaisedDesktopLayoutFactAttribute()
+    {
+        if (DesktopGate.RaisedLayoutSkipReason() is { } reason)
+        {
+            Skip = reason;
+        }
+    }
+}
+
+/// <summary>
 /// The session gate PLUS an external terminal binary (see
 /// <see cref="SpawnedAlacrittyWindow.ExecutablePathEnvVar"/>).
 /// </summary>

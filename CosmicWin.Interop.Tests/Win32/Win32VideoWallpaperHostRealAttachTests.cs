@@ -120,7 +120,17 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
     /// Explorer's new wallpaper layer without waiting on a real slideshow tick, then asserts
     /// <see cref="Win32VideoWallpaperHost.TryAttach"/> puts the host back directly after DefView.
     /// </summary>
-    [RequiresDesktopSessionFact]
+    /// <remarks>
+    /// F4 (video-wallpaper-review-followups, <c>R3-realattach-assumes-raised-layout</c>): the
+    /// <c>Assert.NotEqual(HWND.Null, defView)</c> below assumes DefView sits directly under
+    /// <see cref="ResolveExpectedDesktopParent"/>'s answer, which only holds on the raised-desktop
+    /// layout this machine happens to run -- on the legacy WorkerW layout DefView lives under a
+    /// DIFFERENT top-level window than the one the host attaches to (see that method's own two
+    /// branches), so the assumption does not apply there. <see
+    /// cref="RequiresRaisedDesktopLayoutFactAttribute"/> SKIPS this fact on that layout instead of
+    /// reporting a failure that is not actually a defect.
+    /// </remarks>
+    [RequiresRaisedDesktopLayoutFact]
     public void TryAttach_WhenAWindowIsInsertedDirectlyAfterDefView_ReRaisesTheHostAboveIt()
     {
         using var host = new Win32VideoWallpaperHost();

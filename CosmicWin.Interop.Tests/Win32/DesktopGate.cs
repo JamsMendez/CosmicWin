@@ -1,5 +1,9 @@
 using System.Diagnostics;
 using System.Security.Principal;
+using CosmicWin.Interop.Win32;
+using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.Interop.Tests.Win32;
 
@@ -61,6 +65,11 @@ public static class DesktopGate
     /// <inheritdoc cref="OptInSkipReason()"/>
     public static string? ElevatedSkipReason() =>
         ElevatedSkipReason(Environment.GetEnvironmentVariable(RunFlagVariable), Elevated);
+
+    /// <inheritdoc cref="OptInSkipReason()"/>
+    public static string? RaisedLayoutSkipReason() =>
+        RaisedLayoutSkipReason(
+            Environment.GetEnvironmentVariable(RunFlagVariable), WindowManagerRunning, IsRaisedDesktopLayout);
 
     /// <summary>
     /// <see langword="null"/> to run, otherwise the reason the fact is skipped. Every other gate
@@ -143,8 +152,52 @@ public static class DesktopGate
         string? beneath, string? value, string reasonWhenAbsent, params string[] accepted) =>
         beneath ?? (Array.IndexOf(accepted, value) >= 0 ? null : reasonWhenAbsent);
 
+    /// <summary>
+    /// The session gate plus the raised-desktop (24H2+) layout <see cref="DesktopLayoutDetector"/>
+    /// recognises. F4 (video-wallpaper-review-followups, <c>R3-realattach-assumes-raised-layout</c>):
+    /// <c>Win32VideoWallpaperHostRealAttachTests.TryAttach_WhenAWindowIsInsertedDirectlyAfterDefView_ReRaisesTheHostAboveIt</c>
+    /// asserts that <c>SHELLDLL_DefView</c> sits directly under the host's resolved parent, which
+    /// is true only on this layout -- on the legacy one, DefView lives under a DIFFERENT top-level
+    /// window than the wallpaper WorkerW the host attaches to (see that test's own
+    /// <c>ResolveExpectedDesktopParent</c>), so the assumption does not apply and the fact must
+    /// SKIP rather than report a failure that is not actually a defect on this machine.
+    /// </summary>
+    public static string? RaisedLayoutSkipReason(
+        string? runFlag, Func<bool> windowManagerRunning, Func<bool> isRaisedLayout)
+    {
+        if (SessionSkipReason(runFlag, windowManagerRunning) is { } beneath)
+        {
+            return beneath;
+        }
+
+        return isRaisedLayout()
+            ? null
+            : "This machine uses the legacy WorkerW desktop layout, where SHELLDLL_DefView does not " +
+              "sit under the video wallpaper host's resolved parent -- not applicable here; this fact " +
+              "only holds on the raised-desktop (24H2+) layout.";
+    }
+
     private static bool WindowManagerRunning() => Process.GetProcessesByName("CosmicWin.App").Length > 0;
 
     private static bool Elevated() =>
         new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+
+    /// <summary>
+    /// The real probe behind <see cref="RaisedLayoutSkipReason()"/>: Progman's own
+    /// <c>GWL_EXSTYLE</c>, read exactly as
+    /// <c>Win32VideoWallpaperHostRealAttachTests.ResolveExpectedDesktopParent</c> does. Missing
+    /// Progman reads as "not raised" rather than throwing -- a gate deciding whether to SKIP must
+    /// never crash test discovery.
+    /// </summary>
+    private static bool IsRaisedDesktopLayout()
+    {
+        HWND progman = PInvoke.FindWindow(null, "Program Manager");
+        if (progman == HWND.Null)
+        {
+            return false;
+        }
+
+        var exStyle = unchecked((uint)PInvoke.GetWindowLong(progman, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE));
+        return DesktopLayoutDetector.IsRaisedDesktop(exStyle);
+    }
 }

@@ -212,6 +212,51 @@ public sealed class DesktopGateTests
     }
 
     /// <summary>
+    /// F4 (video-wallpaper-review-followups, <c>R3-realattach-assumes-raised-layout</c>): a fact
+    /// whose own assertions assume the raised-desktop (24H2+) layout must SKIP on the legacy
+    /// WorkerW layout, naming what it needs, the same way every other gate here does.
+    /// </summary>
+    [Fact]
+    public void WithTheLegacyLayout_TheRaisedLayoutGateSkipsAndNamesTheLayout()
+    {
+        var reason = DesktopGate.RaisedLayoutSkipReason("1", Never, isRaisedLayout: Never);
+
+        Assert.NotNull(reason);
+        Assert.Contains("legacy", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WithTheRaisedLayout_TheRaisedLayoutGateRuns()
+    {
+        Assert.Null(DesktopGate.RaisedLayoutSkipReason("1", Never, isRaisedLayout: Always));
+    }
+
+    [Fact]
+    public void WithTheWindowManagerRunning_TheRaisedLayoutGateSkipsEvenOnTheRaisedLayout()
+    {
+        Assert.NotNull(DesktopGate.RaisedLayoutSkipReason("1", Always, isRaisedLayout: Always));
+    }
+
+    /// <summary>Same reasoning as <see cref="NeitherTheTerminalNorTheElevatedGateProbesBeforeTheOptInPasses"/>:
+    /// reading Progman's own style is a real Win32 call, not worth paying for on a machine that
+    /// never opted in.</summary>
+    [Fact]
+    public void TheRaisedLayoutIsNotProbedUntilTheOptInPasses()
+    {
+        var probe = new CountingProbe(answer: true);
+
+        Assert.NotNull(DesktopGate.RaisedLayoutSkipReason(runFlag: null, Never, probe.Read));
+        Assert.Equal(0, probe.Calls);
+
+        // The window manager gate already settled it -- the layout must not be probed either.
+        Assert.NotNull(DesktopGate.RaisedLayoutSkipReason("1", Always, probe.Read));
+        Assert.Equal(0, probe.Calls);
+
+        Assert.NotNull(DesktopGate.RaisedLayoutSkipReason("1", Never, () => false));
+        Assert.Null(DesktopGate.RaisedLayoutSkipReason("1", Never, () => true));
+    }
+
+    /// <summary>
     /// A diagnostic carries a SECOND opt-in of its own, on top of the gate it already sits behind.
     /// Before this existed the second one was checked in the method body, which could only
     /// `return` -- so a diagnostic nobody had opted into reported PASSED while doing nothing. A
