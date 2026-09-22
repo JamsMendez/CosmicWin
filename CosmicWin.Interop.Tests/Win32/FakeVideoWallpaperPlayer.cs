@@ -21,6 +21,8 @@ internal sealed class FakeVideoWallpaperPlayer : IVideoWallpaperPlayer
 
     public int DisposeCallCount { get; private set; }
 
+    public int StopCallCount { get; private set; }
+
     public bool TryPlay(IVideoWallpaperHost host, string videoPath)
     {
         TryPlayCallCount++;
@@ -28,6 +30,8 @@ internal sealed class FakeVideoWallpaperPlayer : IVideoWallpaperPlayer
         LastVideoPath = videoPath;
         return TryPlayReturns;
     }
+
+    public void Stop() => StopCallCount++;
 
     public void Dispose() => DisposeCallCount++;
 }

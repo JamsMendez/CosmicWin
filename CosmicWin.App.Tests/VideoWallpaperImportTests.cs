@@ -81,6 +81,25 @@ public sealed class VideoWallpaperImportTests : IDisposable
         Assert.True(Directory.Exists(_destinationDirectory));
     }
 
+    /// <summary>
+    /// Picking the file CosmicWin already imported -- the fixed destination itself, reachable
+    /// again through a file picker's own "recent files" list, or because the tray re-pick closure
+    /// hands back the previously imported path on a restore -- must not ask <see
+    /// cref="File.Copy(string, string, bool)"/> to copy a file onto itself, which throws.
+    /// </summary>
+    [Fact]
+    public void Import_SourceEqualsDestination_ReturnsDestinationWithoutCopying()
+    {
+        Directory.CreateDirectory(_destinationDirectory);
+        var destination = Path.Combine(_destinationDirectory, "video-wallpaper.mp4");
+        File.WriteAllText(destination, "already imported");
+
+        var result = VideoWallpaperImport.Import(_destinationDirectory, destination);
+
+        Assert.Equal(destination, result);
+        Assert.Equal("already imported", File.ReadAllText(destination));
+    }
+
     [Fact]
     public void Import_MissingSourceFile_Throws()
     {

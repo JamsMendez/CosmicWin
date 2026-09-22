@@ -293,6 +293,14 @@ public sealed class AppComposition : IDisposable
             desktopTrace?.Record($"border {decision}");
         }
 
+        // The path a successful (re)pick last activated, so a LATER pick that fails on import knows
+        // what to fall back to -- the constraint that picking a video must never leave the
+        // wallpaper dead. Starts at whatever was already configured before this composition ran
+        // (null on a machine that has never picked one), the same value the startup activation
+        // below reads, and is advanced only after setVideoWallpaperPath's import+persist below both
+        // succeed -- never merely attempted.
+        var currentVideoWallpaperPath = videoWallpaperPath;
+
         void ActivateVideoWallpaper(string phase, string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
@@ -612,20 +620,73 @@ public sealed class AppComposition : IDisposable
             },
             setVideoWallpaperPath: path =>
             {
-                var imported = importVideoWallpaper(path);
-                persistVideoWallpaperPath?.Invoke(imported);
-
-                // (Re)start playback with the IMPORTED path -- never the raw one the user picked,
-                // since that is what actually landed on disk. Handles both the first-ever pick
-                // (the startup activation below never ran, because no path was configured yet) and
-                // every later re-pick identically: TryAttach is documented idempotent and TryPlay
-                // is documented to tear down and restart cleanly, so there is no need to branch on
-                // whether this is the first attach. On the thread whose message loop pumps the host
-                // window, same as the startup activation below.
-                if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
+                if (videoWallpaperHost is null || videoWallpaperPlayer is null)
                 {
-                    onVideoWallpaperThread(() => ActivateVideoWallpaper("pick", imported));
+                    // Nothing to stop or (re)play -- the same import+persist a composition with no
+                    // playback collaborators wired has always done, inline on the tray thread.
+                    // Import runs UNCONDITIONALLY, on its own statement: importVideoWallpaper(path)
+                    // is a real side effect (the file copy), and folding it into
+                    // persistVideoWallpaperPath?.Invoke(importVideoWallpaper(path)) would let the
+                    // null-conditional short-circuit skip evaluating it entirely whenever no persist
+                    // delegate is wired, exactly the composition every pre-T1 test with no persist
+                    // callback exercises.
+                    var importedInline = importVideoWallpaper(path);
+                    persistVideoWallpaperPath?.Invoke(importedInline);
+                    return;
                 }
+
+                // Read HERE, on the tray thread, before handing off below -- not inside the posted
+                // work item, where a second pick arriving before this one finishes could read a
+                // value the first pick has already started changing.
+                var previous = currentVideoWallpaperPath;
+
+                // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
+                // ONE work item on the video wallpaper thread, in that order. Bug 1 was exactly this
+                // ordering: import ran on the tray thread BEFORE playback stopped, so Media
+                // Foundation still held the fixed destination open and the copy threw a sharing
+                // violation. Moving the whole sequence here, after the stop, also moves the
+                // multi-gigabyte copy itself off the tray thread, which used to block the tray menu
+                // for as long as the copy took.
+                onVideoWallpaperThread(() =>
+                {
+                    // Idempotent and never throws, per the interface contract -- releases the fixed
+                    // destination file so the import below can overwrite it.
+                    videoWallpaperPlayer.Stop();
+
+                    string imported;
+                    try
+                    {
+                        imported = importVideoWallpaper(path);
+                    }
+                    catch (Exception error)
+                    {
+                        // The constraint from the feature doc: a failed pick must never leave the
+                        // wallpaper dead. No absolute paths in the trace line -- the picked path and
+                        // the import destination both live under the user's profile. Falling back to
+                        // the PREVIOUS video (if any) is what keeps this from being the empty desktop
+                        // bug 1 itself reported; not persisting means the failed pick never gets
+                        // remembered as if it had landed on disk.
+                        desktopTrace?.Record(
+                            $"video-wallpaper phase=pick import-failed error={error.GetType().Name}");
+                        if (previous is not null)
+                        {
+                            ActivateVideoWallpaper("restore", previous);
+                        }
+
+                        return;
+                    }
+
+                    persistVideoWallpaperPath?.Invoke(imported);
+                    currentVideoWallpaperPath = imported;
+
+                    // (Re)start playback with the IMPORTED path -- never the raw one the user
+                    // picked, since that is what actually landed on disk. Handles both the
+                    // first-ever pick (the startup activation below never ran, because no path was
+                    // configured yet) and every later re-pick identically: TryAttach is documented
+                    // idempotent and TryPlay is documented to tear down and restart cleanly, so
+                    // there is no need to branch on whether this is the first attach.
+                    ActivateVideoWallpaper("pick", imported);
+                });
             },
             exit: () =>
             {

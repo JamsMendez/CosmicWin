@@ -88,6 +88,32 @@ public sealed class MediaFoundationVideoWallpaperPlayerTests
         Assert.Null(exception);
     }
 
+    /// <summary>Mirrors <see cref="Dispose_IsSafeWhenTryPlayWasNeverCalled"/> for the new <c>Stop</c>
+    /// member: a re-pick that arrives before anything has ever played must not throw.</summary>
+    [Fact]
+    public void Stop_IsSafeWhenTryPlayWasNeverCalled()
+    {
+        var player = new MediaFoundationVideoWallpaperPlayer();
+
+        var exception = Record.Exception(player.Stop);
+
+        Assert.Null(exception);
+    }
+
+    /// <summary>Stop is documented never to throw, including after the player has already been
+    /// retired -- the interface contract a caller reaching Stop from a background thread relies on
+    /// without checking disposal state itself first.</summary>
+    [Fact]
+    public void Stop_AfterDispose_IsSafe()
+    {
+        var player = new MediaFoundationVideoWallpaperPlayer();
+        player.Dispose();
+
+        var exception = Record.Exception(player.Stop);
+
+        Assert.Null(exception);
+    }
+
     [RequiresDesktopSessionFact]
     public void Dispose_AfterAFailedTryPlay_IsSafe()
     {

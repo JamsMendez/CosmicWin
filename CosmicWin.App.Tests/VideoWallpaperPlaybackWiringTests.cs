@@ -1,3 +1,4 @@
+using System.IO;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.App.Tray;
@@ -99,6 +100,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         public int DisposeCallCount { get; private set; }
 
+        public int StopCallCount { get; private set; }
+
         public bool TryPlay(IVideoWallpaperHost host, string videoPath)
         {
             TryPlayCallCount++;
@@ -106,6 +109,12 @@ public sealed class VideoWallpaperPlaybackWiringTests
             LastVideoPath = videoPath;
             events?.Add("player.TryPlay");
             return TryPlayReturns;
+        }
+
+        public void Stop()
+        {
+            StopCallCount++;
+            events?.Add("player.Stop");
         }
 
         public void Dispose()
@@ -124,7 +133,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Func<string, string>? importVideoWallpaper = null,
         CosmicWin.App.Diagnostics.IDesktopTrace? desktopTrace = null,
         Action<Action>? scheduleVideoWallpaperWork = null,
-        Action? disposeVideoWallpaper = null)
+        Action? disposeVideoWallpaper = null,
+        Action<string>? persistVideoWallpaperPath = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -154,7 +164,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
             videoWallpaperPlayer: videoWallpaperPlayer,
             scheduleVideoWallpaperWork: scheduleVideoWallpaperWork,
             disposeVideoWallpaper: disposeVideoWallpaper,
-            videoWallpaperPath: videoWallpaperPath);
+            videoWallpaperPath: videoWallpaperPath,
+            persistVideoWallpaperPath: persistVideoWallpaperPath);
 
         return new Harness(composition, tray!);
     }
@@ -361,5 +372,97 @@ public sealed class VideoWallpaperPlaybackWiringTests
         harness.Composition.Dispose();
 
         Assert.Equal(["player.Dispose", "host.Dispose"], events);
+    }
+
+    /// <summary>
+    /// T1 (video-wallpaper-repick-and-slideshow): re-picking a video while one is already playing
+    /// used to import onto the fixed destination BEFORE stopping playback, and Media Foundation
+    /// still held that file open -- a sharing violation, and the new video never played. The fix
+    /// stops first, so the whole sequence must run in this order: player.Stop, then the import,
+    /// then the (re)attach and (re)play.
+    /// </summary>
+    [Fact]
+    public void PickingAVideo_StopsPlaybackBeforeImportingBeforeReattachingAndReplaying()
+    {
+        var events = new List<string>();
+        var host = new FakeVideoWallpaperHost(events);
+        var player = new FakeVideoWallpaperPlayer(events);
+        const string imported = @"C:\LOCALAPPDATA\CosmicWin\video-wallpaper.mp4";
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            importVideoWallpaper: _ =>
+            {
+                events.Add("import");
+                return imported;
+            });
+        using (harness.Composition)
+        {
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.Equal(["player.Stop", "import", "host.TryAttach", "player.TryPlay"], events);
+        }
+    }
+
+    /// <summary>
+    /// Constraint from the feature doc: "picking a video must never leave the wallpaper dead". When
+    /// the import throws (the scenario bug 1 describes, or any other import failure), the failure is
+    /// traced with no absolute paths, the PREVIOUS video is re-played so playback survives, and
+    /// nothing is persisted -- the failed pick never landed on disk under the fixed destination.
+    /// </summary>
+    [Fact]
+    public void PickingAVideo_WhenImportThrows_TracesAndRestoresThePreviousVideoWithoutPersisting()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var persisted = new List<string>();
+        var previousPath = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: previousPath,
+            desktopTrace: trace, persistVideoWallpaperPath: persisted.Add,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            // Startup already activated the previously-configured video and traced a
+            // phase=startup line -- cleared so the assertions below read only the pick itself.
+            trace.Lines.Clear();
+
+            var exception = Record.Exception(
+                () => harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4"));
+
+            Assert.Null(exception);
+            Assert.Contains("video-wallpaper phase=pick import-failed error=IOException", trace.Lines);
+            Assert.Contains(
+                trace.Lines,
+                line => line.StartsWith("video-wallpaper phase=restore") && line.Contains("tryPlay=True"));
+            Assert.Empty(persisted);
+        }
+    }
+
+    /// <summary>The other half of the restore contract: with no previous video configured, there is
+    /// nothing to fall back to, so nothing is played -- but the failure still must not throw out of
+    /// the tray call.</summary>
+    [Fact]
+    public void PickingAVideo_WhenImportThrowsWithNoPreviousPath_PlaysNothingAndDoesNotThrow()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, desktopTrace: trace,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            var exception = Record.Exception(
+                () => harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4"));
+
+            Assert.Null(exception);
+            Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+            Assert.Contains("video-wallpaper phase=pick import-failed error=IOException", trace.Lines);
+        }
     }
 }

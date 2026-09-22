@@ -25,4 +25,17 @@ public interface IVideoWallpaperPlayer : IDisposable
     /// <see langword="false"/> on failure (missing file, engine creation failure, ...).
     /// </summary>
     bool TryPlay(IVideoWallpaperHost host, string videoPath);
+
+    /// <summary>
+    /// Stops any playback currently in progress and releases whatever file is behind it, so a
+    /// caller that is about to overwrite that file on disk (see <c>VideoWallpaperImport.Import</c>'s
+    /// fixed destination) can safely do so once this returns.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent and safe to call when nothing is playing, including before the first ever
+    /// <see cref="TryPlay"/> call and after <see cref="IDisposable.Dispose"/>. Never throws.
+    /// <see cref="TryPlay"/> remains fully usable afterwards -- <c>Stop</c> tears playback down
+    /// without retiring the player itself, unlike <see cref="IDisposable.Dispose"/>.
+    /// </remarks>
+    void Stop();
 }

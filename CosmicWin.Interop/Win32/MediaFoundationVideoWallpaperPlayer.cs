@@ -39,9 +39,9 @@ namespace CosmicWin.Interop.Win32;
 /// <see cref="TryPlay"/> stays synchronous from the caller's point of view: it starts the worker
 /// thread and blocks (with a timeout) on a <see cref="ManualResetEventSlim"/> the thread signals
 /// once setup (device manager, engine, source, play) has finished, carrying success/failure via
-/// <see cref="SetupOutcome.Succeeded"/>. <see cref="StopPlaybackOnly"/> (restart and
-/// <see cref="Dispose"/>) signals a second event and joins the thread with a timeout rather than
-/// risking an indefinite hang.
+/// <see cref="SetupOutcome.Succeeded"/>. <see cref="StopPlaybackOnly"/> (restart, the public
+/// <see cref="Stop"/>, and <see cref="Dispose"/>) signals a second event and joins the thread with
+/// a timeout rather than risking an indefinite hang.
 /// </para>
 /// <para>
 /// <see cref="IVideoWallpaperHost.Device"/>/<c>GetBackBuffer()</c>/<c>Present()</c> are now called
@@ -154,12 +154,35 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     }
 
     /// <summary>
+    /// The interface's own <c>Stop</c>: releases the file currently playing (if any) without
+    /// retiring this player, so a caller that is about to overwrite that file on disk -- the tray
+    /// re-pick closure in <c>AppComposition</c>, importing a new video onto the same fixed
+    /// destination the engine may still hold open -- can safely do so once this returns.
+    /// </summary>
+    /// <remarks>
+    /// Guarded by <see cref="_disposed"/> rather than throwing <see cref="ObjectDisposedException"/>
+    /// like <see cref="TryPlay"/> does: the interface documents <c>Stop</c> as never throwing, and
+    /// a player already disposed already has nothing playing, so the guard makes this call an
+    /// honest no-op instead of a surprise exception a caller has to guard against separately.
+    /// </remarks>
+    public void Stop()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        StopPlaybackOnly();
+    }
+
+    /// <summary>
     /// Signals the current worker thread to stop and joins it (bounded, never indefinitely).
-    /// Shared by <see cref="TryPlay"/> (restart) and <see cref="Dispose"/> (final teardown). The
-    /// worker thread itself releases the engine/device-manager, calls <c>MFShutdown</c>/
-    /// <c>CoUninitialize</c>, nulls <see cref="_engine"/>/<see cref="_notify"/>, and disposes the
-    /// stop signal as the last things it does before exiting -- never from this (caller) thread,
-    /// so no COM object is ever touched from a thread other than the one that created it.
+    /// Shared by <see cref="TryPlay"/> (restart), the public <see cref="Stop"/>, and <see
+    /// cref="Dispose"/> (final teardown). The worker thread itself releases the engine/device-manager,
+    /// calls <c>MFShutdown</c>/<c>CoUninitialize</c>, nulls <see cref="_engine"/>/<see cref="_notify"/>,
+    /// and disposes the stop signal as the last things it does before exiting -- never from this
+    /// (caller) thread, so no COM object is ever touched from a thread other than the one that
+    /// created it.
     /// </summary>
     private void StopPlaybackOnly()
     {
