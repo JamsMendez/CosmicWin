@@ -23,6 +23,9 @@ public enum TrayMenuEntry
     /// <summary>Picks the colour that border is drawn in, or hands it back to Windows' accent.</summary>
     BorderColor,
 
+    /// <summary>Opens a file picker for the MP4 that plays, looping, as the desktop wallpaper.</summary>
+    VideoWallpaper,
+
     /// <summary>Stops and resumes the keyboard hook, and with it every chord.</summary>
     Pause,
 

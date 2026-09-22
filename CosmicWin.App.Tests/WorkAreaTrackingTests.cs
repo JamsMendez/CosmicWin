@@ -93,6 +93,7 @@ public sealed class WorkAreaTrackingTests
                 tray = controller;
                 return new NullDisposable();
             },
+            importVideoWallpaper: path => path,
             desktopTrace: trace,
             // Drains what the test queued, the way the real refresh reports each change exactly once.
             refreshDisplays: () =>

@@ -170,10 +170,22 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
   full 15-second runs, zero hangs. The temporary manual-verification test file was deleted
   afterward per its own header comment. `dotnet test CosmicWin.Interop.Tests/
   CosmicWin.Interop.Tests.csproj` (full suite): 165 passed, 0 failed, 31 skipped, 196 total.
-- [ ] **T5 — Tray entry + file picker + settings wiring.** `TrayMenuEntry` value, `MenuOrder`,
+- [x] **T5 — Tray entry + file picker + settings wiring.** `TrayMenuEntry` value, `MenuOrder`,
   `TrayMenuController` delegate, `TrayIconHost` `OpenFileDialog` handler (mirror
   `PickBorderColor`), copy the picked file into `%LOCALAPPDATA%\CosmicWin\`, persist via T1's
-  `VideoWallpaperPath`. Route: delegated writer.
+  `VideoWallpaperPath`. Route: delegated writer. **Done** — App-layer only, no Win32/Interop
+  touched. New `VideoWallpaperImport.Import` (fixed destination filename
+  `video-wallpaper.<ext>`, overwrites on re-pick, lets `File.Copy`/`Directory.CreateDirectory`
+  throw normally — unlike `SettingsFile.Save`, a failed video import needs to reach the user who
+  just picked the file). `TrayMenuEntry.VideoWallpaper` placed between `BorderColor` and `Pause`
+  (both are picker items, not mode switches). `AppComposition.Wire` gained a required
+  `Func<string, string> importVideoWallpaper` seam (positioned before every optional parameter,
+  since C# forbids a required parameter after one with a default) and optional
+  `Action<string>? persistVideoWallpaperPath`; the `setVideoWallpaperPath` closure imports then
+  persists, with an explicit comment marking where T6 adds the (re)start-playback call — no
+  playback wiring in this task, by design. Spot-checked: `dotnet test
+  CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` => 742 passed, 0 failed, 6 skipped (same skips
+  as T1's baseline, +10 new tests), confirmed myself before committing.
 - [ ] **T6 — AppComposition wiring.** Construct the T3/T4 host+playback service in
   `WireProduction` when `settings.VideoWallpaperPath is not null`; wire the T5 picker to
   (re)start playback on selection; dispose in the existing ordered `Dispose()` block. Route:

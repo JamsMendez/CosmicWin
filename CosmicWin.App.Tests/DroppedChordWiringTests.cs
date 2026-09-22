@@ -98,6 +98,7 @@ public sealed class DroppedChordWiringTests
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullDisposable(),
+            importVideoWallpaper: path => path,
             desktopTrace: new CollectingTrace(traceLines));
 
         return new Harness(composition, scheduler, platform, traceLines);

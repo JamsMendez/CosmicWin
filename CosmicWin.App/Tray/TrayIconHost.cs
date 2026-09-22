@@ -69,6 +69,9 @@ public sealed class TrayIconHost : IDisposable
         colorItem.DropDownItems.Add(pickColorItem);
         colorItem.DropDownItems.Add(accentItem);
 
+        var videoWallpaperItem = new ToolStripMenuItem("Wallpaper de video...");
+        videoWallpaperItem.Click += (_, _) => PickVideoWallpaper(controller);
+
         var reloadItem = new ToolStripMenuItem("Reload")
         {
             Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
@@ -94,6 +97,7 @@ public sealed class TrayIconHost : IDisposable
             [TrayMenuEntry.Tiling] = tilingItem,
             [TrayMenuEntry.FocusBorder] = borderItem,
             [TrayMenuEntry.BorderColor] = colorItem,
+            [TrayMenuEntry.VideoWallpaper] = videoWallpaperItem,
             [TrayMenuEntry.Pause] = _pauseItem,
             [TrayMenuEntry.Reload] = reloadItem,
             [TrayMenuEntry.Exit] = exitItem,
@@ -150,12 +154,17 @@ public sealed class TrayIconHost : IDisposable
 
     /// <summary>
     /// The order the items appear in: the mode switch first, then the border and its colour, then
-    /// the pause, then the two that end something.
+    /// the video wallpaper picker, then the pause, then the two that end something.
     /// </summary>
     /// <remarks>
     /// Tiling leads because it is the biggest thing on this menu that is not an ending -- it says
     /// whether CosmicWin is doing its job at all -- and it sits above Pausar rather than beside it
     /// so the two "how much is this app doing" switches read from narrow to wide.
+    /// </remarks>
+    /// <remarks>
+    /// VideoWallpaper sits right after BorderColor: the two are the menu's visual-customization
+    /// items, and both open a picker rather than flip a switch -- unlike Tiling/FocusBorder, which
+    /// state a mode, or Pause/Reload/Exit, which do something to the running process.
     /// </remarks>
     /// <remarks>
     /// The constructor ADDS its items by walking this list, which is what makes it the decision
@@ -168,6 +177,7 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.Tiling,
         TrayMenuEntry.FocusBorder,
         TrayMenuEntry.BorderColor,
+        TrayMenuEntry.VideoWallpaper,
         TrayMenuEntry.Pause,
         TrayMenuEntry.Reload,
         TrayMenuEntry.Exit,
@@ -206,6 +216,25 @@ public sealed class TrayIconHost : IDisposable
         if (dialog.ShowDialog() == DialogResult.OK)
         {
             controller.SetBorderColor((uint)(dialog.Color.ToArgb() & 0x00FFFFFF));
+        }
+    }
+
+    /// <summary>
+    /// Opens Windows' own file picker for the MP4 to play as the desktop wallpaper.
+    /// </summary>
+    /// <remarks>
+    /// Cancelled, it changes NOTHING -- same rule <see cref="PickBorderColor"/> follows. The RAW
+    /// picked path is handed to the controller as-is; copying it into <c>%LOCALAPPDATA%\CosmicWin\</c>
+    /// and persisting the result is the injected delegate's job (wired in <c>AppComposition</c>),
+    /// not this thin WinForms wrapper's.
+    /// </remarks>
+    private static void PickVideoWallpaper(TrayMenuController controller)
+    {
+        using var dialog = new OpenFileDialog { Filter = "MP4 video (*.mp4)|*.mp4", CheckFileExists = true };
+
+        if (dialog.ShowDialog() == DialogResult.OK)
+        {
+            controller.SetVideoWallpaperPath(dialog.FileName);
         }
     }
 

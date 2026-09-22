@@ -114,7 +114,8 @@ public static class CompositionRoot
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
         Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit,
         Func<bool> getTiling, Action<bool> setTiling,
-        Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null) =>
+        Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
+        Action<string>? setVideoWallpaperPath = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
@@ -125,5 +126,6 @@ public static class CompositionRoot
             getBorderColor,
             setBorderColor,
             getTiling,
-            setTiling);
+            setTiling,
+            setVideoWallpaperPath);
 }

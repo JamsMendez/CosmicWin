@@ -13,7 +13,8 @@ public sealed class TrayMenuController(
     Func<bool> getFocusBorder, Action<bool> setFocusBorder,
     Action reload, Action exit,
     Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
-    Func<bool>? getTiling = null, Action<bool>? setTiling = null)
+    Func<bool>? getTiling = null, Action<bool>? setTiling = null,
+    Action<string>? setVideoWallpaperPath = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -102,6 +103,18 @@ public sealed class TrayMenuController(
         setTiling(next);
         return next;
     }
+
+    /// <summary>
+    /// Hands the raw file the user just picked to the injected import/persist delegate. Write-only
+    /// -- unlike <see cref="BorderColor"/> or <see cref="IsTilingEnabled"/>, nothing in this menu
+    /// needs to read back or display the current video path, so there is no matching getter.
+    /// </summary>
+    /// <remarks>
+    /// Forwarded, never interpreted. This class does not know how to copy a file into
+    /// <c>%LOCALAPPDATA%</c> or persist a setting -- the delegate the caller wired owns that, the
+    /// same separation <see cref="SetBorderColor"/> keeps from the colour it forwards.
+    /// </remarks>
+    public void SetVideoWallpaperPath(string filePath) => setVideoWallpaperPath?.Invoke(filePath);
 
     /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();

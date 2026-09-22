@@ -142,6 +142,7 @@ public sealed class ArrivingWindowDesktopWiringTests
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullTray(),
+            importVideoWallpaper: path => path,
             virtualDesktops: desktops,
             desktopTrace: trace,
             // The shell says the window was born on desktop 1, which is where the user is NOT.

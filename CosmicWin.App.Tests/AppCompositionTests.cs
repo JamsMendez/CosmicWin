@@ -96,7 +96,8 @@ public sealed class AppCompositionTests
             {
                 capturedController = controller;
                 return new DisposeCountingTray();
-            });
+            },
+            importVideoWallpaper: path => path);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -368,7 +369,8 @@ public sealed class AppCompositionTests
             {
                 capturedTray = new DisposeCountingTray();
                 return capturedTray;
-            });
+            },
+            importVideoWallpaper: path => path);
 
         composition.Dispose();
 

@@ -269,4 +269,34 @@ public sealed class TrayMenuControllerTests
         Assert.True(controller.ToggleTiling());
         Assert.True(controller.IsTilingEnabled);
     }
+
+    /// <summary>
+    /// Write-only, unlike <see cref="TrayMenuController.BorderColor"/>: nothing in the tray menu
+    /// needs to read back or display the current video path, so there is no getter to prove
+    /// alongside this one.
+    /// </summary>
+    [Fact]
+    public void SetVideoWallpaperPath_InvokesInjectedDelegate_WithTheGivenPath()
+    {
+        var chosen = new List<string>();
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            setVideoWallpaperPath: chosen.Add);
+
+        controller.SetVideoWallpaperPath(@"C:\videos\clip.mp4");
+
+        Assert.Equal([@"C:\videos\clip.mp4"], chosen);
+    }
+
+    /// <summary>
+    /// Unwired -- as every caller that predates this switch is -- a menu click must never throw.
+    /// </summary>
+    [Fact]
+    public void WithNoVideoWallpaperDelegateWired_SetVideoWallpaperPath_DoesNotThrow()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        controller.SetVideoWallpaperPath(@"C:\videos\clip.mp4");
+    }
 }

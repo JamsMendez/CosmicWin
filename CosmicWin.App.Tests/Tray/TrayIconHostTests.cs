@@ -28,13 +28,14 @@ public sealed class TrayIconHostTests
     /// in its own literal would assert nothing but its own copy.
     /// </remarks>
     [Fact]
-    public void TheMenuIsOrdered_TilingThenBorderThenPauseThenReloadThenExit()
+    public void TheMenuIsOrdered_TilingThenBorderThenVideoWallpaperThenPauseThenReloadThenExit()
     {
         Assert.Equal(
             [
                 TrayMenuEntry.Tiling,
                 TrayMenuEntry.FocusBorder,
                 TrayMenuEntry.BorderColor,
+                TrayMenuEntry.VideoWallpaper,
                 TrayMenuEntry.Pause,
                 TrayMenuEntry.Reload,
                 TrayMenuEntry.Exit,

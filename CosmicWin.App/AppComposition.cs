@@ -112,6 +112,12 @@ public sealed class AppComposition : IDisposable
         Func<ExceptionList> loadExceptions,
         Action shutdown,
         Func<TrayMenuController, IDisposable> buildTray,
+        // Required, unlike the persistX delegates below: there is no sensible default for "copy
+        // this file somewhere and hand back where it landed", and this is the seam a test
+        // substitutes to avoid touching real disk. Production wires it to
+        // VideoWallpaperImport.Import. Must stay ahead of every optional parameter below --
+        // a required parameter cannot follow one with a default in C#.
+        Func<string, string> importVideoWallpaper,
         IVirtualDesktopService? virtualDesktops = null,
         Diagnostics.IDesktopTrace? desktopTrace = null,
         Func<nint, Guid>? resolveWindowDesktop = null,
@@ -124,6 +130,8 @@ public sealed class AppComposition : IDisposable
         Action<uint?>? persistBorderColor = null,
         bool tilingEnabled = true,
         Action<bool>? persistTiling = null,
+        // Optional, same as the persistX delegates above.
+        Action<string>? persistVideoWallpaperPath = null,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -551,6 +559,15 @@ public sealed class AppComposition : IDisposable
                 // On the overlay's own thread. A WPF window may only be touched by the thread that
                 // created it, and this arrives from a tray click.
                 onOwningThread(() => focusBorder?.UseColor(rgb));
+            },
+            setVideoWallpaperPath: path =>
+            {
+                var imported = importVideoWallpaper(path);
+                persistVideoWallpaperPath?.Invoke(imported);
+
+                // T6 hooks in here: (re)start playback with `imported` once the video-wallpaper
+                // host/player are wired into this composition. Left as a no-op for now -- T5's
+                // scope stops at persisting the imported path.
             },
             exit: () =>
             {
@@ -1158,6 +1175,7 @@ public sealed class AppComposition : IDisposable
             loadExceptions: ExceptionListFile.Load,
             shutdown: shutdown,
             buildTray: controller => new TrayIconHost(controller),
+            importVideoWallpaper: VideoWallpaperImport.Import,
             // Gated internally: an unrecognised Windows build reports unsupported and the desktop
             // chords become inert, rather than calling through a vtable that may have moved.
             virtualDesktops: desktops,
@@ -1172,6 +1190,7 @@ public sealed class AppComposition : IDisposable
             persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
+            persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }

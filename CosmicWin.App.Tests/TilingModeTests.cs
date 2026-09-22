@@ -117,6 +117,7 @@ public sealed class TilingModeTests
                 tray = controller;
                 return new NullDisposable();
             },
+            importVideoWallpaper: path => path,
             virtualDesktops: desktops,
             tilingEnabled: tilingEnabled,
             persistTiling: persisted.Add);

@@ -196,6 +196,7 @@ public sealed class AppCompositionDesktopFocusWiringTests
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullDisposable(),
+            importVideoWallpaper: path => path,
             virtualDesktops: desktops,
             desktopTrace: new CollectingTrace(traceLines));
 

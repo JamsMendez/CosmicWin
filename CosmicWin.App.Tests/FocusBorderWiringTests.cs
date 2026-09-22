@@ -141,6 +141,7 @@ public sealed class FocusBorderWiringTests
                 tray = controller;
                 return new NullDisposable();
             },
+            importVideoWallpaper: path => path,
             focusBorder: border,
             virtualDesktops: virtualDesktops,
             resolveWindowDesktop: resolveWindowDesktop,
