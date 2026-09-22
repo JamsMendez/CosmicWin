@@ -33,6 +33,24 @@ public sealed class VideoWallpaperPlaybackWiringTests
         }
     }
 
+    /// <summary>
+    /// Captures the 400ms watch tick's own callback so a test can fire it on demand -- the same
+    /// shape as <c>WorkAreaTrackingTests.Scheduler</c>, declared locally here for the reason that
+    /// file's own remarks give for its local fakes: no shared test-double project reaches both.
+    /// </summary>
+    private sealed class Scheduler
+    {
+        private Action? _callback;
+
+        public IDisposable Schedule(TimeSpan interval, Action callback)
+        {
+            _callback = callback;
+            return new NullDisposable();
+        }
+
+        public void Fire() => _callback!();
+    }
+
     private sealed class RecordingDesktopTrace : CosmicWin.App.Diagnostics.IDesktopTrace
     {
         public List<string> Lines { get; } = [];
@@ -134,7 +152,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         CosmicWin.App.Diagnostics.IDesktopTrace? desktopTrace = null,
         Action<Action>? scheduleVideoWallpaperWork = null,
         Action? disposeVideoWallpaper = null,
-        Action<string>? persistVideoWallpaperPath = null)
+        Action<string>? persistVideoWallpaperPath = null,
+        Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -148,7 +167,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
             disableTaskTrigger: () => { },
-            scheduleReconcile: (_, _) => new NullDisposable(),
+            scheduleReconcile: scheduleReconcile ?? ((_, _) => new NullDisposable()),
             hookFactory: writer => new LowLevelKeyboardHook(
                 writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,
@@ -500,6 +519,118 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 trace.Lines,
                 line => line.StartsWith("video-wallpaper phase=restore") && line.Contains("tryPlay=True"));
             Assert.Equal(landed, player.LastVideoPath);
+        }
+    }
+
+    /// <summary>
+    /// T3 (video-wallpaper-repick-and-slideshow): T2 proved live that the Windows wallpaper
+    /// slideshow inserts a fresh WorkerW directly above the host every time it changes image, and
+    /// nothing ever re-raised it. The existing 400ms watch tick is what now notices -- but only
+    /// while a video is genuinely playing, so a tick on a machine that never configured one, or
+    /// whose last activation failed, costs nothing.
+    /// </summary>
+    [Fact]
+    public void ReconcileTick_WithAnActiveVideoWallpaper_PostsExactlyOneKeepAliveTryAttach()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            // Drains the startup activation's own posted work item -- it is what makes the video
+            // ACTIVE in the first place, and must not be mistaken for a keep-alive post below.
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, host.TryAttachCallCount);
+
+            scheduler.Fire();
+
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+            Assert.Equal(2, host.TryAttachCallCount);
+        }
+    }
+
+    [Fact]
+    public void ReconcileTick_WithNoConfiguredVideo_PostsNothing()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            Assert.Empty(queued);
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+            Assert.Equal(0, host.TryAttachCallCount);
+        }
+    }
+
+    [Fact]
+    public void ReconcileTick_WhenStartupTryPlayFailed_PostsNothing()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer { TryPlayReturns = false };
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            // Drains the startup activation: it attaches but fails to play, so the wallpaper is
+            // NOT active and the tick below must post nothing.
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, player.TryPlayCallCount);
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+            Assert.Equal(1, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>
+    /// Guards against the queue piling up when the video-wallpaper thread is slower than the
+    /// 400ms tick: a second tick before the first posted keep-alive has even run must not queue a
+    /// second one.
+    /// </summary>
+    [Fact]
+    public void TwoReconcileTicks_BeforeThePostedKeepAliveRuns_PostOnlyOne()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke(); // drains startup activation
+
+            scheduler.Fire();
+            scheduler.Fire();
+
+            Assert.Single(queued);
         }
     }
 }

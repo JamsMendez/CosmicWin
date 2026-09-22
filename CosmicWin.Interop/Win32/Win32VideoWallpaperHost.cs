@@ -217,6 +217,31 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         var exStyle = unchecked((uint)PInvoke.GetWindowLong(progman, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE));
         var raisedDesktop = DesktopLayoutDetector.IsRaisedDesktop(exStyle);
 
+        // Resolved WITHOUT sending the spawn message below -- on the raised-desktop layout host is
+        // Progman itself, which always exists, and on the legacy layout a WorkerW created by an
+        // earlier attach is still there to be found. Only a genuinely first-ever attach (or one
+        // after Explorer destroyed the legacy WorkerW) needs the message, so trying this first is
+        // what lets the fast path below skip it entirely in steady state.
+        HWND host = ResolveHost(progman, raisedDesktop);
+
+        // T3 (video-wallpaper-repick-and-slideshow): the fast path. `!host.IsNull` guards the one
+        // edge case that resolving BEFORE the spawn message opens up -- on a legacy-layout machine
+        // that has never attached, ResolveHost above returns HWND.Null because the WorkerW does not
+        // exist yet, and GetParent(childHwnd) is also HWND.Null on a freshly created window; without
+        // this guard the two nulls would compare equal and this would report success having attached
+        // nothing.
+        //
+        // Checked, and returned from, BEFORE the 0x052C message farther down: that message is only
+        // ever needed to make Explorer (re)create a worker window, and in the already-attached
+        // steady state -- which is what the 400ms keep-alive tick in AppComposition hits on every
+        // call once a video wallpaper is playing -- nothing needs creating. Sending it anyway, every
+        // 400ms, for the life of the session would be an unresearched action against Explorer for a
+        // path that never needs one.
+        if (!host.IsNull && PInvoke.GetParent(childHwnd) == host)
+        {
+            return EnsureDirectlyAfterDefView(childHwnd, host);
+        }
+
         // Single message, exactly once. The old two-message form (0xD,1) then (0xD,0) deletes the
         // new WorkerW instead of creating a durable one.
         nuint sendResult;
@@ -229,31 +254,11 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             1000,
             &sendResult);
 
-        HWND host;
-        if (raisedDesktop)
-        {
-            // WorkerW is located for parity with the measured sequence but Progman is the actual
-            // parent on this layout -- matches the spike's resolved (non-alternate) path.
-            _ = PInvoke.FindWindowEx(progman, HWND.Null, "WorkerW", null);
-            host = progman;
-        }
-        else
-        {
-            HWND ownerOfDefView = FindTopLevelOwningDefView();
-            if (ownerOfDefView.IsNull)
-            {
-                return false;
-            }
-
-            HWND workerW = PInvoke.FindWindowEx(HWND.Null, ownerOfDefView, "WorkerW", null);
-            if (workerW.IsNull)
-            {
-                return false;
-            }
-
-            host = workerW;
-        }
-
+        // Re-resolved: on the legacy layout the message above may have just made Explorer create
+        // the WorkerW that a first attach needs, which the pre-message resolve necessarily missed.
+        // The raised-desktop layout's host is Progman itself and never depended on this message; the
+        // re-resolve there just repeats a cheap, side-effect-free lookup.
+        host = ResolveHost(progman, raisedDesktop);
         if (host.IsNull)
         {
             return false;
@@ -262,7 +267,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         HWND existingParent = PInvoke.GetParent(childHwnd);
         if (existingParent == host)
         {
-            return true;
+            return EnsureDirectlyAfterDefView(childHwnd, host);
         }
 
         PInvoke.SetParent(childHwnd, host);
@@ -304,6 +309,77 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
         PInvoke.ShowWindow(childHwnd, SHOW_WINDOW_CMD.SW_SHOW);
         return true;
+    }
+
+    /// <summary>
+    /// Finds the same host <see cref="AttachToDesktop"/> has always targeted, WITHOUT the
+    /// <c>0x052C</c> spawn message: Progman itself on the raised-desktop layout (always exists), or
+    /// the legacy layout's WorkerW sibling of DefView's owner (exists once something has attached
+    /// before). Returns <see cref="HWND.Null"/> when that WorkerW does not exist yet -- a caller
+    /// that needs one created still has to send the message and resolve again.
+    /// </summary>
+    private static HWND ResolveHost(HWND progman, bool raisedDesktop)
+    {
+        if (raisedDesktop)
+        {
+            // WorkerW is located for parity with the measured sequence but Progman is the actual
+            // parent on this layout -- matches the spike's resolved (non-alternate) path.
+            _ = PInvoke.FindWindowEx(progman, HWND.Null, "WorkerW", null);
+            return progman;
+        }
+
+        HWND ownerOfDefView = FindTopLevelOwningDefView();
+        if (ownerOfDefView.IsNull)
+        {
+            return HWND.Null;
+        }
+
+        return PInvoke.FindWindowEx(HWND.Null, ownerOfDefView, "WorkerW", null);
+    }
+
+    /// <summary>
+    /// T3 (video-wallpaper-repick-and-slideshow): the parent matching <paramref name="host"/> alone
+    /// used to be enough for <see cref="AttachToDesktop"/> to report success outright, and that was
+    /// exactly the bug T2 proved live on hardware -- the Windows wallpaper slideshow creates a NEW
+    /// wallpaper WorkerW, inserts it directly after <c>SHELLDLL_DefView</c> (i.e. directly ABOVE the
+    /// host), then destroys the old one, and this early return kept even a re-attach from ever
+    /// noticing. The parent match is now necessary but not sufficient: the host must also still sit
+    /// directly after DefView, and if it does not, only the z-order is re-applied here -- no
+    /// re-parent, no style change, since both of those already hold and touching them again would be
+    /// wasted Win32 calls against a window that is already correctly parented and styled.
+    /// </summary>
+    /// <remarks>
+    /// When there is no DefView under <paramref name="host"/> at all -- the legacy WorkerW layout,
+    /// where DefView lives under a different top-level owner entirely (see
+    /// <see cref="FindTopLevelOwningDefView"/>), never under the WorkerW host itself -- there is
+    /// nothing here to compare the order against, so the original "parent already matches" signal is
+    /// trusted exactly as it always was.
+    /// </remarks>
+    private static bool EnsureDirectlyAfterDefView(HWND childHwnd, HWND host)
+    {
+        HWND defView = PInvoke.FindWindowEx(host, HWND.Null, "SHELLDLL_DefView", null);
+        if (defView.IsNull)
+        {
+            return true;
+        }
+
+        if (PInvoke.GetWindow(defView, GET_WINDOW_CMD.GW_HWNDNEXT) == childHwnd)
+        {
+            // Already exactly where the slideshow keep-alive tick wants us: a true no-op steady
+            // state, so no SetWindowPos call happens here -- the whole reason this fast path exists
+            // is for that steady state to cost nothing.
+            return true;
+        }
+
+        // Explorer's slideshow replaced the wallpaper WorkerW/DefView sibling with a fresh one
+        // inserted directly after DefView, i.e. above us (T2's proven repro). The parent is still
+        // right, so only the z-order needs to be re-applied.
+        return PInvoke.SetWindowPos(
+            childHwnd,
+            defView,
+            0, 0, 0, 0,
+            SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOMOVE
+            | SET_WINDOW_POS_FLAGS.SWP_NOSIZE);
     }
 
     private bool CreateSwapChainAndPresentTestPattern(HWND hwnd)

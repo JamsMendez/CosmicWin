@@ -6,6 +6,12 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!--
+      T3 (video-wallpaper-repick-and-slideshow): Win32VideoWallpaperHostRealAttachTests spawns its
+      own test window via PInvoke.CreateWindowEx, whose CsWin32-generated lpParam parameter is a
+      raw pointer, the same reason CosmicWin.Interop itself needs this flag.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

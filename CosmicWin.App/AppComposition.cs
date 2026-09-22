@@ -301,6 +301,19 @@ public sealed class AppComposition : IDisposable
         // succeed -- never merely attempted.
         var currentVideoWallpaperPath = videoWallpaperPath;
 
+        // T3 (video-wallpaper-repick-and-slideshow): whether a video is genuinely playing right
+        // now -- host attached AND the player actually started, not merely "collaborators wired".
+        // The 400ms watch tick below reads this to decide whether the keep-alive TryAttach below
+        // is worth posting at all; an unconfigured wallpaper, or one whose last activation failed,
+        // must cost the tick nothing.
+        var videoWallpaperActive = false;
+
+        // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
+        // never both true at once for longer than one video-wallpaper work item. Without this a
+        // video-wallpaper thread slower than 400ms would see its queue grow one item per tick
+        // instead of the single standing keep-alive the task calls for.
+        var videoWallpaperKeepAlivePending = false;
+
         void ActivateVideoWallpaper(string phase, string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
@@ -315,6 +328,8 @@ public sealed class AppComposition : IDisposable
             {
                 played = videoWallpaperPlayer.TryPlay(videoWallpaperHost, path);
             }
+
+            videoWallpaperActive = attached && played == true;
 
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
@@ -1203,6 +1218,24 @@ public sealed class AppComposition : IDisposable
             // which is true. Noted BEFORE it, the departing desktop's foreground would be filed
             // under the arriving desktop's key: the record would be not merely stale but wrong.
             executor.NoteFocusOnCurrentDesktop();
+
+            // T3 (video-wallpaper-repick-and-slideshow): re-raise the video wallpaper host above a
+            // slideshow-created wallpaper layer. Win32VideoWallpaperHost.AttachToDesktop's own fast
+            // path now re-applies the z-order (and only the z-order) when Explorer's slideshow has
+            // inserted a fresh WorkerW directly after DefView, above the host -- see that class's
+            // remarks and T2's proven cause. Nothing else calls TryAttach on this cadence, so this
+            // tick is what actually notices; gated on videoWallpaperActive so a never-activated or
+            // failed video wallpaper posts nothing, and on the pending flag so a slow
+            // video-wallpaper thread never gets a second one queued behind the one it has not run.
+            if (videoWallpaperActive && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending)
+            {
+                videoWallpaperKeepAlivePending = true;
+                onVideoWallpaperThread(() =>
+                {
+                    videoWallpaperKeepAlivePending = false;
+                    videoWallpaperHost.TryAttach();
+                });
+            }
 
             UpdateFocusBorder();
         }

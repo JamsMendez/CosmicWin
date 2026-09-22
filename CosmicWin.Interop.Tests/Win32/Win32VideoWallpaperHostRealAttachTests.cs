@@ -22,7 +22,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </remarks>
 [Trait("Category", "RequiresDesktop")]
 [Collection(RealDesktopCollection.Name)]
-public sealed class Win32VideoWallpaperHostRealAttachTests
+public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
 {
     private const uint WsChild = 0x40000000;
 
@@ -110,5 +110,64 @@ public sealed class Win32VideoWallpaperHostRealAttachTests
 
         Assert.Equal(firstHwnd, host.Hwnd);
         Assert.Same(firstBackBuffer, host.GetBackBuffer());
+    }
+
+    /// <summary>
+    /// T3 (video-wallpaper-repick-and-slideshow): T2 proved live on this same raised-desktop
+    /// layout that the Windows wallpaper slideshow inserts a NEW wallpaper WorkerW directly after
+    /// <c>SHELLDLL_DefView</c> -- i.e. directly ABOVE the host -- every time it changes image, and
+    /// nothing re-raised it. This spawns its OWN window in that exact position, standing in for
+    /// Explorer's new wallpaper layer without waiting on a real slideshow tick, then asserts
+    /// <see cref="Win32VideoWallpaperHost.TryAttach"/> puts the host back directly after DefView.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_WhenAWindowIsInsertedDirectlyAfterDefView_ReRaisesTheHostAboveIt()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        HWND hostParent = ResolveExpectedDesktopParent();
+        HWND defView = PInvoke.FindWindowEx(hostParent, HWND.Null, "SHELLDLL_DefView", null);
+        Assert.NotEqual(HWND.Null, defView);
+
+        HWND hwnd = new(host.Hwnd);
+
+        HWND simulatedSlideshowLayer = HWND.Null;
+        try
+        {
+            simulatedSlideshowLayer = PInvoke.CreateWindowEx(
+                0,
+                "Static",
+                "T3 simulated slideshow WorkerW",
+                WINDOW_STYLE.WS_CHILD,
+                0, 0, 1, 1,
+                hostParent,
+                null,
+                PInvoke.GetModuleHandle((string?)null),
+                null);
+            Assert.NotEqual(HWND.Null, simulatedSlideshowLayer);
+
+            Assert.True(PInvoke.SetWindowPos(
+                simulatedSlideshowLayer,
+                defView,
+                0, 0, 0, 0,
+                SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOMOVE
+                | SET_WINDOW_POS_FLAGS.SWP_NOSIZE));
+
+            // The host is knocked out of place: something else now sits directly after DefView.
+            Assert.NotEqual(hwnd, PInvoke.GetWindow(defView, GET_WINDOW_CMD.GW_HWNDNEXT));
+
+            Assert.True(host.TryAttach());
+
+            // Re-raised: the host is directly after DefView again.
+            Assert.Equal(hwnd, PInvoke.GetWindow(defView, GET_WINDOW_CMD.GW_HWNDNEXT));
+        }
+        finally
+        {
+            if (simulatedSlideshowLayer != HWND.Null)
+            {
+                PInvoke.DestroyWindow(simulatedSlideshowLayer);
+            }
+        }
     }
 }
