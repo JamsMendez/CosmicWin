@@ -193,8 +193,9 @@ project serialize via `[Collection(RealDesktopCollection.Name)]`, but not across
 
 ## Delivery strategy
 
-`ask-on-risk` (default) — not yet triggered; revisit if the running changed-line count clears
-~400 authored lines before T6 closes.
+`ask-on-risk` (default) — triggered after T5 (running total ~2246 lines across the branch, well
+past the ~400-line heuristic). User chose a single PR for the whole branch (research+spikes,
+T1-T6) over a chained-PR split — open it once T6 closes.
 
 ## Progress log
 
