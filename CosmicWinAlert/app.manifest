@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- T4 (live-alert-wallpaper): asInvoker, so an alert command from a normal shell or WSL never
+       triggers UAC: unlike CosmicWin.App.exe (requireAdministrator, app.manifest:9), whose
+       elevated server this client only ever talks to over the named pipe, never runs itself. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

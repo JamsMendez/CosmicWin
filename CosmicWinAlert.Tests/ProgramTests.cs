@@ -1,0 +1,127 @@
+using CosmicWin.Interop;
+using CosmicWin.Interop.Win32;
+using CosmicWinAlert;
+
+namespace CosmicWinAlert.Tests;
+
+/// <summary>
+/// The pure arg-joining and reply-to-exit-code mapping <see cref="Program"/> uses, tested
+/// directly (T4 task file: "the client exe's arg handling/exit-code mapping as a unit-testable
+/// function").
+/// </summary>
+public sealed class ProgramArgAndExitCodeTests
+{
+    [Fact]
+    public void TryBuildCommand_NoArguments_FailsWithUsageError() =>
+        Assert.False(Program.TryBuildCommand([], out _));
+
+    [Fact]
+    public void TryBuildCommand_OneArgument_IsUsedAsIs()
+    {
+        var ok = Program.TryBuildCommand(["warning:2 failed:1"], out var command);
+
+        Assert.True(ok);
+        Assert.Equal("warning:2 failed:1", command);
+    }
+
+    [Fact]
+    public void TryBuildCommand_SeveralArguments_AreJoinedWithASingleSpace()
+    {
+        var ok = Program.TryBuildCommand(["warning:2", "failed:1", "duration:8"], out var command);
+
+        Assert.True(ok);
+        Assert.Equal("warning:2 failed:1 duration:8", command);
+    }
+
+    [Fact]
+    public void Interpret_Ok_ReturnsExitOkAndPrintsNothing()
+    {
+        var stderr = new StringWriter();
+
+        var exitCode = Program.Interpret(AlertPipeProtocol.OkReply, stderr);
+
+        Assert.Equal(Program.ExitOk, exitCode);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    [Fact]
+    public void Interpret_AnErrorLine_ReturnsExitServerErrorAndPrintsItToStderr()
+    {
+        var stderr = new StringWriter();
+
+        var exitCode = Program.Interpret("error: busy", stderr);
+
+        Assert.Equal(Program.ExitServerError, exitCode);
+        Assert.Equal("error: busy" + Environment.NewLine, stderr.ToString());
+    }
+}
+
+/// <summary>
+/// End-to-end coverage for <see cref="Program.RunAsync"/>: a real <see
+/// cref="NamedPipeAlertCommandServer"/> on a unique test pipe name, the same "real pipe" approach
+/// <c>NamedPipeAlertCommandServerTests</c> takes, cheap enough (task file: "one test that runs the
+/// built client end to end is welcome if cheap") that all four exit-code paths get one each.
+/// </summary>
+public sealed class ProgramRunAsyncTests
+{
+    private static readonly TimeSpan ShortTimeout = TimeSpan.FromSeconds(2);
+
+    private static string UniquePipeName([System.Runtime.CompilerServices.CallerMemberName] string testName = "") =>
+        $"CosmicWin.Alerts.Tests.Client.{testName}.{Guid.NewGuid():N}";
+
+    [Fact]
+    public async Task RunAsync_NoArguments_ReturnsUsageErrorWithoutEverConnecting()
+    {
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            [], stderr, UniquePipeName(), ShortTimeout, ShortTimeout);
+
+        Assert.Equal(Program.ExitUsageError, exitCode);
+        Assert.NotEmpty(stderr.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_NoServerListening_ReturnsExitNoServerQuickly()
+    {
+        var stderr = new StringWriter();
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+
+        var exitCode = await Program.RunAsync(
+            ["warning:1"], stderr, UniquePipeName(), TimeSpan.FromMilliseconds(300), ShortTimeout);
+
+        elapsed.Stop();
+        Assert.Equal(Program.ExitNoServer, exitCode);
+        Assert.NotEmpty(stderr.ToString());
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5), $"took {elapsed.Elapsed}");
+    }
+
+    [Fact]
+    public async Task RunAsync_ServerAccepts_ReturnsExitOk()
+    {
+        var pipeName = UniquePipeName();
+        using var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        server.Start();
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["warning:2", "failed:1"], stderr, pipeName, ShortTimeout, ShortTimeout);
+
+        Assert.Equal(Program.ExitOk, exitCode);
+    }
+
+    [Fact]
+    public async Task RunAsync_ServerRejects_ReturnsExitServerErrorAndPrintsTheReplyToStderr()
+    {
+        var pipeName = UniquePipeName();
+        using var server = new NamedPipeAlertCommandServer(
+            pipeName, text => AlertPipeProtocol.FormatError($"'{text}' is not a 'key:count' token"));
+        server.Start();
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(["banana"], stderr, pipeName, ShortTimeout, ShortTimeout);
+
+        Assert.Equal(Program.ExitServerError, exitCode);
+        Assert.Equal("error: 'banana' is not a 'key:count' token" + Environment.NewLine, stderr.ToString());
+    }
+}

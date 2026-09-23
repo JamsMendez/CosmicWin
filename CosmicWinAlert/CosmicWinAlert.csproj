@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>CosmicWinAlert</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>CosmicWinAlert</AssemblyName>
+    <!-- T4 (live-alert-wallpaper): own asInvoker manifest, distinct from CosmicWin.App's
+         (requireAdministrator): an alert command from an unelevated shell or WSL must never
+         raise UAC. Same pattern as CosmicWin.Launcher's own app.manifest. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Interop only, never CosmicWin.App: App carries WPF and the elevation manifest, neither of
+         which this unelevated console client wants. Interop is Win32-free at the two members this
+         project actually calls (AlertPipeName.Resolve, AlertPipeProtocol): see their own
+         remarks for why they live there. -->
+    <ProjectReference Include="..\CosmicWin.Interop\CosmicWin.Interop.csproj" />
+  </ItemGroup>
+</Project>
