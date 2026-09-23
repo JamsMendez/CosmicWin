@@ -344,8 +344,10 @@ Slices (planned, each a PR against main stacked on the previous one):
   `Direct2DAlertOverlay` focused tests 2/2. Verification: `dotnet build CosmicWin.sln -c Debug`
   0 warnings / 0 errors after changing `NativeMethods.txt` to enum type names;
   `CosmicWin.Interop.Tests` 208 passed / 34 skipped. Independent verifier first found the partial
-  COM-initialization leak risk; after remediation it approved T6 code-side. Manual/hardware gap:
-  actual Direct2D drawing, alpha fallback, Explorer-restart rebuild, and GPU cost still await T9.
+  COM-initialization leak risk; after remediation it approved T6 code-side. Native review
+  `review-ba2d4e3013e17c30` (reliability) approved and was acknowledged; advisory findings are
+  recorded in Reviews. Commit `c2515c7`. Manual/hardware gap: actual Direct2D drawing, alpha
+  fallback, Explorer-restart rebuild, and GPU cost still await T9.
 - [ ] **T7 — Alert visuals ported from great-sage**
 - [ ] **T8 — Wiring and `alerts-enabled` setting**
 - [ ] **T9 — Supervised hardware run**
@@ -432,6 +434,18 @@ one lifecycle cleanup fix. Hardware/runtime drawing evidence remains for T9.
   - `R3-backoff-ceiling-exceeds-client-connect-timeout` (SUGGESTION): backoff caps at 5 s and
     resets only after a served connection; a client's ~1 s connect budget can miss a recovered
     server. Fixed, commit `94fae54`.
+- Slice T6 (`545 lines`, risk `medium`): lineage `review-ba2d4e3013e17c30`, one lens
+  (reliability), **approved**, acknowledged, authority burned. Advisory, non-blocking findings
+  (not reopened; separate work only if the maintainer accepts it):
+  - `R3-com-cleanup` (WARNING): review still flags COM cleanup around the overlay resource path;
+    this was also caught by the independent verifier before native review and remediated by moving
+    partial initialization ownership into fields so `ReleaseAllResources()` can clean failed setup.
+  - `R3-failure-retry-loop` (WARNING): repeated draw/resource failure can retry every frame, with
+    throttled logging and cache release. Current behavior matches T6 containment; T9 hardware run
+    should check that no repeated failure appears in `alert-overlay.log`.
+  - `R3-native-path-coverage` (WARNING): pure tests cover API/idle snapshot behavior only; real
+    Direct2D/D3D draw, alpha fallback, rebuild, and GPU cost remain manual/hardware evidence for
+    T9.
 
 ## Next step
 
