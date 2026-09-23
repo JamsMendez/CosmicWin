@@ -97,6 +97,58 @@ public sealed class ProgramRunAsyncTests
         Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5), $"took {elapsed.Elapsed}");
     }
 
+    /// <summary>
+    /// Finding R3-client-connect-timeout-message-regressed: T4b's fix for
+    /// R3-client-unmapped-failures moved <c>ConnectAsync</c> into the same try block as the later
+    /// write/read round trip, so a connect TIMEOUT (no server listening) started printing "did not
+    /// reply in time" -- the reply-timeout message -- instead of the original "not running"
+    /// message. Exit code (2) was never wrong, only the text.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_NoServerListening_PrintsTheNotRunningMessageNotTheDidNotReplyMessage()
+    {
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["warning:1"], stderr, UniquePipeName(), TimeSpan.FromMilliseconds(300), ShortTimeout);
+
+        Assert.Equal(Program.ExitNoServer, exitCode);
+        Assert.Equal(
+            "CosmicWin is not running, or is not listening for alerts." + Environment.NewLine,
+            stderr.ToString());
+    }
+
+    /// <summary>
+    /// Finding R3-client-connect-timeout-message-regressed, the other half: a server that DID
+    /// accept the connection but then never writes a reply must still get "did not reply in time"
+    /// -- the reply-timeout message -- not the "not running" one, since the server plainly IS
+    /// running.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ServerConnectsButNeverReplies_PrintsTheDidNotReplyMessage()
+    {
+        var pipeName = UniquePipeName();
+        var replyIoTimeout = TimeSpan.FromMilliseconds(300);
+        var serverTask = Task.Run(async () =>
+        {
+            using var server = new NamedPipeServerStream(
+                pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
+            await server.WaitForConnectionAsync();
+            // Accepts the connection -- the client's ConnectAsync succeeds -- and then holds it
+            // open, never reading or writing anything, well past the client's own IO timeout.
+            await Task.Delay(replyIoTimeout + ShortTimeout);
+        });
+
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(
+            ["warning:1"], stderr, pipeName, ShortTimeout, replyIoTimeout);
+
+        Assert.Equal(Program.ExitNoServer, exitCode);
+        Assert.Equal("CosmicWin did not reply in time." + Environment.NewLine, stderr.ToString());
+        await serverTask;
+    }
+
     [Fact]
     public async Task RunAsync_ServerAccepts_ReturnsExitOk()
     {

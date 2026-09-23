@@ -77,17 +77,39 @@ public static class Program
         }
 
         using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        // Finding R3-client-connect-timeout-message-regressed: connecting and the write/read round
+        // trip are now two SEPARATE try blocks with their own messages, not one shared try. Folding
+        // them into one (T4b's fix for R3-client-unmapped-failures) meant a connect timeout -- no
+        // server listening at all -- started printing "did not reply in time", the reply-timeout
+        // message, instead of the original "not running" message. The exit code (ExitNoServer, 2)
+        // was never wrong for either phase, only the text.
         try
         {
             using var connecting = new CancellationTokenSource(connectTimeout);
             await client.ConnectAsync(connecting.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            stderr.WriteLine("CosmicWin is not running, or is not listening for alerts.");
+            return ExitNoServer;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Connect failure (e.g. "all pipe instances are busy") or access denied (wrong ACL/
+            // integrity level) -- the server, if any, was never actually reached.
+            stderr.WriteLine($"CosmicWin is not running, or is not listening for alerts: {error.Message}");
+            return ExitNoServer;
+        }
 
-            // Matches the server's own PIPE_READMODE_MESSAGE (NamedPipeAlertCommandServer): each
-            // side of a message-type pipe sets its OWN read mode independently, so the client has
-            // to ask for message framing too, or its read below would just see an undifferentiated
-            // byte stream instead of exactly the server's one reply line.
-            client.ReadMode = PipeTransmissionMode.Message;
+        // Matches the server's own PIPE_READMODE_MESSAGE (NamedPipeAlertCommandServer): each side
+        // of a message-type pipe sets its OWN read mode independently, so the client has to ask for
+        // message framing too, or its read below would just see an undifferentiated byte stream
+        // instead of exactly the server's one reply line.
+        client.ReadMode = PipeTransmissionMode.Message;
 
+        try
+        {
             using var callBudget = new CancellationTokenSource(ioTimeout);
             await client.WriteAsync(bytes, callBudget.Token).ConfigureAwait(false);
             await client.FlushAsync(callBudget.Token).ConfigureAwait(false);
@@ -98,10 +120,11 @@ public static class Program
             {
                 // The connection reached EOF without ever carrying a reply byte -- the server
                 // closed (or was killed) after accepting but before answering. Finding
-                // R3-client-unmapped-failures: this is a "no usable reply" shape, exactly like a
-                // connect timeout, not a malformed-command server error -- an empty string is not
-                // AlertPipeProtocol.OkReply, so falling through to Interpret used to return
-                // ExitServerError (1), an undocumented mapping for this case.
+                // R3-client-unmapped-failures: this is a "no usable reply" shape, but the server
+                // WAS reached (ConnectAsync above already succeeded), so it gets its own message
+                // rather than either the "not running" or "did not reply in time" ones -- an empty
+                // string is not AlertPipeProtocol.OkReply, so falling through to Interpret used to
+                // return ExitServerError (1), an undocumented mapping for this case.
                 stderr.WriteLine("CosmicWin closed the connection without replying.");
                 return ExitNoServer;
             }
@@ -111,20 +134,18 @@ public static class Program
         }
         catch (OperationCanceledException)
         {
-            // Either the connect budget or the call budget expired: no server listening, or one
-            // that accepted but never finished the round trip in time.
+            // The call budget expired: the server accepted the connection but never finished the
+            // round trip in time. Unlike a connect-phase timeout, the server IS running.
             stderr.WriteLine("CosmicWin did not reply in time.");
             return ExitNoServer;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            // Finding R3-client-unmapped-failures: every OTHER documented client failure shape --
-            // connect failure (e.g. "all pipe instances are busy"), access denied (wrong ACL/
-            // integrity level), or a broken pipe mid-call (the server crashed or disconnected
-            // after accepting) -- surfaces as one of these two exception types. Previously only
-            // OperationCanceledException was caught here, so any of these propagated out of
-            // RunAsync as an unhandled exception instead of a documented exit code.
-            stderr.WriteLine($"CosmicWin is not running, or is not listening for alerts: {error.Message}");
+            // Finding R3-client-unmapped-failures: a broken pipe mid-call (the server crashed or
+            // disconnected after accepting, before ever replying). Previously only
+            // OperationCanceledException was caught here, so this propagated out of RunAsync as an
+            // unhandled exception instead of a documented exit code.
+            stderr.WriteLine($"CosmicWin closed the connection before replying: {error.Message}");
             return ExitNoServer;
         }
     }
