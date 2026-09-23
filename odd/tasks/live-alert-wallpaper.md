@@ -198,9 +198,79 @@ Slices (planned, each a PR against main stacked on the previous one):
   `Medium Mandatory Level` (S-1-16-8192, from `whoami /groups`). `warning:2 failed:1` → server
   received it, reply `ok`, exit 0; `warning:2 bad:1` → `error: bad token`, exit 1. With no
   server: exit 2 after ~1.08 s; no arguments: usage line, exit 3.
-- [ ] **T4b — Harden the alert pipe and client.** Added 2026-09-23, maintainer accepted all six
+- [x] **T4b — Harden the alert pipe and client.** Added 2026-09-23, maintainer accepted all six
   advisory findings of review `review-b48c85520820f775` (see Reviews). Checks: a test per finding,
-  RED first. Route: delegated writer.
+  RED first. Route: delegated writer (trigger: 2+ non-trivial files -- server, protocol, client and
+  queue each with their own tests, four commits across `CosmicWin.Interop`, `CosmicWin.App` and
+  `CosmicWinAlert`). Naturally over the ~400-line heuristic (469 authored lines across four
+  commits): each finding lives in a different file pairing (queue+tests, ACL test only,
+  server+protocol+tests, client+tests) and none could be folded into another without mixing
+  unrelated concerns in one commit.
+  - **R3-queue-ctor-unvalidated** (`CosmicWin.App/Alerts/AlertQueue.cs`,
+    `CosmicWin.App.Tests/Alerts/AlertQueueTests.cs`): constructor now throws
+    `ArgumentOutOfRangeException` for `capacity <= 0` and for a negative `maxAge`; a zero `maxAge`
+    is allowed on purpose (decided here) -- it means "must start the same tick it was enqueued, or
+    be dropped," not a construction error, matching `DropExpired`'s existing strictly-greater-than
+    boundary. TDD: RED 3 failed ("No exception was thrown") / 14 passed; GREEN 17/17. Commit
+    `a89830b`.
+  - **R3-acl-test-owner-masks-dacl** (`CosmicWin.Interop.Tests/Win32/NamedPipeAlertCommandServerAclTests.cs`,
+    test-only): replaced the `Assert.Contains(userSid, sddl)` check (which would still pass if the
+    SID appeared only as the SDDL owner, not the DACL) with a small regex parser that extracts the
+    `D:` component's ACE list and asserts exactly one ACE, allow, for the current user SID, keeping
+    the existing `S:(ML;;NW;;;ME)` label assertion. TDD: RED -- the new parser-based test, run
+    against the unchanged production code, failed asserting `"GA"` (the generic right the SDDL
+    string grants) where the live handle actually reports `"FA"` (the kernel resolves a generic
+    right to its object-specific equivalent before storing the ACE); GREEN after correcting the
+    test's expectation to `"FA"`, the real, directly observed mask, 3/3. Commit `427f7ac`.
+  - **R3-client-unmapped-failures** (`CosmicWinAlert/Program.cs`, `CosmicWinAlert.Tests/ProgramTests.cs`):
+    a zero-byte reply (server closed the connection without ever writing) now returns `ExitNoServer`
+    (2) instead of falling through to `ExitServerError` (1); the connect/write/read round trip is
+    now inside one try that also catches `IOException`/`UnauthorizedAccessException` (broken pipe
+    mid-call, access denied, "all pipe instances are busy") and maps them to `ExitNoServer` with one
+    stderr line, instead of letting them escape `Main` unhandled. TDD: RED 2 failed -- zero-byte
+    case returned 1 instead of 2; broken-pipe case threw an unhandled `IOException` out of the test
+    itself; GREEN 11/11 (full `CosmicWinAlert.Tests` suite, run three times, stable). Commit
+    `9208efd`.
+  - **R3-reply-drain-unbounded**, **R3-runloop-hot-spin**, **R3-oversized-reply-size**
+    (`CosmicWin.Interop/Win32/NamedPipeAlertCommandServer.cs`, `CosmicWin.Interop/AlertPipeProtocol.cs`,
+    their tests): three findings in one commit since they share the same two production files and
+    were developed and verified together.
+    - Reply drain: `WriteReplyAsync`'s write+flush+`WaitForPipeDrain()` sequence is now bounded by a
+      new `ReplyTimeout` (2s). `WaitForPipeDrain` has no cancellable overload, so it runs on a
+      background `Task.Run` raced against the timeout; on timeout the connection is forced closed
+      with `NamedPipeServerStream.Disconnect()`, which was verified live to actually unblock the
+      still-running native `WaitForPipeDrain`/`FlushFileBuffers` call and free the
+      `nMaxInstances = 1` pipe instance for the next client -- `Dispose()` alone does not do this,
+      since the pending native call keeps the handle referenced until it returns; this was the one
+      genuinely uncertain part of the fix and is now confirmed by a passing integration test, not
+      assumed. TDD: RED (compile error, `ReplyTimeout` missing); GREEN on the first real run after
+      implementing the bounded drain + forced disconnect -- both the "second client still served"
+      and the "Dispose stays prompt while stuck" tests passed immediately.
+    - RunLoop backoff: a RunLoop-level failure (chiefly a pipe-name collision with another server
+      instance on the same name) now waits `InitialRetryBackoff` (100ms), doubling up to
+      `MaxRetryBackoff` (5s), reset to 100ms the moment a connection is served again; since the
+      backoff wait and the diagnostic call are the same event, bounding the retry rate bounds the
+      diagnostic rate for free, with no separate coalescing mechanism needed. TDD: RED -- two
+      servers on one colliding pipe name logged **132,391** diagnostics in a 3-second window (a
+      genuine, measured hot spin) while the healthy first server still served correctly; GREEN with
+      the backoff in place, same scenario, diagnostic count bounded (asserted `<= 25` over the same
+      3s window) and the first server still served correctly.
+    - Oversized reply size: a message too large to fit `ReadBufferSize` used to report the
+      *truncated* read count as if it were the message's real size. `AlertPipeProtocol` gained
+      `OversizedReplyAtLeast(int)`, an honest lower-bound reply ("more than N bytes"), used when
+      `!IsMessageComplete`; the existing `OversizedReply(int)` (exact count) still applies when the
+      whole message fit under `ReadBufferSize` but exceeded the wire limit, since `read` is accurate
+      in that case. TDD: RED -- a message larger than `ReadBufferSize` got the old exact-but-wrong
+      reply; GREEN after the fix, 1/1 new test plus the full `AlertPipeProtocolTests` /
+      `NamedPipeAlertCommandServerTests` suites (20/20).
+    - `ReadBufferSize` changed from `private` to `internal const` so the new oversized-message test
+      can size its payload without duplicating the constant.
+    - Commit `e4abf30`.
+  - **Verification**: `dotnet build CosmicWin.sln -c Debug` 0 errors; `CosmicWin.App.Tests` 964
+    passed / 0 failed / 6 skipped; `CosmicWin.Interop.Tests` 202 passed / 0 failed / 34 skipped;
+    `CosmicWinAlert.Tests` 11 passed / 0 failed. The pipe-touching classes
+    (`NamedPipeAlertCommandServerTests`, `NamedPipeAlertCommandServerAclTests`,
+    `CosmicWinAlert.Tests`) were each run three times end to end: stable every time, no flakes.
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
@@ -221,6 +291,13 @@ Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 2026-09-23: T4 done -- alert pipe protocol, named-pipe server with the per-user ACL + medium
 mandatory label, and the unelevated `CosmicWinAlert.exe` client, each its own commit
 (`7468f0d`, `04a6a5a`, `f660adf`). Not wired into `AppComposition` yet (T8).
+
+2026-09-23: T4b done -- all six advisory findings from review `review-b48c85520820f775` fixed with
+a RED test per finding (see T4b entry for evidence): bounded reply drain + forced disconnect,
+exponential RunLoop backoff, honest oversized-reply size, mapped client exit codes, exact-DACL
+test, and `AlertQueue` constructor validation. Four commits (`a89830b`, `427f7ac`, `9208efd`,
+`e4abf30`), 469 authored lines. Full verification green three times over for the pipe-touching
+test classes; no flakes.
 
 ## Reviews
 
@@ -255,4 +332,4 @@ mandatory label, and the unelevated `CosmicWinAlert.exe` client, each its own co
 
 ## Next step
 
-T4b, then T5 (`IFrameOverlay` seam in the player).
+T5 (`IFrameOverlay` seam in the player).
