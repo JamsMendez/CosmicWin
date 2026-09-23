@@ -91,7 +91,22 @@ Slices (planned, each a PR against main stacked on the previous one):
   never throws -- bad input returns `AlertCommandParseResult.Fail(message)` naming the offending
   token. Commit `72e9397`.
 - [ ] **T2 — `AlertQueue`** (needs the open question answered)
-- [ ] **T3 — `AlertTileLayout`**
+- [x] **T3 — `AlertTileLayout`.** `CosmicWin.App/Alerts/AlertTileLayout.cs`, tests in
+  `CosmicWin.App.Tests/Alerts/AlertTileLayoutTests.cs`. Route: delegated writer (trigger: 2+
+  non-trivial files -- layout algorithm + its test file, alongside the T1 files already in the
+  same task). TDD: RED-1 (type missing) `error CS0246: The type or namespace name 'Rectangle'
+  could not be found`; stubbed `AlertTileLayout.Layout` to throw `NotImplementedException`, RED-2
+  154 failed / 0 passed, all `NotImplementedException`; GREEN after the real implementation, 154
+  passed / 0 failed (one REFACTOR-stage correction: a hand-computed expected pixel width in the
+  N=1 test was arithmetically wrong -- 22112/9 floors to 2456, not 2457 -- caught by the failing
+  assertion and fixed in the test, not the code). Full `Alerts` suite after both tasks: 181
+  passed / 0 failed. Algorithm: tries every column count 1..N (rows = ceil(N/cols)), keeps the
+  grid whose forced cell yields the largest 16:9 tile (tie -> fewer rows); outer margin and
+  inter-tile gap both equal round(2% of the shorter area side); tiles fill row-major in command
+  order, the grid is centered in the area, and a partial last row is centered under the rows
+  above it. Reuses `CosmicWin.Interop.Rectangle` for the output type rather than adding a new
+  one, matching `BorderGeometry`'s existing precedent of App-side pure geometry code depending on
+  Interop's Win32-free `Rectangle`. Commit `4d5ffae`.
 - [ ] **T4 — Named pipe server and `--alert` client**
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
@@ -112,5 +127,5 @@ Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 
 ## Next step
 
-T3 `AlertTileLayout` (T1 done). Chain strategy: `stacked-to-main` (recorded above). Before T2:
-the open question.
+T2 `AlertQueue` (T1 and T3 done, slice 2 of the delivery plan complete). Before T2: the open
+question (&#167;5) must be decided. Chain strategy: `stacked-to-main` (recorded above).
