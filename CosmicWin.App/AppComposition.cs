@@ -184,6 +184,14 @@ public sealed class AppComposition : IDisposable
         Action? clearAlertOverlay = null,
         IDisposable? alertOverlay = null,
         Func<bool>? alertDesktopVisible = null,
+        // T10 (live-alert-wallpaper): the real production signal for "something is covering the
+        // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
+        // PrimaryMonitorFullscreenDetector.IsPrimaryMonitorCoveredByFullscreenWindow, wired by
+        // WireProduction. Kept separate from alertDesktopVisible, which stays the full override
+        // escape hatch a test uses to bypass this composition entirely: unset (every test that
+        // predates T10, and any caller that overrides alertDesktopVisible directly) reads as "never
+        // covered", exactly the T8 behaviour this task is fixing.
+        Func<bool>? isPrimaryMonitorCovered = null,
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
@@ -420,10 +428,15 @@ public sealed class AppComposition : IDisposable
             ActiveAlert? active;
             lock (alertQueueLock)
             {
-                // T8's conservative primary-monitor visibility seam: production uses a playing
-                // video wallpaper as the available signal; covered-desktop proof stays for T9.
-                active = alertQueue.Advance(
-                    DateTimeOffset.UtcNow, desktopVisible: alertDesktopVisible?.Invoke() ?? videoWallpaperActive.Value);
+                // T10 (live-alert-wallpaper): the real predicate is "a video is playing AND nothing
+                // fullscreen covers the primary monitor" -- T9 proved the T8 fallback (video playing
+                // alone) plays an alert out unseen under a fullscreen window instead of holding it.
+                // alertDesktopVisible, when supplied, still overrides this composition entirely (the
+                // seam every test predating T10 uses); isPrimaryMonitorCovered is the new, narrower
+                // seam for the coverage half alone, wired to the real Win32 check by WireProduction.
+                var desktopVisible = alertDesktopVisible?.Invoke()
+                    ?? (videoWallpaperActive.Value && !(isPrimaryMonitorCovered?.Invoke() ?? false));
+                active = alertQueue.Advance(DateTimeOffset.UtcNow, desktopVisible);
             }
 
             if (active is null)
@@ -1513,6 +1526,11 @@ public sealed class AppComposition : IDisposable
             setAlertOverlayTiles: alertOverlay is null ? null : alertOverlay.SetTiles,
             clearAlertOverlay: alertOverlay is null ? null : alertOverlay.Clear,
             alertOverlay: alertOverlay,
+            // T10 (live-alert-wallpaper): the real covered-desktop signal T9 found missing --
+            // without it an alert played out unseen under a fullscreen video or browser instead of
+            // being held. Reused, not re-invented: PrimaryMonitorFullscreenDetector applies the SAME
+            // fullscreen definition a023fac proved for the tiling engine.
+            isPrimaryMonitorCovered: PrimaryMonitorFullscreenDetector.IsPrimaryMonitorCoveredByFullscreenWindow,
             // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
             // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
             // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.
