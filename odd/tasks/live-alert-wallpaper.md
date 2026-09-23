@@ -24,10 +24,11 @@ Out of scope: multi-monitor, WebView2 or any browser engine, HTTP listeners.
 - Idle cost must stay zero: no drawing when no alert is on screen.
 - A failing overlay must never break video playback.
 
-## Open question
+## Decided: alerts while the desktop is covered
 
-An alert that arrives while a fullscreen window covers the desktop: drop it with a log line, or
-queue it with a max age. Must be decided before T2.
+Maintainer, 2026-09-23: an alert that arrives while a fullscreen window covers the desktop is
+**queued with a max age** (~5 min). It is shown once the desktop is visible again; past the max
+age it is dropped with a log line. T2 implements it.
 
 ## TDD mode
 
@@ -125,7 +126,21 @@ Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 
 2026-09-23: base bug fixed (`fix/explorer-restart-reattach`); T0 passed. Branch rebased onto it.
 
+## Reviews
+
+- Slice fix + T1 + T3 (`--base-ref fadfda7`, 1373 lines, risk `medium`, `slice_budget_reached`):
+  consent granted by the maintainer; lineage `review-cd5abe02fe1d9247`, one lens
+  (reliability), **approved**, acknowledged, authority burned. Reviewed boundary is now `e87a108`.
+  Advisory, non-blocking findings (follow-up work, not reopened):
+  - `R3-device-rcw-release` (WARNING, inferential): a second Explorer restart could lose the
+    device. Checked on hardware the same day: three consecutive Explorer restarts, the host was
+    recreated under each new Progman (`0xC0412`, `0x509E0`, `0x50A0A`) and the video kept
+    playing. Not reproduced.
+  - `R3-concurrent-swapchain-release` (WARNING, inferential): swapchain released on the wallpaper
+    thread while the player may be mid-tick. Not observed in four recoveries; no test covers it.
+  - `R3-layout-fallback-out-of-bounds` (SUGGESTION): the zero-size fallback grid can go out of
+    bounds for counts far above 16; unreachable through the parser (max 16).
+
 ## Next step
 
-T2 `AlertQueue` (T1 and T3 done, slice 2 of the delivery plan complete). Before T2: the open
-question (&#167;5) must be decided. Chain strategy: `stacked-to-main` (recorded above).
+T2 `AlertQueue`, then T4 (named pipe and client).
