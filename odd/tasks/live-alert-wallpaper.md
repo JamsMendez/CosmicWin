@@ -91,7 +91,26 @@ Slices (planned, each a PR against main stacked on the previous one):
   warning/failed group required, total tiles <= 16, input capped at 256 chars, order preserved,
   never throws -- bad input returns `AlertCommandParseResult.Fail(message)` naming the offending
   token. Commit `72e9397`.
-- [ ] **T2 — `AlertQueue`** (needs the open question answered)
+- [x] **T2 — `AlertQueue`.** `CosmicWin.App/Alerts/AlertQueue.cs` (also defines `ActiveAlert`),
+  tests in `CosmicWin.App.Tests/Alerts/AlertQueueTests.cs`. Route: delegated writer (trigger: 2+
+  non-trivial files -- the queue plus its test file). TDD: RED-1 (type missing) `error CS0246: The
+  type or namespace name 'AlertQueue' could not be found`, 13 occurrences; stubbed
+  `AlertQueue.Enqueue`/`Advance` to throw `NotImplementedException`, RED-2 13 failed / 0 passed,
+  all `NotImplementedException`; GREEN after the real implementation, 13/13 passed, full
+  `CosmicWin.App.Tests` suite 960 passed / 0 failed / 6 skipped (pre-existing hardware-only skips).
+  Implements the maintainer's covered-desktop decision above: bounded FIFO (capacity 8 default,
+  constructor parameter), `Enqueue` rejects the NEW command when full and reports the rejection;
+  `Advance(now, desktopVisible)` ends the current alert once `now >= StartedAt + Duration` (so it
+  ends exactly at that instant, not one tick later), drops any queued alert that has waited
+  strictly longer than the max age (5 min default, also a constructor parameter) regardless of
+  visibility, and starts the next eligible one only when nothing is currently showing AND the
+  desktop is visible -- so a covered desktop lets an already-showing alert's clock keep running
+  (it ends on time, never paused/extended) but never starts a new one, and back-to-back alerts can
+  start on the same `Advance` call the previous one ends on. Every rejection and every drop goes
+  through an `Action<string>? onDiagnostic` constructor parameter, defaulting to a no-op -- the
+  same optional-delegate convention `AppComposition`'s `persistX` parameters already use, chosen
+  over a new interface since the message is a single short string. Documented as not thread-safe;
+  the caller (a single-threaded render tick) serializes every call. Commit `2605623`.
 - [x] **T3 — `AlertTileLayout`.** `CosmicWin.App/Alerts/AlertTileLayout.cs`, tests in
   `CosmicWin.App.Tests/Alerts/AlertTileLayoutTests.cs`. Route: delegated writer (trigger: 2+
   non-trivial files -- layout algorithm + its test file, alongside the T1 files already in the
@@ -143,4 +162,4 @@ Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 
 ## Next step
 
-T2 `AlertQueue`, then T4 (named pipe and client).
+T4 (named pipe and client).
