@@ -48,6 +48,22 @@ asked when the running count passes ~400. RDD: on (global).
   400 ms re-attach and an Explorer restart, GPU with and without the overlay (resolution and
   refresh recorded). Route: delegated writer (CsWin32 Direct2D interop, preparation reading),
   hardware run by the parent.
+  **Partial, 2026-09-23.** Spike commit `d9fe4a2` on `spike/alert-overlay-t0` (not to be merged;
+  `SpikeAlertOverlay.cs`, toggle `COSMICWIN_SPIKE_OVERLAY=1`). Hardware: RTX 4060 Ti,
+  3440x1440 @ 164 Hz, back buffer 3392x1440 (primary work area). Evidence:
+  - Renders: red translucent band and DirectWrite text drawn over the live video, taskbar above
+    it. First draw logged `D2D1_ALPHA_MODE_PREMULTIPLIED`; no draw failure logged.
+  - Kept rendering across the 400 ms watch tick for the whole run (> 1 min), no failure.
+  - GPU 3D, same Debug build, visible desktop: overlay off 2.08 / 1.55 / 2.31 %, overlay on
+    2.40 / 1.56 / 2.12 %. The overlay's cost is below the measurement noise. (The long-running
+    Release instance read 6.15 / 6.69 / 6.55 % before the run; not the same build or state.)
+  - Under the desktop icons: not verifiable, no icons are shown on this desktop.
+  - **Explorer restart: BLOCKED by a pre-existing base bug.** After `Stop-Process explorer`, the
+    video is gone in both runs, with the overlay on AND with it off (control). Window tree:
+    `CosmicWinVideoWallpaperHost-*` is left as an orphaned top-level window, invisible,
+    1x1, never re-parented to the new Progman. So the device re-creation path of the overlay
+    could not be exercised. Not caused by the spike: with the variable unset `Draw()` returns on
+    a bool.
 - [ ] **T1 — `AlertCommandParser`**
 - [ ] **T2 — `AlertQueue`** (needs the open question answered)
 - [ ] **T3 — `AlertTileLayout`**
@@ -64,6 +80,11 @@ Task details and checks: plan §6.
 
 2026-09-23: branch `feat/live-alert-wallpaper` created, T0 started. Engram mirror `odd/live-alert-wallpaper/tasks`: **pending** (save refused, several active sessions matched).
 
+2026-09-23: T0 partial: Direct2D on the back buffer works and costs nothing measurable; the
+Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
+
 ## Next step
 
-T0 spike.
+Maintainer decision: fix the Explorer-restart re-attach bug first (separate work, outside this
+feature), then re-run the T0 Explorer leg; or accept T0 as passed on rendering and cost and
+carry the re-attach leg into T9.
