@@ -42,7 +42,7 @@ asked when the running count passes ~400. RDD: on (global).
 
 ## Tasks
 
-- [ ] **T0 — Spike (gate):** throwaway branch `spike/alert-overlay-t0`. Direct2D rectangle and
+- [x] **T0 — Spike (gate):** throwaway branch `spike/alert-overlay-t0`. Direct2D rectangle and
   DirectWrite text drawn in `MediaFoundationVideoWallpaperPlayer.Tick()` between
   `TransferVideoFrame` and `Present`. Check on hardware: visible under the icons, survives the
   400 ms re-attach and an Explorer restart, GPU with and without the overlay (resolution and
@@ -64,6 +64,13 @@ asked when the running count passes ~400. RDD: on (global).
     1x1, never re-parented to the new Progman. So the device re-creation path of the overlay
     could not be exercised. Not caused by the spike: with the variable unset `Draw()` returns on
     a bool.
+  **Passed, 2026-09-23**, after the base bug was fixed on `fix/explorer-restart-reattach`
+  (`322b8fb`, host recreated on the same D3D11 device). Spike branch with the fix cherry-picked
+  (`13ff3ac`), overlay on, Explorer killed: new host `0x8046C` child of the new Progman
+  `0x605C6`, 3392x1440, visible; the capture shows the video AND the overlay band drawn again;
+  the log holds only the first-draw line, no failure. The device survives, so what this exercised
+  is the overlay's back-buffer-keyed target rebuild. This feature branch is now stacked on
+  `fix/explorer-restart-reattach`.
 - [ ] **T1 — `AlertCommandParser`**
 - [ ] **T2 — `AlertQueue`** (needs the open question answered)
 - [ ] **T3 — `AlertTileLayout`**
@@ -83,8 +90,9 @@ Task details and checks: plan §6.
 2026-09-23: T0 partial: Direct2D on the back buffer works and costs nothing measurable; the
 Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 
+2026-09-23: base bug fixed (`fix/explorer-restart-reattach`); T0 passed. Branch rebased onto it.
+
 ## Next step
 
-Maintainer decision: fix the Explorer-restart re-attach bug first (separate work, outside this
-feature), then re-run the T0 Explorer leg; or accept T0 as passed on rendering and cost and
-carry the re-attach leg into T9.
+T1 `AlertCommandParser`. Before its commit: chain strategy (forecast > 400 lines). Before T2:
+the open question.
