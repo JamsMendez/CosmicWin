@@ -271,12 +271,55 @@ Slices (planned, each a PR against main stacked on the previous one):
     `CosmicWinAlert.Tests` 11 passed / 0 failed. The pipe-touching classes
     (`NamedPipeAlertCommandServerTests`, `NamedPipeAlertCommandServerAclTests`,
     `CosmicWinAlert.Tests`) were each run three times end to end: stable every time, no flakes.
-- [ ] **T4c — Correct the three defects T4b introduced.** Added 2026-09-23, maintainer accepted
+- [x] **T4c — Correct the three defects T4b introduced.** Added 2026-09-23, maintainer accepted
   the three advisory findings of review `review-c9bc26f67897ef30` as one bounded correction:
   restore the "not running" message on connect timeout (test asserts stderr), make the drain test
   keep the rude client connected and not reading (RED against the unbounded drain), cap the
   backoff below the client's connect budget and reset it after any accepted connection. Route:
-  delegated writer (same writer as T4b).
+  delegated writer (same writer as T4b). 266 authored lines across three commits.
+  - **R3-client-connect-timeout-message-regressed** (`CosmicWinAlert/Program.cs`,
+    `CosmicWinAlert.Tests/ProgramTests.cs`): T4b's client-exit-code fix had folded connecting and
+    the write/read round trip into one shared `try`, so a connect timeout (no server listening)
+    started printing "did not reply in time" instead of the original "not running" message; the
+    exit code (2) was never wrong. Split back into two `try` blocks, each with its own message --
+    "not running" for `ConnectAsync` failures/timeouts, "did not reply in time" only for a timeout
+    AFTER a successful connect. TDD: RED 1 failed (`RunAsync_NoServerListening_...` got "did not
+    reply in time" instead of "not running"; the paired "connected but never replies" test already
+    passed, since both cases happened to share text under the bug) / 1 passed; GREEN 13/13 (full
+    `CosmicWinAlert.Tests`, two new stderr-text assertions). Commit `91f5783`.
+  - **R3-drain-test-does-not-prove-timeout** (`CosmicWin.Interop.Tests/Win32/NamedPipeAlertCommandServerTests.cs`,
+    test-only): the original drain test disposed the rude client BEFORE the second client
+    connected -- disposing breaks the pipe by itself, so the OLD unbounded `WaitForPipeDrain` would
+    have passed that version too, proving nothing about `ReplyTimeout` specifically. Rewrote it so
+    the rude client stays connected and non-reading for the WHOLE test, including while the second
+    client connects and must be served within `ReplyTimeout + 3s`. TDD, proven per the coordinator's
+    instructions by temporarily reverting the bound: with `WriteReplyAsync`'s bounded drain
+    temporarily replaced by the bare pre-fix `pipe.WaitForPipeDrain()` call (reverted immediately
+    after, never committed), the rewritten test failed -- `OperationCanceledException` from the
+    second client's own 5s connect budget, i.e. it never got served -- RED confirmed the test
+    actually exercises the bound; with the real bound restored, GREEN (same test, 1/1), then the
+    full pipe suite 15/15. Commit `fe10136`.
+  - **R3-backoff-ceiling-exceeds-client-connect-timeout** (`CosmicWin.Interop/Win32/NamedPipeAlertCommandServer.cs`,
+    its tests): `MaxRetryBackoff` lowered from 5s to 500ms (ample headroom under
+    `CosmicWinAlert.Program.ConnectTimeout`'s ~1s), and `ServeOneConnectionAsync` now takes an
+    `onConnectionAccepted` callback invoked immediately after `WaitForConnectionAsync` succeeds, so
+    `RunLoop` resets the backoff at the moment of ACCEPTANCE rather than only once
+    `ServeOneConnectionAsync` returns without throwing (which today only happens after a full
+    serve, though nothing between acceptance and return could actually throw -- this makes the
+    reset point explicit and robust to that changing later). TDD: RED -- a new test occupies a pipe
+    name with a "blocker" server, lets a second server fail against the collision for a 4s burst,
+    disposes the blocker, then asserts a real client can connect within its own 1s budget; against
+    the unfixed 5s-cap/served-only-reset code this failed deterministically
+    (`OperationCanceledException`, the client's 1s budget expired); GREEN after the fix, same test,
+    plus the full `NamedPipeAlertCommandServerTests`/`NamedPipeAlertCommandServerAclTests` suite
+    (16/16) -- including the existing hot-spin diagnostics-count test, still comfortably within its
+    `[1, 25]` bound under the new lower cap. Commit `94fae54`.
+  - **Verification**: `dotnet build CosmicWin.sln -c Debug` 0 errors; `CosmicWin.App.Tests` 964
+    passed / 0 failed / 6 skipped; `CosmicWin.Interop.Tests` 203 passed / 0 failed / 34 skipped;
+    `CosmicWinAlert.Tests` 13 passed / 0 failed. Pipe-touching classes
+    (`NamedPipeAlertCommandServerTests`, `NamedPipeAlertCommandServerAclTests`,
+    `CosmicWinAlert.Tests`) each run three times end to end: stable every time (16/16 and 13/13
+    every run), no flakes. `CosmicWin.App.exe` was not stopped or started.
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
@@ -303,6 +346,14 @@ a RED test per finding (see T4b entry for evidence): bounded reply drain + force
 exponential RunLoop backoff, honest oversized-reply size, mapped client exit codes, exact-DACL
 test, and `AlertQueue` constructor validation. Four commits (`a89830b`, `427f7ac`, `9208efd`,
 `e4abf30`), 469 authored lines. Full verification green three times over for the pipe-touching
+test classes; no flakes.
+
+2026-09-23: T4c done -- the three defects review `review-c9bc26f67897ef30` found in T4b's own
+change, fixed as one bounded correction with a RED test per defect (see T4c entry for evidence):
+restored the connect-timeout "not running" message, rewrote the drain test to actually prove the
+bound (RED demonstrated by temporarily reverting the bound), and capped the RunLoop backoff under
+the client's connect budget with an accept-time reset. Three commits (`91f5783`, `fe10136`,
+`94fae54`), 266 authored lines. Full verification green three times over for the pipe-touching
 test classes; no flakes.
 
 ## Reviews
@@ -338,15 +389,16 @@ test classes; no flakes.
 - Slice T4b (`--base-ref 8db204d`, 565 lines, risk `medium`, `slice_budget_reached`): consent
   granted by the maintainer; lineage `review-c9bc26f67897ef30`, one lens (reliability),
   **approved**, acknowledged, authority burned. Reviewed boundary is now the T4b record commit.
-  Advisory findings, all introduced by T4b itself:
+  Advisory findings, all introduced by T4b itself -- all three fixed by T4c, see its task entry:
   - `R3-client-connect-timeout-message-regressed` (SUGGESTION, deterministic): a connect timeout
     (CosmicWin not running) now prints "did not reply in time" instead of "not running"; exit
-    code still 2; no test asserts the stderr text.
+    code still 2; no test asserts the stderr text. Fixed, commit `91f5783`.
   - `R3-drain-test-does-not-prove-timeout` (WARNING): the drain test disposes the rude client
-    before the second one connects, so the old unbounded code would pass it too.
+    before the second one connects, so the old unbounded code would pass it too. Fixed, commit
+    `fe10136`.
   - `R3-backoff-ceiling-exceeds-client-connect-timeout` (SUGGESTION): backoff caps at 5 s and
     resets only after a served connection; a client's ~1 s connect budget can miss a recovered
-    server.
+    server. Fixed, commit `94fae54`.
 
 ## Next step
 
