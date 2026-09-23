@@ -66,6 +66,28 @@ public sealed class NamedPipeAlertCommandServerTests
         Assert.Equal(0, handlerCalls);
     }
 
+    /// <summary>
+    /// Finding R3-oversized-reply-size: a message too large to fit the whole read buffer only ever
+    /// has a TRUNCATED read count available on the server -- reporting that truncated count as the
+    /// message's size (the old behaviour) is misleading, since the sender's real message was larger.
+    /// The reply must instead be an honest lower bound.
+    /// </summary>
+    [Fact]
+    public async Task SeverelyOversizedMessage_ThatDoesNotFitTheReadBuffer_ReportsAnHonestLowerBoundNotTheTruncatedCount()
+    {
+        var pipeName = UniquePipeName();
+        using var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        server.Start();
+
+        // Larger than NamedPipeAlertCommandServer.ReadBufferSize: the server's one ReadAsync call
+        // can only ever see the first ReadBufferSize bytes of this, and IsMessageComplete reports
+        // false for the rest.
+        var severelyOversized = new string('w', NamedPipeAlertCommandServer.ReadBufferSize + 500);
+        var reply = await SendAsync(pipeName, severelyOversized);
+
+        Assert.Equal(AlertPipeProtocol.OversizedReplyAtLeast(NamedPipeAlertCommandServer.ReadBufferSize), reply);
+    }
+
     [Fact]
     public async Task ConnectingWithNoServerListening_FailsQuickly()
     {
@@ -103,6 +125,114 @@ public sealed class NamedPipeAlertCommandServerTests
         // A well-behaved client arriving afterwards must still be served normally.
         var reply = await SendAsync(pipeName, "warning:1");
         Assert.Equal("ok", reply);
+    }
+
+    /// <summary>
+    /// Finding R3-runloop-hot-spin: <see cref="NamedPipeAlertCommandServer"/> creates its pipe
+    /// instance with <c>nMaxInstances = 1</c>, so a second server started on the SAME pipe name can
+    /// never create its own instance -- every one of its <c>RunLoop</c> iterations fails the same
+    /// way, forever. Before the fix this retried with no delay at all (a genuine hot spin: one CPU
+    /// core pegged, and the diagnostic callback flooded as fast as the loop could run). With the
+    /// 100&#8201;ms&#8594;5&#8201;s exponential backoff, the number of failures (and therefore
+    /// diagnostics) over any bounded window is small and predictable, and the healthy first server
+    /// is completely unaffected.
+    /// </summary>
+    [Fact]
+    public async Task TwoServersOnTheSamePipeName_TheSecondBacksOffAndTheFirstKeepsServing()
+    {
+        var pipeName = UniquePipeName();
+        using var first = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        first.Start();
+
+        // Give the first server's background thread time to actually own the pipe instance before
+        // the second one starts racing it -- otherwise which one wins the collision is a coin flip.
+        Thread.Sleep(200);
+
+        var collisionDiagnostics = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var second = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply, collisionDiagnostics.Enqueue);
+        second.Start();
+
+        // A short, bounded window for the collision to keep retrying in the background.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        // The first, healthy server must be completely unaffected by the second one's failures.
+        var reply = await SendAsync(pipeName, "warning:1");
+        Assert.Equal("ok", reply);
+
+        // A hot spin (no backoff at all) would log many thousands of times in 3 seconds; with
+        // 100ms doubling up to 5s, the cumulative wait after 5 failures already exceeds 3s (100 +
+        // 200 + 400 + 800 + 1600 = 3100ms), so the count is small -- a generous upper bound that
+        // would only be reached by something far closer to a hot spin than real backoff.
+        Assert.InRange(collisionDiagnostics.Count, 1, 25);
+    }
+
+    /// <summary>
+    /// Finding R3-reply-drain-unbounded: the old <c>WriteReplyAsync</c> called <see
+    /// cref="PipeStream.WaitForPipeDrain"/> with no timeout, which blocks until the client has read
+    /// everything or the connection breaks. A same-user client that connects, sends a valid
+    /// command, and then simply never reads its reply used to hang that call -- and, because this
+    /// server's pipe is <c>nMaxInstances = 1</c>, hang the single instance -- forever. The reply
+    /// path must now give up after a bound (<see cref="NamedPipeAlertCommandServer.ReplyTimeout"/>)
+    /// and move on to the next connection.
+    /// </summary>
+    [Fact]
+    public async Task AClientThatWritesAndNeverReads_DoesNotStallTheServerFromServingTheNextClient()
+    {
+        var pipeName = UniquePipeName();
+        using var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        server.Start();
+
+        using (var rudeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            using var connectTimeout = new CancellationTokenSource(ShortTimeout);
+            await rudeClient.ConnectAsync(connectTimeout.Token);
+            rudeClient.ReadMode = PipeTransmissionMode.Message;
+
+            using var writeTimeout = new CancellationTokenSource(ShortTimeout);
+            // Writes a genuinely valid command and then, deliberately, never reads the reply.
+            await rudeClient.WriteAsync(Encoding.UTF8.GetBytes("warning:1"), writeTimeout.Token);
+            await rudeClient.FlushAsync(writeTimeout.Token);
+
+            // Long enough to be certain the server's own ReplyTimeout has already fired and moved
+            // on, without depending on exact timing.
+            await Task.Delay(NamedPipeAlertCommandServer.ReplyTimeout + TimeSpan.FromSeconds(2));
+        }
+
+        // A well-behaved client arriving afterwards must still be served normally, within a few
+        // seconds -- the whole point of bounding the drain.
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var reply = await SendAsync(pipeName, "warning:1");
+        elapsed.Stop();
+
+        Assert.Equal("ok", reply);
+        Assert.True(elapsed.Elapsed < ShortTimeout, $"The next client took {elapsed.Elapsed} to be served.");
+    }
+
+    /// <summary>Finding R3-reply-drain-unbounded: Dispose must stay prompt even while a connection is stuck mid-reply-drain.</summary>
+    [Fact]
+    public async Task Dispose_WhileAClientIsStuckNotReadingTheReply_ReturnsPromptly()
+    {
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        server.Start();
+
+        using var rudeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        using var connectTimeout = new CancellationTokenSource(ShortTimeout);
+        await rudeClient.ConnectAsync(connectTimeout.Token);
+        rudeClient.ReadMode = PipeTransmissionMode.Message;
+
+        using var writeTimeout = new CancellationTokenSource(ShortTimeout);
+        await rudeClient.WriteAsync(Encoding.UTF8.GetBytes("warning:1"), writeTimeout.Token);
+        await rudeClient.FlushAsync(writeTimeout.Token);
+
+        // Give the server a moment to actually reach the write/drain step before disposing.
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        server.Dispose();
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < ShortTimeout, $"Dispose took {elapsed.Elapsed} with a stuck reply drain.");
     }
 
     [Fact]

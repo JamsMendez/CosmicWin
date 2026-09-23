@@ -59,6 +59,25 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
     public static readonly TimeSpan ConnectionReadTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// Starting delay before <see cref="RunLoop"/> retries after a RunLoop-level failure (e.g. a
+    /// pipe-name collision with another instance), doubled after every consecutive failure up to
+    /// <see cref="MaxRetryBackoff"/> and reset back to this the moment a connection is served again
+    /// (finding R3-runloop-hot-spin).
+    /// </summary>
+    public static readonly TimeSpan InitialRetryBackoff = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Ceiling for <see cref="RunLoop"/>'s exponential retry backoff.</summary>
+    public static readonly TimeSpan MaxRetryBackoff = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Total bound (finding R3-reply-drain-unbounded) on writing the reply AND waiting for the
+    /// client to actually read it (<see cref="WriteReplyAsync"/>): a same-user client that connects,
+    /// sends a valid command, and then never reads back its reply must not be able to hang this
+    /// single-instance server forever. Same order of magnitude as <see cref="ConnectionReadTimeout"/>.
+    /// </summary>
+    public static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Larger than <see cref="AlertPipeProtocol.MaxMessageBytes"/> on purpose: reading a moderately
     /// oversized message fully (rather than the theoretical minimum of one byte past the limit)
     /// lets <see cref="AlertPipeProtocol.OversizedReply"/> report the real size, while still
@@ -66,7 +85,11 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
     /// still reports <see langword="false"/> and the rest of an oversized message is simply
     /// discarded when the pipe instance is disposed, never read into memory.
     /// </summary>
-    private const int ReadBufferSize = AlertPipeProtocol.MaxMessageBytes * 4;
+    /// <summary>
+    /// Internal (rather than <see langword="private"/>) so <c>NamedPipeAlertCommandServerTests</c>
+    /// can size a deliberately-too-large test message without duplicating this constant.
+    /// </summary>
+    internal const int ReadBufferSize = AlertPipeProtocol.MaxMessageBytes * 4;
 
     private readonly string _pipeName;
     private readonly Func<string, string> _handleCommand;
@@ -107,13 +130,28 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
     /// and reported, never allowed to end the loop: the constraint from the task file is "errors on
     /// one connection never stop the server."
     /// </summary>
+    /// <remarks>
+    /// Finding R3-runloop-hot-spin: a RunLoop-level failure (most notably a pipe-name collision --
+    /// another instance already owns this <c>nMaxInstances = 1</c> pipe name -- but also any other
+    /// per-iteration Win32 failure) used to retry with no delay at all: a genuine hot spin, pegging
+    /// a CPU core and flooding <see cref="_onDiagnostic"/> as fast as the loop could run. Each
+    /// consecutive failure now waits <see cref="InitialRetryBackoff"/>, doubling up to <see
+    /// cref="MaxRetryBackoff"/>, which bounds both the retry rate AND the diagnostic rate together
+    /// (they are the same event) without a separate coalescing mechanism. The backoff resets the
+    /// moment a connection is served again, so a transient failure never permanently slows down an
+    /// otherwise healthy server. The wait itself is <see cref="_stopping"/>'s own wait handle, not a
+    /// plain sleep, so <see cref="Dispose"/> still returns promptly even mid-backoff.
+    /// </remarks>
     private void RunLoop()
     {
+        var backoff = InitialRetryBackoff;
+
         while (!_stopping.IsCancellationRequested)
         {
             try
             {
                 ServeOneConnectionAsync().GetAwaiter().GetResult();
+                backoff = InitialRetryBackoff;
             }
             catch (OperationCanceledException)
             {
@@ -123,6 +161,8 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
             catch (Exception error)
             {
                 _onDiagnostic($"alert pipe: {error.GetType().Name}: {error.Message}");
+                _stopping.Token.WaitHandle.WaitOne(backoff);
+                backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxRetryBackoff.Ticks));
             }
         }
     }
@@ -158,9 +198,18 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
         // fit under ReadBufferSize) but is still past the wire limit (the everyday case, e.g. a
         // stray extra token) -- that one needs BOTH the read to complete and this length check,
         // since IsMessageComplete alone would let it straight through to the handler.
-        var reply = !pipe.IsMessageComplete || read > AlertPipeProtocol.MaxMessageBytes
-            ? AlertPipeProtocol.OversizedReply(read)
-            : InvokeHandler(Encoding.UTF8.GetString(buffer, 0, read));
+        //
+        // The two shapes get different reply text (finding R3-oversized-reply-size): when the
+        // message fit under ReadBufferSize, `read` IS the sender's real total, so OversizedReply
+        // reports it exactly; when it did not, `read` is only how much this ONE ReadAsync call
+        // captured before giving up -- reporting that as the message's size would understate a
+        // message that could be arbitrarily larger, so OversizedReplyAtLeast states it as the
+        // honest lower bound it actually is.
+        var reply = !pipe.IsMessageComplete
+            ? AlertPipeProtocol.OversizedReplyAtLeast(read)
+            : read > AlertPipeProtocol.MaxMessageBytes
+                ? AlertPipeProtocol.OversizedReply(read)
+                : InvokeHandler(Encoding.UTF8.GetString(buffer, 0, read));
 
         await WriteReplyAsync(pipe, reply).ConfigureAwait(false);
     }
@@ -183,14 +232,63 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
         try
         {
             var bytes = Encoding.UTF8.GetBytes(reply);
-            await pipe.WriteAsync(bytes, _stopping.Token).ConfigureAwait(false);
-            await pipe.FlushAsync(_stopping.Token).ConfigureAwait(false);
-            pipe.WaitForPipeDrain();
+            using var replyBudget = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+            replyBudget.CancelAfter(ReplyTimeout);
+
+            await pipe.WriteAsync(bytes, replyBudget.Token).ConfigureAwait(false);
+            await pipe.FlushAsync(replyBudget.Token).ConfigureAwait(false);
+            await DrainWithinReplyTimeoutAsync(pipe, replyBudget.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!_stopping.IsCancellationRequested)
+        {
+            _onDiagnostic("alert pipe: the client did not finish reading the reply within the reply timeout");
         }
         catch (Exception error)
         {
             _onDiagnostic($"alert pipe: failed to write the reply: {error.GetType().Name}: {error.Message}");
         }
+    }
+
+    /// <summary>
+    /// Bounds <see cref="PipeStream.WaitForPipeDrain"/>, which has no async or cancellable overload
+    /// and blocks synchronously until the client has read everything or the connection breaks
+    /// (finding R3-reply-drain-unbounded). Since it cannot itself be cancelled, it is raced on a
+    /// background thread against <paramref name="cancellationToken"/>; if the token wins, the
+    /// connection is forced closed with <see cref="NamedPipeServerStream.Disconnect"/> so the
+    /// blocked native call actually returns and the OS frees this single pipe instance for the next
+    /// client -- <see cref="IDisposable.Dispose"/> alone would not do that, since the pending native
+    /// call keeps the underlying handle referenced until it returns. The abandoned drain task's
+    /// result (success or, after the forced disconnect, a broken-pipe failure) is intentionally
+    /// never observed further -- there is nothing more to do with it once this method has already
+    /// decided the connection is over.
+    /// </summary>
+    private async Task DrainWithinReplyTimeoutAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    {
+        var drain = Task.Run(pipe.WaitForPipeDrain, CancellationToken.None);
+        var winner = await Task.WhenAny(drain, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
+
+        if (winner == drain)
+        {
+            await drain.ConfigureAwait(false); // observes/rethrows a genuine drain failure
+            return;
+        }
+
+        try
+        {
+            pipe.Disconnect();
+        }
+        catch
+        {
+            // Best-effort: the goal is only to unblock the still-running WaitForPipeDrain call.
+        }
+
+        _ = drain.ContinueWith(
+            static t => t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     /// <summary>

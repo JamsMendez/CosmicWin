@@ -56,6 +56,15 @@ public static class AlertPipeProtocol
         FormatError($"command is {actualBytes} bytes long, past the {MaxMessageBytes}-byte limit");
 
     /// <summary>
+    /// The reply for a command message so large it did not even fit the server's read buffer (finding
+    /// R3-oversized-reply-size): the server only knows it read at least <paramref
+    /// name="atLeastBytes"/> before giving up, not the sender's real total, so this states that
+    /// honestly rather than reporting the truncated read count as if it were the whole message.
+    /// </summary>
+    public static string OversizedReplyAtLeast(int atLeastBytes) =>
+        FormatError($"command is more than {atLeastBytes} bytes long, past the {MaxMessageBytes}-byte limit");
+
+    /// <summary>
     /// Encodes <paramref name="command"/> as UTF-8 for the wire, failing when it would exceed
     /// <see cref="MaxMessageBytes"/> -- the same check the server applies to what it reads, run
     /// once up front so a client never sends a message the server is guaranteed to reject.

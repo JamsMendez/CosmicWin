@@ -61,6 +61,12 @@ public sealed class AlertPipeProtocolTests
         Assert.Equal("error: command is 300 bytes long, past the 256-byte limit", AlertPipeProtocol.OversizedReply(300));
 
     [Fact]
+    public void OversizedReplyAtLeast_NamesALowerBoundRatherThanAnExactCount() =>
+        Assert.Equal(
+            "error: command is more than 1024 bytes long, past the 256-byte limit",
+            AlertPipeProtocol.OversizedReplyAtLeast(1024));
+
+    [Fact]
     public void FormatError_PrependsTheErrorPrefix() =>
         Assert.Equal("error: busy", AlertPipeProtocol.FormatError("busy"));
 
