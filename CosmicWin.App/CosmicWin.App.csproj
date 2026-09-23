@@ -18,6 +18,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- T1 (webview-alert-layer): the trimmed, transparent alert page, served locally in T3 via
+         WebView2's SetVirtualHostNameToFolderMapping (that API maps a virtual host to a real
+         FOLDER), so these ship as loose content files next to the executable (CopyToOutputDirectory),
+         not as embedded resources that would first need extracting back to disk. ProjectReference
+         propagates them into CosmicWin.App.Tests' own output too, which is what
+         AlertLayerWebPageTests reads. -->
+    <Content Include="Alerts\Web\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Task 3.16 (WU11): UseWindowsForms implicitly globals System.Drawing/System.Windows.Forms,
          which collide with CosmicWin.Interop.Rectangle and WPF's System.Windows.Application across
          the rest of this project. Scope both back down to an explicit `using` in Tray/TrayIconHost.cs. -->

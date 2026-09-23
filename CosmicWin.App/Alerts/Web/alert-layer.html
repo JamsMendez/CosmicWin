@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!--
+  T1 (webview-alert-layer): trimmed, transparent, offline copy of the great-sage page's alert layer.
+  Loaded with a hash carrying the kind and duration, e.g.:
+
+      alert-layer.html#kind=failed&duration=5000
+      alert-layer.html#kind=warning&duration=5000
+
+  Starts immediately on load; no script needs to be injected by the host. When the layer finishes,
+  it posts 'done' through window.chrome.webview (T3's CoreWebView2), guarded so this same file can
+  also be opened directly in an ordinary browser tab for a manual check (see alert-layer.js remarks).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CosmicWin alert layer</title>
+<link rel="stylesheet" href="alert-layer.css">
+</head>
+<body>
+<canvas id="alert-layer-canvas"></canvas>
+<script src="alert-layer.js"></script>
+</body>
+</html>
