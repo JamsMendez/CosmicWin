@@ -197,4 +197,37 @@ public sealed class AlertQueueTests
         Assert.Null(active);
         Assert.Single(messages);
     }
+
+    /// <summary>Finding R3-queue-ctor-unvalidated: a non-positive capacity can never hold a single
+    /// alert, so it is a construction error rather than a queue that silently rejects everything.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Constructor_NonPositiveCapacity_Throws(int capacity) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AlertQueue(capacity: capacity));
+
+    /// <summary>Finding R3-queue-ctor-unvalidated: a negative max age can never be "waited longer
+    /// than", which would make every enqueue immediately eligible for drop AND for a bogus negative
+    /// duration comparison -- reject it at construction instead.</summary>
+    [Fact]
+    public void Constructor_NegativeMaxAge_Throws() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AlertQueue(maxAge: TimeSpan.FromTicks(-1)));
+
+    /// <summary>Decided here (finding R3-queue-ctor-unvalidated): a ZERO max age is allowed -- it
+    /// means "this alert must start immediately or be dropped," not "reject the queue." An alert
+    /// enqueued and advanced at the very same instant is still exactly at the max age (see
+    /// <see cref="AnAlertAtExactlyTheMaxAge_IsStillEligible"/>'s boundary), so it starts on that
+    /// same call.</summary>
+    [Fact]
+    public void Constructor_ZeroMaxAge_IsAllowed_AndTheAlertStartsOnTheSameInstantItWasEnqueued()
+    {
+        var queue = new AlertQueue(maxAge: TimeSpan.Zero);
+        var command = Command();
+        queue.Enqueue(command, Epoch);
+
+        var active = queue.Advance(Epoch, desktopVisible: true);
+
+        Assert.NotNull(active);
+        Assert.Same(command, active!.Command);
+    }
 }

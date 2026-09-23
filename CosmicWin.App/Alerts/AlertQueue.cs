@@ -51,17 +51,39 @@ public sealed class AlertQueue
     private ActiveAlert? _current;
 
     /// <param name="capacity">Bound on the FIFO of not-yet-started alerts. Small values let tests exercise rejection without enqueuing 8 commands.</param>
-    /// <param name="maxAge">How long a queued alert may wait before it is dropped unshown; defaults to <see cref="DefaultMaxAge"/> when omitted.</param>
+    /// <param name="maxAge">
+    /// How long a queued alert may wait before it is dropped unshown; defaults to <see
+    /// cref="DefaultMaxAge"/> when omitted. <see cref="TimeSpan.Zero"/> is allowed (finding
+    /// R3-queue-ctor-unvalidated) and means "must start on the same tick it was enqueued, or be
+    /// dropped" -- <see cref="DropExpired"/>'s strictly-greater-than check still leaves an alert
+    /// exactly at its max age eligible, so a zero max age does not make every enqueue pointless.
+    /// </param>
     /// <param name="onDiagnostic">
     /// Told about every rejection and every drop, with a short message naming the reason, so the
     /// caller can log it. Never called with anything else, and never expected to throw. Defaults to
     /// a no-op, the same optional-delegate convention <c>AppComposition</c>'s <c>persistX</c>
     /// parameters use.
     /// </param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="capacity"/> is not positive (a queue that can hold nothing would just reject
+    /// every alert, which is a construction error, not a runtime rejection), or the resolved
+    /// <paramref name="maxAge"/> is negative (finding R3-queue-ctor-unvalidated).
+    /// </exception>
     public AlertQueue(int capacity = DefaultCapacity, TimeSpan? maxAge = null, Action<string>? onDiagnostic = null)
     {
+        if (capacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
+        }
+
+        var resolvedMaxAge = maxAge ?? DefaultMaxAge;
+        if (resolvedMaxAge < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxAge), resolvedMaxAge, "Max age must not be negative.");
+        }
+
         _capacity = capacity;
-        _maxAge = maxAge ?? DefaultMaxAge;
+        _maxAge = resolvedMaxAge;
         _onDiagnostic = onDiagnostic ?? (_ => { });
     }
 
