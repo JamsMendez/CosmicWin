@@ -378,7 +378,31 @@ Slices (planned, each a PR against main stacked on the previous one):
   Debug` 0 warnings / 0 errors. Native review `review-13be75f36453d741` (reliability) required a
   one-line correction adding an explicit alerts namespace import to the new test file; targeted
   validation then approved and was acknowledged. Advisory findings are recorded in Reviews.
-- [ ] **T9 — Supervised hardware run**
+- [x] **T9 — Supervised hardware run** (2026-09-23, agent-driven, elevated shell, 3440x1440
+  primary, app launched from `run\` via `scripts/run.ps1`). Screenshots were taken with the
+  maintainer's windows minimized and restored afterwards. Results:
+  - Combined `warning:2 failed:1`: three tiles in command order at 2 s, cleared by 7 s. **Pass.**
+  - Back-to-back `failed:1 duration:3` then `warning:6 duration:3` (65 ms apart): the failed tile
+    showed first (1.2 s), the six warnings after it (4 s), clear at 7.5 s -- FIFO, one at a time.
+    **Pass.**
+  - Malformed `bogus:3` and `failed:17`: client exit 1 with a one-line reason. **Pass.**
+  - Explorer restart (`Stop-Process explorer`): video re-attached, a later `warning:1 failed:3`
+    drew correctly and cleared. **Pass.**
+  - GPU (`\GPU Engine(*engtype_3D)` summed for the app PID): idle 7.08 %, 16-tile
+    `failed:8 warning:8` 11.18 %, after clear 6.81 %. Idle cost returns to baseline. **Pass.**
+  - `alerts-enabled = off` + app restart: client prints "not running, or is not listening" and
+    exits 2; restoring the setting and restarting accepts alerts again. **Pass.** (App was stopped
+    with `Stop-Process -Force`, so graceful tray-exit disposal was not exercised.)
+  - No `alert-overlay.log` was created during the whole run: no overlay draw/resource failures.
+  - **Covered desktop: FAIL.** A borderless topmost fullscreen probe covered the primary monitor,
+    `failed:2 duration:4` was sent under it (exit 0), the probe closed 5 s later: no tiles ever
+    appeared. Cause (code): production passes `desktopVisible: videoWallpaperActive`
+    (`AppComposition.cs` ~line 416), which stays true under a fullscreen window, so the queue plays
+    the alert out unseen instead of holding it (decision of 2026-09-23). Tracked as T10.
+- [ ] **T10 — Real desktop-visibility predicate for the alert queue.** Feed `AlertQueue` a
+  predicate that is false while a fullscreen window covers the primary monitor (reuse the a023fac
+  fullscreen detection), so covered alerts are held up to the max age and shown on uncover.
+  Check: wiring test with a fake predicate + repeat the T9 covered-desktop probe on hardware.
 
 Task details and checks: plan §6.
 
@@ -511,4 +535,4 @@ native review approved after the one-line test import correction.
 
 ## Next step
 
-T9 (supervised hardware run).
+T10 (covered-desktop predicate), found by T9. Everything else in T9 passed.
