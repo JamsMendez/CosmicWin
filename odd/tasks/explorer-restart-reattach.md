@@ -55,7 +55,7 @@ Strategy: `ask-on-risk` (default). Forecast: under 400 authored lines. RDD: on (
   attach test destroys the host window and calls `TryAttach()` again; it must return true with a
   new live, parented window and the same `Device`. Then GREEN, then REFACTOR. Route: delegated
   writer (host + test file).
-- [ ] **R2 — Hardware check.** Parent runs the Release build, restarts Explorer, and captures the
+- [x] **R2 — Hardware check.** Parent runs the Release build, restarts Explorer, and captures the
   desktop and the window tree.
 
 ## Progress
@@ -90,8 +90,18 @@ Strategy: `ask-on-risk` (default). Forecast: under 400 authored lines. RDD: on (
   failed.
 - Files: `CosmicWin.Interop/Win32/Win32VideoWallpaperHost.cs`, `CosmicWin.Interop/IVideoWallpaperHost.cs`,
   `CosmicWin.Interop.Tests/Win32/Win32VideoWallpaperHostRealAttachTests.cs`.
-- Commit: `<pending — parent fills in the hash>`.
+- Commit: `322b8fb`.
+
+2026-09-23: R2 passed on hardware (RTX 4060 Ti, 3440x1440 @ 164 Hz, Debug build of `322b8fb`
+run from a `run/` copy). Parent re-ran the gated real-attach filter first: 4/4 passed.
+
+- Before: host `0x2035E` (`WS_CHILD|WS_VISIBLE`, 3392x1440) child of Progman `0x4055C`.
+- `Stop-Process -Name explorer -Force`, Explorer restarts; ~8 s later: a NEW host `0x50422`,
+  `WS_CHILD|WS_VISIBLE`, 3392x1440, visible, child of the NEW Progman `0xB08DA`.
+- Desktop capture after the restart shows the video wallpaper back and animating (the same build
+  on `main` showed the static Windows wallpaper indefinitely). GPU 3D 6.59 / 7.18 / 7.01 %,
+  the normal cost of the visible video.
 
 ## Next step
 
-R2 — parent's hardware check (do not start `CosmicWin.App`; the parent relaunches it).
+None for this fix. Unblocks the Explorer-restart leg of `odd/tasks/live-alert-wallpaper.md` T0.
