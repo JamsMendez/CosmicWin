@@ -1,7 +1,9 @@
+using System.Runtime.InteropServices;
 using CosmicWin.Interop.Win32;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Direct3D11;
+using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -54,6 +56,33 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         // IsTrackable check excludes it with zero extra work").
         var source = new Win32NativeWindowSource();
         Assert.DoesNotContain(host.Hwnd, source.EnumerateTopLevelWindows());
+    }
+
+    /// <summary>
+    /// T11 (live-alert-wallpaper): on a monitor whose taskbar is not docked bottom -- an ultrawide
+    /// with it docked RIGHT is what the maintainer measured -- sizing the host to the work area
+    /// letterboxes an ultrawide video with black bars, because the work area is narrower/shorter than
+    /// the monitor itself. The host must span the whole monitor (<c>rcMonitor</c>), not the work area
+    /// (<c>rcWork</c>) <see cref="Win32VideoWallpaperHost.CreateHostWindow"/> used before this fix.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_SizesTheHostWindowToTheWholePrimaryMonitorNotJustTheWorkArea()
+    {
+        using var host = new Win32VideoWallpaperHost();
+
+        Assert.True(host.TryAttach());
+
+        HWND hwnd = new(host.Hwnd);
+        Assert.True(PInvoke.GetWindowRect(hwnd, out RECT actual));
+
+        HMONITOR primary = PInvoke.MonitorFromWindow(HWND.Null, MONITOR_FROM_FLAGS.MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi = new() { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
+        Assert.True(PInvoke.GetMonitorInfo(primary, ref mi));
+
+        Assert.Equal(mi.rcMonitor.left, actual.left);
+        Assert.Equal(mi.rcMonitor.top, actual.top);
+        Assert.Equal(mi.rcMonitor.right, actual.right);
+        Assert.Equal(mi.rcMonitor.bottom, actual.bottom);
     }
 
     private static HWND ResolveExpectedDesktopParent()

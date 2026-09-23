@@ -74,10 +74,10 @@ public sealed class AlertWallpaperWiringTests
         Counter ClearCount,
         RecordingDesktopTrace Trace);
 
-    private static Harness Wire(bool alertsEnabled = true)
+    private static Harness Wire(bool alertsEnabled = true, IDisplay? primary = null)
     {
         var workspace = new FakeWorkspace();
-        var primary = new FakeDisplay(
+        primary ??= new FakeDisplay(
             new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
         var registry = new WindowRegistry();
         var treeManager = new TreeManager([primary], primary, registry);
@@ -160,6 +160,39 @@ public sealed class AlertWallpaperWiringTests
                 Assert.True(tile.Bounds.Width > 0);
                 Assert.True(tile.Bounds.Height > 0);
             });
+        }
+    }
+
+    /// <summary>
+    /// T11: the host window (and its back buffer) now spans the WHOLE monitor, not just the work
+    /// area -- so on a monitor whose taskbar is docked at the TOP (work area origin away from the
+    /// monitor's own (0,0)), a tile's back-buffer coordinates must be shifted by that offset, or the
+    /// alert would render <see cref="Rectangle.Top"/> pixels too high, drifting into the taskbar
+    /// strip the layout was supposed to avoid.
+    /// </summary>
+    [Fact]
+    public void ValidAlertCommand_TilesAreOffsetByTheWorkAreasOriginOnTheMonitor()
+    {
+        // Taskbar docked at the top: a 40px strip is carved off the monitor's own top edge, so the
+        // work area's origin sits 40px below the monitor's.
+        var primary = new FakeDisplay(
+            new IntPtr(1),
+            Rectangle.FromSize(0, 0, 1920, 1080),
+            Rectangle.FromSize(0, 40, 1920, 1040),
+            1.0,
+            true);
+        var harness = Wire(primary: primary);
+        using (harness.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, harness.Server!.Send("warning:1"));
+
+            harness.Scheduler.Fire();
+
+            var tile = Assert.Single(Assert.Single(harness.TileSets));
+            // The un-offset layout (work-area-local) would centre a single tile's top somewhere
+            // inside a 1920x1040 area starting at (0,0); back-buffer-local it must start 40px lower,
+            // and never above the work area at all.
+            Assert.True(tile.Bounds.Top >= 40, $"tile.Bounds.Top={tile.Bounds.Top} is above the work area (< 40)");
         }
     }
 

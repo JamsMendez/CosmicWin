@@ -223,6 +223,16 @@ public sealed class AppComposition : IDisposable
         treeManager.TryGetTree(primary, out var primaryTree);
         var workArea = WorkAreaResolver.Resolve(primary);
 
+        // T11 (live-alert-wallpaper): the video wallpaper host (and its back buffer) now spans the
+        // WHOLE monitor, not just the work area -- so the work area's own top-left corner can sit
+        // away from the back buffer's (0,0) (a taskbar docked top or left; docked right or bottom
+        // leaves this at zero, which is what every machine measured on hardware so far has). The
+        // alert tile layout below is computed in work-area-local coordinates and then shifted by
+        // this offset before it reaches the overlay, which draws directly in back-buffer coordinates
+        // -- see AlertTileLayout.ToBackBufferCoordinates.
+        var workAreaOffsetX = primary.WorkArea.Left - primary.Bounds.Left;
+        var workAreaOffsetY = primary.WorkArea.Top - primary.Bounds.Top;
+
         // A chord that throws no longer kills the pump; this is where it says so. Without a sink
         // the manager would drop the chord in silence and look perfectly healthy doing it.
         var (dispatcher, executor) = CompositionRoot.Build(
@@ -425,7 +435,8 @@ public sealed class AppComposition : IDisposable
             var kinds = active.Command.Groups
                 .SelectMany(group => Enumerable.Repeat(group.Kind, group.Count))
                 .ToArray();
-            var bounds = AlertTileLayout.Layout(kinds, workArea.Width, workArea.Height);
+            var localBounds = AlertTileLayout.Layout(kinds, workArea.Width, workArea.Height);
+            var bounds = AlertTileLayout.ToBackBufferCoordinates(localBounds, workAreaOffsetX, workAreaOffsetY);
             var tiles = kinds.Zip(bounds, (kind, bounds) => new FrameOverlayTile(
                 bounds,
                 MapAlertKind(kind),

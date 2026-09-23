@@ -47,6 +47,26 @@ public static class AlertTileLayout
         return PlaceTiles(count, width, height, gap, best);
     }
 
+    /// <summary>
+    /// Translates <paramref name="tiles"/> -- laid out relative to the work area's OWN top-left
+    /// corner, as <see cref="Layout"/> always has -- into back-buffer-local coordinates.
+    /// </summary>
+    /// <remarks>
+    /// T11 (live-alert-wallpaper): the host window (and therefore its back buffer) now spans the
+    /// WHOLE monitor rather than just the work area, so the work area's origin can sit away from the
+    /// back buffer's own (0,0) -- a taskbar docked at the top or left shifts it; docked right or
+    /// bottom leaves it at zero. <paramref name="offsetX"/>/<paramref name="offsetY"/> is that shift,
+    /// resolved by the caller from the live monitor/work-area rects (see <c>AppComposition</c>). Kept
+    /// separate from <see cref="Layout"/>'s own grid arithmetic -- a pure offset, testable on its own
+    /// without re-proving the grid.
+    /// </remarks>
+    public static IReadOnlyList<Rectangle> ToBackBufferCoordinates(
+        IReadOnlyList<Rectangle> tiles, int offsetX, int offsetY) =>
+        tiles
+            .Select(tile => new Rectangle(
+                tile.Left + offsetX, tile.Top + offsetY, tile.Right + offsetX, tile.Bottom + offsetY))
+            .ToArray();
+
     /// <summary>One candidate grid: its shape, and the largest 16:9 tile that fits it.</summary>
     private readonly record struct GridCandidate(int Columns, int Rows, double TileWidth, double TileHeight)
     {

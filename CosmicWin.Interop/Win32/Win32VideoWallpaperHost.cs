@@ -758,9 +758,16 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             return HWND.Null;
         }
 
-        RECT workArea = GetPrimaryWorkArea();
-        var width = workArea.right - workArea.left;
-        var height = workArea.bottom - workArea.top;
+        // T11 (live-alert-wallpaper): the whole MONITOR, not the work area -- sizing to rcWork used
+        // to letterbox an ultrawide video with black bars top and bottom on a monitor whose taskbar
+        // is docked right (measured: 3440x1440 monitor, 3392x1440 work area). The swapchain is sized
+        // from this same window's GetWindowRect further down (CreateSwapChainAndPresentTestPattern /
+        // CreateSwapChainOnExistingDevice), so this one change is enough to size both -- the video
+        // now runs under the taskbar too. The alert tile layout stays confined to the work area; see
+        // AppComposition, which now maps its tiles into these same back-buffer coordinates.
+        RECT monitorRect = GetPrimaryMonitorRect();
+        var width = monitorRect.right - monitorRect.left;
+        var height = monitorRect.bottom - monitorRect.top;
 
         // No WS_EX_LAYERED: a DXGI flip-model swapchain presents through DWM directly and never
         // touches the GDI-era layered/UpdateLayeredWindow path.
@@ -769,8 +776,8 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             _className,
             "CosmicWin Video Wallpaper",
             WINDOW_STYLE.WS_POPUP | WINDOW_STYLE.WS_VISIBLE,
-            workArea.left,
-            workArea.top,
+            monitorRect.left,
+            monitorRect.top,
             width,
             height,
             HWND.Null,
@@ -815,13 +822,20 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         return true;
     }
 
-    private static RECT GetPrimaryWorkArea()
+    /// <summary>
+    /// T11 (live-alert-wallpaper): <c>rcMonitor</c>, the WHOLE primary monitor -- renamed from the
+    /// former <c>GetPrimaryWorkArea</c> (which returned <c>rcWork</c>) now that the host window
+    /// spans the taskbar too. The alert overlay is the one caller that still needs the work area
+    /// specifically (so tiles are not drawn under the taskbar); it reads that separately, from
+    /// <c>IDisplay.WorkArea</c> in <c>AppComposition</c>, not from this host.
+    /// </summary>
+    private static RECT GetPrimaryMonitorRect()
     {
         HMONITOR primary = PInvoke.MonitorFromWindow(HWND.Null, MONITOR_FROM_FLAGS.MONITOR_DEFAULTTOPRIMARY);
         MONITORINFO mi = new() { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
         if (PInvoke.GetMonitorInfo(primary, ref mi))
         {
-            return mi.rcWork;
+            return mi.rcMonitor;
         }
 
         return new RECT { left = 0, top = 0, right = 1920, bottom = 1080 };

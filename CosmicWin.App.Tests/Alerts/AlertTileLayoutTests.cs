@@ -162,4 +162,47 @@ public sealed class AlertTileLayoutTests
     {
         Assert.Equal(count, AlertTileLayout.Layout(Tiles(count), width, height).Count);
     }
+
+    /// <summary>
+    /// T11: the host window (and its back buffer) now spans the WHOLE monitor, not just the work
+    /// area <see cref="Layout"/> was given -- so a work area that does not start at the monitor's
+    /// origin (taskbar docked left or top) needs its tiles shifted by that offset before they are
+    /// handed to the overlay, which draws directly in back-buffer coordinates. Pure translation, kept
+    /// separate from <see cref="Layout"/>'s own grid arithmetic so the offset alone is testable.
+    /// </summary>
+    [Fact]
+    public void ToBackBufferCoordinates_ShiftsEveryRectByTheGivenOffset()
+    {
+        var rects = AlertTileLayout.Layout(Tiles(2), 1920, 1080);
+
+        var shifted = AlertTileLayout.ToBackBufferCoordinates(rects, offsetX: 50, offsetY: 30);
+
+        Assert.Equal(rects.Count, shifted.Count);
+        for (var i = 0; i < rects.Count; i++)
+        {
+            Assert.Equal(rects[i].Left + 50, shifted[i].Left);
+            Assert.Equal(rects[i].Top + 30, shifted[i].Top);
+            Assert.Equal(rects[i].Right + 50, shifted[i].Right);
+            Assert.Equal(rects[i].Bottom + 30, shifted[i].Bottom);
+            Assert.Equal(rects[i].Width, shifted[i].Width);
+            Assert.Equal(rects[i].Height, shifted[i].Height);
+        }
+    }
+
+    /// <summary>A zero offset (taskbar docked right or bottom: the work area already starts at the monitor's origin) is a no-op.</summary>
+    [Fact]
+    public void ToBackBufferCoordinates_WithZeroOffset_ReturnsTheSameRectangles()
+    {
+        var rects = AlertTileLayout.Layout(Tiles(3), 1920, 1080);
+
+        var shifted = AlertTileLayout.ToBackBufferCoordinates(rects, offsetX: 0, offsetY: 0);
+
+        Assert.Equal(rects, shifted);
+    }
+
+    [Fact]
+    public void ToBackBufferCoordinates_OfAnEmptyLayout_IsStillEmpty()
+    {
+        Assert.Empty(AlertTileLayout.ToBackBufferCoordinates([], offsetX: 12, offsetY: 7));
+    }
 }
