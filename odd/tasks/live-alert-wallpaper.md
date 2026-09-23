@@ -233,6 +233,22 @@ mandatory label, and the unelevated `CosmicWinAlert.exe` client, each its own co
     thread while the player may be mid-tick. Not observed in four recoveries; no test covers it.
   - `R3-layout-fallback-out-of-bounds` (SUGGESTION): the zero-size fallback grid can go out of
     bounds for counts far above 16; unreachable through the parser (max 16).
+- Slice T2 + T4 (`--base-ref e87a108`, 1694 lines, risk `medium`, `slice_budget_reached`):
+  consent granted by the maintainer; lineage `review-b48c85520820f775`, one lens (reliability),
+  **approved**, acknowledged, authority burned. Reviewed boundary is now `8db204d`. Advisory,
+  non-blocking findings (not reopened; separate work only if the maintainer accepts it):
+  - `R3-reply-drain-unbounded` (WARNING): `WaitForPipeDrain` has no timeout; a same-user client
+    that writes and never reads hangs the single-instance server.
+  - `R3-runloop-hot-spin` (WARNING): `RunLoop` retries with no backoff; a pipe-name collision
+    (e.g. a second app instance, nMaxInstances 1) spins a core and floods diagnostics.
+  - `R3-client-unmapped-failures` (WARNING): client exceptions other than cancellation (broken
+    pipe, access denied) escape with undocumented exit codes; a zero-byte reply maps to 1, not 2.
+  - `R3-acl-test-owner-masks-dacl` (WARNING): the ACL test would pass on the owner SID alone; it
+    should assert the exact `D:` section.
+  - `R3-oversized-reply-size` (SUGGESTION): oversized reply reports the buffer size, not the
+    real size.
+  - `R3-queue-ctor-unvalidated` (SUGGESTION): `AlertQueue` accepts capacity <= 0 and a negative
+    max age.
 
 ## Next step
 
