@@ -175,6 +175,17 @@ public sealed class NamedPipeAlertCommandServerTests
     /// path must now give up after a bound (<see cref="NamedPipeAlertCommandServer.ReplyTimeout"/>)
     /// and move on to the next connection.
     /// </summary>
+    /// <remarks>
+    /// Finding R3-drain-test-does-not-prove-timeout (review of T4b): the ORIGINAL version of this
+    /// test disposed the rude client, ending its connection, BEFORE the second client connected.
+    /// Disposing a <see cref="NamedPipeClientStream"/> breaks the pipe by itself -- which would
+    /// unblock even the OLD, unbounded <see cref="PipeStream.WaitForPipeDrain"/> just as well as the
+    /// new bounded one, so that version proved nothing about <see
+    /// cref="NamedPipeAlertCommandServer.ReplyTimeout"/> specifically. This version keeps the rude
+    /// client open and non-reading for the ENTIRE test, including while the second client connects
+    /// and is served -- confirmed by re-disabling the bound and observing this exact test fail (see
+    /// the T4c task file entry for the RED/GREEN lines).
+    /// </remarks>
     [Fact]
     public async Task AClientThatWritesAndNeverReads_DoesNotStallTheServerFromServingTheNextClient()
     {
@@ -182,30 +193,34 @@ public sealed class NamedPipeAlertCommandServerTests
         using var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
         server.Start();
 
-        using (var rudeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        // Stays connected for the rest of the test -- NOT disposed before the second client
+        // connects -- so only the server's own ReplyTimeout, never the rude client disconnecting,
+        // can be what frees the single pipe instance below.
+        using var rudeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        using (var connectTimeout = new CancellationTokenSource(ShortTimeout))
         {
-            using var connectTimeout = new CancellationTokenSource(ShortTimeout);
             await rudeClient.ConnectAsync(connectTimeout.Token);
-            rudeClient.ReadMode = PipeTransmissionMode.Message;
+        }
+        rudeClient.ReadMode = PipeTransmissionMode.Message;
 
-            using var writeTimeout = new CancellationTokenSource(ShortTimeout);
-            // Writes a genuinely valid command and then, deliberately, never reads the reply.
+        using (var writeTimeout = new CancellationTokenSource(ShortTimeout))
+        {
+            // Writes a genuinely valid command and then, deliberately, never reads the reply --
+            // and, critically, never disconnects either.
             await rudeClient.WriteAsync(Encoding.UTF8.GetBytes("warning:1"), writeTimeout.Token);
             await rudeClient.FlushAsync(writeTimeout.Token);
-
-            // Long enough to be certain the server's own ReplyTimeout has already fired and moved
-            // on, without depending on exact timing.
-            await Task.Delay(NamedPipeAlertCommandServer.ReplyTimeout + TimeSpan.FromSeconds(2));
         }
 
-        // A well-behaved client arriving afterwards must still be served normally, within a few
-        // seconds -- the whole point of bounding the drain.
+        // A well-behaved second client, arriving WHILE the rude one is still connected and still
+        // not reading, must still be served -- within a generous bound above ReplyTimeout, not
+        // depending on exact timing.
+        var bound = NamedPipeAlertCommandServer.ReplyTimeout + TimeSpan.FromSeconds(3);
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         var reply = await SendAsync(pipeName, "warning:1");
         elapsed.Stop();
 
         Assert.Equal("ok", reply);
-        Assert.True(elapsed.Elapsed < ShortTimeout, $"The next client took {elapsed.Elapsed} to be served.");
+        Assert.True(elapsed.Elapsed < bound, $"The next client took {elapsed.Elapsed} to be served (bound {bound}).");
     }
 
     /// <summary>Finding R3-reply-drain-unbounded: Dispose must stay prompt even while a connection is stuck mid-reply-drain.</summary>
