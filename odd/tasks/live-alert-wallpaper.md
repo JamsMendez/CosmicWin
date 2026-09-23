@@ -399,10 +399,45 @@ Slices (planned, each a PR against main stacked on the previous one):
     appeared. Cause (code): production passes `desktopVisible: videoWallpaperActive`
     (`AppComposition.cs` ~line 416), which stays true under a fullscreen window, so the queue plays
     the alert out unseen instead of holding it (decision of 2026-09-23). Tracked as T10.
-- [ ] **T10 — Real desktop-visibility predicate for the alert queue.** Feed `AlertQueue` a
-  predicate that is false while a fullscreen window covers the primary monitor (reuse the a023fac
-  fullscreen detection), so covered alerts are held up to the max age and shown on uncover.
-  Check: wiring test with a fake predicate + repeat the T9 covered-desktop probe on hardware.
+- [x] **T10 — Real desktop-visibility predicate for the alert queue.** Added
+  `CosmicWin.Interop.Win32.PrimaryMonitorFullscreenDetector`: a pure `IsFullscreen(style, bounds,
+  monitor)` classifier reusing -- not re-inventing -- commit a023fac's own fullscreen definition (no
+  caption, not maximised, covering to within two pixels per edge), duplicated as documented
+  constants only because `CosmicWin.Interop` takes no project references and so cannot depend on
+  `CosmicWin.Layout.Filters.WindowStyleFlags`, plus the real Win32 entry point
+  `IsPrimaryMonitorCoveredByFullscreenWindow()` (foreground window vs the primary monitor -- decided
+  over enumerating every top-level window: what actually hides the desktop is whatever the user is
+  looking at, and this is exactly the shape of the T9 probe, a borderless TOPMOST form that had just
+  taken focus). `AppComposition.Wire` gained an `isPrimaryMonitorCovered` seam, composed with the
+  existing `videoWallpaperActive` flag into the real `desktopVisible` predicate
+  (`alertDesktopVisible`, when supplied, still overrides the whole composition -- the seam every
+  earlier alert test uses); `WireProduction` wires the real detector. TDD: RED
+  `PrimaryMonitorFullscreenDetectorTests` (type missing), GREEN 7/7; RED
+  `AlertDesktopVisibilityWiringTests` (covered desktop still showed the alert -- the T9 defect,
+  reproduced), GREEN 3/3 (covered holds, uncovered shows, queued-while-covered shows on uncover).
+  Commit `613d062`.
+- [x] **T11 — Video covers the whole primary monitor, not its work area.** Renamed
+  `Win32VideoWallpaperHost.GetPrimaryWorkArea` to `GetPrimaryMonitorRect` and sized
+  `CreateHostWindow` to `rcMonitor` instead of `rcWork` -- the swapchain/back buffer already derive
+  their size from `GetWindowRect` on this same window (`CreateSwapChainAndPresentTestPattern` /
+  `CreateSwapChainOnExistingDevice`), so this one change covers both the first attach and the
+  Explorer-restart recreation path (`RecreateDestroyedHostWindow`). Alert tiles stay confined to the
+  work area: added `AlertTileLayout.ToBackBufferCoordinates(tiles, offsetX, offsetY)`, a pure
+  translation, and `AppComposition` now offsets the work-area-local layout by
+  `primary.WorkArea.Left/Top - primary.Bounds.Left/Top` before handing tiles to the overlay, which
+  draws in back-buffer coordinates. TDD: RED `AlertTileLayoutTests` (`ToBackBufferCoordinates`
+  missing), GREEN 160/160 (`App.Tests` full run at the time); RED
+  `ValidAlertCommand_TilesAreOffsetByTheWorkAreasOriginOnTheMonitor` (a taskbar-docked-top fixture,
+  `tile.Bounds.Top=21` instead of `>= 40`), GREEN. A new `[RequiresDesktopSessionFact]`,
+  `TryAttach_SizesTheHostWindowToTheWholePrimaryMonitorNotJustTheWorkArea`, asserts host rect ==
+  monitor rect; run with `COSMICWIN_RUN_DESKTOP_TESTS=1` it **skipped**, exactly because
+  `CosmicWin.App.exe` (PID confirmed live, per the hard rule not to touch it) is running --
+  `DesktopGate.SessionSkipReason` correctly refuses a fact that would spawn a window on top of the
+  running app rather than reporting a false pass or a false fail. Hardware confirmation (host rect,
+  no black bars) is therefore still open -- see Next step. Commit `bc017bc`.
+
+Route (T10 + T11): delegated direct, one writer, sequential commits -- writer trigger (host +
+test, AppComposition + visibility source + tests) and preparation trigger (a023fac detection).
 
 Task details and checks: plan §6.
 
@@ -452,6 +487,25 @@ comparison.
 commands parse/enqueue, the 400 ms tick advances the queue and maps active alerts through layout to
 `Direct2DAlertOverlay`, and disposal owns the server/overlay. Focused and full App tests green;
 native review approved after the one-line test import correction.
+
+2026-09-23: T9 (supervised hardware run) done -- see its own task entry above for the full pass/fail
+list. Every scenario passed except covered-desktop, tracked as T10.
+
+2026-09-23: T11 done -- `Win32VideoWallpaperHost` sizes the host to the whole primary monitor
+(`rcMonitor`) instead of its work area, fixing the ultrawide letterboxing T9's plan anticipated;
+alert tiles are re-offset into back-buffer coordinates so they stay clear of the taskbar. TDD
+RED/GREEN throughout; full `CosmicWin.Interop.Tests` (218/0/35) and `CosmicWin.App.Tests`
+(990/0/6) green. The new real-attach fact SKIPPED under `COSMICWIN_RUN_DESKTOP_TESTS=1` because
+`CosmicWin.App.exe` is running (the hard rule against touching it) -- hardware confirmation is
+still open. Commit `bc017bc`.
+
+2026-09-23: T10 done -- `PrimaryMonitorFullscreenDetector` (Interop) reuses a023fac's own
+fullscreen definition to answer "is the desktop covered", and `AppComposition`'s alert predicate
+now composes it with `videoWallpaperActive` instead of using the video flag alone (T9's finding).
+TDD RED/GREEN throughout (a wiring test reproduces the T9 covered-desktop defect RED, then proves
+hold-while-covered/show-on-uncover GREEN). Full `CosmicWin.Interop.Tests` (218/0/35) and
+`CosmicWin.App.Tests` (990/0/6) green. Commit `613d062`. The T9 covered-desktop hardware probe
+itself still needs re-running (see Next step).
 
 ## Reviews
 
@@ -535,4 +589,10 @@ native review approved after the one-line test import correction.
 
 ## Next step
 
-T10 (covered-desktop predicate), found by T9. Everything else in T9 passed.
+T10/T11 hardware re-check (covered-desktop probe + no black bars). Both are implemented and
+unit-tested green, but neither has been proven on hardware yet: T11's new real-attach fact skipped
+because `CosmicWin.App.exe` is running (must not be touched mid-session), and T10's fix has not
+been re-run against T9's own covered-desktop probe. Exit the running app from the tray first, then
+repeat T9's `failed:2 duration:4` probe under a borderless topmost fullscreen window (expect: held,
+then shown once the probe closes) and take a screenshot of the ultrawide video with no black bars
+top or bottom.
