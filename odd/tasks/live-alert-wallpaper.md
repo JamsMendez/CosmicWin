@@ -271,6 +271,12 @@ Slices (planned, each a PR against main stacked on the previous one):
     `CosmicWinAlert.Tests` 11 passed / 0 failed. The pipe-touching classes
     (`NamedPipeAlertCommandServerTests`, `NamedPipeAlertCommandServerAclTests`,
     `CosmicWinAlert.Tests`) were each run three times end to end: stable every time, no flakes.
+- [ ] **T4c — Correct the three defects T4b introduced.** Added 2026-09-23, maintainer accepted
+  the three advisory findings of review `review-c9bc26f67897ef30` as one bounded correction:
+  restore the "not running" message on connect timeout (test asserts stderr), make the drain test
+  keep the rude client connected and not reading (RED against the unbounded drain), cap the
+  backoff below the client's connect budget and reset it after any accepted connection. Route:
+  delegated writer (same writer as T4b).
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
