@@ -348,7 +348,20 @@ Slices (planned, each a PR against main stacked on the previous one):
   `review-ba2d4e3013e17c30` (reliability) approved and was acknowledged; advisory findings are
   recorded in Reviews. Commit `c2515c7`. Manual/hardware gap: actual Direct2D drawing, alpha
   fallback, Explorer-restart rebuild, and GPU cost still await T9.
-- [ ] **T7 — Alert visuals ported from great-sage**
+- [x] **T7 — Alert visuals ported from great-sage.** Added timing data to
+  `FrameOverlayTile` (`StartedAt`, `Duration`) for T8 mapping and ported the great-sage alert
+  model into `Direct2DAlertOverlay`: failed/warning themes, 230 ms failed shake state, 700 ms
+  reveal progress, 100 ms module counter, full-tile wash, inner frame, segmented rails, large title
+  fragments, side binary modules, and simple moving intersection-band accents. Warning skips shake
+  and backdrop pixelation; failed exposes shake/pixelate state but does not move the video/window.
+  Native v1 approximates canvas compositing with Direct2D primitives: no true backdrop pixelation,
+  no browser/offscreen masking, and title inversion/intersection clipping are approximate and left
+  for T9 visual review. Strict TDD: RED focused `Direct2DAlertOverlay` test compile failed on
+  missing `FrameOverlayTile.StartedAt`/`Duration` and `ComputeVisualStateForTests`; GREEN focused
+  filter 5/5 passed. Verification: `dotnet build CosmicWin.sln -c Debug` 0 warnings / 0 errors;
+  full `CosmicWin.Interop.Tests` 211 passed / 0 failed / 34 skipped. Native review
+  `review-dd0ba74af27e9322` (reliability) approved and was acknowledged; advisory findings are
+  recorded in Reviews.
 - [ ] **T8 — Wiring and `alerts-enabled` setting**
 - [ ] **T9 — Supervised hardware run**
 
@@ -390,6 +403,11 @@ TDD RED/GREEN and full Interop verification green; independent verifier approved
 lazy D2D/DWrite resource lifecycle, device/back-buffer rebuild, failure cleanup/logging, and simple
 plain tile drawing. Focused tests and full Interop tests green; independent verifier approved after
 one lifecycle cleanup fix. Hardware/runtime drawing evidence remains for T9.
+
+2026-09-23: T7 done -- great-sage alert visuals ported into the Direct2D overlay with timing state,
+warning/failed themes, title fragments, rails, modules, and moving band accents. Focused tests,
+build, full Interop tests, and native review all green; visual fidelity remains for T9 hardware
+comparison.
 
 ## Reviews
 
@@ -446,7 +464,18 @@ one lifecycle cleanup fix. Hardware/runtime drawing evidence remains for T9.
   - `R3-native-path-coverage` (WARNING): pure tests cover API/idle snapshot behavior only; real
     Direct2D/D3D draw, alpha fallback, rebuild, and GPU cost remain manual/hardware evidence for
     T9.
+- Slice T7 (`459 lines`, risk `medium`): lineage `review-dd0ba74af27e9322`, one lens
+  (reliability), **approved**, acknowledged, authority burned. Advisory, non-blocking findings
+  (not reopened; separate work only if the maintainer accepts it):
+  - `R3-custom-label-regression` (WARNING): the great-sage visual path uses theme titles rather
+    than a tile's custom `Label`; this matches T7's warning/failed visual port, but T8 should not
+    rely on custom labels unless intentionally restored.
+  - `R3-public-constructor-abi` (WARNING): adding `StartedAt`/`Duration` to the public record
+    constructor changes the constructor ABI. Source compatibility remains for existing named/default
+    usage in this repo; external ABI stability is not promised for this feature branch.
+  - `R3-small-tile-overdraw` (WARNING): small tiles may overdraw dense title/modules. T3 parser and
+    layout cap count at 16; T9 visual comparison should include worst-case small tiles.
 
 ## Next step
 
-T7 (alert visuals ported from great-sage).
+T8 (wiring and `alerts-enabled` setting).

@@ -8,7 +8,9 @@ namespace CosmicWin.Interop;
 public readonly record struct FrameOverlayTile(
     Rectangle Bounds,
     FrameOverlayTileKind Kind = FrameOverlayTileKind.Warning,
-    string? Label = null);
+    string? Label = null,
+    DateTimeOffset StartedAt = default,
+    TimeSpan Duration = default);
 
 public enum FrameOverlayTileKind
 {
