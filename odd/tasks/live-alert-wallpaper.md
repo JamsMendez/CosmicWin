@@ -79,7 +79,17 @@ Slices (planned, each a PR against main stacked on the previous one):
   the log holds only the first-draw line, no failure. The device survives, so what this exercised
   is the overlay's back-buffer-keyed target rebuild. This feature branch is now stacked on
   `fix/explorer-restart-reattach`.
-- [ ] **T1 — `AlertCommandParser`**
+- [x] **T1 — `AlertCommandParser`.** `CosmicWin.App/Alerts/{AlertKind,AlertCommand,AlertCommandParser}.cs`,
+  tests in `CosmicWin.App.Tests/Alerts/AlertCommandParserTests.cs`. Route: delegated writer
+  (trigger: 2+ non-trivial files -- parser + shared record/enum types + tests). TDD: RED-1 (type
+  missing) `error CS0234: The type or namespace name 'Alerts' does not exist`; stubbed
+  `AlertCommandParser.Parse` to throw `NotImplementedException`, RED-2 27 failed / 0 passed, all
+  `NotImplementedException`; GREEN after the real implementation, 27 passed / 0 failed. Grammar:
+  whitespace-separated `kind:count` tokens (`warning`/`failed`, case-insensitive, count 1..16),
+  optional `duration:seconds` (1..60, default 5s), each key at most once, at least one
+  warning/failed group required, total tiles <= 16, input capped at 256 chars, order preserved,
+  never throws -- bad input returns `AlertCommandParseResult.Fail(message)` naming the offending
+  token. Commit `72e9397`.
 - [ ] **T2 — `AlertQueue`** (needs the open question answered)
 - [ ] **T3 — `AlertTileLayout`**
 - [ ] **T4 — Named pipe server and `--alert` client**
@@ -102,5 +112,5 @@ Explorer-restart leg is blocked by a pre-existing re-attach bug (host orphaned).
 
 ## Next step
 
-T1 `AlertCommandParser`. Before its commit: chain strategy (forecast > 400 lines). Before T2:
+T3 `AlertTileLayout` (T1 done). Chain strategy: `stacked-to-main` (recorded above). Before T2:
 the open question.
