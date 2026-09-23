@@ -1,3 +1,4 @@
+using System.IO.Pipes;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 using CosmicWinAlert;
@@ -123,5 +124,65 @@ public sealed class ProgramRunAsyncTests
 
         Assert.Equal(Program.ExitServerError, exitCode);
         Assert.Equal("error: 'banana' is not a 'key:count' token" + Environment.NewLine, stderr.ToString());
+    }
+
+    /// <summary>
+    /// Finding R3-client-unmapped-failures: a server that accepts the connection and reads the
+    /// command, but then closes without ever writing a reply, used to make <c>ReadAsync</c> return
+    /// zero bytes -- an empty string is not <see cref="AlertPipeProtocol.OkReply"/>, so the OLD code
+    /// fell through to <see cref="Program.Interpret"/> and returned <see
+    /// cref="Program.ExitServerError"/> (1), an undocumented mapping for "the server never actually
+    /// answered." This must be <see cref="Program.ExitNoServer"/> (2), the same code every other "no
+    /// usable reply" shape uses.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ServerClosesWithoutReplying_ReturnsExitNoServer()
+    {
+        var pipeName = UniquePipeName();
+        var serverTask = Task.Run(async () =>
+        {
+            using var server = new NamedPipeServerStream(
+                pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
+            await server.WaitForConnectionAsync();
+            var buffer = new byte[64];
+            await server.ReadAsync(buffer); // reads the command, then the using block closes
+        });                                 // without ever writing back -- no reply, ever.
+
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(["warning:1"], stderr, pipeName, ShortTimeout, ShortTimeout);
+
+        Assert.Equal(Program.ExitNoServer, exitCode);
+        Assert.NotEmpty(stderr.ToString());
+        await serverTask;
+    }
+
+    /// <summary>
+    /// Finding R3-client-unmapped-failures: the server accepts the connection, then severs it (an
+    /// <see cref="IOException"/>-flavoured broken pipe, e.g. <c>ERROR_BROKEN_PIPE</c> /
+    /// <c>ERROR_PIPE_NOT_CONNECTED</c>) before the client's write-then-read round trip can finish.
+    /// The OLD code caught only <see cref="OperationCanceledException"/> around this call, so an
+    /// <see cref="IOException"/> here used to propagate all the way out of <c>Main</c> as an
+    /// unhandled exception instead of a documented exit code.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ServerDisconnectsMidCall_ReturnsExitNoServerWithoutThrowing()
+    {
+        var pipeName = UniquePipeName();
+        var serverTask = Task.Run(async () =>
+        {
+            using var server = new NamedPipeServerStream(
+                pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Message, PipeOptions.Asynchronous);
+            await server.WaitForConnectionAsync();
+            server.Disconnect(); // severs the connection before ever reading or replying.
+        });
+
+        var stderr = new StringWriter();
+
+        var exitCode = await Program.RunAsync(["warning:1"], stderr, pipeName, ShortTimeout, ShortTimeout);
+
+        Assert.Equal(Program.ExitNoServer, exitCode);
+        Assert.NotEmpty(stderr.ToString());
+        await serverTask;
     }
 }

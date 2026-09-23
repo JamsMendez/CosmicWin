@@ -81,34 +81,50 @@ public static class Program
         {
             using var connecting = new CancellationTokenSource(connectTimeout);
             await client.ConnectAsync(connecting.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            stderr.WriteLine("CosmicWin is not running, or is not listening for alerts.");
-            return ExitNoServer;
-        }
 
-        // Matches the server's own PIPE_READMODE_MESSAGE (NamedPipeAlertCommandServer): each side
-        // of a message-type pipe sets its OWN read mode independently, so the client has to ask
-        // for message framing too, or its read below would just see an undifferentiated byte
-        // stream instead of exactly the server's one reply line.
-        client.ReadMode = PipeTransmissionMode.Message;
+            // Matches the server's own PIPE_READMODE_MESSAGE (NamedPipeAlertCommandServer): each
+            // side of a message-type pipe sets its OWN read mode independently, so the client has
+            // to ask for message framing too, or its read below would just see an undifferentiated
+            // byte stream instead of exactly the server's one reply line.
+            client.ReadMode = PipeTransmissionMode.Message;
 
-        try
-        {
             using var callBudget = new CancellationTokenSource(ioTimeout);
             await client.WriteAsync(bytes, callBudget.Token).ConfigureAwait(false);
             await client.FlushAsync(callBudget.Token).ConfigureAwait(false);
 
             var buffer = new byte[1024];
             var read = await client.ReadAsync(buffer, callBudget.Token).ConfigureAwait(false);
-            var reply = Encoding.UTF8.GetString(buffer, 0, read);
+            if (read == 0)
+            {
+                // The connection reached EOF without ever carrying a reply byte -- the server
+                // closed (or was killed) after accepting but before answering. Finding
+                // R3-client-unmapped-failures: this is a "no usable reply" shape, exactly like a
+                // connect timeout, not a malformed-command server error -- an empty string is not
+                // AlertPipeProtocol.OkReply, so falling through to Interpret used to return
+                // ExitServerError (1), an undocumented mapping for this case.
+                stderr.WriteLine("CosmicWin closed the connection without replying.");
+                return ExitNoServer;
+            }
 
+            var reply = Encoding.UTF8.GetString(buffer, 0, read);
             return Interpret(reply, stderr);
         }
         catch (OperationCanceledException)
         {
+            // Either the connect budget or the call budget expired: no server listening, or one
+            // that accepted but never finished the round trip in time.
             stderr.WriteLine("CosmicWin did not reply in time.");
+            return ExitNoServer;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Finding R3-client-unmapped-failures: every OTHER documented client failure shape --
+            // connect failure (e.g. "all pipe instances are busy"), access denied (wrong ACL/
+            // integrity level), or a broken pipe mid-call (the server crashed or disconnected
+            // after accepting) -- surfaces as one of these two exception types. Previously only
+            // OperationCanceledException was caught here, so any of these propagated out of
+            // RunAsync as an unhandled exception instead of a documented exit code.
+            stderr.WriteLine($"CosmicWin is not running, or is not listening for alerts: {error.Message}");
             return ExitNoServer;
         }
     }
