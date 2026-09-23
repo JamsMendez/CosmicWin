@@ -61,13 +61,23 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
     /// <summary>
     /// Starting delay before <see cref="RunLoop"/> retries after a RunLoop-level failure (e.g. a
     /// pipe-name collision with another instance), doubled after every consecutive failure up to
-    /// <see cref="MaxRetryBackoff"/> and reset back to this the moment a connection is served again
-    /// (finding R3-runloop-hot-spin).
+    /// <see cref="MaxRetryBackoff"/> and reset back to this the moment a connection is ACCEPTED
+    /// again, not only once it has been fully served (finding R3-runloop-hot-spin, refined by
+    /// R3-backoff-ceiling-exceeds-client-connect-timeout).
     /// </summary>
     public static readonly TimeSpan InitialRetryBackoff = TimeSpan.FromMilliseconds(100);
 
-    /// <summary>Ceiling for <see cref="RunLoop"/>'s exponential retry backoff.</summary>
-    public static readonly TimeSpan MaxRetryBackoff = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Ceiling for <see cref="RunLoop"/>'s exponential retry backoff. Finding
+    /// R3-backoff-ceiling-exceeds-client-connect-timeout: this must stay comfortably under a
+    /// typical client's own connect budget (e.g. <c>CosmicWinAlert.Program.ConnectTimeout</c>,
+    /// ~1s) -- otherwise a server that just recovered from a burst of failures (e.g. another
+    /// instance holding the same pipe name finally went away) can still be sleeping through the
+    /// tail of a long backoff wait when a client's connect attempt gives up, making a perfectly
+    /// healthy server transiently unreachable. 500ms leaves ample headroom under a ~1s budget even
+    /// accounting for scheduling jitter.
+    /// </summary>
+    public static readonly TimeSpan MaxRetryBackoff = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
     /// Total bound (finding R3-reply-drain-unbounded) on writing the reply AND waiting for the
@@ -137,10 +147,17 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
     /// a CPU core and flooding <see cref="_onDiagnostic"/> as fast as the loop could run. Each
     /// consecutive failure now waits <see cref="InitialRetryBackoff"/>, doubling up to <see
     /// cref="MaxRetryBackoff"/>, which bounds both the retry rate AND the diagnostic rate together
-    /// (they are the same event) without a separate coalescing mechanism. The backoff resets the
-    /// moment a connection is served again, so a transient failure never permanently slows down an
-    /// otherwise healthy server. The wait itself is <see cref="_stopping"/>'s own wait handle, not a
-    /// plain sleep, so <see cref="Dispose"/> still returns promptly even mid-backoff.
+    /// (they are the same event) without a separate coalescing mechanism. The wait itself is <see
+    /// cref="_stopping"/>'s own wait handle, not a plain sleep, so <see cref="Dispose"/> still
+    /// returns promptly even mid-backoff.
+    /// </remarks>
+    /// <remarks>
+    /// Finding R3-backoff-ceiling-exceeds-client-connect-timeout: the backoff resets the moment a
+    /// connection is ACCEPTED (<see cref="ServeOneConnectionAsync"/>'s <c>onConnectionAccepted</c>
+    /// callback fires right after <c>WaitForConnectionAsync</c> succeeds), not only once one has
+    /// been fully served. A slow or misbehaving CLIENT after acceptance must not keep the server
+    /// looking "unhealthy" for backoff purposes -- the server itself already recovered the moment it
+    /// stopped colliding and started accepting again.
     /// </remarks>
     private void RunLoop()
     {
@@ -150,8 +167,8 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
         {
             try
             {
-                ServeOneConnectionAsync().GetAwaiter().GetResult();
-                backoff = InitialRetryBackoff;
+                ServeOneConnectionAsync(onConnectionAccepted: () => backoff = InitialRetryBackoff)
+                    .GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
             {
@@ -167,11 +184,21 @@ public sealed class NamedPipeAlertCommandServer : IAlertCommandServer
         }
     }
 
-    private async Task ServeOneConnectionAsync()
+    /// <param name="onConnectionAccepted">
+    /// Invoked once <c>WaitForConnectionAsync</c> actually succeeds -- i.e. a client connected --
+    /// BEFORE anything else about the connection (reading, replying) is attempted. Finding
+    /// R3-backoff-ceiling-exceeds-client-connect-timeout: <see cref="RunLoop"/> uses this to reset
+    /// its backoff at the earliest correct moment, rather than only once this whole method returns
+    /// without throwing (which also happens to require a full serve today, but would silently stop
+    /// resetting the backoff early if this method ever grew a step after acceptance that could
+    /// throw).
+    /// </param>
+    private async Task ServeOneConnectionAsync(Action onConnectionAccepted)
     {
         using var pipe = CreateInstance();
 
         await pipe.WaitForConnectionAsync(_stopping.Token).ConfigureAwait(false);
+        onConnectionAccepted();
 
         using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
         readTimeout.CancelAfter(ConnectionReadTimeout);

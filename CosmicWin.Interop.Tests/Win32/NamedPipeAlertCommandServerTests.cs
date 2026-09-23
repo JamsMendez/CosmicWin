@@ -160,10 +160,55 @@ public sealed class NamedPipeAlertCommandServerTests
         Assert.Equal("ok", reply);
 
         // A hot spin (no backoff at all) would log many thousands of times in 3 seconds; with
-        // 100ms doubling up to 5s, the cumulative wait after 5 failures already exceeds 3s (100 +
-        // 200 + 400 + 800 + 1600 = 3100ms), so the count is small -- a generous upper bound that
-        // would only be reached by something far closer to a hot spin than real backoff.
+        // 100ms doubling up to the backoff ceiling, the count over a few seconds stays small -- a
+        // generous upper bound that would only be reached by something far closer to a hot spin
+        // than real backoff.
         Assert.InRange(collisionDiagnostics.Count, 1, 25);
+    }
+
+    /// <summary>
+    /// Finding R3-backoff-ceiling-exceeds-client-connect-timeout (review of T4b): the RunLoop
+    /// backoff used to cap at 5s and reset only once a connection was fully SERVED, not merely
+    /// accepted. A client's own connect budget (<c>CosmicWinAlert.Program.ConnectTimeout</c>, ~1s)
+    /// could therefore land inside a multi-second sleep on a server that had just recovered from a
+    /// burst of failures (e.g. another instance holding the same pipe name finally went away),
+    /// making a perfectly healthy server briefly unreachable within that budget. The ceiling is now
+    /// well under a typical client connect budget (<see
+    /// cref="NamedPipeAlertCommandServer.MaxRetryBackoff"/>), and the backoff resets the moment a
+    /// connection is ACCEPTED, not only once it has been fully served.
+    /// </summary>
+    [Fact]
+    public async Task AfterABurstOfFailures_AHealthySeverIsReachableWithinTheClientsConnectBudget()
+    {
+        var pipeName = UniquePipeName();
+
+        // Occupies the pipe name first, so `server` below collides on every attempt and backs off.
+        var blocker = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply);
+        blocker.Start();
+        Thread.Sleep(200); // let blocker actually own the instance before the race starts
+
+        var diagnostics = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        using var server = new NamedPipeAlertCommandServer(pipeName, _ => AlertPipeProtocol.OkReply, diagnostics.Enqueue);
+        server.Start();
+
+        // A long enough burst that, under the OLD 5s-cap backoff, `server`'s current sleep is very
+        // likely still several seconds long at the moment `blocker` goes away below -- long enough
+        // to blow well past a ~1s client connect budget. Under the NEW, much lower cap, `server`'s
+        // longest possible sleep at any moment is short regardless of how long the burst ran.
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        Assert.NotEmpty(diagnostics); // sanity: it really was failing against the collision
+
+        blocker.Dispose(); // frees the pipe name; server's very next retry should pick it back up
+
+        // The same connect budget CosmicWinAlert.Program uses against the real, elevated server.
+        var clientConnectBudget = TimeSpan.FromSeconds(1);
+        using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        using var connecting = new CancellationTokenSource(clientConnectBudget);
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        await client.ConnectAsync(connecting.Token);
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < clientConnectBudget, $"Reconnecting after the burst took {elapsed.Elapsed}.");
     }
 
     /// <summary>
