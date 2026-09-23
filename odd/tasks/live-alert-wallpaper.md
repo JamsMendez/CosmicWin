@@ -329,6 +329,18 @@ test classes; no flakes.
     real size.
   - `R3-queue-ctor-unvalidated` (SUGGESTION): `AlertQueue` accepts capacity <= 0 and a negative
     max age.
+- Slice T4b (`--base-ref 8db204d`, 565 lines, risk `medium`, `slice_budget_reached`): consent
+  granted by the maintainer; lineage `review-c9bc26f67897ef30`, one lens (reliability),
+  **approved**, acknowledged, authority burned. Reviewed boundary is now the T4b record commit.
+  Advisory findings, all introduced by T4b itself:
+  - `R3-client-connect-timeout-message-regressed` (SUGGESTION, deterministic): a connect timeout
+    (CosmicWin not running) now prints "did not reply in time" instead of "not running"; exit
+    code still 2; no test asserts the stderr text.
+  - `R3-drain-test-does-not-prove-timeout` (WARNING): the drain test disposes the rude client
+    before the second one connects, so the old unbounded code would pass it too.
+  - `R3-backoff-ceiling-exceeds-client-connect-timeout` (SUGGESTION): backoff caps at 5 s and
+    resets only after a served connection; a client's ~1 s connect budget can miss a recovered
+    server.
 
 ## Next step
 
