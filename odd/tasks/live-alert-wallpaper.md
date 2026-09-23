@@ -589,10 +589,20 @@ itself still needs re-running (see Next step).
 
 ## Next step
 
-T10/T11 hardware re-check (covered-desktop probe + no black bars). Both are implemented and
-unit-tested green, but neither has been proven on hardware yet: T11's new real-attach fact skipped
-because `CosmicWin.App.exe` is running (must not be touched mid-session), and T10's fix has not
-been re-run against T9's own covered-desktop probe. Exit the running app from the tray first, then
-repeat T9's `failed:2 duration:4` probe under a borderless topmost fullscreen window (expect: held,
-then shown once the probe closes) and take a screenshot of the ultrawide video with no black bars
-top or bottom.
+Hardware re-check of T10/T11 done by the parent, 2026-09-23 (app stopped, rebuilt, relaunched):
+
+- T11 real-attach facts with `COSMICWIN_RUN_DESKTOP_TESTS=1`: 5 passed / 0 skipped. RED proven
+  by the parent: with `Win32VideoWallpaperHost.cs` from `571c019` the new
+  `...WholePrimaryMonitor...` fact failed (1/1), then the file was restored.
+- T11 screenshot: the ultrawide video reaches the top and bottom edges, no black bars. A
+  `warning:3 failed:3` alert keeps its tiles inside the work area, clear of the right-docked
+  taskbar.
+- T10: T9's covered-desktop probe repeated (`failed:2 duration:4` sent under a borderless
+  topmost fullscreen form, which closes 5 s later): the tiles were held, then shown 1.5 s after
+  uncover and cleared by 6 s. **Pass.**
+- Observation, not fixed: the first alert right after relaunch did not appear while the
+  desktop was visible. The likely cause is the NVIDIA overlay's "Press Alt+Z" toast, a caption-less
+  full-monitor window that is foreground for a few seconds and matches the fullscreen rule, so the
+  alert was held. Not reproduced afterwards. Consequence: at worst a held alert, never a lost one.
+
+Next: native review of the T10/T11 commits, then slice 5 delivery (T7+T8+T9+T10+T11).
