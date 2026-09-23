@@ -332,7 +332,20 @@ Slices (planned, each a PR against main stacked on the previous one):
   `CosmicWin.Interop.Tests` 206 passed / 34 skipped. Independent verifier: approved for T5, no
   blocking findings. RDD assess could not score the untracked candidate directly, so it failed
   closed to unassessable/high and the required independent verifier was run.
-- [ ] **T6 — `Direct2DAlertOverlay`**
+- [x] **T6 — `Direct2DAlertOverlay`.** Added `FrameOverlayTile` / `FrameOverlayTileKind`
+  as the Interop-owned tile snapshot API for T8, and `Direct2DAlertOverlay` in
+  `CosmicWin.Interop.Win32` implementing `IFrameOverlay` with `SetTiles`, `Clear`, `TileCount`,
+  lazy Direct2D/DirectWrite resource creation only when non-idle, D3D device identity rebuild,
+  back-buffer target bitmap rebuild, alpha-mode fallback, throttled first-failure logging, COM
+  cleanup on `Dispose`, and simple warning/failed filled tiles with centered labels. Resource
+  failures are contained by `Draw`, and partial initialization now assigns COM objects directly to
+  owning fields so `ReleaseAllResources()` cleans up failed setup attempts. TDD: RED (types
+  missing) for `Direct2DAlertOverlay`, `FrameOverlayTile`, `FrameOverlayTileKind`; GREEN
+  `Direct2DAlertOverlay` focused tests 2/2. Verification: `dotnet build CosmicWin.sln -c Debug`
+  0 warnings / 0 errors after changing `NativeMethods.txt` to enum type names;
+  `CosmicWin.Interop.Tests` 208 passed / 34 skipped. Independent verifier first found the partial
+  COM-initialization leak risk; after remediation it approved T6 code-side. Manual/hardware gap:
+  actual Direct2D drawing, alpha fallback, Explorer-restart rebuild, and GPU cost still await T9.
 - [ ] **T7 — Alert visuals ported from great-sage**
 - [ ] **T8 — Wiring and `alerts-enabled` setting**
 - [ ] **T9 — Supervised hardware run**
@@ -370,6 +383,11 @@ test classes; no flakes.
 2026-09-23: T5 done -- `IFrameOverlay` seam added to the player, with optional injection, no-op
 default, draw after video transfer and before present, and isolated overlay exception containment.
 TDD RED/GREEN and full Interop verification green; independent verifier approved T5.
+
+2026-09-23: T6 done -- `Direct2DAlertOverlay` code-side landed with the Interop tile snapshot API,
+lazy D2D/DWrite resource lifecycle, device/back-buffer rebuild, failure cleanup/logging, and simple
+plain tile drawing. Focused tests and full Interop tests green; independent verifier approved after
+one lifecycle cleanup fix. Hardware/runtime drawing evidence remains for T9.
 
 ## Reviews
 
@@ -417,4 +435,4 @@ TDD RED/GREEN and full Interop verification green; independent verifier approved
 
 ## Next step
 
-T6 (`Direct2DAlertOverlay`).
+T7 (alert visuals ported from great-sage).
