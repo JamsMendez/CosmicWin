@@ -84,7 +84,7 @@ Why it fits the existing code **[code]**:
 ## 4. Design
 
 ```
-CLI / WSL ──► CosmicWin.exe --alert "warning:2 failed:1"
+CLI / WSL ──► CosmicWinAlert.exe "warning:2 failed:1"
                      │  named pipe (current user only)
                      ▼
               AlertCommandParser ─► AlertQueue ─► AlertTileLayout
@@ -97,9 +97,11 @@ CLI / WSL ──► CosmicWin.exe --alert "warning:2 failed:1"
 - **Named pipe, not an HTTP webhook.** A localhost HTTP listener can be reached by any web page
   open in a browser (cross-origin `fetch`). A pipe with a current-user ACL opens no port. WSL can
   still call it through interop: `/mnt/c/.../CosmicWin.exe --alert ...`.
-- **`--alert` is a client, never a second app.** It is handled next to `TryHandleTaskCommand`,
-  before WPF starts, sends one message and exits. No instance running or connect timeout: exit
-  code non-zero with a one-line message on stderr.
+- **The client is a separate exe, `CosmicWinAlert.exe` (decided 2026-09-23).** `CosmicWin.App.exe`
+  is `requireAdministrator`, so a flag on it would raise UAC for every alert sent from an
+  unelevated shell or WSL. The client is an `asInvoker` console exe: it sends one message and
+  exits; no instance running or connect timeout gives a non-zero exit code and one line on stderr.
+  The server (elevated) sets a medium integrity label on the pipe so that client can write.
 - **Pipe limits:** max message size, read timeout, one client at a time. Malformed or oversized
   input is rejected and logged, never partially applied.
 - **Tiles are computed in C#** as pure, testable functions; the overlay only draws what it receives.

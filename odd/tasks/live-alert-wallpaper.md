@@ -127,7 +127,11 @@ Slices (planned, each a PR against main stacked on the previous one):
   above it. Reuses `CosmicWin.Interop.Rectangle` for the output type rather than adding a new
   one, matching `BorderGeometry`'s existing precedent of App-side pure geometry code depending on
   Interop's Win32-free `Rectangle`. Commit `4d5ffae`.
-- [ ] **T4 — Named pipe server and `--alert` client**
+- [ ] **T4 — Named pipe server and `CosmicWinAlert.exe` client.** Decision (maintainer,
+  2026-09-23): `CosmicWin.App.exe` is `requireAdministrator` (`app.manifest:9`), so an `--alert`
+  flag on it would raise UAC on every alert from an unelevated shell or WSL. The client is a
+  separate `asInvoker` console exe instead. The elevated server's pipe needs a current-user ACL
+  plus a medium mandatory integrity label so an unelevated client can write to it.
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
