@@ -198,6 +198,9 @@ Slices (planned, each a PR against main stacked on the previous one):
   `Medium Mandatory Level` (S-1-16-8192, from `whoami /groups`). `warning:2 failed:1` → server
   received it, reply `ok`, exit 0; `warning:2 bad:1` → `error: bad token`, exit 1. With no
   server: exit 2 after ~1.08 s; no arguments: usage line, exit 3.
+- [ ] **T4b — Harden the alert pipe and client.** Added 2026-09-23, maintainer accepted all six
+  advisory findings of review `review-b48c85520820f775` (see Reviews). Checks: a test per finding,
+  RED first. Route: delegated writer.
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
