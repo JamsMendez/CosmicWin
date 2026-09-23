@@ -30,6 +30,7 @@ PROCESS_ACCESS_RIGHTS
 PROCESS_NAME_FORMAT
 AttachThreadInput
 GetForegroundWindow
+GetShellWindow
 GetCurrentThreadId
 DwmGetWindowAttribute
 EVENT_OBJECT_SHOW

@@ -81,3 +81,59 @@ public sealed class PrimaryMonitorFullscreenDetectorTests
         Assert.False(PrimaryMonitorFullscreenDetector.IsFullscreen(StyleMaximized, Monitor, Monitor));
     }
 }
+
+/// <summary>
+/// R3 (<c>R3-desktop-shell-foreground-false-positive</c>): the desktop shell (Progman/WorkerW) and
+/// click-through overlays are caption-less, non-maximised, full-monitor popups too --
+/// <see cref="PrimaryMonitorFullscreenDetector.IsFullscreen"/> alone cannot tell them apart from an
+/// actual fullscreen video or game, so <see cref="PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage"/>
+/// must veto them first.
+/// </summary>
+public sealed class PrimaryMonitorFullscreenDetectorExclusionTests
+{
+    private const uint NoExStyle = 0;
+    private const uint TransparentOnly = 0x00000020; // WS_EX_TRANSPARENT alone: not click-through proof.
+    private const uint TransparentAndLayered = TransparentOnly | 0x00080000; // + WS_EX_LAYERED.
+
+    [Theory]
+    [InlineData("Progman")]
+    [InlineData("WorkerW")]
+    public void TheShellsOwnClassNames_AreExcludedFromCoverage(string shellClassName)
+    {
+        Assert.True(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(shellClassName, NoExStyle, isShellWindow: false));
+    }
+
+    [Fact]
+    public void TheShellWindowFlag_IsExcludedFromCoverageRegardlessOfClassName()
+    {
+        // GetShellWindow() is the most direct signal Win32 offers for "this is the desktop",
+        // ahead of any class-name guess.
+        Assert.True(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage("AnythingAtAll", NoExStyle, isShellWindow: true));
+    }
+
+    /// <summary>The NVIDIA overlay's "Press Alt+Z" toast: click-through and layered, both bits set.</summary>
+    [Fact]
+    public void ATransparentLayeredOverlay_IsExcludedFromCoverage()
+    {
+        Assert.True(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(
+                "CEF-OSC-WIDGET", TransparentAndLayered, isShellWindow: false));
+    }
+
+    [Fact]
+    public void TransparentWithoutLayered_IsNotExcludedFromCoverage()
+    {
+        Assert.False(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage("SomeAppClass", TransparentOnly, isShellWindow: false));
+    }
+
+    /// <summary>The T9 probe shape must still pass through: ordinary class, no overlay styles, not the shell.</summary>
+    [Fact]
+    public void AnOrdinaryFullscreenApplicationWindow_IsNotExcludedFromCoverage()
+    {
+        Assert.False(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage("CosmicWinProbeForm", NoExStyle, isShellWindow: false));
+    }
+}
