@@ -102,6 +102,9 @@ run from a `run/` copy). Parent re-ran the gated real-attach filter first: 4/4 p
   on `main` showed the static Windows wallpaper indefinitely). GPU 3D 6.59 / 7.18 / 7.01 %,
   the normal cost of the visible video.
 
+RDD assess (`--base-ref fadfda7 --committed-only`): risk `medium`, 399 changed lines,
+`review_due: false` (`under_budget`); no review ran, the slice stays pending under the budget.
+
 ## Next step
 
 None for this fix. Unblocks the Explorer-restart leg of `odd/tasks/live-alert-wallpaper.md` T0.
