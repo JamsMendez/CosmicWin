@@ -320,7 +320,18 @@ Slices (planned, each a PR against main stacked on the previous one):
     (`NamedPipeAlertCommandServerTests`, `NamedPipeAlertCommandServerAclTests`,
     `CosmicWinAlert.Tests`) each run three times end to end: stable every time (16/16 and 13/13
     every run), no flakes. `CosmicWin.App.exe` was not stopped or started.
-- [ ] **T5 — `IFrameOverlay` seam in the player**
+- [x] **T5 — `IFrameOverlay` seam in the player.** Added public Interop seam
+  `CosmicWin.Interop/IFrameOverlay.cs` with internal `Draw(ID3D11Texture2D, RECT)`, optional
+  constructor injection into `MediaFoundationVideoWallpaperPlayer`, a private no-op default, and a
+  call between `TransferVideoFrame` and `Present`. Overlay exceptions are caught separately so a
+  bad overlay cannot stop the already-transferred frame from being presented; other tick failures
+  stay contained by the existing pump guard. TDD: RED (type missing)
+  `CS0246: IFrameOverlay could not be found`; GREEN
+  `MediaFoundationVideoWallpaperPlayerFrameOverlayTests` 3/3. Verification:
+  `MediaFoundationVideoWallpaperPlayer` filter 7 passed / 4 skipped; full
+  `CosmicWin.Interop.Tests` 206 passed / 34 skipped. Independent verifier: approved for T5, no
+  blocking findings. RDD assess could not score the untracked candidate directly, so it failed
+  closed to unassessable/high and the required independent verifier was run.
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
 - [ ] **T8 — Wiring and `alerts-enabled` setting**
@@ -355,6 +366,10 @@ bound (RED demonstrated by temporarily reverting the bound), and capped the RunL
 the client's connect budget with an accept-time reset. Three commits (`91f5783`, `fe10136`,
 `94fae54`), 266 authored lines. Full verification green three times over for the pipe-touching
 test classes; no flakes.
+
+2026-09-23: T5 done -- `IFrameOverlay` seam added to the player, with optional injection, no-op
+default, draw after video transfer and before present, and isolated overlay exception containment.
+TDD RED/GREEN and full Interop verification green; independent verifier approved T5.
 
 ## Reviews
 
@@ -402,4 +417,4 @@ test classes; no flakes.
 
 ## Next step
 
-T5 (`IFrameOverlay` seam in the player).
+T6 (`Direct2DAlertOverlay`).

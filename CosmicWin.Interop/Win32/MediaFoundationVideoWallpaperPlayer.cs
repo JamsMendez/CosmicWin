@@ -73,6 +73,8 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopJoinTimeout = TimeSpan.FromSeconds(5);
 
+    private readonly IFrameOverlay _overlay;
+
     private Thread? _workerThread;
     private ManualResetEventSlim? _stopSignal;
 
@@ -80,6 +82,11 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private volatile MediaEngineNotify? _notify;
 
     private bool _disposed;
+
+    public MediaFoundationVideoWallpaperPlayer(IFrameOverlay? overlay = null)
+    {
+        _overlay = overlay ?? NoOpFrameOverlay.Instance;
+    }
 
     /// <summary>Test-only observability: whether an engine is currently set up to be ticked.</summary>
     internal bool IsPlayingForTests => _engine is not null;
@@ -283,7 +290,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             {
                 while (!stopSignal.Wait(TickIntervalMs))
                 {
-                    Tick(engine!, host);
+                    Tick(engine!, host, _overlay);
                 }
             }
             finally
@@ -424,7 +431,43 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         return true;
     }
 
-    private static void Tick(IMFMediaEngine engine, IVideoWallpaperHost host)
+    private static void Tick(IMFMediaEngine engine, IVideoWallpaperHost host, IFrameOverlay overlay)
+    {
+        TickCore(
+            overlay,
+            onVideoStreamTick: () => engine.OnVideoStreamTick(out long _),
+            getBackBuffer: host.GetBackBuffer,
+            getDesc: backBuffer =>
+            {
+                backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
+                return desc;
+            },
+            transferVideoFrame: (backBuffer, destination) =>
+            {
+                RECT localDestination = destination;
+                engine.TransferVideoFrame(backBuffer, null, &localDestination, null);
+            },
+            present: host.Present);
+    }
+
+    internal static void TickForTests(
+        IFrameOverlay overlay,
+        Action onVideoStreamTick,
+        Func<ID3D11Texture2D> getBackBuffer,
+        Func<ID3D11Texture2D, D3D11_TEXTURE2D_DESC> getDesc,
+        Action<ID3D11Texture2D, RECT> transferVideoFrame,
+        Action present)
+    {
+        TickCore(overlay, onVideoStreamTick, getBackBuffer, getDesc, transferVideoFrame, present);
+    }
+
+    private static void TickCore(
+        IFrameOverlay overlay,
+        Action onVideoStreamTick,
+        Func<ID3D11Texture2D> getBackBuffer,
+        Func<ID3D11Texture2D, D3D11_TEXTURE2D_DESC> getDesc,
+        Action<ID3D11Texture2D, RECT> transferVideoFrame,
+        Action present)
     {
         try
         {
@@ -435,19 +478,33 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             // TransferVideoFrame is called unconditionally every tick instead; it is a no-op (or
             // a cheap re-present of the current frame) when there is nothing new, and any failure
             // is caught below rather than crashing the pump.
-            engine.OnVideoStreamTick(out long _);
+            onVideoStreamTick();
 
-            ID3D11Texture2D backBuffer = host.GetBackBuffer();
-            backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
+            ID3D11Texture2D backBuffer = getBackBuffer();
+            D3D11_TEXTURE2D_DESC desc = getDesc(backBuffer);
 
             RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
-            engine.TransferVideoFrame(backBuffer, null, &destRect, null);
-            host.Present();
+            transferVideoFrame(backBuffer, destRect);
+            DrawOverlay(overlay, backBuffer, destRect);
+            present();
         }
         catch
         {
             // The frame pump must never crash the process or tear down the host window -- a bad
             // tick is skipped and playback is retried on the next tick.
+        }
+    }
+
+    private static void DrawOverlay(IFrameOverlay overlay, ID3D11Texture2D backBuffer, RECT destination)
+    {
+        try
+        {
+            overlay.Draw(backBuffer, destination);
+        }
+        catch
+        {
+            // Overlay failures are contained to this frame: a transferred video frame should still
+            // be presented, and the next tick gets another chance to draw.
         }
     }
 
@@ -490,6 +547,19 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         if (comObject is IDisposable disposable)
         {
             disposable.Dispose();
+        }
+    }
+
+    private sealed class NoOpFrameOverlay : IFrameOverlay
+    {
+        public static readonly NoOpFrameOverlay Instance = new();
+
+        private NoOpFrameOverlay()
+        {
+        }
+
+        public void Draw(ID3D11Texture2D backBuffer, RECT destination)
+        {
         }
     }
 
