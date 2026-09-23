@@ -2,6 +2,7 @@
 using System.IO;
 using System.Threading.Channels;
 using System.Windows.Threading;
+using CosmicWin.App.Alerts;
 using CosmicWin.App.Diagnostics;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -177,6 +178,12 @@ public sealed class AppComposition : IDisposable
         IVideoWallpaperPlayer? videoWallpaperPlayer = null,
         Action<Action>? scheduleVideoWallpaperWork = null,
         Action? disposeVideoWallpaper = null,
+        bool alertsEnabled = false,
+        Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
+        Action<IReadOnlyList<FrameOverlayTile>>? setAlertOverlayTiles = null,
+        Action? clearAlertOverlay = null,
+        IDisposable? alertOverlay = null,
+        Func<bool>? alertDesktopVisible = null,
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
@@ -256,11 +263,15 @@ public sealed class AppComposition : IDisposable
         // than beside its other use further down.
         var onOwningThread = scheduleOnOwningThread ?? (work => work());
         var onVideoWallpaperThread = scheduleVideoWallpaperWork ?? onOwningThread;
-        disposeVideoWallpaper ??= () =>
+        var disposeVideoWallpaperBase = disposeVideoWallpaper ?? (() =>
         {
             videoWallpaperPlayer?.Dispose();
             videoWallpaperHost?.Dispose();
-        };
+        });
+
+        var alertQueueLock = new object();
+        var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
+        IAlertCommandServer? alertServer = null;
 
         // What the border was last told to do. Three focus-border defects have been fixed so far and
         // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
@@ -362,6 +373,81 @@ public sealed class AppComposition : IDisposable
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
                 $"tryAttach={attached} tryPlay={(played is { } result ? result.ToString() : "skipped")}");
         }
+
+        string HandleAlertCommand(string text)
+        {
+            var parsed = AlertCommandParser.Parse(text);
+            if (!parsed.Success || parsed.Command is null)
+            {
+                var error = parsed.Error ?? "alert command could not be parsed";
+                desktopTrace?.Record($"alert rejected: {error}");
+                return AlertPipeProtocol.FormatError(error);
+            }
+
+            lock (alertQueueLock)
+            {
+                if (alertQueue is null)
+                {
+                    return AlertPipeProtocol.FormatError("alerts are disabled");
+                }
+
+                if (!alertQueue.Enqueue(parsed.Command, DateTimeOffset.UtcNow))
+                {
+                    return AlertPipeProtocol.QueueFullReply;
+                }
+            }
+
+            return AlertPipeProtocol.OkReply;
+        }
+
+        void UpdateAlertOverlay()
+        {
+            if (!alertsEnabled || alertQueue is null)
+            {
+                return;
+            }
+
+            ActiveAlert? active;
+            lock (alertQueueLock)
+            {
+                // T8's conservative primary-monitor visibility seam: production uses a playing
+                // video wallpaper as the available signal; covered-desktop proof stays for T9.
+                active = alertQueue.Advance(
+                    DateTimeOffset.UtcNow, desktopVisible: alertDesktopVisible?.Invoke() ?? videoWallpaperActive.Value);
+            }
+
+            if (active is null)
+            {
+                clearAlertOverlay?.Invoke();
+                return;
+            }
+
+            var kinds = active.Command.Groups
+                .SelectMany(group => Enumerable.Repeat(group.Kind, group.Count))
+                .ToArray();
+            var bounds = AlertTileLayout.Layout(kinds, workArea.Width, workArea.Height);
+            var tiles = kinds.Zip(bounds, (kind, bounds) => new FrameOverlayTile(
+                bounds,
+                MapAlertKind(kind),
+                LabelFor(kind),
+                active.StartedAt,
+                active.Command.Duration))
+                .ToArray();
+
+            setAlertOverlayTiles?.Invoke(tiles);
+        }
+
+        static FrameOverlayTileKind MapAlertKind(AlertKind kind) => kind switch
+        {
+            AlertKind.Failed => FrameOverlayTileKind.Failed,
+            _ => FrameOverlayTileKind.Warning,
+        };
+
+        static string LabelFor(AlertKind kind) => kind switch
+        {
+            AlertKind.Failed => "FAILED",
+            _ => "WARNING",
+        };
 
         /// <summary>
         /// Takes the border off the screen right now, without deciding anything about where it
@@ -757,6 +843,15 @@ public sealed class AppComposition : IDisposable
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);
+
+        if (alertsEnabled)
+        {
+            var serverFactory = createAlertCommandServer
+                ?? ((pipeName, handler, diagnostic) => new NamedPipeAlertCommandServer(pipeName, handler, diagnostic));
+            alertServer = serverFactory(AlertPipeName.Resolve(), HandleAlertCommand,
+                message => desktopTrace?.Record(message));
+            alertServer.Start();
+        }
 
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
@@ -1274,6 +1369,7 @@ public sealed class AppComposition : IDisposable
                 });
             }
 
+            UpdateAlertOverlay();
             UpdateFocusBorder();
         }
 
@@ -1315,7 +1411,12 @@ public sealed class AppComposition : IDisposable
 
         return new AppComposition(
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
-            focusBorder, videoWallpaperHost, videoWallpaperPlayer, disposeVideoWallpaper,
+            focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
+            {
+                alertServer?.Dispose();
+                disposeVideoWallpaperBase();
+                alertOverlay?.Dispose();
+            },
             unfollowFocusedWindow: () =>
             {
                 if (followFocusedWindow is not null)
@@ -1368,7 +1469,8 @@ public sealed class AppComposition : IDisposable
         var zOrderSource = new Win32ZOrderSource();
 
         var videoWallpaperHost = new Win32VideoWallpaperHost();
-        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
+        var alertOverlay = settings.AlertsEnabled ? new Direct2DAlertOverlay() : null;
+        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer(alertOverlay);
         var videoWallpaperThread = new MtaActionThread("CosmicWinVideoWallpaperHost");
 
         return Wire(
@@ -1396,6 +1498,10 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
+            alertsEnabled: settings.AlertsEnabled,
+            setAlertOverlayTiles: alertOverlay is null ? null : alertOverlay.SetTiles,
+            clearAlertOverlay: alertOverlay is null ? null : alertOverlay.Clear,
+            alertOverlay: alertOverlay,
             // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
             // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
             // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.

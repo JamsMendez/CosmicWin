@@ -362,7 +362,22 @@ Slices (planned, each a PR against main stacked on the previous one):
   full `CosmicWin.Interop.Tests` 211 passed / 0 failed / 34 skipped. Native review
   `review-dd0ba74af27e9322` (reliability) approved and was acknowledged; advisory findings are
   recorded in Reviews.
-- [ ] **T8 — Wiring and `alerts-enabled` setting**
+- [x] **T8 — Wiring and `alerts-enabled` setting.** Added `alerts-enabled` to
+  `Settings` (default on, `on/off/true/false/1/0`, serialized with a comment) and wired production
+  so an enabled run constructs one `Direct2DAlertOverlay`, passes it to
+  `MediaFoundationVideoWallpaperPlayer(alertOverlay)`, starts the per-user
+  `NamedPipeAlertCommandServer`, parses incoming commands, returns protocol `ok` / `error`, enqueues
+  accepted commands into `AlertQueue`, and updates/clears overlay tiles on the existing 400 ms watch
+  tick via `AlertTileLayout`. Queue mutation is guarded by a lock because the pipe server callback
+  and watch tick can be on different threads. Desktop visibility uses the conservative T8 seam
+  `videoWallpaperActive` (or injected test predicate); real covered-desktop behavior remains for
+  T9. Disposal now stops the alert server and overlay with the app/video wallpaper path. Strict
+  TDD: RED focused settings/wiring tests failed on missing `Settings.AlertsEnabled` and missing
+  `AppComposition.Wire(alertsEnabled: ...)`; GREEN focused settings + alert wiring tests 74/74.
+  Verification: `CosmicWin.App.Tests` 983 passed / 6 skipped; `dotnet build CosmicWin.sln -c
+  Debug` 0 warnings / 0 errors. Native review `review-13be75f36453d741` (reliability) required a
+  one-line correction adding an explicit alerts namespace import to the new test file; targeted
+  validation then approved and was acknowledged. Advisory findings are recorded in Reviews.
 - [ ] **T9 — Supervised hardware run**
 
 Task details and checks: plan §6.
@@ -408,6 +423,11 @@ one lifecycle cleanup fix. Hardware/runtime drawing evidence remains for T9.
 warning/failed themes, title fragments, rails, modules, and moving band accents. Focused tests,
 build, full Interop tests, and native review all green; visual fidelity remains for T9 hardware
 comparison.
+
+2026-09-23: T8 done -- `alerts-enabled` setting and production wiring are in place: named-pipe
+commands parse/enqueue, the 400 ms tick advances the queue and maps active alerts through layout to
+`Direct2DAlertOverlay`, and disposal owns the server/overlay. Focused and full App tests green;
+native review approved after the one-line test import correction.
 
 ## Reviews
 
@@ -475,7 +495,20 @@ comparison.
     usage in this repo; external ABI stability is not promised for this feature branch.
   - `R3-small-tile-overdraw` (WARNING): small tiles may overdraw dense title/modules. T3 parser and
     layout cap count at 16; T9 visual comparison should include worst-case small tiles.
+- Slice T8 (`381 lines`, risk `medium`): lineage `review-13be75f36453d741`, one lens
+  (reliability), **approved after correction**, acknowledged, authority burned. Required correction:
+  - `R3-alert-test-namespace` (BLOCKER, inferential): the new wiring test did not explicitly import
+    `CosmicWin.App.Alerts`; added the import and targeted validation approved. The test had already
+    compiled through existing references, but the explicit import removes ambiguity.
+  Advisory, non-blocking findings (not reopened; separate work only if the maintainer accepts it):
+  - `R3-alert-clock` (SUGGESTION): queue timestamps use `DateTimeOffset.UtcNow` directly in
+    `AppComposition`; acceptable for T8 wiring, but a narrower injectable clock could make future
+    timing tests less sleep-based.
+  - `R3-disposal-chain` (WARNING): alert server disposal is chained with video wallpaper disposal;
+    T9 should watch shutdown/restart behavior for any delayed pipe/server cleanup.
+  - `R3-startup-cleanup` (WARNING): if server startup fails after partial construction, cleanup is
+    best-effort through disposal. T9 should include disabled/enabled restart checks and log review.
 
 ## Next step
 
-T8 (wiring and `alerts-enabled` setting).
+T9 (supervised hardware run).

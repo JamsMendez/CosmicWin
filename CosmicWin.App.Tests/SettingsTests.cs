@@ -20,6 +20,7 @@ public sealed class SettingsTests
         var settings = Settings.Parse(string.Empty);
 
         Assert.True(settings.FocusBorder);
+        Assert.True(settings.AlertsEnabled);
         Assert.Equal(Settings.Default, settings);
     }
 
@@ -271,5 +272,54 @@ public sealed class SettingsTests
             VideoWallpaperPath: videoWallpaperPath);
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Theory]
+    [InlineData("alerts-enabled = off")]
+    [InlineData("alerts-enabled=off")]
+    [InlineData("  ALERTS-ENABLED   =   Off  ")]
+    [InlineData("alerts-enabled = false")]
+    [InlineData("alerts-enabled = 0")]
+    public void AlertsAreTurnedOff_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.False(Settings.Parse(line).AlertsEnabled);
+    }
+
+    [Theory]
+    [InlineData("alerts-enabled = on")]
+    [InlineData("alerts-enabled = true")]
+    [InlineData("alerts-enabled = 1")]
+    public void AlertsAreTurnedOn_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.True(Settings.Parse(line).AlertsEnabled);
+    }
+
+    [Theory]
+    [InlineData("alerts-enabled = perhaps")]
+    [InlineData("alerts-enabled =")]
+    [InlineData("alerts-enabled")]
+    public void AnUnreadableAlertsValue_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.True(Settings.Parse(line).AlertsEnabled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SerializeThenParse_RoundTripsTheAlertsSwitch(bool alertsEnabled)
+    {
+        var original = new Settings(FocusBorder: true, BorderColor: null, Tiling: true,
+            VideoWallpaperPath: null, AlertsEnabled: alertsEnabled);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheAlertsSwitchAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, AlertsEnabled: false).Serialize();
+
+        Assert.Contains("# alerts-enabled:", serialized, StringComparison.Ordinal);
+        Assert.Contains("alerts-enabled = off", serialized, StringComparison.Ordinal);
     }
 }

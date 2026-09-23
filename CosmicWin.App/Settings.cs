@@ -21,6 +21,9 @@ namespace CosmicWin.App;
 /// for none -- which is what every machine has before anyone has picked a video, and a legitimate
 /// way to run this app forever, not a half-configured one.
 /// </param>
+/// <param name="AlertsEnabled">
+/// Whether live alert commands are accepted over the named pipe and drawn over the video wallpaper.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -39,7 +42,7 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null)
+    string? VideoWallpaperPath = null, bool AlertsEnabled = true)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -56,6 +59,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string TilingKey = "tiling";
 
     private const string VideoWallpaperPathKey = "video-wallpaper-path";
+
+    private const string AlertsEnabledKey = "alerts-enabled";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
@@ -74,6 +79,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var borderColor = Default.BorderColor;
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
+        var alertsEnabled = Default.AlertsEnabled;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -118,9 +124,14 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 videoWallpaperPath = value;
             }
+            else if (key.Equals(AlertsEnabledKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var alertsFlag))
+            {
+                alertsEnabled = alertsFlag;
+            }
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -140,6 +151,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # {VideoWallpaperPathKey}: absolute path to an MP4 file to loop as the desktop wallpaper,
          # or blank for none.
          {VideoWallpaperPathKey} = {VideoWallpaperPath ?? ""}
+
+         # {AlertsEnabledKey}: on to accept live alert commands, off to ignore the alert pipe.
+         {AlertsEnabledKey} = {(AlertsEnabled ? "on" : "off")}
 
          """;
 
