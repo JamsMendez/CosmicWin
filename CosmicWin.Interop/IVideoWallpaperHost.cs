@@ -38,8 +38,12 @@ public interface IVideoWallpaperHost : IDisposable
     /// behind the icons, then creates the D3D11 device and swapchain and presents one test-pattern
     /// frame. On a later call (e.g. after <c>TaskbarCreated</c>, when Explorer has restarted) it
     /// re-runs the discovery/parent/z-order half against the already-created window and retries D3D
-    /// creation if a previous attach created the HWND but did not leave usable D3D resources. Never
-    /// throws; returns <see langword="false"/> on any failure (for example, Progman not found).
+    /// creation if a previous attach created the HWND but did not leave usable D3D resources. If the
+    /// host window itself was destroyed in the meantime (Explorer restarting tears down its Progman
+    /// parent along with it), a brand-new window is created, attached, and given a brand-new
+    /// swapchain -- on the SAME D3D11 device, which is never re-created once it exists, since a
+    /// caller (e.g. the Media Foundation frame-server player) may have built other resources on it.
+    /// Never throws; returns <see langword="false"/> on any failure (for example, Progman not found).
     /// </summary>
     bool TryAttach();
 

@@ -22,9 +22,20 @@ namespace CosmicWin.Interop.Win32;
 /// <c>TryAttach</c> is idempotent by design, not by accident: the first successful call creates the
 /// host window, hidden top-level <c>TaskbarCreated</c> receiver, and D3D11 device/swapchain; every
 /// later call re-runs the Progman/WorkerW/DefView discovery and parent/z-order half against the
-/// window that already exists. The device and swapchain are kept once created -- Explorer
-/// restarting invalidates the desktop's window tree, not this process's D3D state -- but a first
-/// attach that creates/parents the HWND and then fails D3D creation can retry D3D on the next call.
+/// window that already exists. The device is kept for the life of this object once created --
+/// Explorer restarting invalidates the desktop's window tree (and, with it, the host window and
+/// its window-bound swapchain), not this process's D3D device -- but a first attach that
+/// creates/parents the HWND and then fails D3D creation can retry D3D on the next call.
+/// </para>
+/// <para>
+/// R1 (explorer-restart-reattach): when Explorer restarts, the host window is a <c>WS_CHILD</c> of
+/// Progman and is destroyed together with it, leaving <see cref="_hwnd"/> a dead handle. Rather than
+/// retrying <see cref="AttachToDesktop"/> against that dead handle forever (what happened before
+/// this fix), <c>TryAttach</c> detects it with <c>PInvoke.IsWindow</c>, drops the now-dead
+/// window-bound swapchain/back buffer/render target view, creates and attaches a brand-new window,
+/// and creates a brand-new swapchain for it -- on the SAME <see cref="_device"/>/<see cref="_context"/>,
+/// never a new one, for the same reason the device is never re-created on an ordinary keep-alive
+/// tick: <c>MediaFoundationVideoWallpaperPlayer</c> built its <c>IMFDXGIDeviceManager</c> on it once.
 /// </para>
 /// <para>
 /// The window is created <c>WS_POPUP</c>, not <c>WS_CHILD</c>: <c>CreateWindowEx</c> refuses
@@ -106,6 +117,16 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
                 return CreateAndAttach() && EnsureTaskbarMessageWindow() && IsD3DReady();
             }
 
+            // R1 (explorer-restart-reattach): a non-null _hwnd that is no longer a real window
+            // means Explorer destroyed it (it was WS_CHILD of Progman and died with it) -- the
+            // stale handle would otherwise make every AttachToDesktop call below fail forever.
+            // Checked before EnsureTaskbarMessageWindow/AttachToDesktop, which both assume _hwnd
+            // is at least a live window even if not yet correctly parented.
+            if (!PInvoke.IsWindow(_hwnd))
+            {
+                return RecreateDestroyedHostWindow() && EnsureTaskbarMessageWindow() && IsD3DReady();
+            }
+
             if (!EnsureTaskbarMessageWindow())
             {
                 return false;
@@ -116,7 +137,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
                 return false;
             }
 
-            return IsD3DReady() || CreateSwapChainAndPresentTestPattern(_hwnd);
+            return EnsureSwapChain(_hwnd);
         }
         catch
         {
@@ -196,6 +217,45 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         }
 
         return CreateSwapChainAndPresentTestPattern(childHwnd);
+    }
+
+    /// <summary>
+    /// R1 (explorer-restart-reattach): recovers from the host window being destroyed out from
+    /// under this process -- Explorer restarting tears down its Progman parent, and the host is a
+    /// <c>WS_CHILD</c> of it, so it dies too. The stale <see cref="_hwnd"/> is a dead handle, and
+    /// every window-bound D3D resource (swapchain, back buffer, render target view) built for it is
+    /// dead along with it -- but <see cref="_device"/>/<see cref="_context"/> are NOT: they outlive
+    /// the window, and <c>MediaFoundationVideoWallpaperPlayer</c> built its
+    /// <c>IMFDXGIDeviceManager</c> on the device once, so replacing it would break playback that has
+    /// nothing to do with which window presents it. Creates a fresh window, attaches it, and gives
+    /// it a fresh swapchain on the SAME device.
+    /// </summary>
+    private bool RecreateDestroyedHostWindow()
+    {
+        // Only the window-bound resources are dead, so only they are dropped -- ReleaseD3DResources
+        // would also release _device/_context, which is exactly what must NOT happen here.
+        ReleaseSwapChainResources();
+
+        HWND newHwnd = CreateHostWindow();
+        if (newHwnd.IsNull)
+        {
+            // _hwnd is left as the dead handle: the next TryAttach still sees !IsWindow(_hwnd) and
+            // retries window creation from here again, same as any other failed step below.
+            return false;
+        }
+
+        _hwnd = newHwnd;
+
+        if (!AttachToDesktop(newHwnd))
+        {
+            // The new window is alive even though attaching it failed -- left in place (not
+            // destroyed) so the NEXT TryAttach takes the ordinary "hwnd already alive" path and
+            // retries AttachToDesktop against it, exactly like a first attach that parents
+            // successfully but fails D3D creation is retried today.
+            return false;
+        }
+
+        return EnsureSwapChain(newHwnd);
     }
 
     /// <summary>
@@ -382,6 +442,14 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             | SET_WINDOW_POS_FLAGS.SWP_NOSIZE);
     }
 
+    /// <summary>
+    /// Creates the D3D11 device, context, AND swapchain together, exactly as the very first
+    /// successful attach always has -- <see cref="ReleaseD3DResources"/> below releases the device
+    /// too, so this is only ever correct when no device exists yet to preserve (a genuine
+    /// first-ever attach, or a first attach whose D3D creation previously failed outright). A
+    /// reattach that must keep an existing device alive uses <see cref="CreateSwapChainOnExistingDevice"/>
+    /// instead -- see <see cref="EnsureSwapChain"/>, which picks between the two.
+    /// </summary>
     private bool CreateSwapChainAndPresentTestPattern(HWND hwnd)
     {
         if (IsD3DReady())
@@ -508,6 +576,149 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             ReleaseComObject(dxgiDevice);
             ReleaseComObject(context);
             ReleaseComObject(device);
+        }
+    }
+
+    /// <summary>
+    /// Ensures a ready swapchain for <paramref name="hwnd"/>, preserving <see cref="_device"/> and
+    /// <see cref="_context"/> when they already exist rather than re-creating them: picks
+    /// <see cref="CreateSwapChainOnExistingDevice"/> when a device survives from an earlier attach
+    /// (the ordinary keep-alive/TaskbarCreated retry, and R1's destroyed-window recovery), or falls
+    /// back to <see cref="CreateSwapChainAndPresentTestPattern"/> -- full device + swapchain
+    /// creation -- for the rare case where the window exists but D3D creation never succeeded at
+    /// all (nothing to preserve yet).
+    /// </summary>
+    private bool EnsureSwapChain(HWND hwnd)
+    {
+        if (IsD3DReady())
+        {
+            return true;
+        }
+
+        return _device is not null && _context is not null
+            ? CreateSwapChainOnExistingDevice(hwnd)
+            : CreateSwapChainAndPresentTestPattern(hwnd);
+    }
+
+    /// <summary>
+    /// R1 (explorer-restart-reattach): the swapchain half of <see cref="CreateSwapChainAndPresentTestPattern"/>,
+    /// split out to run against an ALREADY-EXISTING <see cref="_device"/>/<see cref="_context"/>
+    /// instead of creating a new one -- caller (<see cref="EnsureSwapChain"/>) guarantees both are
+    /// non-null. Used when the host window was recreated (the D3D device is untouched by a window
+    /// being destroyed) so <c>MediaFoundationVideoWallpaperPlayer</c>'s <c>IMFDXGIDeviceManager</c>,
+    /// built on the device once in <c>TryPlay</c>, never has to be rebuilt.
+    /// </summary>
+    /// <remarks>
+    /// Concurrency: <see cref="_swapChain"/>/<see cref="_backBuffer"/>/<see cref="_rtv"/> are plain
+    /// fields, written here from the video-wallpaper thread while the player's own worker thread may
+    /// concurrently read them via <see cref="GetBackBuffer"/>/<see cref="Present"/> every tick. This
+    /// is no different from what <see cref="CreateSwapChainAndPresentTestPattern"/> already does on
+    /// every ordinary (re)attach today: the fields are released (nulled) before the new ones are
+    /// created, so a tick landing in that window sees either the old, still-valid resources or a
+    /// null that <see cref="GetBackBuffer"/>/<see cref="Present"/> already turn into an
+    /// <see cref="InvalidOperationException"/> -- which <c>MediaFoundationVideoWallpaperPlayer.Tick</c>
+    /// already catches and swallows as "a bad tick, retried next time". No new failure mode is
+    /// introduced; D3D11/DXGI COM interfaces are free-threaded by design regardless (see
+    /// <c>MediaFoundationVideoWallpaperPlayer</c>'s own remarks).
+    /// </remarks>
+    private bool CreateSwapChainOnExistingDevice(HWND hwnd)
+    {
+        var device = _device!;
+        var context = _context!;
+
+        ReleaseSwapChainResources();
+
+        if (!PInvoke.GetWindowRect(hwnd, out RECT screenRect))
+        {
+            return false;
+        }
+
+        var width = Math.Max(1, screenRect.right - screenRect.left);
+        var height = Math.Max(1, screenRect.bottom - screenRect.top);
+
+        IDXGIDevice? dxgiDevice = null;
+        IDXGIAdapter? adapter = null;
+        IDXGIFactory2? factory = null;
+        IDXGISwapChain1? swapChain = null;
+        ID3D11Texture2D? backBuffer = null;
+        ID3D11RenderTargetView? rtv = null;
+
+        try
+        {
+            dxgiDevice = (IDXGIDevice)device;
+            dxgiDevice.GetAdapter(out adapter);
+            if (adapter is null)
+            {
+                return false;
+            }
+
+            adapter.GetParent(out factory);
+            if (factory is null)
+            {
+                return false;
+            }
+
+            DXGI_SWAP_CHAIN_DESC1 desc = new()
+            {
+                Width = (uint)width,
+                Height = (uint)height,
+                Format = DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
+                BufferUsage = DXGI_USAGE.DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                BufferCount = 2,
+                SwapEffect = DXGI_SWAP_EFFECT.DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                AlphaMode = DXGI_ALPHA_MODE.DXGI_ALPHA_MODE_IGNORE,
+            };
+
+            factory.CreateSwapChainForHwnd(device, hwnd, &desc, null, null, out swapChain);
+            if (swapChain is null)
+            {
+                return false;
+            }
+
+            swapChain.GetBuffer(0, out backBuffer);
+            if (backBuffer is null)
+            {
+                return false;
+            }
+
+            device.CreateRenderTargetView(backBuffer, null, out rtv);
+            if (rtv is null)
+            {
+                return false;
+            }
+
+            _swapChain = swapChain;
+            _backBuffer = backBuffer;
+            _rtv = rtv;
+
+            swapChain = null;
+            backBuffer = null;
+            rtv = null;
+
+            try
+            {
+                // One-time test-pattern clear, same as the first-ever attach -- proves the NEW
+                // swapchain presents before the player's next tick writes a real frame into it.
+                context.ClearRenderTargetView(_rtv, TestPatternColor);
+                Present();
+            }
+            catch
+            {
+                ReleaseSwapChainResources();
+                throw;
+            }
+
+            return true;
+        }
+        finally
+        {
+            ReleaseComObject(rtv);
+            ReleaseComObject(backBuffer);
+            ReleaseComObject(swapChain);
+            ReleaseComObject(factory);
+            ReleaseComObject(adapter);
+            ReleaseComObject(dxgiDevice);
         }
     }
 
@@ -671,16 +882,28 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
     private void ReleaseD3DResources()
     {
+        ReleaseSwapChainResources();
+        ReleaseComObject(_context);
+        ReleaseComObject(_device);
+        _context = null;
+        _device = null;
+    }
+
+    /// <summary>
+    /// Releases only the window-bound D3D resources (swapchain, back buffer, render target view) --
+    /// <see cref="_device"/> and <see cref="_context"/> are left untouched. R1
+    /// (explorer-restart-reattach): this is what <see cref="RecreateDestroyedHostWindow"/> and
+    /// <see cref="CreateSwapChainOnExistingDevice"/> use instead of <see cref="ReleaseD3DResources"/>
+    /// -- the whole point of recovering a destroyed host window is that the device must survive it.
+    /// </summary>
+    private void ReleaseSwapChainResources()
+    {
         ReleaseComObject(_rtv);
         ReleaseComObject(_backBuffer);
         ReleaseComObject(_swapChain);
-        ReleaseComObject(_context);
-        ReleaseComObject(_device);
         _rtv = null;
         _backBuffer = null;
         _swapChain = null;
-        _context = null;
-        _device = null;
     }
 
     private static void ReleaseComObject(object? comObject)

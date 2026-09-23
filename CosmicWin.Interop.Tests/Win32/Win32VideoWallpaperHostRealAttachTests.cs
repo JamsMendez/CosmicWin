@@ -1,6 +1,7 @@
 using CosmicWin.Interop.Win32;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.UI.WindowsAndMessaging;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -110,6 +111,50 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
 
         Assert.Equal(firstHwnd, host.Hwnd);
         Assert.Same(firstBackBuffer, host.GetBackBuffer());
+    }
+
+    /// <summary>
+    /// R1 (explorer-restart-reattach): reproduces an Explorer restart destroying the host window
+    /// together with its Progman parent -- <c>DestroyWindow</c> on the host from the SAME thread
+    /// that created it (this test thread, via <see cref="Win32VideoWallpaperHost.TryAttach"/> above)
+    /// stands in for that, since only the owning thread may legally destroy a window. Before the fix,
+    /// <c>TryAttach</c> only creates a window when its stored handle <c>IsNull</c>; after this
+    /// destroy the stored handle is non-null but dead, so the retry runs <c>AttachToDesktop</c>
+    /// against a dead HWND and returns <see langword="false"/> forever -- this asserts the recovered
+    /// state instead: a brand-new, live, correctly-parented window, on the SAME D3D11 device (the
+    /// Media Foundation engine's device manager is built on it once and must not be invalidated).
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_AfterTheHostWindowIsDestroyed_RecreatesItOnTheSameDevice()
+    {
+        using var host = new Win32VideoWallpaperHost();
+
+        Assert.True(host.TryAttach());
+        var firstHwnd = host.Hwnd;
+        var firstDevice = host.Device;
+
+        // Simulates Explorer restarting and tearing down the host together with its Progman
+        // parent: the window is destroyed out from under the host while its stale handle is still
+        // stored in `_hwnd`. Legal here because this test thread is the one that created it.
+        Assert.True(PInvoke.DestroyWindow(new HWND(firstHwnd)));
+
+        var reattached = host.TryAttach();
+
+        Assert.True(reattached, "TryAttach should recover a destroyed host window instead of failing forever.");
+
+        var secondHwnd = host.Hwnd;
+        Assert.NotEqual(firstHwnd, secondHwnd);
+
+        HWND newHwnd = new(secondHwnd);
+        Assert.True(PInvoke.IsWindow(newHwnd), "The recreated window should be alive.");
+        Assert.Equal(ResolveExpectedDesktopParent(), PInvoke.GetParent(newHwnd));
+
+        Assert.Same(firstDevice, host.Device);
+
+        ID3D11Texture2D backBuffer = host.GetBackBuffer();
+        Assert.NotNull(backBuffer);
+        var presentException = Record.Exception(host.Present);
+        Assert.Null(presentException);
     }
 
     /// <summary>
