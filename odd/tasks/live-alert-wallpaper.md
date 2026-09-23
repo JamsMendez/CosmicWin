@@ -192,6 +192,12 @@ Slices (planned, each a PR against main stacked on the previous one):
     proven for real, ideally by running `CosmicWinAlert.exe` from an explicitly unelevated shell
     against the real elevated `CosmicWin.App.exe` once T8 wires the server in.
   - Not wired into `AppComposition` -- that is T8, as planned.
+  **Cross-integrity check by the parent, 2026-09-23** (closes the writer's open point): a
+  throwaway elevated harness hosted the real `NamedPipeAlertCommandServer` on
+  `AlertPipeName.Resolve()`; `CosmicWinAlert.exe` launched through `explorer.exe` ran at
+  `Medium Mandatory Level` (S-1-16-8192, from `whoami /groups`). `warning:2 failed:1` → server
+  received it, reply `ok`, exit 0; `warning:2 bad:1` → `error: bad token`, exit 1. With no
+  server: exit 2 after ~1.08 s; no arguments: usage line, exit 3.
 - [ ] **T5 — `IFrameOverlay` seam in the player**
 - [ ] **T6 — `Direct2DAlertOverlay`**
 - [ ] **T7 — Alert visuals ported from great-sage**
