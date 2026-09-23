@@ -37,8 +37,16 @@ spike, checked manually, not TDD.
 
 ## Delivery
 
-Strategy: `ask-on-risk` (default). Forecast: ~1200 authored lines over T1–T8, so chaining will be
-asked when the running count passes ~400. RDD: on (global).
+Strategy: `ask-on-risk` (default). Forecast: ~1200 authored lines over T1–T8. Chain strategy
+chosen by the maintainer on 2026-09-23: **`stacked-to-main`**. RDD: on (global).
+
+Slices (planned, each a PR against main stacked on the previous one):
+
+1. `fix/explorer-restart-reattach` (base fix, already done).
+2. T1 + T3: parser and tile layout (pure logic).
+3. T2 + T4: queue and named pipe / `--alert` client.
+4. T5 + T6: overlay seam and Direct2D overlay.
+5. T7 + T8: visuals and wiring. T9 evidence goes with slice 5.
 
 ## Tasks
 
