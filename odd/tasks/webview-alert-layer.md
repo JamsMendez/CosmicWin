@@ -341,7 +341,7 @@ route: delegated writer. It adds one innermost `_compositionLock`, keeps the exi
 `_compositionLock`, never inverted. The first attempt wrapped the bodies (457 raw changed lines)
 and was rejected by the 200-line frozen correction budget. It was amended to 164 lines. RED was
 **not observable**: the new desktop-gated stress fact
-`CompositionSeam_HammeredFromThreeThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows` skips
+`CompositionSeam_HammeredFromTwoThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows` skips
 while `CosmicWin.App` runs. Checks: Debug build 0 errors; Interop 247 passed / 40 skipped; App
 1013 passed / 6 skipped; `git diff --check` clean. Targeted validation **approved**, and the
 acknowledgement burned authority. The reviewed boundary is now `7462e1c`.
@@ -355,6 +355,37 @@ Advisory, non-blocking follow-ups (not accepted as scope yet):
 - `R3-vacuous-restart-assert` (SUGGESTION),
   `MediaFoundationVideoWallpaperPlayerShakeTests.cs:139-141`: the restart assertion is trivially
   zero at 200 ms > 120 ms, and the tests use 230 ms while production uses 120 ms.
+
+2026-09-24 T6 agent-driven hardware run (maintainer authorized closing the app and minimizing
+windows; Explorer untouched). Elevated shell. The Release app (PID 27056) was force-stopped; the
+Debug build was launched for the run; afterwards the Release app was relaunched (PID 28324, video
+`tryPlay=True`) and user windows restored. Temporary probe scripts' outputs were removed.
+- Gated desktop tests, app closed: `Win32VideoWallpaperHostRealAttachTests` **10 / 10 passed**, no
+  skips, including the `7462e1c` stress fact
+  `CompositionSeam_HammeredFromTwoThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows` (first
+  real run). Full Interop with the gate on: 274 passed / 15 skipped / 0 failed.
+- Method: full-screen captures every ~30 ms, sampled every 24 px, counting strongly red / amber
+  pixels (per mille); time zero is when the client is launched; windows minimized first.
+- **FINDING F1 -- the first alert after app launch never appears.** Reproduced on 3 of 3 launches
+  (first alert sent ~23 s, ~10 s and ~45 s after launch; probe windows 7-12 s): no red pixels at
+  all. The very next alert on the same process appears. The app's `msedgewebview2` children
+  appeared only ~15 s after the command and lived ~5 s. A DBWIN listener (self-tested working)
+  saw **no** `Debug.WriteLine` output from the app, so no caught exception was logged. Root cause
+  unknown; production still has no alert-layer telemetry.
+- **FINDING F2 -- WebView startup eats the alert's duration.** Warm process, 5 s `failed`: first
+  visible at 2.84 / 2.87 / 2.90 / 2.99 / 2.78 s, gone at ~5.5-5.6 s, so ~2.7 s of 5 s shown. The
+  queue deadline starts at promotion, the layer ~2.4 s later. FIFO `warning:1 duration:3` then
+  `failed:1 duration:3`: the warning showed for 0.6 s (2.97-3.60 s) and the failed never appeared.
+- Warning (warm): amber at 3.10 s, gone at 5.71 s. Combined `warning:2 failed:1`: only red
+  (3.01-5.75 s), so failed wins and one layer shows.
+- Covered desktop (borderless, non-maximized, screen-sized TOPMOST probe for 0-5.09 s): no layer
+  while covered; red from 7.83 s to 10.55 s, so the alert was held and its duration started after
+  the cover left. (A first attempt used a *maximized* cover, which the detector excludes by
+  design; that run is discarded.)
+- GPU 3D total (3 x 1 s samples) / memory: idle 0.86 %, app private 217 MB, 0 WebView procs;
+  shown (`failed`) **42.12 %**, app 252 MB, 6 WebView procs, 461 MB WebView private; after 0.94 %,
+  0 WebView procs.
+- Not verified: the 120 ms native shake visual (too short for this sampler).
 
 ## Next step
 
