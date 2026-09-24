@@ -184,7 +184,15 @@ exception if a single cohesive slice cannot fit the budget.
   PR slice rather than splitting code from its tests. Interop 247 passed / 39 skipped; App 1003
   passed / 6 skipped; parent spot check 23 passed. No real-hardware shake rendering check yet
   (T6), and concurrent restart-vs-expiry is not exercised by a dedicated race test.
-- [ ] T5 — Wiring: queue → layer (failed wins), Direct2D overlay switched off; setting.
+- [x] **T5 — Queue → one WebView layer, failed precedence, setting, Direct2D switch-off.**
+  Work-unit commit `b354d26` (247 additions / 12 deletions): production uses persisted
+  `alerts-enabled`, creates no Direct2D alert overlay, selects failed if present, starts once per
+  queued alert, shakes video once, ends on queue completion, and disposes the WebView layer before
+  the host. Existing Direct2D implementation/test seams remain for rollback. Readiness holds
+  pending alerts during host loss while existing keep-alive retries continue. Strict TDD RED/GREEN
+  recorded for new seams/startup/reattach regressions. App suite = 1013 passed / 6 skipped;
+  parent focused spot check = 10 passed; Debug solution build = 0 warnings / 0 errors.
+  Hardware behavior remains T6. Engram mirror pending.
 - [ ] T6 — Supervised hardware run (same checks as live-alert-wallpaper T9, plus GPU/memory idle
   vs shown).
 
@@ -233,10 +241,21 @@ state path but not a real controller. T3 was committed as `64ea1e5` after indepe
 hardware checks.
 Engram mirror remains pending due to provider ownership mismatch.
 
+2026-09-23 T5 in progress: delegated writer wired the existing queue to one WebView layer
+(`failed` wins), one 230 ms shake per failed alert, transition-based start/end, persisted
+`alerts-enabled` gate, and production Direct2D switch-off. The renderer-ready predicate holds
+pending alerts through host loss. A regression test caught that clearing `videoWallpaperActive`
+on a transient keep-alive attach failure would prevent future retries; that flag change was removed.
+A startup STA test also caught premature synchronization-context validation; the controller now
+constructs on STA before the WPF dispatcher starts pumping, but still checks the context at Start.
+Strict TDD RED/GREEN was observed for new seams and these regressions. Independent App suite =
+1013 passed / 6 skipped and Debug solution build succeeded with 0 warnings. Parent spot check =
+10 focused passed; `git diff --check` clean. Real desktop composition, process lifetime, GPU shake,
+and Explorer restart remain T6 hardware checks. T5 committed as `b354d26`; Engram mirror pending.
+
 ## Next step
 
-T3 committed as `64ea1e5`; next T5: wire the existing queue to the lazy layer, setting, and
-Direct2D overlay switch. Do not claim the idle process-lifetime guarantee until measured. T1
-manual Edge check,
+T5 committed as `b354d26`. Next T6 supervised desktop/resource validation; do not claim the idle
+process-lifetime guarantee until measured. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
