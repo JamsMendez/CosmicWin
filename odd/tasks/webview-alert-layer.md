@@ -193,8 +193,24 @@ exception if a single cohesive slice cannot fit the budget.
   recorded for new seams/startup/reattach regressions. App suite = 1013 passed / 6 skipped;
   parent focused spot check = 10 passed; Debug solution build = 0 warnings / 0 errors.
   Hardware behavior remains T6. Engram mirror pending.
-- [ ] T6 — Supervised hardware run (same checks as live-alert-wallpaper T9, plus GPU/memory idle
-  vs shown).
+- [ ] **T6 — Supervised hardware run** (same checks as live-alert-wallpaper T9, plus GPU/memory
+  idle vs shown). Preflight: `CosmicWin.App` is running (one process); 18 `msedgewebview2` processes
+  exist, but attribution to this app is not established. With `COSMICWIN_RUN_DESKTOP_TESTS=1`,
+  the 9 `Win32VideoWallpaperHostRealAttachTests` all skipped under the desktop gate; this is not
+  hardware proof. Do not terminate the running app or restart Explorer without the maintainer's
+  explicit decision. After the user exits the app from its tray, run the gated tests, then a
+  supervised new-app run for transparent warning/failed layers, one-kind precedence, video shake,
+  FIFO, covered-desktop hold, Explorer restart, idle/shown GPU and memory, and WebView2 process
+  cleanup. Separate app-owned WebView2 processes from unrelated existing ones. Maintainer chose
+  `desktop-tests-only` for this run: the guarded command
+  `COSMICWIN_RUN_DESKTOP_TESTS=1 dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj
+  --filter FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests` passed **9 / 9**, with no
+  skips or failures after the app stopped. `CloseMainWindow()` returned false (tray-only process),
+  non-forced `taskkill` left it running, then the parent used `Stop-Process -Force` on the observed
+  PID 33944 under the maintainer's open/close authorization. This did not exercise graceful exit.
+  After tests the parent relaunched the same `run/CosmicWin.App.exe`, observed PID 24084, and did
+  not minimize user windows or restart Explorer. Visual, resource, WebView2 cleanup, and Explorer-
+  restart checks remain pending, with no Explorer restart authorized.
 
 ## Progress
 
@@ -255,7 +271,8 @@ and Explorer restart remain T6 hardware checks. T5 committed as `b354d26`; Engra
 
 ## Next step
 
-T5 committed as `b354d26`. Next T6 supervised desktop/resource validation; do not claim the idle
-process-lifetime guarantee until measured. T1 manual Edge check,
+T5 committed as `b354d26`. T6's nine guarded desktop attachment facts passed after an authorized
+app stop; the app was relaunched. Do not claim real WebView2 rendering, idle process-lifetime,
+shake visuals, or Explorer recovery until separately authorized and measured. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
