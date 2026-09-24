@@ -84,9 +84,82 @@ Out of scope: tiles / per-count grids, multi-monitor, the page's background scen
   Production implications: keep all DComp work on one thread or use own-context RCWs; create a
   new controller per alert (this also covers the Explorer-restart case); close it on every exit
   path.
-- [ ] T1 — Trimmed transparent alert page (warning / failed only, offline font), embedded as an
-  app resource.
-- [ ] T2 — Composition swapchain in production host (behind the gate result).
+- [x] **T1 — Trimmed transparent alert page (warning / failed only, offline font).** Route: delegated
+  writer. Strict TDD observed: RED first (13 file/text facts against
+  `CosmicWin.App/Alerts/Web/*` failing with `DirectoryNotFoundException` because the files did not
+  exist), then GREEN (13/13) after adding the page and the csproj `Content`/`CopyToOutputDirectory`
+  item. Shipped as content, not an embedded resource, per the task's own guidance -- WebView2's
+  `SetVirtualHostNameToFolderMapping` (T3) needs a real folder to point a virtual host at, not bytes
+  baked into the assembly.
+  - `CosmicWin.App/Alerts/Web/alert-layer.{html,css,js}`: ports `drawFailureLayer`,
+    `drawFailureOverlay`, `drawFailureTitle`, `drawFailureBandIntersections`, `drawFailureModules`,
+    `advanceFailureState`, and the folding-band geometry helpers they call
+    (`foldingBandParameters`/`foldingBandGeometry`/`fillFoldingBandGeometry`/
+    `foldingBandCompression`, `animationProgress`/`pingpong01`) from
+    `backgroud-processing/script.js`. Drops the nebula/scene, stars, orbits, keyboard shortcuts,
+    fullscreen, zoom, the self-check block, the canvas shake (`applyFailureShake` -- T4 shakes the
+    video natively) and the backdrop pixelation (the page cannot see the video behind it). The
+    `failed` theme (renamed from the source page's `error` key, matching `AlertKind.Failed`) still
+    carries `shakeMs = 230`, so the page waits that long before revealing, same as the original
+    timing.
+  - Fully transparent html/body/canvas, one devicePixelRatio-aware canvas. API:
+    `alert-layer.html#kind=failed&duration=5000` (falls back to `location.search` so the same file
+    opens directly in a browser tab); posts `window.chrome.webview.postMessage('done')` when
+    `duration` elapses, guarded for a plain browser with no `chrome.webview`.
+  - Font: Archivo Black (SIL OFL) **downloaded successfully** from
+    `github.com/google/fonts` (`ofl/archivoblack/ArchivoBlack-Regular.ttf` + `OFL.txt`) and bundled
+    via a local `@font-face`; no Arial Black fallback was needed. No other network reference in the
+    shipped HTML/CSS/JS (`OFL.txt` itself is excluded from that check -- it legitimately quotes an
+    `http://` URL to the license text).
+  - Manual check (not run by this agent -- no browser drive-by in this sandbox): open
+    `alert-layer.html#kind=warning&duration=5000` in Edge and confirm the layer draws over a
+    transparent/white page. A Node smoke test (stubbed DOM, no xUnit) drove the render loop for both
+    `failed` and `warning` kinds through `hidden → shaking/revealing → shown → done` without
+    throwing, and `node --check` confirmed the script parses.
+  - Tests: `CosmicWin.App.Tests/Alerts/AlertLayerWebPageTests.cs` (13 facts) -- files land in the
+    build output, no network references, hash API + done handshake present, CSS transparency, theme
+    data carried over verbatim, out-of-scope pieces absent.
+  - Commit `1d18e82`.
+- [x] **T2 — Composition swapchain in production host (behind the gate result).** Route: delegated
+  writer. Strict TDD observed: RED first (5 `CS1061` compile errors in
+  `Win32VideoWallpaperHostCompositionSeamTests.cs` against members that did not exist yet), then
+  GREEN (6/6) after implementing the seam; the full `CosmicWin.Interop.Tests` suite stayed green
+  throughout (230 passed / 39 skipped / 0 failed, same skip count as before plus the 4 new
+  desktop-gated facts) proving the switch to composition did not regress the existing D3D/attach
+  behaviour.
+  - `Win32VideoWallpaperHost` always presents through `CreateSwapChainForComposition`
+    (`FLIP_SEQUENTIAL`, default `STRETCH` scaling) now, no env var -- re-implemented cleanly from the
+    T0 spike (`spike/webview-alert-t0`, commits `b77366a`/`26fa64b`), not merged/cherry-picked. A
+    root visual holds the swapchain (video) visual, rebuilt in `RebuildCompositionTarget` whenever
+    the host window is (re)created (Explorer restart), on one `IDCompositionDevice` kept for the
+    object's life like `_device`/`_context`.
+  - Clean public seam for T3 (no `InternalsVisibleTo` hack): `Hwnd` (promoted from
+    internal/test-only), `IsCompositionReady`, `CompositionGeneration`,
+    `AddCompositionOverlayVisual()` (adds ONE overlay visual above the video, returned as `object`
+    for `CoreWebView2CompositionController.RootVisualTarget`), `RemoveCompositionOverlayVisual()`,
+    `CommitComposition()`.
+  - Fixes the cross-thread DComp RCW failure T0 proved on hardware (`E_NOINTERFACE` QI'ing an RCW
+    minted on the video thread from the WPF UI thread): every composition object reachable from
+    another thread (device, root visual, swapchain visual, overlay visual) is reduced to a raw
+    `IUnknown` pointer the instant it is created and never cached as an RCW; `CallerContextDComp<T>`
+    mints a fresh RCW per call and disposes it (via `ReleaseComObject`) before returning, instead of
+    leaking every wrapper forever the way the spike did on purpose. A DComp failure is caught and
+    contained everywhere in the new surface; it can never stop video playback. The existing
+    Direct2D overlay path (`IFrameOverlay` on the back buffer) is unaffected -- unchanged code,
+    confirmed by the still-green `MediaFoundationVideoWallpaperPlayerFrameOverlayTests`.
+  - Tests: `Win32VideoWallpaperHostCompositionSeamTests.cs` (6 facts, pure/unit, no desktop --
+    composition-ready/generation/`Hwnd` all zero/false before attach, `Add`/`Remove`/`Commit` never
+    throw with no device). `Win32VideoWallpaperHostRealAttachTests.cs` gained 4 desktop-gated facts:
+    tree built after attach, overlay add/remove alongside `Present`, rebuild + generation bump after
+    the host window is destroyed, and `AddCompositionOverlayVisual` called from a genuine STA thread
+    (the exact T0 failure shape). All 4 compiled and were confirmed to **skip** for the documented
+    reason ("CosmicWin.App is running") with `COSMICWIN_RUN_DESKTOP_TESTS=1` set -- this agent did
+    not stop the running app, per its instructions. **Needs the parent's run**: close
+    `CosmicWin.App`, then `COSMICWIN_RUN_DESKTOP_TESTS=1 dotnet test
+    CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj --filter
+    FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests` to get real RED/GREEN evidence on
+    hardware for these 4 facts (they were only proven to compile and to skip correctly here).
+  - Commit `c9e8114`.
 - [ ] T3 — WebView2 alert layer: lazy create on alert start, dispose on end, show one kind.
 - [ ] T4 — Native video shake for `failed` in the player.
 - [ ] T5 — Wiring: queue → layer (failed wins), Direct2D overlay switched off; setting.
@@ -99,6 +172,20 @@ Out of scope: tiles / per-count grids, multi-monitor, the page's background scen
 
 2026-09-23: T0 passed on hardware (see T0 entry).
 
+2026-09-23: T1 and T2 implemented by a delegated writer, strict TDD observed for both (RED then
+GREEN, see each entry above). Verification: `dotnet build CosmicWin.sln -c Debug` succeeded (0
+errors, only 3 pre-existing warnings unrelated to this work);
+`dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj` = 230 passed / 39 skipped / 0
+failed; `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` = 1003 passed / 6 skipped / 0
+failed. The 4 new desktop-gated composition facts in `Win32VideoWallpaperHostRealAttachTests.cs`
+compiled and skipped for the documented reason (CosmicWin.App running) -- not yet exercised for
+real on hardware. Commits: `1d18e82` (T1), `c9e8114` (T2).
+
 ## Next step
 
-T1 (trimmed transparent alert page) and T2 (composition swapchain in the production host).
+Parent: run the 4 new desktop-gated facts for real (`CosmicWin.App` closed,
+`COSMICWIN_RUN_DESKTOP_TESTS=1`) and, ideally, the manual browser check for T1
+(`alert-layer.html#kind=warning&duration=5000` in Edge). Then T3 -- WebView2 alert layer: lazy
+create on alert start (using the T2 seam: `Hwnd`, `AddCompositionOverlayVisual`,
+`CommitComposition`, `CompositionGeneration` to detect a host recreate), dispose on end, show one
+kind.
