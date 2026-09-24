@@ -125,19 +125,66 @@ public sealed class MediaFoundationVideoWallpaperPlayerShakeTests
         using var player = new CosmicWin.Interop.Win32.MediaFoundationVideoWallpaperPlayer(timeProvider: time);
         var host = new FakeVideoWallpaperHost { BackBufferSize = (1920, 1080) };
 
-        player.Shake(TimeSpan.FromMilliseconds(230));
-        time.Advance(TimeSpan.FromMilliseconds(200));
+        // Production wiring (AppComposition.UpdateAlertOverlay) always passes exactly
+        // VideoShakeMath.DurationMilliseconds -- use the same duration here so the restart is
+        // exercised inside the one window production can actually reach.
+        var duration = TimeSpan.FromMilliseconds(CosmicWin.Interop.Win32.VideoShakeMath.DurationMilliseconds);
+
+        player.Shake(duration);
+        time.Advance(TimeSpan.FromMilliseconds(80));
 
         // A second failed alert arrives before the first shake finished -- it must restart, not be
         // ignored, and not throw from being called while already active.
-        player.Shake(TimeSpan.FromMilliseconds(230));
-        time.Advance(TimeSpan.FromMilliseconds(200));
+        player.Shake(duration);
+        time.Advance(TimeSpan.FromMilliseconds(50));
         player.ApplyShakeForTests(host);
 
         Assert.True(player.IsShakingForTests);
 
-        var expected = CosmicWin.Interop.Win32.VideoShakeMath.Compute(200, 1920, 1080);
+        // 50 ms since the restart is inside VideoShakeMath's decay window (< DurationMilliseconds),
+        // so this is not the trivial zero the identity transform would produce. It also differs from
+        // what 130 ms since the FIRST start would give -- past DurationMilliseconds, i.e. identity --
+        // which is what an unrestarted clock (or an ignored second Shake() call) would show. Matching
+        // the former and not the latter is what actually proves the restart reset the start time.
+        var expectedSinceRestart = CosmicWin.Interop.Win32.VideoShakeMath.Compute(50, 1920, 1080);
+        var expectedIfNotRestarted = CosmicWin.Interop.Win32.VideoShakeMath.Compute(130, 1920, 1080);
+        Assert.Equal(CosmicWin.Interop.Win32.VideoShakeTransform.Identity.Dx, expectedIfNotRestarted.Dx);
+        Assert.NotEqual(expectedIfNotRestarted.Dx, expectedSinceRestart.Dx);
+
         var actual = host.LastVideoTransform!.Value;
-        Assert.Equal((float)expected.Dx, actual.OffsetX, precision: 3);
+        Assert.Equal((float)expectedSinceRestart.Dx, actual.OffsetX, precision: 3);
+    }
+
+    [Theory]
+    [InlineData(119)]
+    [InlineData(120)]
+    public void Shake_AtProductionDurationBoundary_NonIdentityJustBeforeClearsAtOrAfter(int elapsedMilliseconds)
+    {
+        var time = new ManualTimeProvider(Epoch);
+        using var player = new CosmicWin.Interop.Win32.MediaFoundationVideoWallpaperPlayer(timeProvider: time);
+        var host = new FakeVideoWallpaperHost { BackBufferSize = (1920, 1080) };
+
+        // The production-duration expiry boundary: AppComposition.UpdateAlertOverlay always shakes
+        // for exactly VideoShakeMath.DurationMilliseconds, so this is the one boundary production can
+        // actually reach (a longer test duration, e.g. 230 ms, never exercises it).
+        var duration = TimeSpan.FromMilliseconds(CosmicWin.Interop.Win32.VideoShakeMath.DurationMilliseconds);
+        player.Shake(duration);
+        time.Advance(TimeSpan.FromMilliseconds(elapsedMilliseconds));
+        player.ApplyShakeForTests(host);
+
+        if (elapsedMilliseconds < CosmicWin.Interop.Win32.VideoShakeMath.DurationMilliseconds)
+        {
+            var expected = CosmicWin.Interop.Win32.VideoShakeMath.Compute(elapsedMilliseconds, 1920, 1080);
+            Assert.True(player.IsShakingForTests);
+            Assert.Equal(1, host.SetVideoTransformCallCount);
+            Assert.Equal(0, host.ClearVideoTransformCallCount);
+            Assert.Equal((float)expected.Dx, host.LastVideoTransform!.Value.OffsetX, precision: 3);
+        }
+        else
+        {
+            Assert.False(player.IsShakingForTests);
+            Assert.Equal(0, host.SetVideoTransformCallCount);
+            Assert.Equal(1, host.ClearVideoTransformCallCount);
+        }
     }
 }
