@@ -54,7 +54,7 @@ public sealed class WebViewAlertCompositionWiringTests
 
     private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
-        Host? host = null)
+        Host? host = null, Action<string, int>? startAlertLayer = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
@@ -75,7 +75,7 @@ public sealed class WebViewAlertCompositionWiringTests
             videoWallpaperPath: host is null ? null : typeof(WebViewAlertCompositionWiringTests).Assembly.Location,
             scheduleVideoWallpaperWork: work => work(),
             alertRendererReady: ready,
-            startAlertLayer: (kind, duration) => events.Add($"start:{kind}:{duration}"),
+            startAlertLayer: startAlertLayer ?? ((kind, duration) => events.Add($"start:{kind}:{duration}")),
             endAlertLayer: () => events.Add("end"),
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"));
         return (composition, timer, server!, events);
@@ -163,6 +163,39 @@ public sealed class WebViewAlertCompositionWiringTests
             ready = true;
             h.Timer.Tick();
             Assert.StartsWith("start:warning:", Assert.Single(h.Events));
+        }
+    }
+
+    [Fact]
+    public void FailedAlertLayerStartDoesNotEscapeTheTickAndIsRetriedNextTick()
+    {
+        var attempts = 0;
+        List<string>? events = null;
+        var h = Create(startAlertLayer: (kind, duration) =>
+        {
+            attempts++;
+            events!.Add($"start:{kind}:{duration}");
+            if (attempts == 1) throw new InvalidOperationException("start failed");
+        });
+        events = h.Events;
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:1 duration:1"));
+
+            var thrown = Record.Exception(() => h.Timer.Tick());
+            Assert.Null(thrown);
+            Assert.Equal(1, attempts);
+            Assert.StartsWith("start:failed:", h.Events[1]);
+
+            // Retried on the next tick because the failed start must not have recorded the
+            // alert as displayed.
+            thrown = Record.Exception(() => h.Timer.Tick());
+            Assert.Null(thrown);
+            Assert.Equal(2, attempts);
+            Assert.StartsWith("start:failed:", h.Events[2]);
+
+            // The failed-kind shake happens once per alert, not once per retry attempt.
+            Assert.Single(h.Events, e => e == "shake:120");
         }
     }
 

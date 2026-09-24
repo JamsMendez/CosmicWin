@@ -296,6 +296,7 @@ public sealed class AppComposition : IDisposable
         var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
         IAlertCommandServer? alertServer = null;
         ActiveAlert? displayedAlert = null;
+        ActiveAlert? shakenAlert = null;
 
         // What the border was last told to do. Three focus-border defects have been fixed so far and
         // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
@@ -449,16 +450,42 @@ public sealed class AppComposition : IDisposable
             if (startAlertLayer is not null)
             {
                 if (ReferenceEquals(active, displayedAlert)) return;
-                if (displayedAlert is not null) endAlertLayer?.Invoke();
-                displayedAlert = active;
+                if (displayedAlert is not null)
+                {
+                    endAlertLayer?.Invoke();
+                    // Torn down, not yet replaced: leave nothing marked displayed until a start
+                    // below actually succeeds, so a failed retry never re-ends the same layer.
+                    displayedAlert = null;
+                }
                 if (active is null) return;
                 // The queue's deadline starts when Advance promotes the command, not when the
                 // renderer starts. Never grant an extra watch interval to a late UI tick.
                 var remaining = active.Command.Duration - (DateTimeOffset.UtcNow - active.StartedAt);
                 if (remaining <= TimeSpan.Zero) return;
                 var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
-                if (failed) shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
-                startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
+                if (failed && !ReferenceEquals(shakenAlert, active))
+                {
+                    // Shake once per alert: startAlertLayer below can fail and retry this same
+                    // alert across several ticks, and the shake must not repeat on retry.
+                    shakenAlert = active;
+                    shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
+                }
+                try
+                {
+                    // Started before recording displayedAlert on purpose: on failure the alert
+                    // must not count as shown, so the next tick retries it while duration remains.
+                    // The alert page itself waits 120ms before revealing, so shaking here ahead of
+                    // a not-yet-confirmed start is harmless.
+                    startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
+                }
+                catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+                {
+                    // Recorded, not swallowed, and not re-thrown into the watch tick: an escaping
+                    // exception here would also skip that tick's UpdateFocusBorder call.
+                    desktopTrace?.Record($"alert-layer-start-failed {ex.GetType().Name}: {ex.Message}");
+                    return;
+                }
+                displayedAlert = active;
                 return;
             }
 
@@ -483,6 +510,12 @@ public sealed class AppComposition : IDisposable
 
             setAlertOverlayTiles?.Invoke(tiles);
         }
+
+        // Same corruption-class exclusion as an "is fatal" filter: recoverable per-alert start
+        // failures (WebView2/COM/dispatcher-state errors) are handled, but process-corrupting
+        // ones are left to propagate rather than treated as one alert's problem.
+        static bool IsRecoverableAlertLayerFailure(Exception ex) =>
+            ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 
         static FrameOverlayTileKind MapAlertKind(AlertKind kind) => kind switch
         {
