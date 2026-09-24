@@ -187,6 +187,120 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
     }
 
     /// <summary>
+    /// T2 (webview-alert-layer): the DirectComposition target/root/swapchain-visual tree is built
+    /// the moment attach succeeds, on the SAME device/swapchain the D3D assertions above already
+    /// cover -- proves the production host now always presents through composition (no env var),
+    /// per the T0 spike (<c>spike/webview-alert-t0</c>, commits <c>b77366a</c>/<c>26fa64b</c>).
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_BuildsACompositionTreeReadyForAnOverlayVisual()
+    {
+        using var host = new Win32VideoWallpaperHost();
+
+        Assert.True(host.TryAttach());
+
+        Assert.True(host.IsCompositionReady);
+        Assert.True(host.CompositionGeneration >= 1);
+    }
+
+    /// <summary>
+    /// T2: the seam T3's WebView2 composition layer will use -- add ONE overlay visual above the
+    /// video, get it back as <see cref="object"/>, commit, then remove it again. None of this may
+    /// touch the D3D/video pipeline: <see cref="Win32VideoWallpaperHost.Present"/> must keep working
+    /// throughout.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void AddCompositionOverlayVisual_ThenRemove_NeverDisturbsVideoPresentation()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        var overlay = host.AddCompositionOverlayVisual();
+        Assert.NotNull(overlay);
+
+        var commitException = Record.Exception(host.CommitComposition);
+        Assert.Null(commitException);
+
+        var presentAfterAddException = Record.Exception(host.Present);
+        Assert.Null(presentAfterAddException);
+
+        var removeException = Record.Exception(host.RemoveCompositionOverlayVisual);
+        Assert.Null(removeException);
+
+        // Idempotent: removing twice (nothing left to remove the second time) still never throws.
+        var secondRemoveException = Record.Exception(host.RemoveCompositionOverlayVisual);
+        Assert.Null(secondRemoveException);
+    }
+
+    /// <summary>
+    /// T2, R1 (explorer-restart-reattach): the composition tree is window-bound, exactly like the
+    /// swapchain itself -- destroying the host window must rebuild it (bumping
+    /// <see cref="Win32VideoWallpaperHost.CompositionGeneration"/>) on the SAME composition device,
+    /// mirroring <see cref="TryAttach_AfterTheHostWindowIsDestroyed_RecreatesItOnTheSameDevice"/> for
+    /// the D3D device.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_AfterTheHostWindowIsDestroyed_RebuildsTheCompositionTreeAndBumpsGeneration()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        var firstHwnd = host.Hwnd;
+        var firstGeneration = host.CompositionGeneration;
+        Assert.True(host.IsCompositionReady);
+
+        Assert.True(PInvoke.DestroyWindow(new HWND(firstHwnd)));
+
+        Assert.True(host.TryAttach());
+
+        Assert.NotEqual(firstHwnd, host.Hwnd);
+        Assert.True(host.IsCompositionReady);
+        Assert.True(host.CompositionGeneration > firstGeneration);
+    }
+
+    /// <summary>
+    /// T2: the exact failure T0 proved on hardware -- a DirectComposition RCW minted on the thread
+    /// that built the tree (this test thread, standing in for the video-wallpaper thread) throws
+    /// <c>E_NOINTERFACE</c> when QI'd from a different apartment. <see
+    /// cref="Win32VideoWallpaperHost.AddCompositionOverlayVisual"/> must succeed when called from a
+    /// genuine STA thread instead (T3's WPF UI thread), never throw across the boundary, and commit
+    /// cleanly.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void AddCompositionOverlayVisual_FromAnSTAThread_SucceedsWithoutCrossThreadFailure()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        object? overlay = null;
+        Exception? threadException = null;
+
+        var staThread = new Thread(() =>
+        {
+            try
+            {
+                overlay = host.AddCompositionOverlayVisual();
+                host.CommitComposition();
+            }
+            catch (Exception ex)
+            {
+                threadException = ex;
+            }
+        });
+        staThread.SetApartmentState(ApartmentState.STA);
+        staThread.Start();
+        staThread.Join(TimeSpan.FromSeconds(10));
+
+        Assert.Null(threadException);
+        Assert.NotNull(overlay);
+
+        // Present, back on THIS thread, must still work -- a DComp failure (or a working seam) may
+        // never disturb the video pipeline.
+        var presentAfterCrossThreadException = Record.Exception(host.Present);
+        Assert.Null(presentAfterCrossThreadException);
+    }
+
+    /// <summary>
     /// T3 (video-wallpaper-repick-and-slideshow): T2 proved live on this same raised-desktop
     /// layout that the Windows wallpaper slideshow inserts a NEW wallpaper WorkerW directly after
     /// <c>SHELLDLL_DefView</c> -- i.e. directly ABOVE the host -- every time it changes image, and

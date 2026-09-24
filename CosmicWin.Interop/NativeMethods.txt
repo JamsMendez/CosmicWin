@@ -150,3 +150,7 @@ DWRITE_MEASURING_MODE
 IDXGISurface
 DXGI_FORMAT
 WIN32_ERROR
+DCompositionCreateDevice
+IDCompositionDevice
+IDCompositionTarget
+IDCompositionVisual
