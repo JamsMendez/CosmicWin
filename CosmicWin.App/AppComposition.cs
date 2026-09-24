@@ -207,7 +207,12 @@ public sealed class AppComposition : IDisposable
         // each reported ONCE. A delegate for the reason zOrder is: the only real answer is
         // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
         // test that predates it -- the work area stays what it was at startup, exactly as before.
-        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null)
+        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
+        Action<string, int>? startAlertLayer = null,
+        Action? endAlertLayer = null,
+        Action<TimeSpan>? shakeAlertVideo = null,
+        IDisposable? alertLayer = null,
+        Func<bool>? alertRendererReady = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -290,6 +295,7 @@ public sealed class AppComposition : IDisposable
         var alertQueueLock = new object();
         var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
         IAlertCommandServer? alertServer = null;
+        ActiveAlert? displayedAlert = null;
 
         // What the border was last told to do. Three focus-border defects have been fixed so far and
         // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
@@ -434,9 +440,26 @@ public sealed class AppComposition : IDisposable
                 // alertDesktopVisible, when supplied, still overrides this composition entirely (the
                 // seam every test predating T10 uses); isPrimaryMonitorCovered is the new, narrower
                 // seam for the coverage half alone, wired to the real Win32 check by WireProduction.
-                var desktopVisible = alertDesktopVisible?.Invoke()
-                    ?? (videoWallpaperActive.Value && !(isPrimaryMonitorCovered?.Invoke() ?? false));
+                var desktopVisible = (alertDesktopVisible?.Invoke()
+                    ?? (videoWallpaperActive.Value && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
+                    && (startAlertLayer is null || alertRendererReady?.Invoke() != false);
                 active = alertQueue.Advance(DateTimeOffset.UtcNow, desktopVisible);
+            }
+
+            if (startAlertLayer is not null)
+            {
+                if (ReferenceEquals(active, displayedAlert)) return;
+                if (displayedAlert is not null) endAlertLayer?.Invoke();
+                displayedAlert = active;
+                if (active is null) return;
+                // The queue's deadline starts when Advance promotes the command, not when the
+                // renderer starts. Never grant an extra watch interval to a late UI tick.
+                var remaining = active.Command.Duration - (DateTimeOffset.UtcNow - active.StartedAt);
+                if (remaining <= TimeSpan.Zero) return;
+                var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
+                if (failed) shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(230));
+                startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
+                return;
             }
 
             if (active is null)
@@ -1389,6 +1412,8 @@ public sealed class AppComposition : IDisposable
                 onVideoWallpaperThread(() =>
                 {
                     videoWallpaperKeepAlivePending.Value = false;
+                    // A transient attach failure must not disable the next watch tick's retry.
+                    // Activation/Stop own the playback flag; keep-alive only restores attachment.
                     videoWallpaperHost.TryAttach();
                 });
             }
@@ -1438,6 +1463,7 @@ public sealed class AppComposition : IDisposable
             focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
             {
                 alertServer?.Dispose();
+                alertLayer?.Dispose();
                 disposeVideoWallpaperBase();
                 alertOverlay?.Dispose();
             },
@@ -1493,8 +1519,10 @@ public sealed class AppComposition : IDisposable
         var zOrderSource = new Win32ZOrderSource();
 
         var videoWallpaperHost = new Win32VideoWallpaperHost();
-        var alertOverlay = settings.AlertsEnabled ? new Direct2DAlertOverlay() : null;
-        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer(alertOverlay);
+        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
+        // Startup runs on the owning STA before its dispatcher synchronization context may
+        // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
+        var alertLayer = settings.AlertsEnabled ? new WebViewAlertLayerController(videoWallpaperHost) : null;
         var videoWallpaperThread = new MtaActionThread("CosmicWinVideoWallpaperHost");
 
         return Wire(
@@ -1523,9 +1551,11 @@ public sealed class AppComposition : IDisposable
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
             alertsEnabled: settings.AlertsEnabled,
-            setAlertOverlayTiles: alertOverlay is null ? null : alertOverlay.SetTiles,
-            clearAlertOverlay: alertOverlay is null ? null : alertOverlay.Clear,
-            alertOverlay: alertOverlay,
+            startAlertLayer: alertLayer is null ? null : alertLayer.Start,
+            endAlertLayer: alertLayer is null ? null : alertLayer.End,
+            shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
+            alertLayer: alertLayer,
+            alertRendererReady: () => videoWallpaperHost.IsCompositionReady,
             // T10 (live-alert-wallpaper): the real covered-desktop signal T9 found missing --
             // without it an alert played out unseen under a fullscreen video or browser instead of
             // being held. Reused, not re-invented: PrimaryMonitorFullscreenDetector applies the SAME

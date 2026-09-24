@@ -9,7 +9,7 @@ using Windows.Win32.Foundation;
 
 namespace CosmicWin.App.Alerts;
 
-/// <summary>Single-alert WebView2 composition layer. Construct and call from a pumped UI STA.</summary>
+/// <summary>Single-alert WebView2 composition layer. Construct on the owning STA; start on its pumped dispatcher.</summary>
 public sealed class WebViewAlertLayerController : IDisposable
 {
     private readonly Win32VideoWallpaperHost _host;
@@ -27,9 +27,8 @@ public sealed class WebViewAlertLayerController : IDisposable
 
     public WebViewAlertLayerController(Win32VideoWallpaperHost host)
     {
-        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA ||
-            SynchronizationContext.Current is not DispatcherSynchronizationContext)
-            throw new InvalidOperationException("A pumped WPF UI STA is required.");
+        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            throw new InvalidOperationException("A WPF UI STA is required.");
         _host = host;
         _dispatcher = Dispatcher.CurrentDispatcher;
         _poll = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
@@ -39,6 +38,8 @@ public sealed class WebViewAlertLayerController : IDisposable
     public void Start(string kind, int durationMilliseconds)
     {
         CheckAccess();
+        if (SynchronizationContext.Current is not DispatcherSynchronizationContext)
+            throw new InvalidOperationException("A pumped WPF UI STA is required to start the alert layer.");
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (kind is not ("warning" or "failed")) throw new ArgumentOutOfRangeException(nameof(kind));
         if (durationMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(durationMilliseconds));

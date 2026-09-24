@@ -1,10 +1,38 @@
 using System.Runtime.CompilerServices;
+using System.Windows.Threading;
+using CosmicWin.Interop.Win32;
 using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
 
 public sealed class WebViewAlertLayerControllerTests
 {
+    [Fact]
+    public void ConstructorAcceptsOwningStaWithoutInstalledSynchronizationContext()
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(null);
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                using var host = new Win32VideoWallpaperHost();
+                using var layer = new WebViewAlertLayerController(host);
+                Assert.Null(SynchronizationContext.Current);
+                Assert.Throws<InvalidOperationException>(() =>
+                    Task.Run(() => layer.End()).GetAwaiter().GetResult());
+                Assert.Same(dispatcher, Dispatcher.FromThread(Thread.CurrentThread));
+            }
+            catch (Exception ex) { error = ex; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(error);
+    }
+
     [Fact]
     public void TransparencyIsConfiguredPerControllerWithoutMutatingProcessEnvironment()
     {
