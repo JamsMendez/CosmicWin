@@ -301,6 +301,34 @@ Temporary screenshots/scripts and the isolated Edge profile were removed. No sou
 made. Root cause remains unknown; production has no navigation/render telemetry. The Engram mirror
 is still pending because its provider rejected ownership.
 
+2026-09-23 native review of the whole feature range `b7f4ce6..HEAD` (24 files, 2821 lines, risk
+medium, `slice_budget_reached`; no earlier boundary had been reviewed). The maintainer granted
+consent. Lineage `review-ecb8d681c25b93b6`, one reliability lens. The stale managed assets
+needed one `gentle-ai sync` first. The review found one CRITICAL candidate-caused finding
+`R3-dcomp-raw-pointer-race`: the five raw DirectComposition pointer fields in
+`Win32VideoWallpaperHost` were read and released from the UI, player and video threads with no
+lock, a native use-after-free/double-release. The parent confirmed there was no lock. Correction
+commit `7462e1c` (`fix(interop): serialize DirectComposition pointer access across threads`),
+route: delegated writer. It adds one innermost `_compositionLock`, keeps the existing bodies as
+`...Unlocked` methods and adds thin locked entry points; lock order is `_shakeGate` then
+`_compositionLock`, never inverted. The first attempt wrapped the bodies (457 raw changed lines)
+and was rejected by the 200-line frozen correction budget. It was amended to 164 lines. RED was
+**not observable**: the new desktop-gated stress fact
+`CompositionSeam_HammeredFromThreeThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows` skips
+while `CosmicWin.App` runs. Checks: Debug build 0 errors; Interop 247 passed / 40 skipped; App
+1013 passed / 6 skipped; `git diff --check` clean. Targeted validation **approved**, and the
+acknowledgement burned authority. The reviewed boundary is now `7462e1c`.
+Advisory, non-blocking follow-ups (not accepted as scope yet):
+- `R3-displayed-before-start` (WARNING), `CosmicWin.App/AppComposition.cs:453-461`:
+  `displayedAlert` is set before `startAlertLayer`. If `Start` throws, the alert is never retried
+  and the exception escapes into the timer callback.
+- `R3-real-clock-wiring-tests` (SUGGESTION),
+  `CosmicWin.App.Tests/Alerts/WebViewAlertCompositionWiringTests.cs:96-97`: the tests use a real
+  clock.
+- `R3-vacuous-restart-assert` (SUGGESTION),
+  `MediaFoundationVideoWallpaperPlayerShakeTests.cs:139-141`: the restart assertion is trivially
+  zero at 200 ms > 120 ms, and the tests use 230 ms while production uses 120 ms.
+
 ## Next step
 
 The failed-timing correction is committed as `d5f3b16` (120 ms shake, 350 ms failed reveal;
@@ -314,3 +342,6 @@ bounded GPU measurement; do not claim exact 470 ms from the pipe command because
 and queue polling precede the page animation. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
+Review: feature range approved through `7462e1c`. Still pending: run the new gated stress fact with
+the app closed, and decide whether to take up the three advisory follow-ups (the
+`R3-displayed-before-start` WARNING is the one that matters).
