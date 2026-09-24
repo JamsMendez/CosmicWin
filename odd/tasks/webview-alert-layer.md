@@ -44,6 +44,14 @@ Out of scope: tiles / per-count grids, multi-monitor, the page's background scen
 - Direct2D overlay from `live-alert-wallpaper` is switched off while this is tested (setting or
   wiring switch), not deleted.
 
+## Delivery strategy
+
+Maintainer chose `feature-branch-chain` for this >400-line feature on recovery. Keep coherent
+behavior with its tests in each work unit; stage future dependent PR slices on the feature chain.
+No PR or push is authorized by this choice. T4 alone currently has ~609 authored changed lines
+before the task-document update; keep that coherent unit intact and disclose its review-size
+exception if a single cohesive slice cannot fit the budget.
+
 ## TDD mode
 
 **Strict TDD: enabled** — source: user's global instructions. Runner:
@@ -161,7 +169,13 @@ Out of scope: tiles / per-count grids, multi-monitor, the page's background scen
     hardware for these 4 facts (they were only proven to compile and to skip correctly here).
   - Commit `c9e8114`.
 - [ ] T3 — WebView2 alert layer: lazy create on alert start, dispose on end, show one kind.
-- [ ] T4 — Native video shake for `failed` in the player.
+- [x] **T4 — Native video shake for `failed` in the player.** Work-unit commit `851c582`:
+  composition-visual transform with 230 ms decaying shake math, stop/dispose reset, and focused
+  deterministic tests. 609 additions / 2 deletions in one cohesive behavior-and-tests unit; it
+  exceeds the ~400-line review budget, so surface the size exception when preparing its chained
+  PR slice rather than splitting code from its tests. Interop 247 passed / 39 skipped; App 1003
+  passed / 6 skipped; parent spot check 23 passed. No real-hardware shake rendering check yet
+  (T6), and concurrent restart-vs-expiry is not exercised by a dedicated race test.
 - [ ] T5 — Wiring: queue → layer (failed wins), Direct2D overlay switched off; setting.
 - [ ] T6 — Supervised hardware run (same checks as live-alert-wallpaper T9, plus GPU/memory idle
   vs shown).
@@ -181,11 +195,24 @@ failed. The 4 new desktop-gated composition facts in `Win32VideoWallpaperHostRea
 compiled and skipped for the documented reason (CosmicWin.App running) -- not yet exercised for
 real on hardware. Commits: `1d18e82` (T1), `c9e8114` (T2).
 
+2026-09-23 recovery: Claude left an uncommitted T4 native shake across 11 paths. A delegated
+writer preserved it and fixed shake restart/expiry serialization and Stop/Dispose cleanup. The
+inherited focused tests passed before the first fix (no observed RED); the new Stop/Dispose
+regressions failed twice before the cleanup and passed twice afterward. Independent verification:
+`dotnet test CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj` = 245 passed / 39 skipped before
+the teardown fix; the writer's post-fix run = 247 passed / 39 skipped. App tests = 1003 passed / 6
+skipped before that fix. `git diff --check` passed. No hardware transform rendering check or
+concurrent restart test yet. T4 remains unchecked and uncommitted; its Engram mirror is pending
+because the local Engram endpoint reported an ownership mismatch. The native assessment of the
+untracked candidate was unassessable; a separate verifier checked the earlier revision. After the cleanup, an independent
+verifier ran Interop (247 passed / 39 skipped) and App (1003 passed / 6 skipped); the parent reran
+23 focused tests (all passed) and `git diff --check` (passed). The feature-branch-chain strategy
+was selected. T4 was committed as `851c582`; its 5-second join-timeout teardown caveat and
+hardware transform rendering remain unverified.
+
 ## Next step
 
-Parent: run the 4 new desktop-gated facts for real (`CosmicWin.App` closed,
-`COSMICWIN_RUN_DESKTOP_TESTS=1`) and, ideally, the manual browser check for T1
-(`alert-layer.html#kind=warning&duration=5000` in Edge). Then T3 -- WebView2 alert layer: lazy
-create on alert start (using the T2 seam: `Hwnd`, `AddCompositionOverlayVisual`,
-`CommitComposition`, `CompositionGeneration` to detect a host recreate), dispose on end, show one
-kind.
+Feature-branch-chain selected; T4 committed as `851c582`. Next: T3 (WebView2 lazy
+creation/disposal). T1 manual Edge check,
+T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
+run the gated desktop tests while CosmicWin.App is running.
