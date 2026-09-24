@@ -40,5 +40,26 @@ internal sealed class FakeVideoWallpaperHost : IVideoWallpaperHost
 
     public void Present() => PresentCallCount++;
 
+    /// <summary>T4 (webview-alert-layer): settable so a shake test can size the "video" it shakes.</summary>
+    public (int Width, int Height) BackBufferSize { get; set; }
+
+    public int SetVideoTransformCallCount { get; private set; }
+
+    /// <summary>The arguments of the most recent <see cref="SetVideoTransform"/> call, if any.</summary>
+    public (float CenterX, float CenterY, float OffsetX, float OffsetY, float AngleDegrees, float Scale)?
+        LastVideoTransform
+    { get; private set; }
+
+    public int ClearVideoTransformCallCount { get; private set; }
+
+    public void SetVideoTransform(
+        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
+    {
+        SetVideoTransformCallCount++;
+        LastVideoTransform = (centerX, centerY, offsetX, offsetY, angleDegrees, scale);
+    }
+
+    public void ClearVideoTransform() => ClearVideoTransformCallCount++;
+
     public void Dispose() => DisposeCallCount++;
 }

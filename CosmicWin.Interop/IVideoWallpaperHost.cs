@@ -67,4 +67,30 @@ public interface IVideoWallpaperHost : IDisposable
     /// during the first successful <see cref="TryAttach"/>.
     /// </summary>
     void Present();
+
+    /// <summary>
+    /// The current back buffer's pixel size, or <c>(0, 0)</c> before <see cref="TryAttach"/> has
+    /// succeeded. Public and plain <see cref="int"/>s (unlike <see cref="Device"/>/
+    /// <see cref="GetBackBuffer"/>) so a caller outside this assembly -- T4 (webview-alert-layer):
+    /// <c>MediaFoundationVideoWallpaperPlayer</c>'s native shake needs the size to compute
+    /// <see cref="Win32.VideoShakeMath"/>'s amplitude -- can read it without this interface ever
+    /// exposing a CsWin32 D3D type.
+    /// </summary>
+    (int Width, int Height) BackBufferSize { get; }
+
+    /// <summary>
+    /// Applies a 2D affine transform to the video's own composition visual -- never to the decoded
+    /// frame pixels in the back buffer -- for an effect like T4's native `failed` shake: rotate and
+    /// uniformly scale by <paramref name="angleDegrees"/>/<paramref name="scale"/> about
+    /// (<paramref name="centerX"/>, <paramref name="centerY"/>), then translate by
+    /// (<paramref name="offsetX"/>, <paramref name="offsetY"/>). Identity (no visible effect) until
+    /// this is called; a caller ends the effect with <see cref="ClearVideoTransform"/>. A no-op, and
+    /// never throws, before <see cref="TryAttach"/> has built a composition tree, or on any
+    /// DirectComposition failure -- this effect must never affect video playback.
+    /// </summary>
+    void SetVideoTransform(
+        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale);
+
+    /// <summary>Resets the video's composition visual to its identity transform. Idempotent, never throws.</summary>
+    void ClearVideoTransform();
 }

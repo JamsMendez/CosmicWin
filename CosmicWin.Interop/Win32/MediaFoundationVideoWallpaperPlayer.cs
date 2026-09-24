@@ -74,6 +74,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private static readonly TimeSpan StopJoinTimeout = TimeSpan.FromSeconds(5);
 
     private readonly IFrameOverlay _overlay;
+    private readonly TimeProvider _timeProvider;
 
     private Thread? _workerThread;
     private ManualResetEventSlim? _stopSignal;
@@ -81,12 +82,114 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private volatile IMFMediaEngine? _engine;
     private volatile MediaEngineNotify? _notify;
 
+    // Serialize shake replacement with transform updates: an expired tick must not clear a
+    // newer shake's transform after the UI thread restarts it.
+    private readonly object _shakeGate = new();
+    private ShakeState? _shakeState;
+    private IVideoWallpaperHost? _shakeHost;
+
     private bool _disposed;
 
-    public MediaFoundationVideoWallpaperPlayer(IFrameOverlay? overlay = null)
+    public MediaFoundationVideoWallpaperPlayer(IFrameOverlay? overlay = null, TimeProvider? timeProvider = null)
     {
         _overlay = overlay ?? NoOpFrameOverlay.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    /// <summary>
+    /// Starts (or restarts) a native shake of the video, matching the alert page's own dropped
+    /// canvas shake (<c>applyFailureShake</c>, T1's remarks) for the `failed` kind -- the video
+    /// itself shakes instead. <paramref name="duration"/> bounds how long this player keeps applying
+    /// an effect at all; the effect's own decay always reaches identity by
+    /// <see cref="VideoShakeMath.DurationMilliseconds"/> regardless (see
+    /// <see cref="VideoShakeMath.Compute"/>) -- production wiring always passes exactly that many
+    /// milliseconds, matching the page's own <c>shakeMs</c> and
+    /// <see cref="Direct2DAlertOverlay"/>'s <c>FailureShakeMilliseconds</c>. Calling this again while
+    /// a shake is already active restarts the elapsed clock rather than being ignored or queued --
+    /// there is only ever one video to shake. Thread-safe: called from the wiring's UI thread while
+    /// the tick loop that applies it runs on this player's own dedicated worker thread.
+    /// </summary>
+    public void Shake(TimeSpan duration)
+    {
+        lock (_shakeGate)
+        {
+            _shakeState = new ShakeState(_timeProvider.GetUtcNow(), duration);
+        }
+    }
+
+    /// <summary>Test-only observability: whether a shake is currently active.</summary>
+    internal bool IsShakingForTests
+    {
+        get { lock (_shakeGate) return _shakeState is not null; }
+    }
+
+    /// <summary>
+    /// Test-only entry point into the exact per-tick shake logic <see cref="Tick"/> calls, with no
+    /// real <see cref="IMFMediaEngine"/> anywhere near it -- mirrors how
+    /// <see cref="TickForTests"/> lets the existing frame-overlay tests exercise <see cref="TickCore"/>
+    /// without one.
+    /// </summary>
+    internal void ApplyShakeForTests(IVideoWallpaperHost host) => ApplyShakeTransform(host);
+
+    /// <summary>
+    /// Applies (or clears) the video's composition-visual transform for the current shake, if any --
+    /// called once per tick, from this player's own worker thread, alongside the ordinary
+    /// transfer/present pipeline. When no shake is active, only the short state lock is taken.
+    /// Once the shake's own duration has elapsed,
+    /// <see cref="IVideoWallpaperHost.ClearVideoTransform"/> is called exactly once and the field is
+    /// cleared, so every later tick avoids host calls -- never a per-tick
+    /// identity transform applied forever. A transform failure must never affect video playback,
+    /// same as every other host call this class makes; see <see cref="TickCore"/>'s own remarks.
+    /// </summary>
+    private void ApplyShakeTransform(IVideoWallpaperHost host)
+    {
+        lock (_shakeGate)
+        {
+            ShakeState? state = _shakeState;
+            if (state is null)
+            {
+                return;
+            }
+
+            _shakeHost = host;
+            TimeSpan elapsed = _timeProvider.GetUtcNow() - state.StartedAt;
+            if (elapsed >= state.Duration)
+            {
+                _shakeState = null;
+                _shakeHost = null;
+                try
+                {
+                    host.ClearVideoTransform();
+                }
+                catch
+                {
+                    // See the class remarks: a shake failure must never affect video playback.
+                }
+
+                return;
+            }
+
+            try
+            {
+                (int width, int height) = host.BackBufferSize;
+                VideoShakeTransform transform = VideoShakeMath.Compute(elapsed.TotalMilliseconds, width, height);
+                host.SetVideoTransform(
+                    centerX: width / 2f,
+                    centerY: height / 2f,
+                    offsetX: (float)transform.Dx,
+                    offsetY: (float)transform.Dy,
+                    angleDegrees: (float)transform.AngleDegrees,
+                    scale: (float)transform.Scale);
+            }
+            catch
+            {
+                // See the class remarks: a shake failure must never affect video playback.
+            }
+        }
+    }
+
+    /// <summary>Carries one active shake's start time and requested duration -- see <see cref="Shake"/>.</summary>
+    private sealed record ShakeState(DateTimeOffset StartedAt, TimeSpan Duration);
 
     /// <summary>Test-only observability: whether an engine is currently set up to be ticked.</summary>
     internal bool IsPlayingForTests => _engine is not null;
@@ -158,6 +261,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         _disposed = true;
 
         StopPlaybackOnly();
+        ClearShake();
     }
 
     /// <summary>
@@ -180,6 +284,25 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         }
 
         StopPlaybackOnly();
+        ClearShake();
+    }
+
+    private void ClearShake()
+    {
+        lock (_shakeGate)
+        {
+            _shakeState = null;
+            IVideoWallpaperHost? host = _shakeHost;
+            _shakeHost = null;
+            try
+            {
+                host?.ClearVideoTransform();
+            }
+            catch
+            {
+                // Transform failures must not affect playback teardown.
+            }
+        }
     }
 
     /// <summary>
@@ -431,8 +554,14 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         return true;
     }
 
-    private static void Tick(IMFMediaEngine engine, IVideoWallpaperHost host, IFrameOverlay overlay)
+    private void Tick(IMFMediaEngine engine, IVideoWallpaperHost host, IFrameOverlay overlay)
     {
+        // T4 (webview-alert-layer): applied before the ordinary pipeline, not inside TickCore --
+        // TickCore/TickForTests stay exactly as the existing frame-overlay tests exercise them,
+        // untouched by this feature. A no-op call (see ApplyShakeTransform's remarks) when no shake
+        // is active, which is every tick outside a `failed` alert's own 230 ms.
+        ApplyShakeTransform(host);
+
         TickCore(
             overlay,
             onVideoStreamTick: () => engine.OnVideoStreamTick(out long _),

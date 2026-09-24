@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using CosmicWin.Interop;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Direct2D.Common;
 using Windows.Win32.Graphics.Direct3D;
 using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Graphics.DirectComposition;
@@ -315,6 +316,103 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         catch
         {
             // A DComp failure must never propagate into caller code -- see the class remarks.
+        }
+    }
+
+    /// <summary>
+    /// T4 (webview-alert-layer): plain ints, unlike <see cref="Device"/>/<see cref="GetBackBuffer"/>
+    /// -- <see cref="MediaFoundationVideoWallpaperPlayer"/>'s native shake needs the size from
+    /// <c>CosmicWin.App</c>'s point of view too, which is not an <c>InternalsVisibleTo</c> friend.
+    /// </summary>
+    public (int Width, int Height) BackBufferSize
+    {
+        get
+        {
+            if (_backBuffer is null)
+            {
+                return (0, 0);
+            }
+
+            try
+            {
+                _backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
+                return ((int)desc.Width, (int)desc.Height);
+            }
+            catch
+            {
+                return (0, 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// T4 (webview-alert-layer): rotates and uniformly scales the VIDEO's own swapchain composition
+    /// visual about (<paramref name="centerX"/>, <paramref name="centerY"/>), then translates by
+    /// (<paramref name="offsetX"/>, <paramref name="offsetY"/>) -- never touches a single decoded
+    /// frame pixel, unlike the alternative the task itself offered (an intermediate texture redrawn
+    /// with Direct2D every tick). Composed as one <see cref="D2D_MATRIX_3X2_F"/> (D2D's row-vector
+    /// convention: <c>x' = m11*x + m21*y + dx</c>, <c>y' = m12*x + m22*y + dy</c>) so a single
+    /// <c>SetTransform</c>/<c>Commit</c> pair does the whole effect for this tick, exactly as cheap
+    /// as <see cref="AddCompositionOverlayVisual"/>'s own DComp calls. Same threading and failure
+    /// containment as every other member here -- see the class remarks "Composition threading".
+    /// </summary>
+    public void SetVideoTransform(
+        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
+    {
+        if (_dcompSwapChainVisualPtr == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            double radians = angleDegrees * Math.PI / 180.0;
+            float m11 = (float)(Math.Cos(radians) * scale);
+            float m12 = (float)(Math.Sin(radians) * scale);
+            float m21 = (float)(-Math.Sin(radians) * scale);
+            float m22 = (float)(Math.Cos(radians) * scale);
+            float dx = centerX - (centerX * m11 + centerY * m21) + offsetX;
+            float dy = centerY - (centerX * m12 + centerY * m22) + offsetY;
+
+            D2D_MATRIX_3X2_F matrix = default;
+            matrix.m11 = m11;
+            matrix.m12 = m12;
+            matrix.m21 = m21;
+            matrix.m22 = m22;
+            matrix.dx = dx;
+            matrix.dy = dy;
+
+            using var visual = new CallerContextDComp<IDCompositionVisual>(_dcompSwapChainVisualPtr);
+            visual.Value.SetTransform(&matrix);
+            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
+            device.Value.Commit();
+        }
+        catch
+        {
+            // A DComp failure must never propagate into caller code -- see the class remarks. Above
+            // all, it must never affect video playback: a shake that silently fails to draw is a far
+            // smaller defect than one that takes the video down with it.
+        }
+    }
+
+    /// <summary>Resets the video's composition visual to its identity transform. Idempotent, never throws.</summary>
+    public void ClearVideoTransform()
+    {
+        if (_dcompSwapChainVisualPtr == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var visual = new CallerContextDComp<IDCompositionVisual>(_dcompSwapChainVisualPtr);
+            visual.Value.SetTransform((IDCompositionTransform)null!);
+            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
+            device.Value.Commit();
+        }
+        catch
+        {
+            // See SetVideoTransform's remarks.
         }
     }
 

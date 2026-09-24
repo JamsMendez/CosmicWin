@@ -67,4 +67,29 @@ public sealed class Win32VideoWallpaperHostCompositionSeamTests
         var exception = Record.Exception(host.CommitComposition);
         Assert.Null(exception);
     }
+
+    [Fact]
+    public void BackBufferSize_IsZeroBeforeAttach()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.Equal((0, 0), host.BackBufferSize);
+    }
+
+    /// <summary>T4 (webview-alert-layer): never throws, mirroring CommitComposition above.</summary>
+    [Fact]
+    public void SetVideoTransform_IsANoOpBeforeTheDeviceExists()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        var exception = Record.Exception(() => host.SetVideoTransform(0, 0, 1, 2, 3, 1.18f));
+        Assert.Null(exception);
+    }
+
+    /// <summary>T4 (webview-alert-layer): never throws, mirroring CommitComposition above.</summary>
+    [Fact]
+    public void ClearVideoTransform_IsANoOpBeforeTheDeviceExists()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        var exception = Record.Exception(host.ClearVideoTransform);
+        Assert.Null(exception);
+    }
 }

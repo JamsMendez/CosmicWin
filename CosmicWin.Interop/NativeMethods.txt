@@ -154,3 +154,5 @@ DCompositionCreateDevice
 IDCompositionDevice
 IDCompositionTarget
 IDCompositionVisual
+IDCompositionTransform
+D2D_MATRIX_3X2_F

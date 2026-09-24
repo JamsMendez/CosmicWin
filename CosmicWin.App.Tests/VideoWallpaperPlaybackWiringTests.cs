@@ -99,6 +99,19 @@ public sealed class VideoWallpaperPlaybackWiringTests
         {
         }
 
+        // T4 (webview-alert-layer): plain ints/floats, unlike Device/GetBackBuffer above -- these
+        // composition wiring tests never trigger a shake, so the defaults are never read.
+        public (int Width, int Height) BackBufferSize => (0, 0);
+
+        public void SetVideoTransform(
+            float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
+        {
+        }
+
+        public void ClearVideoTransform()
+        {
+        }
+
         public void Dispose()
         {
             DisposeCallCount++;
