@@ -222,6 +222,18 @@ exception if a single cohesive slice cannot fit the budget.
   restart checks were later explicitly authorized; see the T6 progress entry for the observed
   pass/fail results. T6 remains open because sampled visuals did not establish expected timing.
 
+- [x] **T7 -- Retry the alert layer when its start fails (review follow-up
+  `R3-displayed-before-start`).** The maintainer accepted it on 2026-09-23. Route: delegated
+  writer (fix plus test). Work-unit commit `217d836`: `displayedAlert` is recorded only after
+  `startAlertLayer` succeeds. A recoverable failure is recorded through `desktopTrace`
+  (`alert-layer-start-failed`) and no longer escapes the watch tick, so `UpdateFocusBorder`
+  still runs. A `shakenAlert` guard keeps the 120 ms shake to one per alert, and a torn-down
+  layer is never ended twice. Strict TDD: RED `Assert.Equal(2, attempts)` got Actual 1, then
+  GREEN. App 1014 passed / 6 skipped; Debug build 0 errors; `git diff --check` clean. Parent
+  spot check: 6/6 wiring tests passed. RDD assess from `7462e1c`: medium, 109 lines,
+  `under_budget`, so it stays pending in the slice. Known trade-off: a start that keeps failing
+  retries and logs on every tick until the alert's duration ends.
+
 ## Progress
 
 2026-09-23: document created; page located; T0 next.
@@ -343,5 +355,5 @@ and queue polling precede the page animation. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
 Review: feature range approved through `7462e1c`. Still pending: run the new gated stress fact with
-the app closed, and decide whether to take up the three advisory follow-ups (the
-`R3-displayed-before-start` WARNING is the one that matters).
+the app closed, and decide whether to take up the two remaining advisory test follow-ups
+(`R3-real-clock-wiring-tests`, `R3-vacuous-restart-assert`). `R3-displayed-before-start` is T7, done.
