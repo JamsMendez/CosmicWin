@@ -15,7 +15,7 @@ public sealed class VideoShakeMathTests
     {
         var transform = VideoShakeMath.Compute(0, 1920, 1080);
 
-        // decay = 1 - 0/230 = 1 -> amplitude = min(1920,1080) * 1.0 = 1080
+        // decay = 1 - 0/120 = 1 -> amplitude = min(1920,1080) * 1.0 = 1080
         // t = 0 -> sin(0)=0, sin(1.3)=0.963558..., sin(2.1)=0.863209..., sin(0.4)=0.389418...
         double amplitude = 1080;
         double expectedDx = amplitude * 0.1 * (Math.Sin(0) * 0.65 + Math.Sin(1.3) * 0.35);
@@ -31,11 +31,11 @@ public sealed class VideoShakeMathTests
     [Fact]
     public void HalfwayThroughTheShake_DecayIsHalf()
     {
-        var transform = VideoShakeMath.Compute(115, 1000, 500);
+        var transform = VideoShakeMath.Compute(60, 1000, 500);
 
-        double decay = 1 - 115.0 / 230.0;
+        double decay = 1 - 60.0 / 120.0;
         double amplitude = Math.Min(1000, 500) * (0.5 + 0.5 * decay);
-        double t = 115.0 / 1000.0;
+        double t = 60.0 / 1000.0;
         double expectedDx = amplitude * 0.1 * (Math.Sin(t * 131) * 0.65 + Math.Sin(t * 211 + 1.3) * 0.35);
         double expectedDy = amplitude * 0.04 * (Math.Sin(t * 109 + 2.1) * 0.6 + Math.Sin(t * 197 + 0.4) * 0.4);
         double expectedAngle = 3.5 * decay * Math.Sin(t * 89 + 0.7);
@@ -47,8 +47,8 @@ public sealed class VideoShakeMathTests
     }
 
     [Theory]
-    [InlineData(230)]
-    [InlineData(231)]
+    [InlineData(120)]
+    [InlineData(121)]
     [InlineData(1000)]
     public void AtOrPastTheShakeDuration_IsIdentity(double elapsedMilliseconds)
     {
@@ -72,8 +72,8 @@ public sealed class VideoShakeMathTests
     }
 
     [Fact]
-    public void DurationMillisecondsConstant_MatchesThePageAndTheDirect2DTheme()
+    public void DurationMillisecondsConstant_MatchesTheFailedPageShake()
     {
-        Assert.Equal(230, VideoShakeMath.DurationMilliseconds);
+        Assert.Equal(120, VideoShakeMath.DurationMilliseconds);
     }
 }

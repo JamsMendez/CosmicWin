@@ -90,7 +90,7 @@ public sealed class WebViewAlertCompositionWiringTests
             Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:2 failed:1 duration:1"));
             h.Timer.Tick();
             h.Timer.Tick();
-            Assert.Equal("shake:230", h.Events[0]);
+            Assert.Equal("shake:120", h.Events[0]);
             Assert.StartsWith("start:failed:", h.Events[1]);
             Assert.InRange(int.Parse(h.Events[1]["start:failed:".Length..]), 1, 1000);
             Thread.Sleep(1100);
@@ -118,7 +118,7 @@ public sealed class WebViewAlertCompositionWiringTests
             Assert.Equal(4, h.Events.Count);
             Assert.StartsWith("start:warning:", h.Events[0]);
             Assert.Equal("end", h.Events[1]);
-            Assert.Equal("shake:230", h.Events[2]);
+            Assert.Equal("shake:120", h.Events[2]);
             Assert.StartsWith("start:failed:", h.Events[3]);
             Assert.InRange(int.Parse(h.Events[3]["start:failed:".Length..]), 1, 1000);
         }

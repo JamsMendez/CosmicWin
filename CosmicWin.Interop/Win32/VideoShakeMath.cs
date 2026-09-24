@@ -25,11 +25,11 @@ public static class VideoShakeMath
 {
     /// <summary>
     /// How long the shake decays over, in milliseconds -- matches the page's own
-    /// <c>FAILURE_SHAKE_MS</c> and <see cref="Win32.Direct2DAlertOverlay"/>'s (unused here, cited
-    /// for the same-number cross-check) shake constant. Past this many milliseconds elapsed,
+    /// <c>FAILURE_SHAKE_MS</c>. The legacy Direct2D overlay has independent timing.
+    /// Past this many milliseconds elapsed,
     /// <see cref="Compute"/> always returns <see cref="VideoShakeTransform.Identity"/>.
     /// </summary>
-    public const double DurationMilliseconds = 230;
+    public const double DurationMilliseconds = 120;
 
     /// <summary>
     /// The transform for one instant <paramref name="elapsedMilliseconds"/> into the shake, over a

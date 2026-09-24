@@ -5,7 +5,7 @@
 // nebula/scene, stars, orbits, keyboard shortcuts, fullscreen, zoom and the self-check block are
 // all out of scope here (see odd/tasks/webview-alert-layer.md, T1). The canvas shake
 // (applyFailureShake) is dropped too: T4 shakes the VIDEO natively, and this page only waits out
-// the same 230ms shake duration before it reveals, so the two line up.
+// the same 120ms shake duration before it reveals, so the two line up.
 
 var TAU = Math.PI * 2;
 
@@ -37,8 +37,8 @@ resize();
 
 // ---- Failure layer data (backgroud-processing/script.js, drawFailureLayer et al.) -------------
 
-var FAILURE_SHAKE_MS = 230; // T4 shakes the video natively for exactly this long before reveal
-var FAILURE_REVEAL_MS = 700;
+var FAILURE_SHAKE_MS = 120; // T4 shakes the video natively for exactly this long before reveal
+var FAILURE_REVEAL_MS = 350;
 var FAILURE_REVEAL_MAX_CELL = 48;
 var FAILURE_COUNTER_STEP_MS = 100;
 var FAILURE_REVEAL_LINE_SHARE = 0.25;
@@ -56,6 +56,7 @@ var FAILURE_OVERLAY_THEMES = {
     letters: "rgb(112,0,16)",
     intersections: "rgb(0,160,196)",
     shakeMs: FAILURE_SHAKE_MS,
+    revealMs: FAILURE_REVEAL_MS,
   },
   warning: {
     title: "WARNING",
@@ -65,6 +66,7 @@ var FAILURE_OVERLAY_THEMES = {
     // Violet is the complement of the amber wash, so the bands stay readable through it.
     intersections: "rgb(88,40,196)",
     shakeMs: 0,
+    revealMs: 700,
   },
 };
 
@@ -351,7 +353,7 @@ function drawFailureLayer(cx, cy, progress, ms) {
 
   // Reveal: a horizontal line spreads from the center across the width, then splits open
   // vertically, pixelating the overlay itself while the blocks shrink.
-  var t = Math.min(1, shownMs / FAILURE_REVEAL_MS);
+  var t = Math.min(1, shownMs / theme.revealMs);
   var eased = 1 - Math.pow(1 - t, 3);
   var lineT = Math.min(1, t / FAILURE_REVEAL_LINE_SHARE);
   var openT = Math.max(0, (t - FAILURE_REVEAL_LINE_SHARE) / (1 - FAILURE_REVEAL_LINE_SHARE));
@@ -386,11 +388,12 @@ function advanceFailureState(ms) {
     failureState = "shaking";
   }
 
-  var shakeMs = FAILURE_OVERLAY_THEMES[failureKind].shakeMs;
+  var theme = FAILURE_OVERLAY_THEMES[failureKind];
+  var shakeMs = theme.shakeMs;
   if (failureState === "shaking" && ms - failureStartMs >= shakeMs) {
     failureState = "revealing";
   }
-  if (failureState === "revealing" && ms - failureStartMs >= shakeMs + FAILURE_REVEAL_MS) {
+  if (failureState === "revealing" && ms - failureStartMs >= shakeMs + theme.revealMs) {
     failureState = "shown";
   }
 }

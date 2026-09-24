@@ -96,7 +96,7 @@ public sealed class AlertLayerWebPageTests
 
     /// <summary>
     /// Structural fidelity, not string noise: the trimmed page keeps the source page's actual theme
-    /// data (bit strings, titles, the 230 ms shake the task requires the reveal to wait out) rather
+    /// data (bit strings, titles, the failed reveal timing the task requires) rather
     /// than a paraphrase of it.
     /// </summary>
     [Fact]
@@ -107,7 +107,11 @@ public sealed class AlertLayerWebPageTests
         Assert.Contains("01010111010000010101001001001110010010010100111001000111", js); // WARNING_OVERLAY_BITS
         Assert.Contains("\"FAILED\"", js);
         Assert.Contains("\"WARNING\"", js);
-        Assert.Contains("230", js); // FAILURE_SHAKE_MS -- native shake and reveal must line up on this
+        Assert.Contains("var FAILURE_SHAKE_MS = 120;", js);
+        Assert.Contains("var FAILURE_REVEAL_MS = 350;", js);
+        Assert.Contains("revealMs: FAILURE_REVEAL_MS", js);
+        Assert.Contains("revealMs: 700", js);
+        Assert.Contains("shakeMs + theme.revealMs", js); // Failed reaches shown at 120 + 350 = 470 ms.
     }
 
     /// <summary>

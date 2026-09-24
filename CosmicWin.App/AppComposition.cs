@@ -457,7 +457,7 @@ public sealed class AppComposition : IDisposable
                 var remaining = active.Command.Duration - (DateTimeOffset.UtcNow - active.StartedAt);
                 if (remaining <= TimeSpan.Zero) return;
                 var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
-                if (failed) shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(230));
+                if (failed) shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
                 startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
                 return;
             }
