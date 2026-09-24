@@ -368,4 +368,67 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
             }
         }
     }
+
+    /// <summary>
+    /// R2 (fix): regression for a native review finding -- the five raw DirectComposition pointer
+    /// fields had no lock across the UI/player/video-wallpaper threads, so a concurrent
+    /// <c>Marshal.Release</c> could zero a pointer another thread was about to pass to
+    /// <c>Marshal.GetUniqueObjectForIUnknown</c> (a native use-after-free, not a catchable exception).
+    /// The race is not deterministically reproducible, so this hammers the seam from two threads while
+    /// the host window is destroyed/rebuilt; before <c>_compositionLock</c> existed this reliably
+    /// crashed the process outright. Passing proves the lock holds.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void CompositionSeam_HammeredFromTwoThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        var stop = new CancellationTokenSource();
+        var exceptions = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+        Task RunUntilStopped(Action action) => Task.Run(() =>
+        {
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    action();
+                }
+            }
+            catch (Exception ex)
+            {
+                exceptions.Enqueue(ex);
+            }
+        });
+
+        var overlayTask = RunUntilStopped(() =>
+        {
+            host.AddCompositionOverlayVisual();
+            host.CommitComposition();
+            host.RemoveCompositionOverlayVisual();
+        });
+        var transformTask = RunUntilStopped(() =>
+        {
+            host.SetVideoTransform(0, 0, 1, 1, 5, 1.1f);
+            host.ClearVideoTransform();
+        });
+
+        for (var i = 0; i < 25 && exceptions.IsEmpty; i++)
+        {
+            HWND current = new(host.Hwnd);
+            if (!current.IsNull)
+            {
+                PInvoke.DestroyWindow(current);
+            }
+
+            host.TryAttach();
+        }
+
+        stop.Cancel();
+        Task.WaitAll([overlayTask, transformTask], TimeSpan.FromSeconds(10));
+
+        Assert.Empty(exceptions);
+        Assert.True(host.IsCompositionReady);
+    }
 }

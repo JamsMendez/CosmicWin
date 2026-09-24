@@ -62,6 +62,13 @@ namespace CosmicWin.Interop.Win32;
 /// is calling right now, used for exactly one call and disposed before returning -- unlike the T0
 /// spike, which minted the same wrapper once and intentionally leaked it forever.
 /// </para>
+/// <para>
+/// R2 (fix): the five raw pointers above are ALSO touched by those same three threads with no
+/// synchronization of their own -- <see cref="_compositionLock"/> guards every read-then-use and
+/// write/release of them, held for the whole operation (the short DComp calls made while holding it
+/// are fine -- free-threaded, fast). Always the innermost lock: never held while calling back into a
+/// caller or another lock.
+/// </para>
 /// </remarks>
 public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 {
@@ -102,6 +109,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     private nint _dcompRootVisualPtr;
     private nint _dcompSwapChainVisualPtr;
     private nint _dcompOverlayVisualPtr;
+    private readonly object _compositionLock = new(); // R2 (fix): guards the five pointers above.
 
     private bool _disposed;
 
@@ -212,9 +220,17 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// exist for the CURRENT host window -- the earliest point at which
     /// <see cref="AddCompositionOverlayVisual"/> can succeed.
     /// </summary>
-    public bool IsCompositionReady =>
-        _dcompDevicePtr != 0 && _dcompTargetPtr != 0 && _dcompRootVisualPtr != 0
-        && _dcompSwapChainVisualPtr != 0;
+    public bool IsCompositionReady
+    {
+        get
+        {
+            lock (_compositionLock)
+            {
+                return _dcompDevicePtr != 0 && _dcompTargetPtr != 0 && _dcompRootVisualPtr != 0
+                    && _dcompSwapChainVisualPtr != 0;
+            }
+        }
+    }
 
     /// <summary>
     /// Bumped every time the window-bound composition target/visual tree is (re)built by
@@ -245,6 +261,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// remarks "Composition threading" and <see cref="CallerContextDComp{T}"/>.
     /// </remarks>
     public object? AddCompositionOverlayVisual()
+    {
+        lock (_compositionLock)
+        {
+            return AddCompositionOverlayVisualUnlocked();
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private object? AddCompositionOverlayVisualUnlocked()
     {
         if (!IsCompositionReady)
         {
@@ -284,6 +309,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// </summary>
     public void RemoveCompositionOverlayVisual()
     {
+        lock (_compositionLock)
+        {
+            RemoveCompositionOverlayVisualUnlocked();
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private void RemoveCompositionOverlayVisualUnlocked()
+    {
         try
         {
             RemoveOverlayVisualCore();
@@ -302,6 +336,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// no composition device exists yet.
     /// </summary>
     public void CommitComposition()
+    {
+        lock (_compositionLock)
+        {
+            CommitCompositionUnlocked();
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private void CommitCompositionUnlocked()
     {
         if (_dcompDevicePtr == 0)
         {
@@ -359,6 +402,16 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     public void SetVideoTransform(
         float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
     {
+        lock (_compositionLock)
+        {
+            SetVideoTransformUnlocked(centerX, centerY, offsetX, offsetY, angleDegrees, scale);
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private void SetVideoTransformUnlocked(
+        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
+    {
         if (_dcompSwapChainVisualPtr == 0)
         {
             return;
@@ -397,6 +450,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
     /// <summary>Resets the video's composition visual to its identity transform. Idempotent, never throws.</summary>
     public void ClearVideoTransform()
+    {
+        lock (_compositionLock)
+        {
+            ClearVideoTransformUnlocked();
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private void ClearVideoTransformUnlocked()
     {
         if (_dcompSwapChainVisualPtr == 0)
         {
@@ -1041,6 +1103,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// </summary>
     private bool EnsureCompositionDevice(IDXGIDevice dxgiDevice)
     {
+        lock (_compositionLock)
+        {
+            return EnsureCompositionDeviceUnlocked(dxgiDevice);
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private bool EnsureCompositionDeviceUnlocked(IDXGIDevice dxgiDevice)
+    {
         if (_dcompDevicePtr != 0)
         {
             return true;
@@ -1081,6 +1152,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// the tree this just replaced.
     /// </summary>
     private bool RebuildCompositionTarget(HWND hwnd)
+    {
+        lock (_compositionLock)
+        {
+            return RebuildCompositionTargetUnlocked(hwnd);
+        }
+    }
+
+    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
+    private bool RebuildCompositionTargetUnlocked(HWND hwnd)
     {
         if (_dcompDevicePtr == 0 || _swapChain is null)
         {
@@ -1306,7 +1386,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         // reason _device is not -- built once on the DXGI device, survives a window recreate; see
         // RebuildCompositionTarget. A raw pointer (see the class remarks), so this is a direct
         // Release, not ReleaseComObject -- there is no RCW field to dispose.
-        ReleaseRawPointer(ref _dcompDevicePtr);
+        // R2 (fix): guarded by _compositionLock, like every other read/write of this pointer.
+        lock (_compositionLock)
+        {
+            ReleaseRawPointer(ref _dcompDevicePtr);
+        }
+
         _context = null;
         _device = null;
     }
@@ -1325,8 +1410,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         ReleaseComObject(_swapChain);
         // T2: window-bound, like the swapchain itself -- released and rebuilt together with it. The
         // overlay visual (if any) belonged to this same tree, so it goes too.
-        ReleaseWindowBoundCompositionPointers();
-        ReleaseRawPointer(ref _dcompOverlayVisualPtr);
+        // R2 (fix): guarded by _compositionLock, like every other read/write of these pointers.
+        lock (_compositionLock)
+        {
+            ReleaseWindowBoundCompositionPointers();
+            ReleaseRawPointer(ref _dcompOverlayVisualPtr);
+        }
         _rtv = null;
         _backBuffer = null;
         _swapChain = null;
