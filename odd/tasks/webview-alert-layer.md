@@ -168,15 +168,24 @@ exception if a single cohesive slice cannot fit the budget.
     FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests` to get real RED/GREEN evidence on
     hardware for these 4 facts (they were only proven to compile and to skip correctly here).
   - Commit `c9e8114`.
-- [x] **T3 — Lazy transparent WebView2 alert controller.** Work-unit commit `64ea1e5` (360
+- [x] **T3 — Lazy transparent WebView2 alert controller (timing correction validated).** Work-unit commit `64ea1e5` (360
   additions). Delegated writer used the T2 host seam and T0 spike without T5 queue wiring.
   Creates only on alert start, closes on `done`/end/deadline/failure, watches HWND/generation,
   backs off on missing visuals, and initializes transparency per controller via WebView2 1.0.4191.47
   options. Strict TDD RED/GREEN observed for lifecycle and retry cases; 4 focused facts pass.
   Independent App suite = 1007 passed / 6 skipped; Debug solution build = 0 errors / 0 warnings.
-  Real WebView2 transparency, process exit while idle, and Explorer-restart behavior remain T6
-  hardware checks. Native creation has no cancellation token: a late result closes, but a hung
-  native creation cannot be forcibly terminated. Engram mirror remains pending.
+  T6 proved process exit while idle, but timed screenshots did not show a layer; the maintainer
+  independently saw layers, so absence at those instants is **not** proof the layer never draws.
+  Correction commit `d5f3b16` changed failed native shake/page wait to 120 ms and failed reveal
+  to 350 ms, leaving warning at 700 ms and legacy Direct2D untouched. Strict TDD RED/GREEN and
+  full Interop (247 passed / 39 skipped), App (1013 passed / 6 skipped), Debug solution build
+  (0 errors / 0 warnings) followed. On current Debug hardware, after queuing the alert while the
+  terminal was visible and only then minimizing windows, screenshots showed the transparent red
+  `FAILED` and amber `WARNING` layers over moving video, and the combined command showed one
+  `FAILED` layer. These prove visible compositing, not the exact end-to-end latency or shake
+  motion. Creation/navigation versus first-frame latency remains a T6 measurement gap.
+  Native creation has no cancellation token: a late result closes, but a hung native creation
+  cannot be forcibly terminated. Engram mirror remains pending.
 - [x] **T4 — Native video shake for `failed` in the player.** Work-unit commit `851c582`:
   composition-visual transform with 230 ms decaying shake math, stop/dispose reset, and focused
   deterministic tests. 609 additions / 2 deletions in one cohesive behavior-and-tests unit; it
@@ -210,7 +219,8 @@ exception if a single cohesive slice cannot fit the budget.
   PID 33944 under the maintainer's open/close authorization. This did not exercise graceful exit.
   After tests the parent relaunched the same `run/CosmicWin.App.exe`, observed PID 24084, and did
   not minimize user windows or restart Explorer. Visual, resource, WebView2 cleanup, and Explorer-
-  restart checks remain pending, with no Explorer restart authorized.
+  restart checks were later explicitly authorized; see the T6 progress entry for the observed
+  pass/fail results. T6 remains open because sampled visuals did not establish expected timing.
 
 ## Progress
 
@@ -269,10 +279,38 @@ Strict TDD RED/GREEN was observed for new seams and these regressions. Independe
 10 focused passed; `git diff --check` clean. Real desktop composition, process lifetime, GPU shake,
 and Explorer restart remain T6 hardware checks. T5 committed as `b354d26`; Engram mirror pending.
 
+2026-09-23 T6 full hardware continuation (maintainer authorized Explorer restart and temporary
+window minimization, with restoration of the terminal): current Debug build launched directly from
+`CosmicWin.App/bin/Debug/net10.0-windows10.0.19041.0` as PID 1288; the pre-existing
+`run/CosmicWin.App.exe` was older and was not overwritten. Combined `warning:2 failed:1 duration:5`
+and isolated `warning:1 duration:10` returned client exit 0. Two screenshots during each alert
+(1.2 and 2.1 seconds after the command) showed animated video but **no visible failed/warning
+layer**. The maintainer saw layers at another time: these captures establish a timing-dependent
+observation, not a definitive "never renders" failure or a root cause. Six
+`msedgewebview2` processes descended from PID 1288 during an alert, zero before and after;
+non-app WebView2 processes were excluded. Memory sample: app private 278 MB idle, 279 MB shown,
+279 MB after; app-owned WebView2 private 0 → 161 → 0 MB and working set 0 → 282 → 0 MB.
+The GPU counter sampler timed out without a usable result, so GPU cost is **unavailable** (no
+estimate inferred). A single authorized Explorer restart changed its PID 38072 → 27944 while
+the Debug app remained PID 1288. Afterward the video still animated (495/504 sampled pixels
+changed across 900 ms) and the client accepted another warning, but its visible layer was still
+absent. One-kind precedence, FIFO visuals, covered-desktop reveal, and native shake appearance
+cannot be verified while the layer is invisible. The restored user session has Explorer PID 27944
+and the original `run/CosmicWin.App.exe` PID 34824; user windows and terminal were restored.
+Temporary screenshots/scripts and the isolated Edge profile were removed. No source edits were
+made. Root cause remains unknown; production has no navigation/render telemetry. The Engram mirror
+is still pending because its provider rejected ownership.
+
 ## Next step
 
-T5 committed as `b354d26`. T6's nine guarded desktop attachment facts passed after an authorized
-app stop; the app was relaunched. Do not claim real WebView2 rendering, idle process-lifetime,
-shake visuals, or Explorer recovery until separately authorized and measured. T1 manual Edge check,
+The failed-timing correction is committed as `d5f3b16` (120 ms shake, 350 ms failed reveal;
+warning still 700 ms). Isolated failed, warning, and combined-failed layers were photographed on
+current Debug hardware after submitting the command with the terminal visible and then exposing
+the desktop. The earlier screenshots that minimized every window before submission did not prove
+that the layer never rendered. After testing, the original older `run/CosmicWin.App.exe` was
+restored as PID 32468, windows/terminal restored, and temporary screenshots/scripts removed.
+T6 remains open for end-to-end latency, native shake visual, covered-desktop/FIFO behavior, and
+bounded GPU measurement; do not claim exact 470 ms from the pipe command because WebView startup
+and queue polling precede the page animation. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
