@@ -168,7 +168,15 @@ exception if a single cohesive slice cannot fit the budget.
     FullyQualifiedName~Win32VideoWallpaperHostRealAttachTests` to get real RED/GREEN evidence on
     hardware for these 4 facts (they were only proven to compile and to skip correctly here).
   - Commit `c9e8114`.
-- [ ] T3 — WebView2 alert layer: lazy create on alert start, dispose on end, show one kind.
+- [x] **T3 — Lazy transparent WebView2 alert controller.** Work-unit commit `64ea1e5` (360
+  additions). Delegated writer used the T2 host seam and T0 spike without T5 queue wiring.
+  Creates only on alert start, closes on `done`/end/deadline/failure, watches HWND/generation,
+  backs off on missing visuals, and initializes transparency per controller via WebView2 1.0.4191.47
+  options. Strict TDD RED/GREEN observed for lifecycle and retry cases; 4 focused facts pass.
+  Independent App suite = 1007 passed / 6 skipped; Debug solution build = 0 errors / 0 warnings.
+  Real WebView2 transparency, process exit while idle, and Explorer-restart behavior remain T6
+  hardware checks. Native creation has no cancellation token: a late result closes, but a hung
+  native creation cannot be forcibly terminated. Engram mirror remains pending.
 - [x] **T4 — Native video shake for `failed` in the player.** Work-unit commit `851c582`:
   composition-visual transform with 230 ms decaying shake math, stop/dispose reset, and focused
   deterministic tests. 609 additions / 2 deletions in one cohesive behavior-and-tests unit; it
@@ -210,9 +218,25 @@ verifier ran Interop (247 passed / 39 skipped) and App (1003 passed / 6 skipped)
 was selected. T4 was committed as `851c582`; its 5-second join-timeout teardown caveat and
 hardware transform rendering remain unverified.
 
+2026-09-23 T3 in progress: delegated writer added a lazy composition controller, WebView2 package,
+and four lifecycle/structural tests. Strict TDD RED observed for the new lifecycle seam,
+null-overlay retry, and a process-global configuration guard, then GREEN. App suite = 1007 passed /
+6 skipped; solution Debug build succeeded with 0 warnings. The supported WebView2 1.0.4191.47
+`CoreWebView2ControllerOptions.DefaultBackgroundColor` and composition-controller options overload
+replace the process-wide transparency environment variable (Microsoft Learn WebView2 API reference;
+installed NuGet XML). The deadline closes a successfully created controller if its page never posts
+`done`, with exponential retry backoff for failed creation or a missing overlay. WebView2 environment/
+controller creation has no cancellation token: a late completion is closed, but a hung native
+creation task cannot be forcibly stopped. Real WebView2 process teardown, transparent composition,
+and Explorer-restart behavior remain hardware checks; lifecycle tests exercise the production-used
+state path but not a real controller. T3 was committed as `64ea1e5` after independent read-only verification; T6 retains the
+hardware checks.
+Engram mirror remains pending due to provider ownership mismatch.
+
 ## Next step
 
-Feature-branch-chain selected; T4 committed as `851c582`. Next: T3 (WebView2 lazy
-creation/disposal). T1 manual Edge check,
+T3 committed as `64ea1e5`; next T5: wire the existing queue to the lazy layer, setting, and
+Direct2D overlay switch. Do not claim the idle process-lifetime guarantee until measured. T1
+manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
