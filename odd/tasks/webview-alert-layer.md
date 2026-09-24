@@ -234,6 +234,21 @@ exception if a single cohesive slice cannot fit the budget.
   `under_budget`, so it stays pending in the slice. Known trade-off: a start that keeps failing
   retries and logs on every tick until the alert's duration ends.
 
+- [x] **T8 -- Advisory test follow-ups `R3-vacuous-restart-assert` and
+  `R3-real-clock-wiring-tests`.** The maintainer accepted them on 2026-09-23. Route: one
+  delegated writer, two work-unit commits.
+  - `1602d33`: the shake restart test now uses the production 120 ms. It advances 80 ms,
+    restarts, then advances 50 ms, and asserts `Compute(50)`, not the trivial identity. A new
+    theory covers the 119 / 120 ms expiry boundary. Sabotage RED: when the restart kept the
+    original start, the test failed; reverted, GREEN 9/9.
+  - `b472835`: `AppComposition.Wire` takes an optional `TimeProvider`; the default is
+    `TimeProvider.System` and production does not set it. It is used for the three alert-queue
+    time reads. The wiring tests advance a manual fake clock instead of `Thread.Sleep(1100)`:
+    6 tests went from ~3 s to ~80 ms.
+  Checks: Debug build 0 errors; Interop 249 passed / 40 skipped; App 1014 passed / 6 skipped;
+  `git diff --check` clean. Parent spot check: 6/6 wiring tests and 9/9 shake tests passed. RDD
+  assess from `7462e1c`: medium, 227 lines, `under_budget`, so it stays pending in the slice.
+
 ## Progress
 
 2026-09-23: document created; page located; T0 next.
@@ -355,5 +370,5 @@ and queue polling precede the page animation. T1 manual Edge check,
 T2's four real desktop-gated facts, and T4 transform rendering on hardware remain pending. Do not
 run the gated desktop tests while CosmicWin.App is running.
 Review: feature range approved through `7462e1c`. Still pending: run the new gated stress fact with
-the app closed, and decide whether to take up the two remaining advisory test follow-ups
-(`R3-real-clock-wiring-tests`, `R3-vacuous-restart-assert`). `R3-displayed-before-start` is T7, done.
+the app closed, and all three advisory follow-ups are done (T7, T8). Unreviewed slice since `7462e1c`: 227 lines,
+under budget.
