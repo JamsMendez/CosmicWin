@@ -212,8 +212,14 @@ public sealed class AppComposition : IDisposable
         Action? endAlertLayer = null,
         Action<TimeSpan>? shakeAlertVideo = null,
         IDisposable? alertLayer = null,
-        Func<bool>? alertRendererReady = null)
+        Func<bool>? alertRendererReady = null,
+        // Where the alert queue's own time reads (Enqueue/Advance and the remaining-duration
+        // check below) come from. Unset -- as every test predating this parameter, and production
+        // via WireProduction -- reads the real system clock. Tests inject a manual TimeProvider so
+        // the queue's second-scale deadlines advance deterministically instead of via Thread.Sleep.
+        TimeProvider? timeProvider = null)
     {
+        var alertClock = timeProvider ?? TimeProvider.System;
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
         // all have to read ONE decision, and whichever of them kept its own copy would become a
@@ -416,7 +422,7 @@ public sealed class AppComposition : IDisposable
                     return AlertPipeProtocol.FormatError("alerts are disabled");
                 }
 
-                if (!alertQueue.Enqueue(parsed.Command, DateTimeOffset.UtcNow))
+                if (!alertQueue.Enqueue(parsed.Command, alertClock.GetUtcNow()))
                 {
                     return AlertPipeProtocol.QueueFullReply;
                 }
@@ -444,7 +450,7 @@ public sealed class AppComposition : IDisposable
                 var desktopVisible = (alertDesktopVisible?.Invoke()
                     ?? (videoWallpaperActive.Value && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
                     && (startAlertLayer is null || alertRendererReady?.Invoke() != false);
-                active = alertQueue.Advance(DateTimeOffset.UtcNow, desktopVisible);
+                active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
             }
 
             if (startAlertLayer is not null)
@@ -460,7 +466,7 @@ public sealed class AppComposition : IDisposable
                 if (active is null) return;
                 // The queue's deadline starts when Advance promotes the command, not when the
                 // renderer starts. Never grant an extra watch interval to a late UI tick.
-                var remaining = active.Command.Duration - (DateTimeOffset.UtcNow - active.StartedAt);
+                var remaining = active.Command.Duration - (alertClock.GetUtcNow() - active.StartedAt);
                 if (remaining <= TimeSpan.Zero) return;
                 var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
                 if (failed && !ReferenceEquals(shakenAlert, active))

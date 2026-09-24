@@ -11,6 +11,25 @@ namespace CosmicWin.App.Tests.Alerts;
 
 public sealed class WebViewAlertCompositionWiringTests
 {
+    /// <summary>
+    /// Manual fake for the alert queue's own clock (<c>AppComposition.Wire</c>'s
+    /// <c>timeProvider</c> seam) -- there is no <c>Microsoft.Extensions.TimeProvider.Testing</c>
+    /// reference in this test project, so this mirrors the same manual-subclass pattern
+    /// <c>CosmicWin.Interop.Tests</c> already uses for its own shake timing tests. Lets these tests
+    /// advance past a queue's second-scale duration deterministically instead of via
+    /// <c>Thread.Sleep</c> against the real clock.
+    /// </summary>
+    private sealed class FakeTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now;
+
+        public FakeTimeProvider(DateTimeOffset start) => _now = start;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
+    }
+
     private sealed class Scheduler
     {
         private Action? _tick;
@@ -52,12 +71,13 @@ public sealed class WebViewAlertCompositionWiringTests
         public void Dispose() { }
     }
 
-    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events) Create(
+    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
         Host? host = null, Action<string, int>? startAlertLayer = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
         Server? server = null;
         var display = new FakeDisplay((nint)1, Rectangle.FromSize(0, 0, 1920, 1080),
             Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -77,8 +97,9 @@ public sealed class WebViewAlertCompositionWiringTests
             alertRendererReady: ready,
             startAlertLayer: startAlertLayer ?? ((kind, duration) => events.Add($"start:{kind}:{duration}")),
             endAlertLayer: () => events.Add("end"),
-            shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"));
-        return (composition, timer, server!, events);
+            shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
+            timeProvider: clock);
+        return (composition, timer, server!, events, clock);
     }
 
     [Fact]
@@ -93,7 +114,7 @@ public sealed class WebViewAlertCompositionWiringTests
             Assert.Equal("shake:120", h.Events[0]);
             Assert.StartsWith("start:failed:", h.Events[1]);
             Assert.InRange(int.Parse(h.Events[1]["start:failed:".Length..]), 1, 1000);
-            Thread.Sleep(1100);
+            h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
             h.Timer.Tick();
             Assert.Equal("end", h.Events.Last());
         }
@@ -113,7 +134,7 @@ public sealed class WebViewAlertCompositionWiringTests
             visible = true;
             h.Timer.Tick();
             Assert.StartsWith("start:warning:", Assert.Single(h.Events));
-            Thread.Sleep(1100);
+            h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
             h.Timer.Tick();
             Assert.Equal(4, h.Events.Count);
             Assert.StartsWith("start:warning:", h.Events[0]);
@@ -138,7 +159,7 @@ public sealed class WebViewAlertCompositionWiringTests
             h.Timer.Tick();
             Assert.StartsWith("start:warning:", Assert.Single(h.Events));
             ready = false;
-            Thread.Sleep(1100);
+            h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
             h.Timer.Tick();
             Assert.Equal("end", h.Events.Last());
         }
