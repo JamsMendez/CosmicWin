@@ -26,8 +26,12 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
 
 ## Tasks
 
-- [ ] T1 Detector excludes the host class (unit test, RED then GREEN). Route: inline (1 file + test).
-- [ ] T2 Host created hidden + `WS_EX_NOACTIVATE`, shown with `SW_SHOWNA`. Route: inline (1 file).
+- [x] T1 Detector excludes the host class (unit test, RED then GREEN). Route: inline (1 file + test).
+  Commit 7c433a0. RED: `TheVideoWallpaperHostClass_IsExcludedFromCoverage` failed; GREEN 14/14.
+- [x] T2 Host created hidden + `WS_EX_NOACTIVATE`, shown with `SW_SHOWNA`. Route: inline (1 file).
+  Commit 7042caf. RED: `TryAttach_CreatesAndRecreatesTheHostWindowAsNonActivatable` failed on the
+  ex-style bit (desktop opt-in run); GREEN 20/20 host tests. Full suites: Layout 190, Alert 13,
+  Interop 315/41 skipped (341/15 with `COSMICWIN_RUN_DESKTOP_TESTS=1`), App 958/6 skipped.
 - [ ] T3 Hardware check: after start, an alert plays immediately with no other window focused.
 
 ## Acceptance criteria
@@ -37,4 +41,9 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
 
 ## Progress
 
-(none yet)
+- 2026-09-25 hardware probe (elevated shell, scratchpad `probe.ps1`): launch, wait for
+  `alert-layer page ready`, send `warning:1`, measure `alert-layer show`.
+  - base (`main` 24fc980): shown after 197 ms -- did NOT reproduce: the user's Chrome held the
+    foreground, so the new process could not take it.
+  - fix (7042caf): shown after 223 ms; `video-wallpaper phase=startup tryAttach=True tryPlay=True`.
+  - T3 still open: a reproducing A/B needs the foreground free at launch.
