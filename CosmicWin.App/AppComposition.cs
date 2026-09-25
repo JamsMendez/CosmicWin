@@ -942,7 +942,12 @@ public sealed class AppComposition : IDisposable
                         httpAlertServer = httpServerFactory(alertHttpPort, token, HandleAlertCommand,
                             message => desktopTrace?.Record(message));
                         httpAlertServer.Start();
-                        desktopTrace?.Record($"alert-http listening port={alertHttpPort}");
+                        // H5b: Start() succeeding does not by itself prove anything is listening
+                        // behind it (see HttpAlertCommandServer's own remarks -- a squatted port can
+                        // make it succeed silently) -- the server's own background self-probe reports
+                        // the actual reachable/NOT reachable outcome asynchronously, through this same
+                        // desktopTrace sink.
+                        desktopTrace?.Record($"alert-http start requested port={alertHttpPort}");
                     }
                 }
                 // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a

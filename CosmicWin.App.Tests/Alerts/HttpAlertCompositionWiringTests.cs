@@ -162,7 +162,7 @@ public sealed class HttpAlertCompositionWiringTests
             Assert.Equal(AlertPipeProtocol.OkReply, reply);
             Assert.StartsWith("start:warning:", Assert.Single(h.Events));
 
-            Assert.Contains(h.Trace.Lines, l => l == "alert-http listening port=5001");
+            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=5001");
             Assert.DoesNotContain(h.Trace.Lines, l => l.Contains("abc123", StringComparison.Ordinal));
         }
     }
@@ -193,7 +193,7 @@ public sealed class HttpAlertCompositionWiringTests
             // Wire's DEFAULT factory, so it would read null regardless of whether the HTTP server
             // actually started. The trace lines below are what actually prove the failure path ran.
             Assert.Contains(h.Trace.Lines, l => l.StartsWith("alert-http-start-failed", StringComparison.Ordinal));
-            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http listening", StringComparison.Ordinal));
+            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
         }
     }
 
@@ -206,7 +206,7 @@ public sealed class HttpAlertCompositionWiringTests
         {
             Assert.True(h.Pipe!.Started);
             Assert.Contains(h.Trace.Lines, l => l.StartsWith("alert-http-start-failed", StringComparison.Ordinal));
-            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http listening", StringComparison.Ordinal));
+            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
         }
     }
 
