@@ -38,6 +38,12 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - The only validation today is the file dialog: `*.mp4` and `CheckFileExists`. `Import` accepts any
   extension. An HTTP body gets neither check for free.
 
+## Decided (maintainer, 2026-09-25)
+
+- The request carries an ABSOLUTE path to a video file already on this PC. No downloads and no
+  external URLs: an `http(s)://`, `file://` or any other URI scheme is rejected with 400. This
+  settles part of decision 4 below: the path must be absolute and local.
+
 ## Decisions to take first (maintainer)
 
 1. **Route and host.** Recommended: `POST /v1/wallpaper/video` with body `{"path":"C:\\...\\x.mp4"}`,
