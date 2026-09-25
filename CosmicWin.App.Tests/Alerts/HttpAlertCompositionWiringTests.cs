@@ -188,7 +188,12 @@ public sealed class HttpAlertCompositionWiringTests
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
-            Assert.Null(h.HttpServer);
+            // NOT Assert.Null(h.HttpServer) here: a CUSTOM httpFactory (this one) bypasses the
+            // harness's own capturing closure entirely -- h.HttpServer is only ever assigned inside
+            // Wire's DEFAULT factory, so it would read null regardless of whether the HTTP server
+            // actually started. The trace lines below are what actually prove the failure path ran.
+            Assert.Contains(h.Trace.Lines, l => l.StartsWith("alert-http-start-failed", StringComparison.Ordinal));
+            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http listening", StringComparison.Ordinal));
         }
     }
 
@@ -200,6 +205,8 @@ public sealed class HttpAlertCompositionWiringTests
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
+            Assert.Contains(h.Trace.Lines, l => l.StartsWith("alert-http-start-failed", StringComparison.Ordinal));
+            Assert.DoesNotContain(h.Trace.Lines, l => l.StartsWith("alert-http listening", StringComparison.Ordinal));
         }
     }
 
