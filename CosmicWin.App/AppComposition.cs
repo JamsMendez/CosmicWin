@@ -1963,7 +1963,16 @@ public sealed class AppComposition : IDisposable
                         // Posted wallpaper work must not kill the thread that owns the host HWND.
                         // Synchronous Invoke callers wrap their own failures before they get here.
                         // Only the TYPE reaches the sink: exception.Message can hold an absolute path.
-                        _onWorkFailed?.Invoke(exception.GetType().Name);
+                        // Review R3-002: the sink is guarded too, so "keeps serving later work"
+                        // never depends on it -- an exception escaping here would end this thread,
+                        // and, unhandled on a background thread, the whole process.
+                        try
+                        {
+                            _onWorkFailed?.Invoke(exception.GetType().Name);
+                        }
+                        catch
+                        {
+                        }
                     }
                 }
 

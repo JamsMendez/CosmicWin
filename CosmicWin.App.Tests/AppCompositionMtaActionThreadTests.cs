@@ -26,6 +26,25 @@ public sealed class AppCompositionMtaActionThreadTests
         Assert.DoesNotContain(@"C:\Users\x\secret.mp4", reported[0]);
     }
 
+    /// <summary>
+    /// Review R3-002: the "keeps serving" guarantee must not depend on the sink. A sink that throws
+    /// must not let the exception escape Run, which would end the thread (and, unhandled on a
+    /// background thread, the process).
+    /// </summary>
+    [Fact]
+    public void Run_WhenTheFailureSinkItselfThrows_KeepsServingLaterWork()
+    {
+        using var thread = new AppComposition.MtaActionThread(
+            "AppCompositionMtaActionThreadTests.ThrowingSink",
+            onWorkFailed: _ => throw new InvalidOperationException("sink failed"));
+        var secondItemRan = new ManualResetEventSlim(initialState: false);
+
+        thread.Post(() => throw new IOException("work failed"));
+        thread.Post(() => secondItemRan.Set());
+
+        Assert.True(secondItemRan.Wait(TimeSpan.FromSeconds(5)), "the second work item never ran");
+    }
+
     /// <summary>Waits briefly for an async assertion to stop failing, instead of racing the worker thread.</summary>
     private static void AssertEventually(Action assertion)
     {
