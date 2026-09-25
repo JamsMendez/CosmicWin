@@ -562,7 +562,9 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     {
         var port = GetFreePort();
         var server = new HttpAlertCommandServer(port, Token, _ => "ok");
-        server.Start();
+
+        // Never started, THEN disposed (finding R3-004): an instance that was started first already
+        // has a thread, and Start's `_thread is not null` guard would hide a missing `_disposed` check.
         server.Dispose();
 
         // Must be a genuine no-op: no exception, and -- the actual proof -- the port comes back
