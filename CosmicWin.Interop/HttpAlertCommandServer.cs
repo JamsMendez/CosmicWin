@@ -442,7 +442,9 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         }
         catch (Exception handlerError)
         {
-            _onDiagnostic($"alert http: the video wallpaper switch handler threw {handlerError.GetType().Name}: {handlerError.Message}");
+            // The type only, never the message: an I/O exception's message routinely names the
+            // file, an absolute path under the user's profile that no trace line may carry.
+            _onDiagnostic($"alert http: the video wallpaper switch handler threw {handlerError.GetType().Name}");
             WriteReply(response, 500, AlertPipeProtocol.FormatError("internal error"));
             return;
         }

@@ -875,6 +875,26 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task VideoRoute_SwitchDelegateThrows_TheDiagnosticNeverCarriesTheExceptionMessage()
+    {
+        // An IOException's message routinely names the file -- an absolute path under the user's
+        // profile, which no trace line may carry. Only the exception's type is reported.
+        var port = GetFreePort();
+        var diagnostics = new List<string>();
+        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+            handleVideoWallpaperSwitch: _ => throw new IOException($"Could not open '{ExistingVideo}'."),
+            videoWallpaperProbes: FakeVideoProbes(exists: true));
+        server.Start();
+
+        var (status, _) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+
+        Assert.Equal(500, status);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains(nameof(IOException), diagnostic);
+        Assert.DoesNotContain("Could not open", diagnostic);
+    }
+
+    [Fact]
     public async Task VideoRouteDisabled_AnswersExactlyLikeAnUnknownPath()
     {
         var port = GetFreePort();
