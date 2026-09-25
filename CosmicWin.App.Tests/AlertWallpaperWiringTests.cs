@@ -146,7 +146,9 @@ public sealed class AlertWallpaperWiringTests
 
             harness.Scheduler.Fire();
 
-            var tiles = Assert.Single(harness.TileSets);
+            // T9d: enqueuing itself already ticks the overlay once, so the watch tick above repeats
+            // the SAME (idempotent) tile set rather than being the only update -- take the latest.
+            var tiles = harness.TileSets[^1];
             Assert.Equal(3, tiles.Count);
             Assert.Collection(
                 tiles,
@@ -188,7 +190,9 @@ public sealed class AlertWallpaperWiringTests
 
             harness.Scheduler.Fire();
 
-            var tile = Assert.Single(Assert.Single(harness.TileSets));
+            // T9d: enqueuing itself already ticks the overlay once, so the watch tick above repeats
+            // the SAME (idempotent) tile set rather than being the only update -- take the latest.
+            var tile = Assert.Single(harness.TileSets[^1]);
             // The un-offset layout (work-area-local) would centre a single tile's top somewhere
             // inside a 1920x1040 area starting at (0,0); back-buffer-local it must start 40px lower,
             // and never above the work area at all.

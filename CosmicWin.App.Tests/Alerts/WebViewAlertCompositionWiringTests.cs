@@ -125,6 +125,22 @@ public sealed class WebViewAlertCompositionWiringTests
         using (h.Composition) Assert.Equal(0, calls);
     }
 
+    /// <summary>
+    /// T9d (webview-alert-layer): a newly accepted command must start the layer as soon as it is
+    /// queued, not wait up to the 400ms watch tick -- this test never calls <c>h.Timer.Tick()</c> at
+    /// all, so <c>h.Events</c> can only be non-empty if enqueueing itself scheduled the update.
+    /// </summary>
+    [Fact]
+    public void EnqueuedAlertStartsTheLayerImmediatelyWithoutAdvancingTheWatchTick()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:1 duration:1"));
+            Assert.StartsWith("start:warning:", Assert.Single(h.Events));
+        }
+    }
+
     [Fact]
     public void CombinedCommand_StartsFailedOnceAndEndsAfterDuration()
     {
@@ -224,10 +240,12 @@ public sealed class WebViewAlertCompositionWiringTests
         events = h.Events;
         using (h.Composition)
         {
-            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:1 duration:1"));
-
-            var thrown = Record.Exception(() => h.Timer.Tick());
+            // T9d: enqueuing itself already ticks the overlay once -- the first (failing) attempt
+            // happens here, not on the first explicit watch tick.
+            string? reply = null;
+            var thrown = Record.Exception(() => reply = h.Server.Send("failed:1 duration:1"));
             Assert.Null(thrown);
+            Assert.Equal(AlertPipeProtocol.OkReply, reply);
             Assert.Equal(1, attempts);
             Assert.StartsWith("start:failed:", h.Events[1]);
 

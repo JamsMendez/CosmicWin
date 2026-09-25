@@ -174,10 +174,13 @@ public sealed class AlertDesktopVisibilityWiringTests
         {
             Assert.Equal(AlertPipeProtocol.OkReply, harness.Server.Send("warning:1"));
 
+            // T9d: enqueuing itself already ticks the overlay once, so the watch tick below repeats
+            // the SAME (idempotent) tile set rather than being the only update.
+            Assert.NotEmpty(harness.TileSets);
+
             harness.Scheduler.Fire();
 
-            var tiles = Assert.Single(harness.TileSets);
-            Assert.Single(tiles);
+            Assert.Single(harness.TileSets[^1]);
         }
     }
 

@@ -435,6 +435,13 @@ public sealed class AppComposition : IDisposable
                 }
             }
 
+            // T9d (webview-alert-layer): HandleAlertCommand runs on the pipe server thread -- do not
+            // wait for the next 400ms watch tick to show a newly queued alert. UpdateAlertOverlay
+            // itself must stay on the UI thread (it touches the WebView layer and the overlay), and
+            // must not race the watch tick's own call -- onOwningThread already serializes both onto
+            // the same dispatcher, so posting here is safe.
+            onOwningThread(UpdateAlertOverlay);
+
             return AlertPipeProtocol.OkReply;
         }
 
