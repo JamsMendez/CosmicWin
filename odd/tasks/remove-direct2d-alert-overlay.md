@@ -83,6 +83,18 @@ gone; GREEN is the deletion with every suite still passing.
   Check: structural readback of the three headers. Review: passive docs, none.
   T1b review assessment vs `7f6d0e0`: medium, `under_budget` (95 lines) -> pending in the slice.
 - [ ] T3 — Hardware re-check with the preloaded layer: warning, failed with shake, FIFO, covered hold.
+  2026-09-25 (UTC), build of `5e178ad` launched from the session scratchpad, shell elevated. Preload:
+  controller 401 ms, navigation 171 ms, `page ready`. Alerts sent with `CosmicWinAlert.exe`.
+  - [x] warning: `show kind=warning duration=5000` -> `done` 5.01 s -> `hide`; yellow visible in the
+    desktop gaps.
+  - [x] failed: same timing; red visible in the desktop gaps.
+  - [ ] shake: NOT visually confirmed. The maintainer's tiled windows cover the desktop except thin
+    gaps, and the agent does not move the maintainer's windows. The shake code is unchanged by this
+    feature (`ApplyShakeTransform` untouched; confirmed by the review evidence).
+  - [x] FIFO: `warning` then `failed` sent 83 ms apart; failed shown at the same ms as warning's `hide`
+    (02.146), each 5 s.
+  - [x] covered hold: a fullscreen TopMost probe form was foreground; alert sent 33.803, no show while
+    covered; probe closed 41.094; `show` at 41.373 (0.28 s later).
 
 ## Acceptance criteria
 
