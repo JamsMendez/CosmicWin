@@ -131,4 +131,47 @@ public sealed class AlertLayerWebPageTests
         Assert.DoesNotContain("requestFullscreen", js);
         Assert.DoesNotContain("addEventListener(\"keydown\"", js);
     }
+
+    /// <summary>
+    /// T9b (webview-alert-layer): the page must idle with NOTHING running -- no draw, no
+    /// requestAnimationFrame loop -- until a "show" message arrives, so a preloaded-but-hidden
+    /// layer (T9c) costs ~0% GPU while idle (feature doc, "Idle cost"). Loading the file bare (no
+    /// hash/query) must not auto-start a warning any more, unlike the one-shot page T1 shipped.
+    /// </summary>
+    [Fact]
+    public void Script_IdlesWithNoAnimationUntilAShowMessageArrives()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("hasExplicitParams", js);
+        Assert.Contains("function startShowing", js);
+        Assert.Contains("function hide(", js);
+        Assert.Contains("if (!animating) return;", js);
+    }
+
+    /// <summary>
+    /// T9b: the host (T9c) drives a preloaded page by posting <c>{type:"show",...}</c>/
+    /// <c>{type:"hide"}</c> through the WebView2 message bridge, guarded the same way the outgoing
+    /// side already is so this file keeps working when opened directly in a browser tab.
+    /// </summary>
+    [Fact]
+    public void Script_HandlesShowAndHideMessagesFromTheHost()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("addEventListener(\"message\"", js);
+        Assert.Contains("\"show\"", js);
+        Assert.Contains("\"hide\"", js);
+        Assert.Contains("data.kind", js);
+        Assert.Contains("data.duration", js);
+    }
+
+    /// <summary>
+    /// T9b: the host needs to know the navigated page produced a live, running script -- not just
+    /// that navigation completed -- before it trusts a pending "show" was actually received.
+    /// </summary>
+    [Fact]
+    public void Script_PostsReadyOnceInitialised()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("\"ready\"", js);
+    }
 }

@@ -371,12 +371,13 @@ function drawFailureLayer(cx, cy, progress, ms) {
   ctx.restore();
 }
 
-// ---- Single-shot state machine: hidden -> shaking (failed only) -> revealing -> shown ---------
-// backgroud-processing/script.js's advanceFailureState, trimmed to a one-shot run (no toggling off
-// and back on -- the host disposes this page's WebView2 when it is done, see signalDoneIfElapsed
-// below) and with applyFailureShake dropped entirely: T4 shakes the VIDEO natively for the same
-// FAILURE_SHAKE_MS, so this page only has to WAIT that long before it reveals -- exactly what the
-// shakeMs check below already does, unchanged from the source page.
+// ---- State machine: hidden -> shaking (failed only) -> revealing -> shown ----------------------
+// backgroud-processing/script.js's advanceFailureState, with applyFailureShake dropped entirely --
+// T4 shakes the VIDEO natively for the same FAILURE_SHAKE_MS, so this page only has to WAIT that
+// long before it reveals, exactly what the shakeMs check below already does, unchanged from the
+// source page. T1 ran this once per page load, then the host disposed the whole WebView2. T9b
+// (webview-alert-layer) makes the run REPEATABLE: the host now preloads this page once and keeps
+// it alive (feature doc, "Idle cost"), driving it with "show"/"hide" messages instead -- see below.
 
 var failureState = "hidden";
 var failureKind = "warning";
@@ -398,11 +399,104 @@ function advanceFailureState(ms) {
   }
 }
 
+// ---- Message-driven show/hide API (T9b) ---------------------------------------------------------
+// The preloaded host (T9c) drives this page after navigation by posting JSON through the WebView2
+// message bridge: {type:"show", kind, duration} / {type:"hide"}. IDLE means nothing runs at all --
+// canvas cleared, no requestAnimationFrame loop -- so a hidden preloaded layer costs ~0% GPU (the
+// feature doc's Idle cost condition). "show" while already showing restarts from zero with the new
+// kind/duration, same as a fresh "show" on an idle page.
+
+var animating = false;
+var doneSignaled = false;
+var durationMs = 5000;
+
+function postToHost(message) {
+  // Guarded: this same file also opens in a plain browser tab, where window.chrome.webview does
+  // not exist -- the manual check the feature doc asks for
+  // (alert-layer.html#kind=warning&duration=5000 in Edge).
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage(message);
+  }
+}
+
+function clearCanvas() {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function stopAndClear() {
+  animating = false;
+  clearCanvas();
+}
+
+function startShowing(kind, duration) {
+  failureKind = kind === "failed" ? "failed" : "warning";
+  durationMs = isFinite(duration) && duration > 0 ? duration : 5000;
+  failureStartMs = null;
+  failureState = "hidden";
+  doneSignaled = false;
+  if (!animating) {
+    animating = true;
+    scheduleFrame(render);
+  }
+}
+
+function hide() {
+  stopAndClear();
+  failureStartMs = null;
+  failureState = "hidden";
+}
+
+function signalDoneIfElapsed(ms) {
+  if (doneSignaled || failureStartMs === null || ms - failureStartMs < durationMs) {
+    return false;
+  }
+
+  doneSignaled = true;
+  postToHost("done");
+  return true;
+}
+
+function render(ms) {
+  if (!animating) return;
+  advanceFailureState(ms);
+  var progress = animationProgress(ms);
+  var cx = W * 0.5;
+  var cy = H * 0.5;
+
+  clearCanvas();
+  drawFailureLayer(cx, cy, progress, ms);
+
+  if (signalDoneIfElapsed(ms)) {
+    stopAndClear();
+    return;
+  }
+
+  scheduleFrame(render);
+}
+
+function handleHostMessage(event) {
+  var data = event.data;
+  if (!data || typeof data !== "object") return;
+  if (data.type === "show") {
+    startShowing(data.kind, Number(data.duration));
+  } else if (data.type === "hide") {
+    hide();
+  }
+}
+
+if (window.chrome && window.chrome.webview) {
+  window.chrome.webview.addEventListener("message", handleHostMessage);
+}
+
 // ---- Hash API: alert-layer.html#kind=failed&duration=5000 --------------------------------------
-// Starts immediately on load -- no script needs to be injected by the host (T3). Reads
-// location.hash, falling back to location.search so the exact same file also works when opened
-// directly in a browser tab (?kind=warning&duration=5000) for the manual check the feature doc
-// asks for.
+// Still supported so this same file keeps working when opened directly in a browser tab for the
+// manual check the feature doc asks for -- reads location.hash, falling back to location.search.
+// A preloaded host page (T9c) navigates with NO hash/query at all, so this must NOT auto-show:
+// only an EXPLICIT kind or duration param starts the layer; otherwise the page stays idle until a
+// "show" message arrives, exactly like a freshly preloaded page must.
 
 function parseParams() {
   var raw = (location.hash || location.search || "").replace(/^[#?]/, "");
@@ -410,41 +504,14 @@ function parseParams() {
 }
 
 var params = parseParams();
-var requestedDuration = Number(params.get("duration"));
+var hasExplicitParams = params.has("kind") || params.has("duration");
 
-failureKind = params.get("kind") === "failed" ? "failed" : "warning";
-var durationMs = isFinite(requestedDuration) && requestedDuration > 0 ? requestedDuration : 5000;
+// Tells the host a live, running script exists on the other end of the bridge -- not just that
+// navigation completed -- before it trusts a pending "show" was actually received (T9c).
+postToHost("ready");
 
-var doneSignaled = false;
-
-function signalDoneIfElapsed(ms) {
-  if (doneSignaled || ms < durationMs) {
-    return;
-  }
-
-  doneSignaled = true;
-  // Guarded: this same file also opens in a plain browser tab, where window.chrome.webview does
-  // not exist -- the manual check the feature doc asks for
-  // (alert-layer.html#kind=warning&duration=5000 in Edge).
-  if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.postMessage("done");
-  }
+if (hasExplicitParams) {
+  var requestedKind = params.get("kind") === "failed" ? "failed" : "warning";
+  var requestedDuration = Number(params.get("duration"));
+  startShowing(requestedKind, requestedDuration);
 }
-
-function render(ms) {
-  advanceFailureState(ms);
-  var progress = animationProgress(ms);
-  var cx = W * 0.5;
-  var cy = H * 0.5;
-
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.restore();
-
-  drawFailureLayer(cx, cy, progress, ms);
-  signalDoneIfElapsed(ms);
-  scheduleFrame(render);
-}
-
-scheduleFrame(render);
