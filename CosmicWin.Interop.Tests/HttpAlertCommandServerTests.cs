@@ -45,10 +45,48 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     // old assertion (throws ArgumentNullException) described a stricter contract this class no
     // longer has, now that decision 2 requires each route to be independently switchable.
     [Fact]
-    public void Constructor_NullHandlerAndNullVideoSwitch_DoesNotThrow_AndConstructsWithNoRoutesEnabled()
+    public void Constructor_NullHandlerAndNullVideoSwitch_DoesNotThrow()
     {
         var exception = Record.Exception(() => new HttpAlertCommandServer(GetFreePort(), Token, null));
         Assert.Null(exception);
+    }
+
+    // R3-001 (review-3 follow-up): the constructor check above only proves the object comes into
+    // existence -- it never starts a server or shows both routes are actually off. This proves the
+    // contract: with BOTH delegates null, a well-formed, authorized POST to EACH route answers
+    // exactly what a genuinely unknown path answers (same status, same body), not just "some 4xx".
+    [Fact]
+    public async Task BothRoutesDisabled_AlertsRouteAnswersExactlyLikeAnUnknownPath()
+    {
+        var port = GetFreePort();
+        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
+        server.Start();
+
+        using var client = NewClient();
+        var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
+        using var alertResponse = await client.PostAsync(
+            $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}", JsonContent("{\"warning\":1}"));
+
+        Assert.Equal((HttpStatusCode)unknownStatus, alertResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, alertResponse.StatusCode);
+        Assert.Equal(unknownBody, await alertResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task BothRoutesDisabled_VideoRouteAnswersExactlyLikeAnUnknownPath()
+    {
+        var port = GetFreePort();
+        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
+        server.Start();
+
+        using var client = NewClient();
+        var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
+        using var videoResponse = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", VideoJsonContent(VideoBody(ExistingVideo)));
+
+        Assert.Equal((HttpStatusCode)unknownStatus, videoResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, videoResponse.StatusCode);
+        Assert.Equal(unknownBody, await videoResponse.Content.ReadAsStringAsync());
     }
 
     // ---- lifecycle ----
@@ -640,10 +678,78 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var padding = new string(' ', AlertHttpProtocol.MaxBodyBytes - prefix.Length - suffix.Length + 50);
         var body = prefix + padding + suffix;
 
-        var (status, responseBody) = await SendRawAsync(port, BuildRawChunkedRequest($"127.0.0.1:{port}", body));
+        var (status, responseBody) = await SendRawAsync(
+            port, BuildRawChunkedRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", body));
 
         Assert.Equal(413, status);
         Assert.StartsWith("error: ", responseBody);
+    }
+
+    // ---- R3-002 (review-3 follow-up): the per-route body cap must also govern the UNKNOWN-length
+    // (chunked, no Content-Length) read loop in TryReadBody, not just the declared-Content-Length
+    // check. BodyBetweenTheAlertCapAndTheVideoCap_Is413OnAlertsButNotOnVideo above already proves
+    // this for a DECLARED length; these three prove it for genuinely chunked wire framing, built
+    // byte-for-byte with BuildRawChunkedRequest (no Content-Length header at all -- HttpClient
+    // cannot be trusted not to compute one on its own, so a client library is not used here).
+
+    [Fact]
+    public async Task VideoRoute_ChunkedBodyBetweenTheAlertCapAndTheVideoCap_PassesTheSizeGate()
+    {
+        var port = GetFreePort();
+        var switchCalls = 0;
+        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+
+        var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
+        var body = "{\"warning\":" + padding + "}";
+        Assert.True(Encoding.UTF8.GetByteCount(body) > AlertHttpProtocol.MaxBodyBytes);
+        Assert.True(Encoding.UTF8.GetByteCount(body) < VideoWallpaperHttpProtocol.MaxBodyBytes);
+
+        var (status, responseBody) = await SendRawAsync(
+            port, BuildRawChunkedRequest(VideoWallpaperHttpProtocol.VideoPath, $"127.0.0.1:{port}", body));
+
+        // Passes the video route's wider size gate: it fails validation for an unrelated reason
+        // (unknown field), never 413 -- same as the declared-length sibling test above.
+        Assert.Equal(400, status);
+        Assert.Contains("unknown field 'warning'", responseBody);
+        Assert.Equal(0, switchCalls);
+    }
+
+    [Fact]
+    public async Task VideoRoute_ChunkedBodyOverTheVideoCap_Returns413WithoutCallingTheSwitchDelegate()
+    {
+        var port = GetFreePort();
+        var switchCalls = 0;
+        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+
+        var oversized = VideoBody(@"C:\" + new string('a', VideoWallpaperHttpProtocol.MaxBodyBytes) + ".mp4");
+        Assert.True(Encoding.UTF8.GetByteCount(oversized) > VideoWallpaperHttpProtocol.MaxBodyBytes);
+
+        var (status, responseBody) = await SendRawAsync(
+            port, BuildRawChunkedRequest(VideoWallpaperHttpProtocol.VideoPath, $"127.0.0.1:{port}", oversized));
+
+        Assert.Equal(413, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("request body is too large"), responseBody);
+        Assert.Equal(0, switchCalls);
+    }
+
+    [Fact]
+    public async Task AlertsRoute_TheSameChunkedBodyThatPassesOnVideo_Returns413()
+    {
+        var port = GetFreePort();
+        var handlerCalls = 0;
+        using var server = Start(port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
+
+        var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
+        var body = "{\"warning\":" + padding + "}";
+        Assert.True(Encoding.UTF8.GetByteCount(body) > AlertHttpProtocol.MaxBodyBytes);
+        Assert.True(Encoding.UTF8.GetByteCount(body) < VideoWallpaperHttpProtocol.MaxBodyBytes);
+
+        var (status, responseBody) = await SendRawAsync(
+            port, BuildRawChunkedRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", body));
+
+        Assert.Equal(413, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("request body is too large"), responseBody);
+        Assert.Equal(0, handlerCalls);
     }
 
     // ---- V3: /v1/wallpaper/video, behind the same gates ----
@@ -1078,12 +1184,14 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     /// <summary>
     /// Builds a raw, genuinely chunked HTTP/1.1 request (<c>Transfer-Encoding: chunked</c>, no
     /// <c>Content-Length</c> at all) -- proof that the "unknown length" branch of the body reader is
-    /// exercised by real chunked wire framing, not by a client library's own internal buffering.
+    /// exercised by real chunked wire framing, not by a client library's own internal buffering. V3
+    /// (R3-002): takes an explicit <paramref name="path"/> so the same raw-socket idiom covers both
+    /// routes, the same way <see cref="BuildRawRequest"/> already does for the declared-length case.
     /// </summary>
-    private static string BuildRawChunkedRequest(string hostHeader, string body)
+    private static string BuildRawChunkedRequest(string path, string hostHeader, string body)
     {
         var sb = new StringBuilder();
-        sb.Append("POST ").Append(AlertHttpProtocol.AlertsPath).Append(" HTTP/1.1\r\n");
+        sb.Append("POST ").Append(path).Append(" HTTP/1.1\r\n");
         sb.Append("Host: ").Append(hostHeader).Append("\r\n");
         sb.Append("Content-Type: application/json\r\n");
         sb.Append("Authorization: Bearer ").Append(Token).Append("\r\n");
