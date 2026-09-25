@@ -1,4 +1,6 @@
 using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace CosmicWin.App.Tests;
 
@@ -135,6 +137,16 @@ public sealed class VideoWallpaperImportTests : IDisposable
     /// temporary file first and moving it into place means a failed copy cannot touch the
     /// destination at all, and the temporary file must not survive the failure either.
     /// </summary>
+    /// <remarks>
+    /// V1b surprise: <c>CreateHardLinkW</c> only adds a directory entry -- it never opens the
+    /// source's data stream -- so the exclusive lock below no longer blocks the link the way it
+    /// used to block <see cref="File.Copy(string, string, bool)"/> (confirmed by re-running this
+    /// exact test against the real, uninjected two-argument overload: the RED run this test was
+    /// written to reproduce came back GREEN instead, because the link quietly succeeded). Forcing
+    /// the link to fail through the injectable overload is what actually keeps this test testing
+    /// the scenario it is named for: a failure while copying BYTES must not touch the existing
+    /// destination or leave a temp file behind.
+    /// </remarks>
     [Fact]
     public void Import_WhenTheSourceCannotBeRead_LeavesAnExistingDestinationUntouchedAndNoTempFileBehind()
     {
@@ -145,7 +157,8 @@ public sealed class VideoWallpaperImportTests : IDisposable
 
         using (new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            Assert.ThrowsAny<IOException>(() => VideoWallpaperImport.Import(_destinationDirectory, source));
+            Assert.ThrowsAny<IOException>(() =>
+                VideoWallpaperImport.Import(_destinationDirectory, source, (_, _) => false));
         }
 
         Assert.Equal("previously imported", File.ReadAllText(destination));
@@ -188,4 +201,102 @@ public sealed class VideoWallpaperImportTests : IDisposable
             System.IO.Path.GetDirectoryName(SettingsFile.ResolvePath()),
             directory);
     }
+
+    /// <summary>
+    /// V1b (video-wallpaper-http-endpoint, decision 5): both temp directories above live under
+    /// <see cref="Path.GetTempPath"/>, i.e. the same volume, so the real, uninjected two-argument
+    /// <see cref="VideoWallpaperImport.Import(string, string)"/> should link rather than copy --
+    /// verified here by file IDENTITY (same volume serial and file index), not merely equal bytes,
+    /// which a copy would also produce.
+    /// </summary>
+    [Fact]
+    public void Import_WhenSourceAndDestinationShareAVolume_LinksInsteadOfCopyingBytes()
+    {
+        var source = WriteSourceFile("clip.mp4", "identity-checked-payload");
+
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+
+        Assert.Equal(GetFileIdentity(source), GetFileIdentity(destination));
+        Assert.True(GetLinkCount(source) >= 2);
+    }
+
+    /// <summary>
+    /// The injectable third overload (the same seam <see cref="SettingsFile"/>'s convention
+    /// extends one level deeper) stands in for a link failure -- a different volume,
+    /// <c>ERROR_NOT_SAME_DEVICE</c>, a non-NTFS destination, access denied -- without needing a
+    /// second real volume attached to the test machine. The destination must still end up with
+    /// the source's bytes, by an ordinary copy this time, and it must NOT share the source's file
+    /// identity.
+    /// </summary>
+    [Fact]
+    public void Import_WhenTheLinkFails_FallsBackToCopyingBytes()
+    {
+        var source = WriteSourceFile("clip.mp4", "copied-payload");
+
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source, (_, _) => false);
+
+        Assert.Equal("copied-payload", File.ReadAllText(destination));
+        Assert.NotEqual(GetFileIdentity(source), GetFileIdentity(destination));
+    }
+
+    /// <summary>
+    /// The CRITICAL invariant from <see cref="VideoWallpaperImport"/>'s remarks: once
+    /// <c>video-wallpaper.mp4</c> is a hard link to <paramref name="first"/>'s data, re-picking a
+    /// DIFFERENT source must not touch <paramref name="first"/>'s own bytes, reachable through its
+    /// own, still-separate directory entry -- overwriting the fixed destination only ever retires
+    /// the destination's own directory entry, never the source's.
+    /// </summary>
+    [Fact]
+    public void Import_AfterALinkedImport_ReplacingItWithADifferentSourceLeavesTheFirstSourceUntouched()
+    {
+        var first = WriteSourceFile("first.mp4", "first-must-stay-untouched");
+        var second = WriteSourceFile("second.mp4", "second-payload");
+
+        VideoWallpaperImport.Import(_destinationDirectory, first);
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, second);
+
+        Assert.Equal("second-payload", File.ReadAllText(destination));
+        Assert.Equal("first-must-stay-untouched", File.ReadAllText(first));
+    }
+
+    private static (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) GetFileIdentity(string path)
+    {
+        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (!GetFileInformationByHandle(handle, out var info))
+        {
+            throw new IOException($"GetFileInformationByHandle failed for '{path}'.");
+        }
+
+        return (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow);
+    }
+
+    private static uint GetLinkCount(string path)
+    {
+        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (!GetFileInformationByHandle(handle, out var info))
+        {
+            throw new IOException($"GetFileInformationByHandle failed for '{path}'.");
+        }
+
+        return info.NumberOfLinks;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION
+    {
+        public uint FileAttributes;
+        public long CreationTime;
+        public long LastAccessTime;
+        public long LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 }
