@@ -192,4 +192,14 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop
   382/42 skipped, App 964/6 skipped. The class name `HttpAlertCommandServer` is now inaccurate; a
   rename is a later cosmetic call.
-- Next: V4 (composition wiring and the `video-wallpaper-http` settings key).
+- Review 3 (2026-09-25): assess (base `b92783f`) medium, `slice_budget_reached` (618 lines).
+  Maintainer granted. Lens review-reliability, lineage `review-cb7cd1e32be1714f`: APPROVED,
+  acknowledged, authority burned. The reviewed boundary is now `9a056d9`. Two SUGGESTIONS, test
+  coverage only, not yet authorized:
+  - R3-001: `Constructor_NullHandlerAndNullVideoSwitch_DoesNotThrow_AndConstructsWithNoRoutesEnabled`
+    only checks the constructor; nothing starts that server and shows both routes answer 404.
+  - R3-002: the per-route cap also governs the chunked (no Content-Length) read loop, but the size
+    tests only send a declared Content-Length. No test sends a chunked video body between 1024 and
+    4096 (should pass) or over 4096 (should be 413 without draining).
+- Next: the maintainer decides on R3-001/R3-002, then V4 (composition wiring and the
+  `video-wallpaper-http` settings key).
