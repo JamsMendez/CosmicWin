@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -5,11 +6,17 @@ using System.Text;
 namespace CosmicWin.Interop;
 
 /// <summary>
-/// The other real <see cref="IAlertCommandServer"/> (feature http-alert-endpoint, H2): a
-/// loopback-only <see cref="HttpListener"/> that runs every accepted request through the exact same
-/// <c>Func&lt;string,string&gt;</c> handler the pipe (<see
-/// cref="Win32.NamedPipeAlertCommandServer"/>) uses, so a caller on this PC that would rather speak
-/// HTTP than a named pipe gets identical behaviour from the shared alert grammar.
+/// The other real <see cref="IAlertCommandServer"/> (feature http-alert-endpoint, H2; extended by
+/// feature video-wallpaper-http-endpoint, V3): a loopback-only <see cref="HttpListener"/> serving two
+/// independent routes behind the SAME security gates, port and bearer token --
+/// <see cref="AlertHttpProtocol.AlertsPath"/>, which runs an accepted request through the exact same
+/// <c>Func&lt;string,string&gt;</c> handler the pipe (<see cref="Win32.NamedPipeAlertCommandServer"/>)
+/// uses, and <see cref="VideoWallpaperHttpProtocol.VideoPath"/>, which validates the body as a video
+/// path and hands it to a separate switch delegate. Each route is independently enabled by whether
+/// its handler delegate was supplied to the constructor: a route whose delegate is
+/// <see langword="null"/> is never in the routing table at all, so a request to it is rejected the
+/// exact same way (404, same body) as a request to a path that was never a route -- see
+/// <see cref="ResolveRoute"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -81,11 +88,17 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
 
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
+    /// <summary>One entry in the routing table built once at construction time (V3).</summary>
+    private sealed record Route(string Path, int MaxBodyBytes, Action<string, HttpListenerResponse> Handle);
+
     private readonly int _port;
     private readonly string _token;
     private readonly byte[] _tokenBytes;
-    private readonly Func<string, string> _handleCommand;
+    private readonly Func<string, string>? _handleCommand;
+    private readonly Func<string, bool>? _handleVideoWallpaperSwitch;
+    private readonly VideoWallpaperFileProbes? _videoWallpaperProbes;
     private readonly Action<string> _onDiagnostic;
+    private readonly IReadOnlyList<Route> _routes;
     private readonly CancellationTokenSource _stopping = new();
 
     private HttpListener? _listener;
@@ -98,15 +111,40 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// this type only compares against whatever it is handed.
     /// </param>
     /// <param name="handleCommand">
-    /// The SAME delegate the pipe uses. Never called for a request the gate already rejected. A
-    /// throw from it is caught and reported as <c>"error: internal error"</c>, same as the pipe.
+    /// The SAME delegate the pipe uses, for <see cref="AlertHttpProtocol.AlertsPath"/>. Never called
+    /// for a request the gate already rejected. A throw from it is caught and reported as
+    /// <c>"error: internal error"</c>, same as the pipe. <see langword="null"/> (V3) means the alert
+    /// route is off: it answers exactly like an unknown path.
     /// </param>
     /// <param name="onDiagnostic">
     /// Told about every start failure, rejection and per-request error. Defaults to a no-op, the
-    /// same convention <see cref="Win32.NamedPipeAlertCommandServer"/> uses. Never told the token or
-    /// the raw <c>Authorization</c> header.
+    /// same convention <see cref="Win32.NamedPipeAlertCommandServer"/> uses. Never told the token, the
+    /// raw <c>Authorization</c> header, or an absolute video path.
     /// </param>
-    public HttpAlertCommandServer(int port, string token, Func<string, string> handleCommand, Action<string>? onDiagnostic = null)
+    /// <param name="handleVideoWallpaperSwitch">
+    /// V3/V4: called with the already-validated absolute path once a
+    /// <see cref="VideoWallpaperHttpProtocol.VideoPath"/> body passes
+    /// <see cref="VideoWallpaperHttpProtocol.TryValidate"/>. Returns whether the switch was accepted
+    /// for dispatch; <see langword="false"/> answers <see
+    /// cref="VideoWallpaperHttpProtocol.NotAvailableStatusCode"/>. MUST be non-blocking: it is called
+    /// on this server's single request-handling thread, so it may only post work elsewhere, never
+    /// wait for the switch to finish (V4 guarantees this by calling the same operation the tray pick
+    /// uses). A throw from it is caught and reported the same way a throw from
+    /// <paramref name="handleCommand"/> is. <see langword="null"/> (the default) means the video
+    /// route is off: it answers exactly like an unknown path.
+    /// </param>
+    /// <param name="videoWallpaperProbes">
+    /// Forwarded to every <see cref="VideoWallpaperHttpProtocol.TryValidate"/> call, so a test can
+    /// make the video route deterministic without touching disk. <see langword="null"/> (the
+    /// default) uses the real filesystem.
+    /// </param>
+    public HttpAlertCommandServer(
+        int port,
+        string token,
+        Func<string, string>? handleCommand,
+        Action<string>? onDiagnostic = null,
+        Func<string, bool>? handleVideoWallpaperSwitch = null,
+        VideoWallpaperFileProbes? videoWallpaperProbes = null)
     {
         if (port is < 1 or > 65535)
         {
@@ -118,8 +156,32 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         _port = port;
         _token = token;
         _tokenBytes = Encoding.UTF8.GetBytes(token);
-        _handleCommand = handleCommand ?? throw new ArgumentNullException(nameof(handleCommand));
+        _handleCommand = handleCommand;
+        _handleVideoWallpaperSwitch = handleVideoWallpaperSwitch;
+        _videoWallpaperProbes = videoWallpaperProbes;
         _onDiagnostic = onDiagnostic ?? (_ => { });
+        _routes = BuildRoutes();
+    }
+
+    /// <summary>
+    /// The routing table: one entry per route whose handler delegate was actually supplied. Built
+    /// once, since the delegates never change after construction.
+    /// </summary>
+    private List<Route> BuildRoutes()
+    {
+        var routes = new List<Route>();
+
+        if (_handleCommand is not null)
+        {
+            routes.Add(new Route(AlertHttpProtocol.AlertsPath, AlertHttpProtocol.MaxBodyBytes, HandleAlertBody));
+        }
+
+        if (_handleVideoWallpaperSwitch is not null)
+        {
+            routes.Add(new Route(VideoWallpaperHttpProtocol.VideoPath, VideoWallpaperHttpProtocol.MaxBodyBytes, HandleVideoWallpaperBody));
+        }
+
+        return routes;
     }
 
     /// <summary>
@@ -276,15 +338,18 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             return;
         }
 
-        // 4. Path.
-        if (!string.Equals(request.Url?.AbsolutePath, AlertHttpProtocol.AlertsPath, StringComparison.Ordinal))
+        // 4. Path -- resolved against the routing table of ENABLED routes only (V3). A route whose
+        // handler delegate was never supplied is not in this table, so it is indistinguishable from
+        // a path that was never a route: both fall through to the exact same 404 below.
+        var route = ResolveRoute(request.Url?.AbsolutePath);
+        if (route is null)
         {
             Reject(response, 404, "no such route");
             return;
         }
 
         // 5. Method. OPTIONS (a CORS preflight) is rejected here too, and never answered with any
-        // Access-Control-* header.
+        // Access-Control-* header. Every route only ever accepts POST.
         if (!string.Equals(request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
         {
             response.Headers["Allow"] = "POST";
@@ -292,7 +357,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             return;
         }
 
-        // 6. Bearer token, constant-time.
+        // 6. Bearer token, constant-time. Shared by every route.
         if (!HasValidToken(request))
         {
             response.Headers["WWW-Authenticate"] = "Bearer";
@@ -300,20 +365,35 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             return;
         }
 
-        // 7. Content-Type, ignoring parameters like ";charset=utf-8".
+        // 7. Content-Type, ignoring parameters like ";charset=utf-8". Shared by every route.
         if (!IsJsonMediaType(request.ContentType))
         {
             Reject(response, 415, "content type must be application/json");
             return;
         }
 
-        // 8/9. Body size cap and UTF-8 validity.
-        if (!TryReadBody(request, out var body, out var readStatus, out var readReason))
+        // 8/9. Body size cap (chosen from the route BEFORE a single byte is read) and UTF-8 validity.
+        if (!TryReadBody(request, route.MaxBodyBytes, out var body, out var readStatus, out var readReason))
         {
             Reject(response, readStatus, readReason!);
             return;
         }
 
+        // 10/11. Route-specific translation and dispatch.
+        route.Handle(body!, response);
+    }
+
+    /// <summary>
+    /// The route whose <see cref="Route.Path"/> exactly matches <paramref name="path"/>, or
+    /// <see langword="null"/> when none does -- including a route that exists on the other server
+    /// (alerts vs. video) but was never enabled for THIS instance, and a genuinely unknown path.
+    /// </summary>
+    private Route? ResolveRoute(string? path) =>
+        _routes.FirstOrDefault(r => string.Equals(r.Path, path, StringComparison.Ordinal));
+
+    /// <summary>Finishes gate 10/11 for <see cref="AlertHttpProtocol.AlertsPath"/>.</summary>
+    private void HandleAlertBody(string body, HttpListenerResponse response)
+    {
         // 10. Translate to the pipe's command grammar.
         if (!AlertHttpProtocol.TryTranslate(body, out var command, out var translateError))
         {
@@ -325,7 +405,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         string reply;
         try
         {
-            reply = _handleCommand(command!);
+            reply = _handleCommand!(command!);
         }
         catch (Exception error)
         {
@@ -335,6 +415,47 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         }
 
         WriteReply(response, AlertHttpProtocol.StatusCodeFor(reply), reply);
+    }
+
+    /// <summary>
+    /// Finishes gate 10/11 for <see cref="VideoWallpaperHttpProtocol.VideoPath"/> (V3). A validation
+    /// failure answers with the SAME response-body format the alert route uses for errors (<see
+    /// cref="Reject"/>, i.e. <see cref="AlertPipeProtocol.FormatError"/>) so a caller sees one
+    /// consistent error shape from this server regardless of route.
+    /// </summary>
+    private void HandleVideoWallpaperBody(string body, HttpListenerResponse response)
+    {
+        var outcome = VideoWallpaperHttpProtocol.TryValidate(body, out var path, out var error, _videoWallpaperProbes);
+        if (outcome != VideoWallpaperRequestOutcome.Accepted)
+        {
+            Reject(response, VideoWallpaperHttpProtocol.StatusCodeFor(outcome), error!);
+            return;
+        }
+
+        // The delegate is documented (constructor) as non-blocking: it only posts the switch
+        // elsewhere and reports back whether that dispatch was accepted, never waits for the switch
+        // itself to finish.
+        bool accepted;
+        try
+        {
+            accepted = _handleVideoWallpaperSwitch!(path!);
+        }
+        catch (Exception handlerError)
+        {
+            _onDiagnostic($"alert http: the video wallpaper switch handler threw {handlerError.GetType().Name}: {handlerError.Message}");
+            WriteReply(response, 500, AlertPipeProtocol.FormatError("internal error"));
+            return;
+        }
+
+        if (!accepted)
+        {
+            // Same "error: ..." body format every other rejection on this server uses (Reject),
+            // even though this one comes after a successful validation, not a gate failure.
+            Reject(response, VideoWallpaperHttpProtocol.NotAvailableStatusCode, VideoWallpaperHttpProtocol.NotAvailableError);
+            return;
+        }
+
+        WriteReply(response, 202, AlertPipeProtocol.OkReply);
     }
 
     /// <summary>
@@ -416,17 +537,20 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     }
 
     /// <summary>
-    /// Reads the body, enforcing <see cref="AlertHttpProtocol.MaxBodyBytes"/> two ways: a DECLARED
-    /// <see cref="HttpListenerRequest.ContentLength64"/> past the cap is rejected before a single
-    /// byte is read; an UNKNOWN length (chunked transfer) is read at most one byte past the cap, so
-    /// the excess is detected without buffering an unbounded stream. Only once the size is known-good
-    /// is the buffer decoded as strict UTF-8.
+    /// Reads the body, enforcing <paramref name="maxBodyBytes"/> -- the caller resolves this from
+    /// the matched <see cref="Route"/> BEFORE this method reads a single byte, so the alerts route
+    /// keeps <see cref="AlertHttpProtocol.MaxBodyBytes"/> while the video route gets its own, wider
+    /// <see cref="VideoWallpaperHttpProtocol.MaxBodyBytes"/> -- two ways: a DECLARED <see
+    /// cref="HttpListenerRequest.ContentLength64"/> past the cap is rejected before a single byte is
+    /// read; an UNKNOWN length (chunked transfer) is read at most one byte past the cap, so the
+    /// excess is detected without buffering an unbounded stream. Only once the size is known-good is
+    /// the buffer decoded as strict UTF-8.
     /// </summary>
-    private static bool TryReadBody(HttpListenerRequest request, out string? body, out int status, out string? reason)
+    private static bool TryReadBody(HttpListenerRequest request, int maxBodyBytes, out string? body, out int status, out string? reason)
     {
         body = null;
 
-        if (request.ContentLength64 > AlertHttpProtocol.MaxBodyBytes)
+        if (request.ContentLength64 > maxBodyBytes)
         {
             status = 413;
             reason = "request body is too large";
@@ -444,7 +568,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             while ((read = request.InputStream.Read(chunk, 0, chunk.Length)) > 0)
             {
                 total += read;
-                if (total > AlertHttpProtocol.MaxBodyBytes)
+                if (total > maxBodyBytes)
                 {
                     // Enough to know it is oversized; stop reading rather than draining an
                     // arbitrarily large stream.

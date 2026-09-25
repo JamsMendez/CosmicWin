@@ -40,9 +40,16 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public void Constructor_BlankToken_Throws() =>
         Assert.Throws<ArgumentException>(() => new HttpAlertCommandServer(GetFreePort(), "   ", _ => "ok"));
 
+    // V3: a null handleCommand no longer throws -- it means the alerts route is off, modelled the
+    // same way the video route's enablement is (see the "per-route enablement" region below). The
+    // old assertion (throws ArgumentNullException) described a stricter contract this class no
+    // longer has, now that decision 2 requires each route to be independently switchable.
     [Fact]
-    public void Constructor_NullHandler_Throws() =>
-        Assert.Throws<ArgumentNullException>(() => new HttpAlertCommandServer(GetFreePort(), Token, null!));
+    public void Constructor_NullHandlerAndNullVideoSwitch_DoesNotThrow_AndConstructsWithNoRoutesEnabled()
+    {
+        var exception = Record.Exception(() => new HttpAlertCommandServer(GetFreePort(), Token, null));
+        Assert.Null(exception);
+    }
 
     // ---- lifecycle ----
 
@@ -167,7 +174,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var port = GetFreePort();
         using var server = Start(port, _ => "ok");
 
-        var (status, body) = await SendRawAsync(port, BuildRawRequest("evil.example:1234", "{\"warning\":1}"));
+        var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, "evil.example:1234", "{\"warning\":1}"));
 
         Assert.Equal(403, status);
         Assert.Equal(AlertPipeProtocol.FormatError("unexpected host header"), body);
@@ -179,7 +186,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var port = GetFreePort();
         using var server = Start(port, _ => "ok");
 
-        var (status, body) = await SendRawAsync(port, BuildRawRequest($"127.0.0.1:{port}", "{\"warning\":1}"));
+        var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", "{\"warning\":1}"));
 
         Assert.Equal(202, status);
         Assert.Equal("ok", body);
@@ -191,7 +198,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var port = GetFreePort();
         using var server = Start(port, _ => "ok");
 
-        var (status, body) = await SendRawAsync(port, BuildRawRequest($"localhost:{port}", "{\"warning\":1}"));
+        var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"localhost:{port}", "{\"warning\":1}"));
 
         Assert.Equal(202, status);
         Assert.Equal("ok", body);
@@ -549,7 +556,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         using var server = Start(port, _ => "ok");
 
         var (status, body) = await SendRawAsync(
-            port, BuildRawRequest($"127.0.0.1:{port}", "{\"warning\":1}", authorization: $"bearer {Token}"));
+            port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", "{\"warning\":1}", authorization: $"bearer {Token}"));
 
         Assert.Equal(202, status);
         Assert.Equal("ok", body);
@@ -639,13 +646,349 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         Assert.StartsWith("error: ", responseBody);
     }
 
+    // ---- V3: /v1/wallpaper/video, behind the same gates ----
+
+    [Fact]
+    public async Task VideoRoute_ValidRequest_CallsSwitchDelegateWithThePath_Returns202()
+    {
+        var port = GetFreePort();
+        string? received = null;
+        using var server = StartVideoOnly(port, path => { received = path; return true; }, FakeVideoProbes(exists: true));
+
+        var (status, body) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", body);
+        Assert.Equal(ExistingVideo, received);
+    }
+
+    [Fact]
+    public async Task VideoRoute_MissingAuthorization_Returns401WithWwwAuthenticate()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        using var client = NewClientWithoutAuth();
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", VideoJsonContent(VideoBody(ExistingVideo)));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains(response.Headers.WwwAuthenticate, v => v.Scheme == "Bearer");
+    }
+
+    [Fact]
+    public async Task VideoRoute_WrongToken_Returns401()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        using var client = NewClientWithoutAuth();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "not-the-token");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", VideoJsonContent(VideoBody(ExistingVideo)));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task VideoRoute_OriginHeaderPresent_Returns403()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}")
+        {
+            Content = VideoJsonContent(VideoBody(ExistingVideo)),
+        };
+        request.Headers.Add("Origin", "http://evil.example");
+
+        using var client = NewClient();
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.StartsWith("error: ", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task VideoRoute_ForeignHost_Returns403()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        var (status, body) = await SendRawAsync(
+            port, BuildRawRequest(VideoWallpaperHttpProtocol.VideoPath, "evil.example:1234", VideoBody(ExistingVideo)));
+
+        Assert.Equal(403, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("unexpected host header"), body);
+    }
+
+    [Fact]
+    public async Task VideoRoute_WrongMethod_Returns405WithAllowHeader()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}");
+        using var client = NewClient();
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        Assert.Contains("POST", response.Content.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task VideoRoute_WrongContentType_Returns415()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        using var client = NewClient();
+        var content = new StringContent(VideoBody(ExistingVideo), Encoding.UTF8, "text/plain");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task VideoRoute_BodyOverTheVideoCap_Returns413()
+    {
+        var port = GetFreePort();
+        var switchCalls = 0;
+        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+
+        var oversized = VideoBody(@"C:\" + new string('a', VideoWallpaperHttpProtocol.MaxBodyBytes) + ".mp4");
+        Assert.True(Encoding.UTF8.GetByteCount(oversized) > VideoWallpaperHttpProtocol.MaxBodyBytes);
+
+        var (status, _) = await PostVideoAsync(port, oversized);
+
+        Assert.Equal(413, status);
+        Assert.Equal(0, switchCalls);
+    }
+
+    /// <summary>
+    /// The proof that gate 8/9 really does pick its size cap from the matched ROUTE, before a single
+    /// byte is read: the exact same oversized-for-alerts body is rejected with 413 on
+    /// <see cref="AlertHttpProtocol.AlertsPath"/> (its own 1024-byte cap) but passes the size gate on
+    /// <see cref="VideoWallpaperHttpProtocol.VideoPath"/> (its wider 4096-byte cap) on ONE server with
+    /// both routes enabled -- it fails validation there for an unrelated reason (an unknown JSON
+    /// field), never for size.
+    /// </summary>
+    [Fact]
+    public async Task BodyBetweenTheAlertCapAndTheVideoCap_Is413OnAlertsButNotOnVideo()
+    {
+        var port = GetFreePort();
+        using var server = StartBoth(port, _ => "ok", _ => true, FakeVideoProbes(exists: true));
+
+        var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
+        var body = "{\"warning\":" + padding + "}";
+        Assert.True(Encoding.UTF8.GetByteCount(body) > AlertHttpProtocol.MaxBodyBytes);
+        Assert.True(Encoding.UTF8.GetByteCount(body) < VideoWallpaperHttpProtocol.MaxBodyBytes);
+
+        var (alertStatus, _) = await PostAsync(port, body);
+        var (videoStatus, videoBody) = await PostVideoAsync(port, body);
+
+        Assert.Equal(413, alertStatus);
+        Assert.NotEqual(413, videoStatus);
+        Assert.Equal(400, videoStatus);
+        Assert.Contains("unknown field 'warning'", videoBody);
+    }
+
+    [Fact]
+    public async Task VideoRoute_MalformedBody_Returns400WithItsOwnMessage()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        var (status, body) = await PostVideoAsync(port, "not-json");
+
+        Assert.Equal(400, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("body is not valid JSON"), body);
+    }
+
+    [Fact]
+    public async Task VideoRoute_MissingFile_Returns404WithItsOwnMessage()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: false));
+
+        var (status, body) = await PostVideoAsync(port, VideoBody(@"C:\videos\missing.mp4"));
+
+        Assert.Equal(404, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("file does not exist"), body);
+    }
+
+    [Fact]
+    public async Task VideoRoute_WrongExtension_Returns415WithItsOwnMessage()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+
+        var (status, body) = await PostVideoAsync(port, VideoBody(@"C:\videos\x.txt"));
+
+        Assert.Equal(415, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("file must have the .mp4 extension"), body);
+    }
+
+    [Fact]
+    public async Task VideoRoute_SwitchDelegateReturnsFalse_Returns503WithNotAvailableError()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => false, FakeVideoProbes(exists: true));
+
+        var (status, body) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+
+        Assert.Equal(VideoWallpaperHttpProtocol.NotAvailableStatusCode, status);
+        Assert.Equal(AlertPipeProtocol.FormatError(VideoWallpaperHttpProtocol.NotAvailableError), body);
+    }
+
+    [Fact]
+    public async Task VideoRoute_SwitchDelegateThrows_Returns500AndTheLoopKeepsServing()
+    {
+        var port = GetFreePort();
+        var diagnostics = new List<string>();
+        var first = true;
+        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+            handleVideoWallpaperSwitch: _ =>
+            {
+                if (first)
+                {
+                    first = false;
+                    throw new InvalidOperationException("boom");
+                }
+
+                return true;
+            },
+            videoWallpaperProbes: FakeVideoProbes(exists: true));
+        server.Start();
+
+        var (firstStatus, firstBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+        Assert.Equal(500, firstStatus);
+        Assert.Equal(AlertPipeProtocol.FormatError("internal error"), firstBody);
+        Assert.NotEmpty(diagnostics);
+
+        var (secondStatus, secondBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+        Assert.Equal(202, secondStatus);
+        Assert.Equal("ok", secondBody);
+    }
+
+    [Fact]
+    public async Task VideoRouteDisabled_AnswersExactlyLikeAnUnknownPath()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok"); // alert route only; handleVideoWallpaperSwitch left null
+
+        using var client = NewClient();
+        var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
+        using var videoResponse = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", VideoJsonContent(VideoBody(ExistingVideo)));
+
+        Assert.Equal((HttpStatusCode)unknownStatus, videoResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, videoResponse.StatusCode);
+        Assert.Equal(unknownBody, await videoResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task AlertRouteDisabled_VideoRouteEnabled_AlertsAnswerExactlyLikeAnUnknownPath()
+    {
+        var port = GetFreePort();
+        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true)); // handleCommand left null
+
+        using var client = NewClient();
+        var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
+        using var alertResponse = await client.PostAsync(
+            $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}", JsonContent("{\"warning\":1}"));
+
+        Assert.Equal((HttpStatusCode)unknownStatus, alertResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, alertResponse.StatusCode);
+        Assert.Equal(unknownBody, await alertResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task BothRoutesEnabled_WorkIndependentlyOnOneServer()
+    {
+        var port = GetFreePort();
+        string? receivedCommand = null;
+        string? receivedVideoPath = null;
+        using var server = StartBoth(
+            port,
+            text => { receivedCommand = text; return "ok"; },
+            path => { receivedVideoPath = path; return true; },
+            FakeVideoProbes(exists: true));
+
+        var (alertStatus, alertBody) = await PostAsync(port, "{\"warning\":2}");
+        var (videoStatus, videoBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+
+        Assert.Equal(202, alertStatus);
+        Assert.Equal("ok", alertBody);
+        Assert.Equal("warning:2", receivedCommand);
+
+        Assert.Equal(202, videoStatus);
+        Assert.Equal("ok", videoBody);
+        Assert.Equal(ExistingVideo, receivedVideoPath);
+    }
+
     // ---- helpers ----
+
+    private const string ExistingVideo = @"C:\videos\x.mp4";
 
     private HttpAlertCommandServer Start(int port, Func<string, string> handleCommand)
     {
         var server = new HttpAlertCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg));
         server.Start();
         return server;
+    }
+
+    private HttpAlertCommandServer StartVideoOnly(
+        int port, Func<string, bool> handleVideoWallpaperSwitch, VideoWallpaperFileProbes probes)
+    {
+        var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
+            handleVideoWallpaperSwitch, probes);
+        server.Start();
+        return server;
+    }
+
+    private HttpAlertCommandServer StartBoth(
+        int port,
+        Func<string, string> handleCommand,
+        Func<string, bool> handleVideoWallpaperSwitch,
+        VideoWallpaperFileProbes probes)
+    {
+        var server = new HttpAlertCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg),
+            handleVideoWallpaperSwitch, probes);
+        server.Start();
+        return server;
+    }
+
+    private static VideoWallpaperFileProbes FakeVideoProbes(bool exists) => new(
+        fileExists: _ => exists,
+        directoryExists: _ => false,
+        isNetworkDrive: _ => false);
+
+    private static string VideoBody(string path) => System.Text.Json.JsonSerializer.Serialize(new { path });
+
+    private static StringContent VideoJsonContent(string body) => new(body, Encoding.UTF8, "application/json");
+
+    private static async Task<(int Status, string Body)> PostVideoAsync(int port, string jsonBody)
+    {
+        using var client = NewClient();
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}", VideoJsonContent(jsonBody));
+        var text = await response.Content.ReadAsStringAsync();
+        return ((int)response.StatusCode, text);
+    }
+
+    /// <summary>
+    /// A path no route this server can ever serve owns, used as the "genuinely unknown path"
+    /// reference point for the per-route-disablement tests above.
+    /// </summary>
+    private static async Task<(int Status, string Body)> GetAgainstUnknownPath(HttpClient client, int port)
+    {
+        using var response = await client.PostAsync($"http://127.0.0.1:{port}/v1/definitely-unknown", JsonContent("{}"));
+        var text = await response.Content.ReadAsStringAsync();
+        return ((int)response.StatusCode, text);
     }
 
     private static HttpClient NewClient()
@@ -698,11 +1041,12 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     /// <summary>
     /// Builds a raw HTTP/1.1 request with a Content-Length body, byte for byte -- no client library
     /// involved, so nothing can normalise or reject the <paramref name="hostHeader"/> on its way out.
+    /// V3: takes an explicit <paramref name="path"/> so the same raw-socket idiom covers both routes.
     /// </summary>
-    private static string BuildRawRequest(string hostHeader, string body, string? authorization = null)
+    private static string BuildRawRequest(string path, string hostHeader, string body, string? authorization = null)
     {
         var bodyBytes = Encoding.UTF8.GetByteCount(body);
-        return "POST " + AlertHttpProtocol.AlertsPath + " HTTP/1.1\r\n" +
+        return "POST " + path + " HTTP/1.1\r\n" +
             "Host: " + hostHeader + "\r\n" +
             "Content-Type: application/json\r\n" +
             "Authorization: " + (authorization ?? $"Bearer {Token}") + "\r\n" +
