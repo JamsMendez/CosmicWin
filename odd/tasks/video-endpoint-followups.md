@@ -22,8 +22,8 @@ Fix the three pre-existing problems found while building the video wallpaper HTT
 
 ## Approach
 
-- P1: a bounded retry on a sharing violation. Up to 5 attempts, a few milliseconds apart (under
-  ~50 ms in total). The line is dropped only if every attempt fails, as today. The writer's own
+- P1: a bounded retry on a sharing violation, bounded by elapsed TIME (150 ms), not by a count of
+  sleeps (see the F1 progress note). The line is dropped only if every attempt fails, as today. The writer's own
   share mode cannot help: a reader that denies writers blocks every writer. Retrying is the smallest
   fix that keeps `Record` synchronous. A background writer queue was rejected: more moving parts,
   and lines could be lost at exit. Keep the lock; `Record` must still never throw.
@@ -36,12 +36,12 @@ Fix the three pre-existing problems found while building the video wallpaper HTT
 
 ## Tasks
 
-- [ ] F1 `FileDesktopTrace`: bounded retry on a sharing violation. RED first: a test that holds the
+- [x] F1 `FileDesktopTrace`: bounded retry on a sharing violation. RED first: a test that holds the
   file open with `FileShare.Read`, releases it after ~10 ms on another thread, and expects the line
   on disk. Plus a test that a permanent hold still never throws and gives up within the bound.
-- [ ] F2 `MtaActionThread`: trace the exception type from a failed posted work item; the loop keeps
+- [x] F2 `MtaActionThread`: trace the exception type from a failed posted work item; the loop keeps
   serving. RED first.
-- [ ] F3 Rename `HttpAlertCommandServer` to `LocalHttpCommandServer` (maintainer's choice, 2026-09-25). Pure refactor:
+- [x] F3 Rename `HttpAlertCommandServer` to `LocalHttpCommandServer` (maintainer's choice, 2026-09-25). Pure refactor:
   the suites are the guard.
 
 ## Constraints
@@ -54,4 +54,22 @@ Fix the three pre-existing problems found while building the video wallpaper HTT
 
 - Branch `fix/video-endpoint-followups` from local main `f03b7f4`. Baseline: Layout 198, Alert 13,
   Interop 387/42 skipped, App 991/6 skipped; build has only the 3 pre-existing warnings.
-- Next: F1.
+- F1 done, commits `53cbf50` (writer) and `887dbd8` (parent correction). The writer retried 5
+  times with 5 ms sleeps; its RED was real (`Assert.Single` empty), but its test released the file
+  after 10 ms. The parent measured the real case: `File.ReadAllLines` on the 9 MB trace holds it
+  22-47 ms, and 4 x `Sleep(5)` took 66 ms at the default timer resolution but is only ~20 ms once
+  Media Foundation (the playing wallpaper) raises it to 1 ms. So the count-based retry would miss
+  exactly the case it was built for, while the wallpaper plays. Fix: retry until 150 ms have
+  elapsed (Stopwatch), with the window injectable (`retryWindow`). Parent RED first: a 200 ms hold
+  inside a 2 s window, with the parameter present but unused, failed (`Assert.Single` empty), then
+  GREEN. The writer's 10 ms test passed 30/30 runs in a loop.
+- F2 done, commit `54cb089`. `MtaActionThread` is now `internal`, and its constructor takes
+  `onWorkFailed`. The `Run` catch reports `exception.GetType().Name` only. Wired at construction:
+  `video-wallpaper-thread work-failed error=<Type>` into the desktop trace (already built a few
+  lines earlier). RED `CS0122` (inaccessible), then a test: an `IOException` whose message holds a
+  path; the sink gets the type, never the path, and the next work item still runs.
+- F3 done, commit `babf720`. `git mv` of the class and its tests to `LocalHttpCommandServer`; the
+  factory seam is now `createLocalHttpCommandServer`. Trace strings and `IAlertCommandServer` are
+  unchanged. `grep HttpAlertCommandServer --include=*.cs` finds 0 matches.
+- Checks after all three: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout
+  198, Alert 13, Interop 387/42 skipped, App 999/6 skipped.
