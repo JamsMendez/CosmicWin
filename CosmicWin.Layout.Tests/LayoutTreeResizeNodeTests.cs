@@ -48,14 +48,23 @@ public class LayoutTreeResizeNodeTests
         Assert.Equal([300, 300], nested.Sizes);
     }
 
+    /// <summary>
+    /// Adjusted for the donor leaf floor (T1, <c>odd/tasks/donor-leaf-floor.md</c>): the original
+    /// 1000/880/120 fixture put the donor 88 px under the new 208-per-window floor before the
+    /// resize even started, which the OLD expectation (a full transfer to 900/100) never accounted
+    /// for -- it is not what a real resize should do to a window already near its own minimum, it
+    /// is a fixture that predates the floor existing. Scaled 5x (5000/4400/600) so the group's own
+    /// 10% ratio floor (500) stays the binding constraint, same as originally intended, comfortably
+    /// clear of the 208 leaf floor.
+    /// </summary>
     [Fact]
     public void ResizeNode_NeighborNearMinimum_TransfersOnlyAvailableHeadroom()
     {
-        var group = Group(SplitAxis.Horizontal, 1000, 880, 120);
+        var group = Group(SplitAxis.Horizontal, 5000, 4400, 600);
 
         Assert.True(LayoutTree.ResizeNode(Direction.Right, group.Children[0]));
 
-        Assert.Equal([900, 100], group.Sizes);
+        Assert.Equal([4500, 500], group.Sizes);
     }
 
     [Fact]
@@ -68,16 +77,25 @@ public class LayoutTreeResizeNodeTests
         Assert.Equal([900, 100], group.Sizes);
     }
 
+    /// <summary>
+    /// Adjusted for the donor leaf floor (T1, <c>odd/tasks/donor-leaf-floor.md</c>): the original
+    /// 333/298/35 fixture had a donor of 35, far under the new 208 floor -- the OLD expectation (a
+    /// 1-pixel transfer bound by the 10% ratio ceiling) is not reachable any more because the leaf
+    /// floor refuses the donor outright before the ratio is even consulted, and a group this small
+    /// cannot hold two windows at 208 each regardless. Scaled so the ratio floor (224, from 10% of
+    /// 2231 rounded up) still sits just above the donor's starting size, exactly as the original
+    /// fixture intended, while the donor (225) stays comfortably clear of the 208 leaf floor.
+    /// </summary>
     [Fact]
     public void ResizeNode_UsesRoundedStepAndCeilingMinimumForIntegerSizes()
     {
-        var group = Group(SplitAxis.Horizontal, 333, 298, 35);
+        var group = Group(SplitAxis.Horizontal, 2231, 2006, 225);
 
         Assert.True(LayoutTree.ResizeNode(Direction.Right, group.Children[0]));
 
-        Assert.Equal([299, 34], group.Sizes);
+        Assert.Equal([2007, 224], group.Sizes);
         Assert.True(group.Sizes[1] / (double)group.GroupLength >= LayoutTree.DefaultMinRatio);
-        Assert.Equal(333, group.Sizes.Sum());
+        Assert.Equal(2231, group.Sizes.Sum());
     }
 
     [Fact]

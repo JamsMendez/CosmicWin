@@ -120,19 +120,29 @@ public class LayoutTreeApplyEdgeDragTests
         Assert.Equal([460, 340], root.Sizes);
     }
 
-    /// <summary>A drag past the floor lands ON the floor rather than being refused outright.</summary>
+    /// <summary>
+    /// A drag past the floor lands ON the floor rather than being refused outright.
+    /// </summary>
+    /// <remarks>
+    /// Adjusted for the donor leaf floor (T1, <c>odd/tasks/donor-leaf-floor.md</c>): the original
+    /// 1000/500/500 fixture dragged the boundary to 950, asking the 500-wide neighbor to give up
+    /// 450 -- the OLD expectation (landing at 900/100) is no longer reachable because the neighbor
+    /// is itself a single window and may not be taken under the new 208 floor, well above the old
+    /// ratio floor of 100. Scaled 5x (5000/2500/2500) so the group's own 10% ratio floor (500)
+    /// stays the binding constraint the test was written to exercise, comfortably clear of 208.
+    /// </remarks>
     [Fact]
     public void ApplyEdgeDrag_DraggedPastTheNeighborsMinimum_TransfersOnlyTheHeadroom()
     {
-        var group = Group(SplitAxis.Horizontal, 1000, 500, 500);
+        var group = Group(SplitAxis.Horizontal, 5000, 2500, 2500);
 
         var applied = LayoutTree.ApplyEdgeDrag(
             group.Children[0],
-            new Rect(0, 0, 500, 800),
-            new Rect(0, 0, 950, 800));
+            new Rect(0, 0, 2500, 800),
+            new Rect(0, 0, 4750, 800));
 
         Assert.True(applied);
-        Assert.Equal([900, 100], group.Sizes);
+        Assert.Equal([4500, 500], group.Sizes);
     }
 
     [Fact]

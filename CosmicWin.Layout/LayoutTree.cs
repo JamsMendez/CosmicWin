@@ -12,6 +12,19 @@ public sealed class LayoutTree : ITilingEngine
 
     public const double DefaultMinRatio = 0.10;
 
+    /// <summary>
+    /// The shortest length, in SLOT units, <see cref="TransferAcross"/> will ever leave a LEAF at
+    /// along the axis being resized.
+    /// </summary>
+    /// <remarks>
+    /// This project knows no gap -- <c>TreeArranger.DefaultGap</c> (CosmicWin.App) is what turns a
+    /// slot into the pixels actually drawn -- so the floor is expressed in the same slot units
+    /// everything else here already uses: 200 px of tile the maintainer chose as the smallest
+    /// usable window, plus the 8 px gap that tile still has to pay for out of its own slot. See
+    /// <see cref="MinLeafFloor"/> for how this reaches a donor that is not itself a leaf.
+    /// </remarks>
+    public const int DefaultMinLeafSlotLength = 208;
+
     public LayoutTree(Node? root = null)
     {
         Root = root;
@@ -819,12 +832,28 @@ public sealed class LayoutTree : ITilingEngine
     /// <summary>
     /// Moves <paramref name="growth"/> pixels across the boundary <paramref name="direction"/>
     /// names -- into the focused subtree when positive, out of it when negative -- never taking
-    /// whichever side gives space up below <paramref name="minRatio"/> of its group.
+    /// whichever side gives space up below <paramref name="minRatio"/> of its group, nor below the
+    /// per-window floor any LEAF inside it needs (<see cref="DefaultMinLeafSlotLength"/>, via
+    /// <see cref="MinLeafFloor"/>).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Shared by the keyboard step and the mouse drag on purpose: the floor is the one rule both
     /// have to obey identically, and two copies of it is exactly how a window ends up squeezed to
     /// nothing on one path and not the other.
+    /// </para>
+    /// <para>
+    /// <paramref name="minRatio"/> alone protects only the IMMEDIATE sibling, and that sibling is
+    /// often a GROUP rather than a window. Measured: four windows on screen, two of them terminals
+    /// sharing a nested group, and a resize that stayed inside the 10% ratio the whole time still
+    /// left two terminals at 150 px -- the ratio only ever looked at the group's own share, never at
+    /// what the leaves inside it needed. <see cref="MinLeafFloor"/> reaches past the immediate
+    /// sibling to every leaf the donor actually contains, and does so PROPORTIONALLY because <see
+    /// cref="RescaleSizes"/> rescales a group's children proportionally on arrange: shrinking the
+    /// donor by some amount shrinks each inner leaf by that same ratio, so the donor's own floor is
+    /// whatever length keeps its smallest-surviving leaf at or above <see
+    /// cref="DefaultMinLeafSlotLength"/> once that rescale happens.
+    /// </para>
     /// </remarks>
     private static bool TransferAcross(
         Direction direction, Node focused, int growth, double minRatio,
@@ -850,6 +879,12 @@ public sealed class LayoutTree : ITilingEngine
         int receiverIndex = growth > 0 ? targetIndex : neighborIndex;
         int minimumSize = (int)Math.Ceiling(ancestor.GroupLength * minRatio);
         int transfer = Math.Min(Math.Abs(growth), ancestor.Sizes[donorIndex] - minimumSize);
+
+        // The ratio floor above only ever bounded the immediate sibling; this reaches every LEAF
+        // the donor contains, however deep, so a nested group of terminals cannot be squeezed past
+        // what its own windows need just because the group's own share still cleared the ratio.
+        int donorLeafFloor = MinLeafFloor(ancestor.Children[donorIndex], ancestor.Axis);
+        transfer = Math.Min(transfer, ancestor.Sizes[donorIndex] - donorLeafFloor);
 
         // Asked of the RECEIVER and the DONOR, not of whoever happens to be focused. A boundary has
         // two sides and the chord may be pressed from either, so naming them by role is the only
@@ -878,6 +913,72 @@ public sealed class LayoutTree : ITilingEngine
         ancestor.Sizes[receiverIndex] += transfer;
         ancestor.Sizes[donorIndex] -= transfer;
         return true;
+    }
+
+    /// <summary>
+    /// The shortest length <paramref name="node"/> may be taken to along <paramref name="axis"/>
+    /// without putting a leaf somewhere inside it under <see cref="DefaultMinLeafSlotLength"/>,
+    /// once <see cref="RescaleSizes"/> has proportionally rescaled every descendant group to match.
+    /// </summary>
+    /// <remarks>
+    /// Three cases, matching how <see cref="RescaleSizes"/> actually distributes a length change:
+    /// <list type="bullet">
+    /// <item>a LEAF has nothing to rescale -- its floor is the constant itself;</item>
+    /// <item>a group whose <see cref="GroupNode.Axis"/> matches <paramref name="axis"/> splits ITS
+    /// length among its children in the same proportion its current <see cref="GroupNode.Sizes"/>
+    /// already hold, so shrinking the group to some new length <c>S</c> shrinks child <c>i</c> to
+    /// <c>childSize[i] / sum(Sizes) * S</c>; solving that for the smallest <c>S</c> that still
+    /// clears child <c>i</c>'s own floor gives <c>childFloor[i] * sum(Sizes) / childSize[i]</c>, and
+    /// the group's floor is the largest of those across every child (rounded up, since any lower
+    /// group length under-shoots at least one child once the rounding in <see cref="RescaleSizes"/>
+    /// lands). A child already at size 0 contributes nothing to the split and is skipped rather than
+    /// dividing by zero;</item>
+    /// <item>a group whose axis runs the OTHER way does not split <paramref name="axis"/> among its
+    /// children at all -- every child spans the group's full length on that axis -- so the group's
+    /// floor is simply the largest of its children's own floors.</item>
+    /// </list>
+    /// An empty group has no leaf to protect and floors at 0.
+    /// </remarks>
+    private static int MinLeafFloor(Node node, SplitAxis axis)
+    {
+        if (node is LeafNode)
+        {
+            return DefaultMinLeafSlotLength;
+        }
+
+        var group = (GroupNode)node;
+        if (group.Children.Count == 0)
+        {
+            return 0;
+        }
+
+        if (group.Axis == axis)
+        {
+            int groupSum = group.Sizes.Sum();
+            int floor = 0;
+            for (int index = 0; index < group.Children.Count; index++)
+            {
+                int childSize = group.Sizes[index];
+                if (childSize <= 0)
+                {
+                    continue;
+                }
+
+                int childFloor = MinLeafFloor(group.Children[index], axis);
+                int required = (int)Math.Ceiling(childFloor * (double)groupSum / childSize);
+                floor = Math.Max(floor, required);
+            }
+
+            return floor;
+        }
+
+        int acrossFloor = 0;
+        foreach (var child in group.Children)
+        {
+            acrossFloor = Math.Max(acrossFloor, MinLeafFloor(child, axis));
+        }
+
+        return acrossFloor;
     }
 
     /// <summary>

@@ -7,7 +7,12 @@ public class TilingEngineContractTests
     [Fact]
     public void LayoutTree_ImplementsPureTilingEngineContract()
     {
-        var root = new GroupNode(SplitAxis.Horizontal) { GroupLength = 100 };
+        // GroupLength adjusted for the donor leaf floor (T1, odd/tasks/donor-leaf-floor.md): 100
+        // gave each leaf only 50, already under the new 208-per-window floor, so the
+        // engine.ResizeNode smoke check below could never transfer anything and the OLD blanket
+        // "every wired-up operation returns true/succeeds" expectation stopped holding. This is a
+        // wiring smoke test, not a floor test, so it is scaled up rather than special-cased.
+        var root = new GroupNode(SplitAxis.Horizontal) { GroupLength = 2000 };
         var first = new LeafNode(new WindowRef(1));
         var second = new LeafNode(new WindowRef(2));
         LayoutTree.AddChild(root, first, 0);
