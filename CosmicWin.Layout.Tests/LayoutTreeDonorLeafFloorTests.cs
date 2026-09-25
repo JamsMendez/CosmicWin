@@ -50,6 +50,21 @@ public class LayoutTreeDonorLeafFloorTests
         return (root, donor);
     }
 
+    /// <summary>A group of already-built children, each wired to it, with its length set to their sum.</summary>
+    private static GroupNode GroupOf(SplitAxis axis, params (Node Child, int Size)[] slots)
+    {
+        var group = new GroupNode(axis);
+        foreach (var (child, size) in slots)
+        {
+            child.Parent = group;
+            group.Children.Add(child);
+            group.Sizes.Add(size);
+        }
+
+        group.GroupLength = group.Sizes.Sum();
+        return group;
+    }
+
     /// <summary>
     /// Keyboard resize into a neighbour GROUP of two leaves stacked on the SAME axis: growth stops
     /// where the smaller inner leaf would be rescaled under 208, not where the group's own total
@@ -127,6 +142,70 @@ public class LayoutTreeDonorLeafFloorTests
 
         Assert.True(resized);
         Assert.Equal([1792, 208], root.Sizes);
+    }
+
+    /// <summary>
+    /// The roles swapped: the FOCUSED subtree gives space up. Pressing Left on the leading child has
+    /// no neighbour to grow into, so the chord pushes the opposite boundary and shrinks the focused
+    /// group itself -- and the floor has to follow the donor role onto the focused side.
+    /// </summary>
+    [Fact]
+    public void ResizeNode_ShrinkingTheFocusedNestedGroup_StopsWhereItsSmallerInnerLeafWouldGoUnder208()
+    {
+        // The mirror of the nested-group case: the focused group is 1300 split 300/1000, so its
+        // floor is ceil(208 * 1300 / 300) = 902, well above the 10% ratio floor of 200.
+        var focused = Group(SplitAxis.Horizontal, 1300, 300, 1000);
+        var root = GroupOf(SplitAxis.Horizontal, (focused, 1300), (new LeafNode(new WindowRef(30)), 700));
+
+        var resized = LayoutTree.ResizeNode(Direction.Left, focused, step: 0.5);
+
+        Assert.True(resized);
+        Assert.Equal([902, 1098], root.Sizes);
+    }
+
+    /// <summary>The same role swap through the mouse: dragging the focused group's own right edge inward.</summary>
+    [Fact]
+    public void ApplyEdgeDrag_ShrinkingTheFocusedNestedGroup_StopsWhereItsSmallerInnerLeafWouldGoUnder208()
+    {
+        var focused = Group(SplitAxis.Horizontal, 1300, 300, 1000);
+        var root = GroupOf(SplitAxis.Horizontal, (focused, 1300), (new LeafNode(new WindowRef(30)), 700));
+
+        // 500 px inward, more than the 398 px the focused group's leaves can spare.
+        var applied = LayoutTree.ApplyEdgeDrag(
+            focused,
+            new Rect(0, 0, 1300, 800),
+            new Rect(0, 0, 800, 800));
+
+        Assert.True(applied);
+        Assert.Equal([902, 1098], root.Sizes);
+    }
+
+    /// <summary>
+    /// Vertical axis, three levels, both kinds of nesting: a same-axis group holding an across-axis
+    /// group that holds a same-axis group again. Only the proportional rule composed through BOTH
+    /// cases lands on this exact stopping point, and the deepest small leaf ends at exactly 208.
+    /// </summary>
+    [Fact]
+    public void ResizeNode_VerticalDonorNestedTwoLevelsAcrossMixedAxes_KeepsTheDeepestLeafAt208()
+    {
+        // innermost: Vertical 250/750          -> floor max(ceil(208*1000/250), ceil(208*1000/750)) = 832
+        // across:    Horizontal [leaf, inner]  -> floor max(208, 832)                                 = 832
+        // donor:     Vertical 1000/1000        -> floor max(208*2000/1000, 832*2000/1000)             = 1664
+        var deepest = new LeafNode(new WindowRef(40));
+        var inner = GroupOf(SplitAxis.Vertical, (deepest, 250), (new LeafNode(new WindowRef(41)), 750));
+        var across = GroupOf(SplitAxis.Horizontal, (new LeafNode(new WindowRef(42)), 500), (inner, 500));
+        var donor = GroupOf(SplitAxis.Vertical, (new LeafNode(new WindowRef(43)), 1000), (across, 1000));
+        var focused = new LeafNode(new WindowRef(44));
+        var root = GroupOf(SplitAxis.Vertical, (focused, 1000), (donor, 2000));
+
+        var resized = LayoutTree.ResizeNode(Direction.Down, focused, step: 0.5);
+
+        Assert.True(resized);
+        Assert.Equal([1336, 1664], root.Sizes);
+
+        var result = new LayoutTree(root).Arrange(new Rect(0, 0, 1000, 3000));
+        Assert.Equal(208, result.Single(item => item.Window == new WindowRef(40)).Bounds.Height);
+        Assert.All(result, item => Assert.True(item.Bounds.Height >= LayoutTree.DefaultMinLeafSlotLength));
     }
 
     /// <summary>A donor already under its floor gives nothing, and the tree is left exactly as it was.</summary>

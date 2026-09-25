@@ -72,3 +72,13 @@ risk medium, consent granted, one reliability lens, APPROVED and acknowledged (l
 Follow-up (non-blocking, R3-001): the floor tests cover only positive growth with the donor on the
 right, one nesting level, horizontal axis. Worth adding: one shrink-direction test (focused side is
 the donor) and one two-level mixed-axis (vertical) test.
+
+- [x] T3 R3-001 coverage, branch `test/donor-floor-coverage`. Route: inline (one test file, no
+  production change). Added: role swap via chord and via mouse drag (focused nested group is the
+  donor, [902, 1098]), and a vertical three-level same/across/same donor ([1336, 1664], deepest leaf
+  exactly 208). Green on the existing code, so proven by mutation of `LayoutTree.cs`:
+  - floor read from `neighborIndex` instead of the donor role: only the 2 role-swap tests fail (the
+    previous suite let this through);
+  - across-axis group floored at one leaf slot: only the mixed-axis test fails;
+  - same-axis floor without the proportion: 5 of 8 floor tests fail.
+  - Layout suite 198 passed.
