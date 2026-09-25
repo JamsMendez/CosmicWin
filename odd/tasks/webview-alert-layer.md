@@ -256,9 +256,27 @@ exception if a single cohesive slice cannot fit the budget.
 - [ ] **T9 -- Permanent preloaded alert layer, telemetry, lower latency (fixes T6 F1/F2).** The
   maintainer accepted it on 2026-09-24. Route: one delegated writer (4+ non-trivial files:
   controller, page, wiring, tests), one work-unit commit per sub-task, strict TDD.
-  - [ ] **T9a -- Alert-layer telemetry.** Trace lines through `desktopTrace` for preload/create
-    start, environment and controller ready (with ms), navigation completed, show, hide, `done`,
-    close reason, process failure, and every currently silent `Debug.WriteLine` failure path.
+  - [x] **T9a -- Alert-layer telemetry.** Commit `98c72e8` (292 additions / 27 deletions).
+    `WebViewAlertLayerController` and `AlertLayerLifecycle` both take an optional
+    `Action<string>? trace`, wired to `desktopTrace.Record` in `WireProduction` (a `desktopTrace`
+    local is now built before the controller so both share the same sink). `AlertLayerTrace` owns
+    the exact wording for create start (hwnd, generation), environment/controller ready (elapsed
+    ms), navigation completed (success/`WebErrorStatus`, elapsed ms), show (kind, duration), hide,
+    `done`, close (reason), process failure (kind/reason), and an error line for every one of the
+    13 previously-silent `Debug.WriteLine` catch sites plus the silent no-overlay-visual path (kept
+    alongside `Debug.WriteLine`, not instead of it). Strict TDD: RED first for `AlertLayerTrace`
+    (`CS0103`, the type did not exist), GREEN 11/11 after adding it; then a second RED/GREEN cycle
+    for the controller wiring itself -- the two new `WebViewAlertLayerControllerTests` facts were
+    written and confirmed to fail (`CS1739`, no `trace` parameter) against the UNCHANGED controller
+    (verified by stashing the implementation edit), then the implementation was reapplied and both
+    passed. App suite = 1027 passed / 6 skipped (1014 baseline + 13 new); Debug solution build = 0
+    errors, the same 2 pre-existing unrelated warnings; `git diff --check` clean.
+    Testability limit (same class as T3/T6): `Start`/`End`'s "show"/"hide" trace lines are exercised
+    behaviorally (an unattached host never reaches WebView2, proven by asserting no "close" line
+    fires either); create start/ready, navigation, and process-failed only fire once a real WebView2
+    environment/controller exists, so those call sites are proven present by a structural test
+    (`EveryLifecycleEventAndSilentFailurePathIsTraced`) rather than exercised -- real confirmation is
+    T9e hardware.
   - [ ] **T9b -- Page show/hide message API.** The page idles with no drawing and no
     `requestAnimationFrame` loop. A `show` message (kind, duration) restarts the animation from
     zero; `hide` clears and stops. `done` is still posted when the duration ends. The hash/query
