@@ -346,8 +346,22 @@ exception if a single cohesive slice cannot fit the budget.
     Not verified (hardware-only, same limitation as T3/T6): real preload creation/navigation timing,
     real Explorer-restart recreate, real `ProcessFailed` recovery, and the Idle-cost GPU condition
     itself -- all T9e.
-  - [ ] **T9d -- Immediate queue tick on enqueue.** A newly accepted command triggers the alert
-    update on the UI dispatcher instead of waiting up to 400 ms for the watch tick.
+  - [x] **T9d -- Immediate queue tick on enqueue.** Commit `a8cf075` (39 additions / 7 deletions).
+    `HandleAlertCommand` (runs on the pipe server thread) now calls `onOwningThread(UpdateAlertOverlay)`
+    right after a successful `Enqueue`, reusing the existing dispatcher seam so the update stays on
+    the UI thread and is serialized with the ordinary 400 ms watch tick rather than racing it.
+    Strict TDD: RED first (`Assert.Single` failed, "The collection was empty" -- nothing had run yet
+    without a tick), then GREEN after the one-line addition. Fixing this surfaced a pre-existing gap
+    in 3 OTHER wiring tests that enqueue-then-fire-one-tick and assert exactly one recorded overlay
+    call: the legacy Direct2D path (`setAlertOverlayTiles`, untouched per the feature doc) has no
+    dedup on an unchanged active alert, so it now legitimately (and harmlessly, same idempotent tile
+    data) fires twice -- once from the immediate tick, once from the watch tick. Updated those 3
+    tests (`AlertDesktopVisibilityWiringTests.AnUncoveredDesktop_ShowsAQueuedAlert`,
+    `AlertWallpaperWiringTests.ValidAlertCommand_IsAcceptedAndUpdatesOverlayOnTickInCommandOrder`,
+    `.ValidAlertCommand_TilesAreOffsetByTheWorkAreasOriginOnTheMonitor`) to read the LATEST recorded
+    tile set instead of asserting exactly one call. App suite = 1043 passed / 6 skipped (net +1);
+    Interop unaffected (249 passed / 40 skipped); Debug solution build = 0 errors, same pre-existing
+    warnings; `git diff --check` clean.
   - [ ] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
     3 s alerts, covered hold, Explorer restart, GPU/memory while hidden vs shown.
 
@@ -505,3 +519,23 @@ run the gated desktop tests while CosmicWin.App is running.
 Review: feature range approved through `7462e1c`. Still pending: run the new gated stress fact with
 the app closed, and all three advisory follow-ups are done (T7, T8). Unreviewed slice since `7462e1c`: 227 lines,
 under budget.
+
+2026-09-24 T9a-d implemented by a delegated writer, one commit per sub-task, strict TDD RED/GREEN
+observed for every one (see each sub-task entry above for the exact evidence):
+`98c72e8` (T9a telemetry), `eb6c548` (T9b page show/hide), `1776cc2` (T9c persistent controller,
+788 lines -- disclosed size exception, same class as T4's), `a8cf075` (T9d immediate tick). Final
+verification after all four: `dotnet build CosmicWin.sln -c Debug` = 0 errors, 3 pre-existing
+warnings unrelated to this work; `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj` =
+1043 passed / 6 skipped / 0 failed (baseline 1014/6); `dotnet test
+CosmicWin.Interop.Tests/CosmicWin.Interop.Tests.csproj` = 249 passed / 40 skipped / 0 failed
+(unchanged from baseline); `git diff --check` clean on every commit. T9 stays open: T9e (supervised
+hardware re-run -- first-alert latency, warm latency, FIFO with 3s alerts, covered hold, Explorer
+restart, idle vs shown GPU/memory) is the parent's to run, not this writer's. Design decisions the
+parent should know: `Preload()` is called once, on the owning UI thread, inside `Wire`'s existing
+`if (alertsEnabled)` block (same place the alert pipe server starts) -- not gated on the video
+wallpaper's own startup activation, since the alert layer's readiness is independent of it. A
+pending show's remaining duration is computed as `deadline - now` at the moment the page becomes
+ready (navigation completed AND its own `"ready"` message received), never re-derived from the
+original duration. The old per-alert `AlertLayerLifecycle` class and its 3 tests were removed
+(superseded, not extended) because its deadline-based auto-close does not fit a controller that
+must now survive past any one alert's duration.
