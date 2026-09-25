@@ -234,17 +234,6 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// <c>finally</c> so a throw cannot leave a handle permanently unaddable.
     /// </para>
     /// </remarks>
-    /// <summary>
-    /// The single choke point through which every admission and every reflow this adapter causes
-    /// reaches <see cref="TreeArranger.ArrangeAndPosition"/>. Threading <see cref="_fullscreen"/>
-    /// through here, rather than through each of the call sites individually, is what makes "a
-    /// fullscreen window is never repositioned by an arrange" one rule instead of one per call site
-    /// -- admission (case 1) and every later reflow, a neighbour opening or closing included (case
-    /// 2), included by construction rather than by remembering to pass the set again.
-    /// </summary>
-    private void Arrange(LayoutTree tree, Rect workArea) =>
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, _afterArrange, _fullscreen);
-
     private void OnWindowAdded(object? sender, WindowEventArgs e)
     {
         if (!_arriving.Add(e.Window.Handle))
@@ -264,6 +253,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _arriving.Remove(e.Window.Handle);
         }
     }
+
+    /// <summary>
+    /// The single choke point through which every admission and every reflow this adapter causes
+    /// reaches <see cref="TreeArranger.ArrangeAndPosition"/>. Threading <see cref="_fullscreen"/>
+    /// through here, rather than through each of the call sites individually, is what makes "a
+    /// fullscreen window is never repositioned by an arrange" one rule instead of one per call site
+    /// -- admission (case 1) and every later reflow, a neighbour opening or closing included (case
+    /// 2), included by construction rather than by remembering to pass the set again.
+    /// </summary>
+    private void Arrange(LayoutTree tree, Rect workArea) =>
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, _afterArrange, _fullscreen);
 
     private void AddWindow(WindowEventArgs e)
     {
