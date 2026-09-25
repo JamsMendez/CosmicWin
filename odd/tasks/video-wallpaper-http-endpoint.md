@@ -82,7 +82,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [x] V2 Protocol in Interop: route constant, JSON parse of `path`, validation, and a status code for
   each outcome (400 bad body or path, 404 file missing, 415 wrong extension, 202 accepted, 503 video
   wallpaper not available on this composition). Unit tests, as in `AlertHttpProtocolTests`.
-- [ ] V3 Server routing: `HttpAlertCommandServer` dispatches `/v1/wallpaper/video` to a new handler
+- [x] V3 Server routing: `HttpAlertCommandServer` dispatches `/v1/wallpaper/video` to a new handler
   delegate after the SAME gates. Real-listener tests, as in `HttpAlertCommandServerTests`, including
   401 without a token and 403 for a foreign Origin or Host on the new route.
 - [ ] V4 Composition wiring: the handler calls the operation from V1 (never `Import` directly: imports
@@ -176,4 +176,20 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
     inline on the tray thread only when there is no video thread). Documented as a requirement
     at the sweep, `3dfbe44`. CONSTRAINT for V4: the HTTP handler must call SwitchVideoWallpaper
     (503 when it is unavailable), never `VideoWallpaperImport.Import` directly.
-- Next: V3 (server routing).
+- V3 done (2026-09-25), commits `6678031` (writer) and `a580bfc` (parent fix). Route: delegated
+  direct (writer trigger: server + real-listener tests). `HttpAlertCommandServer` gains trailing
+  optional `handleVideoWallpaperSwitch: Func<string,bool>?` and `videoWallpaperProbes`;
+  `handleCommand` becomes nullable. A null delegate means the route is off: it is left out of the
+  route table, so it answers the same 404 "no such route" as an unknown path. Each route carries
+  its own body cap (1024 alerts, 4096 video), chosen at the path gate before the body is read.
+  The gate order is unchanged and shared (checked by the parent: loopback, Origin, Host, path,
+  method, token, Content-Type, body). The video route validates, then calls the delegate: true
+  answers 202 "ok", false answers 503 "error: video wallpaper is not available ...", and a throw
+  answers 500 while the loop keeps serving. The `AppComposition` call site needed no change. Parent
+  review fix: the throw diagnostic carried `exception.Message`, which for an I/O error names the
+  absolute path; now it carries the type only (RED test first). Old test
+  `Constructor_NullHandler_Throws` was replaced, because a null handler is now valid. Checks: build
+  clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop
+  382/42 skipped, App 964/6 skipped. The class name `HttpAlertCommandServer` is now inaccurate; a
+  rename is a later cosmetic call.
+- Next: V4 (composition wiring and the `video-wallpaper-http` settings key).
