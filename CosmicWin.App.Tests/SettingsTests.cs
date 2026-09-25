@@ -322,4 +322,138 @@ public sealed class SettingsTests
         Assert.Contains("# alerts-enabled:", serialized, StringComparison.Ordinal);
         Assert.Contains("alerts-enabled = off", serialized, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Off unless the file says otherwise: a settings file that has never been written must not open
+    /// a network-facing port nobody asked for.
+    /// </summary>
+    [Fact]
+    public void AlertHttpIsOff_UnlessTheFileSaysOtherwise()
+    {
+        Assert.False(Settings.Default.AlertHttpEnabled);
+        Assert.False(Settings.Parse(string.Empty).AlertHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("alert-http = on")]
+    [InlineData("alert-http=on")]
+    [InlineData("  ALERT-HTTP   =   On  ")]
+    [InlineData("alert-http = true")]
+    [InlineData("alert-http = 1")]
+    public void AlertHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.True(Settings.Parse(line).AlertHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("alert-http = off")]
+    [InlineData("alert-http = false")]
+    [InlineData("alert-http = 0")]
+    public void AlertHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.False(Settings.Parse(line).AlertHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("alert-http = perhaps")]
+    [InlineData("alert-http =")]
+    [InlineData("alert-http")]
+    public void AnUnreadableAlertHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.False(Settings.Parse(line).AlertHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SerializeThenParse_RoundTripsTheAlertHttpSwitch(bool alertHttpEnabled)
+    {
+        var original = new Settings(FocusBorder: true, AlertHttpEnabled: alertHttpEnabled);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    /// <summary>
+    /// <see cref="CosmicWin.Interop.AlertHttpProtocol.DefaultPort"/> unless the file says otherwise --
+    /// the exact port the endpoint would actually bind to, so a default settings file and a default
+    /// server agree on where the endpoint lives.
+    /// </summary>
+    [Fact]
+    public void AlertHttpPortDefaultsToTheProtocolConstant()
+    {
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Default.AlertHttpPort);
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(string.Empty).AlertHttpPort);
+    }
+
+    [Theory]
+    [InlineData("alert-http-port = 8080")]
+    [InlineData("alert-http-port=8080")]
+    [InlineData("  ALERT-HTTP-PORT   =   8080  ")]
+    [InlineData("alert-http-port = 1")]
+    [InlineData("alert-http-port = 65535")]
+    public void AlertHttpPortIsRead_HoweverTheLineIsSpelled(string line)
+    {
+        var expected = int.Parse(line.Split('=')[1].Trim());
+
+        Assert.Equal(expected, Settings.Parse(line).AlertHttpPort);
+    }
+
+    /// <summary>
+    /// Same rule as every other key: a port outside 1-65535, or not a whole number at all, keeps the
+    /// default rather than opening a port that does not make sense.
+    /// </summary>
+    [Theory]
+    [InlineData("alert-http-port = 0")]
+    [InlineData("alert-http-port = 70000")]
+    [InlineData("alert-http-port = -1")]
+    [InlineData("alert-http-port = abc")]
+    [InlineData("alert-http-port =")]
+    [InlineData("alert-http-port")]
+    public void AnInvalidAlertHttpPort_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(line).AlertHttpPort);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(47811)]
+    [InlineData(65535)]
+    public void SerializeThenParse_RoundTripsTheAlertHttpPort(int port)
+    {
+        var original = new Settings(FocusBorder: true, AlertHttpPort: port);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheAlertHttpSwitchAndPortWithComments()
+    {
+        var serialized = new Settings(FocusBorder: true, AlertHttpEnabled: true, AlertHttpPort: 8080).Serialize();
+
+        Assert.Contains("# alert-http:", serialized, StringComparison.Ordinal);
+        Assert.Contains("alert-http = on", serialized, StringComparison.Ordinal);
+        Assert.Contains("# alert-http-port:", serialized, StringComparison.Ordinal);
+        Assert.Contains("alert-http-port = 8080", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>The comment tells the user where the token lives and that the endpoint never leaves the machine.</summary>
+    [Fact]
+    public void TheAlertHttpComment_NamesTheTokenFileAndLoopbackOnly()
+    {
+        var serialized = new Settings(FocusBorder: true).Serialize();
+
+        Assert.Contains("alert-http.token", serialized, StringComparison.Ordinal);
+        Assert.Contains("loopback", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void AlertHttpSettingsAreReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\nalert-http = on\nalert-http-port = 9999");
+
+        Assert.False(settings.FocusBorder);
+        Assert.True(settings.AlertHttpEnabled);
+        Assert.Equal(9999, settings.AlertHttpPort);
+    }
 }
