@@ -312,4 +312,117 @@ public sealed class FullscreenWindowTests
 
         Assert.Equal(2, h.FullscreenLines);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // U1: admitted already fullscreen. OnWindowAdded never asked IsFullscreen, so a game that
+    // launches straight into fullscreen was shrunk to its tile by the admission arrange.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A window whose FIRST appearance is already fullscreen (no caption, not maximised, covering
+    /// the monitor) must not be shrunk to a tile by the admission arrange.
+    /// </summary>
+    [Fact]
+    public void AWindowAdmittedAlreadyFullscreen_IsNotRepositioned()
+    {
+        using var h = new Harness();
+
+        var game = new RecordingWindow(new IntPtr(30), Monitor, className: "Game", processName: "game.exe");
+        h.Workspace.RaiseWindowAdded(game);
+
+        Assert.Equal(0, game.SetPositionCallCount);
+        Assert.Equal(Monitor, game.Bounds);
+    }
+
+    /// <summary>
+    /// Recorded exactly like any other fullscreen entry -- the same trace line, once -- not
+    /// silently skipped because it arrived on the admission path instead of a poll.
+    /// </summary>
+    [Fact]
+    public void AWindowAdmittedAlreadyFullscreen_IsTracedAsFullscreenOnce()
+    {
+        using var h = new Harness();
+
+        var game = new RecordingWindow(new IntPtr(30), Monitor, className: "Game", processName: "game.exe");
+        h.Workspace.RaiseWindowAdded(game);
+
+        Assert.Equal(1, h.Trace.Lines.Count(
+            line => line.StartsWith("fullscreen hwnd=0x1E ", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// It still gets a leaf -- InsertWindow runs before the fullscreen check turns the arrange's
+    /// SetPosition off -- so the tree already has a tile on record for it, and leaving fullscreen
+    /// lands it there like any other entry, not through a second admission.
+    /// </summary>
+    [Fact]
+    public void AWindowAdmittedAlreadyFullscreen_StillGetsALeafAndLandsOnItOnceItLeaves()
+    {
+        using var h = new Harness();
+
+        var game = new RecordingWindow(new IntPtr(30), Monitor, className: "Game", processName: "game.exe");
+        h.Workspace.RaiseWindowAdded(game);
+
+        // Admitted, but not yet moved: the leaf exists and already has a tile on record, while the
+        // window itself is still untouched (proven again here, not just in the sibling fact, so a
+        // mutation that skipped the leaf/tile half of this while still leaving the window alone
+        // cannot pass by accident).
+        Assert.True(h.Registry.TryGetLeaf(game.Handle, out var leaf) && leaf is not null);
+        Assert.Equal(0, game.SetPositionCallCount);
+        var tile = TreeArranger.TileOf(leaf!);
+        var expectedTile = Rectangle.FromSize(tile.X, tile.Y, tile.Width, tile.Height);
+
+        game.SimulateLeaveFullscreen(Rectangle.FromSize(50, 50, 400, 300));
+        h.Workspace.RaiseWindowBoundsChanged(game);
+
+        Assert.True(game.SetPositionCallCount > 0);
+        Assert.Equal(expectedTile, game.Bounds);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // U2: neighbour reflow. Every arrange repositioned every leaf, the fullscreen one included,
+    // once per neighbour opening or closing.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A neighbour OPENING while Chrome is fullscreen must not touch Chrome -- only reflow the
+    /// ordinary siblings around it.
+    /// </summary>
+    [Fact]
+    public void ANeighbourOpening_DoesNotRepositionAFullscreenWindow()
+    {
+        using var h = new Harness();
+        h.GoFullscreen(Monitor);
+        h.Poll(1);
+        var before = h.Chrome.SetPositionCallCount;
+
+        var third = new RecordingWindow(new IntPtr(40), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        h.Workspace.RaiseWindowAdded(third);
+
+        Assert.Equal(before, h.Chrome.SetPositionCallCount);
+        Assert.True(third.SetPositionCallCount > 0);
+    }
+
+    /// <summary>
+    /// A neighbour CLOSING while Chrome is fullscreen must not touch Chrome either, while the
+    /// surviving neighbour still reflows into the space it freed.
+    /// </summary>
+    [Fact]
+    public void ANeighbourClosing_DoesNotRepositionAFullscreenWindow()
+    {
+        using var h = new Harness();
+        var third = new RecordingWindow(new IntPtr(40), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        h.Workspace.RaiseWindowAdded(third);
+
+        h.GoFullscreen(Monitor);
+        h.Poll(1);
+
+        var chromeBefore = h.Chrome.SetPositionCallCount;
+        var thirdBefore = third.SetPositionCallCount;
+
+        h.Workspace.RaiseWindowRemoved(h.Neighbour);
+
+        Assert.Equal(chromeBefore, h.Chrome.SetPositionCallCount);
+        Assert.True(third.SetPositionCallCount > thirdBefore);
+    }
 }

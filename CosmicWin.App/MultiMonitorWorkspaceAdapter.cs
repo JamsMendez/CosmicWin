@@ -234,6 +234,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// <c>finally</c> so a throw cannot leave a handle permanently unaddable.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The single choke point through which every admission and every reflow this adapter causes
+    /// reaches <see cref="TreeArranger.ArrangeAndPosition"/>. Threading <see cref="_fullscreen"/>
+    /// through here, rather than through each of the call sites individually, is what makes "a
+    /// fullscreen window is never repositioned by an arrange" one rule instead of one per call site
+    /// -- admission (case 1) and every later reflow, a neighbour opening or closing included (case
+    /// 2), included by construction rather than by remembering to pass the set again.
+    /// </summary>
+    private void Arrange(LayoutTree tree, Rect workArea) =>
+        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, _afterArrange, _fullscreen);
+
     private void OnWindowAdded(object? sender, WindowEventArgs e)
     {
         if (!_arriving.Add(e.Window.Handle))
@@ -401,6 +412,25 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;
 
+        // Case 1 of the fullscreen defect: a window admitted ALREADY fullscreen (a game that
+        // launches straight into it) must not be shrunk to its tile by the arrange below --
+        // measuring it against a floor it never asked for is exactly the fight this adapter is
+        // supposed to stay out of. It already has the leaf InsertWindow just gave it, so Arrange
+        // below still computes a tile for it -- only skips POSITIONING it -- and it lands there the
+        // moment OnWindowBoundsChanged sees it leave fullscreen, same as any other fullscreen entry.
+        if (IsFullscreen(window, display))
+        {
+            if (_fullscreen.Add(window.Handle))
+            {
+                Trace?.Record(
+                    $"fullscreen hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                    $"proc={window.ProcessName} -- left alone until it is a window again");
+            }
+
+            Arrange(tree, workArea);
+            return;
+        }
+
         // A window whose floor is already on record is measured against the tile this tree WOULD
         // hand it, and turned away BEFORE anything is moved. Arranging is arithmetic; positioning
         // is what the desktop sees and what the workspace files as the window's bounds.
@@ -446,7 +476,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // measured -- and doing it now is what makes the desktop already correct when the user
         // arrives, instead of correcting itself in front of them.
         var beforeArrange = window.Bounds;
-        TreeArranger.ArrangeAndPosition(tree, _registry, workArea, _afterArrange);
+        Arrange(tree, workArea);
 
         Trace?.Record(
             $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
@@ -822,7 +852,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
             if (WorkspaceSessionAdapter.RemoveWindow(leaving, _registry, windowHandle))
             {
-                TreeArranger.ArrangeAndPosition(leaving, _registry, workArea, _afterArrange);
+                Arrange(leaving, workArea);
             }
         }
 
@@ -832,7 +862,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // false and TreeArranger would EVICT the leaf: a window on a desktop nobody is looking at
         // accepts a position exactly, wanted [120,140,700x480] read back identical.
         WorkspaceSessionAdapter.InsertWindow(arriving, _registry, workArea, window, focused: null);
-        TreeArranger.ArrangeAndPosition(arriving, _registry, workArea, _afterArrange);
+        Arrange(arriving, workArea);
         _owners[windowHandle] = display;
     }
 
@@ -1190,7 +1220,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
         {
-            TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
+            Arrange(tree, WorkAreaResolver.Resolve(display));
         }
     }
 
@@ -1237,7 +1267,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             $"removed hwnd=0x{handle:X} class={e.Window.ClassName} proc={e.Window.ProcessName} " +
             $"-- survivors reflowed");
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
+        Arrange(tree, WorkAreaResolver.Resolve(display));
 
         RetryParkedOn(display);
     }
@@ -1312,7 +1342,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _owners.Remove(handle);
             if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
             {
-                TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
+                Arrange(tree, WorkAreaResolver.Resolve(display));
             }
 
             return;
@@ -1328,9 +1358,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         //
         // Left in the tree, NOT removed: the leaf keeps its slot, and the first bounds change after
         // Chrome leaves fullscreen (its style regains the caption, its bounds go back to what it had)
-        // is an ordinary one and lands it on its tile. The one thing this cannot stop is an unrelated
-        // reflow (a neighbour opening or closing) repositioning it once; Chrome snaps back and the
-        // next poll is ignored here.
+        // is an ordinary one and lands it on its tile. An unrelated reflow (a neighbour opening or
+        // closing) no longer repositions it either -- Arrange skips every handle in _fullscreen, so
+        // this window is left alone by every arrange for as long as it stays in that set, not only
+        // by the one this method would otherwise have run below.
         if (IsFullscreen(window, display))
         {
             _misses.Remove(handle);
@@ -1492,7 +1523,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             }
         }
 
-        TreeArranger.ArrangeAndPosition(tree, _registry, WorkAreaResolver.Resolve(display), _afterArrange);
+        Arrange(tree, WorkAreaResolver.Resolve(display));
 
         if (before != window.Bounds)
         {

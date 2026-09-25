@@ -65,8 +65,8 @@ internal static class TreeArranger
     /// </remarks>
     public static void ArrangeAndPosition(
         ITilingEngine engine, WindowRegistry registry, Rect workArea,
-        Action<IReadOnlyList<nint>>? afterArrange) =>
-        ArrangeAndPosition(engine, registry, workArea, Gap, afterArrange);
+        Action<IReadOnlyList<nint>>? afterArrange, IReadOnlySet<nint>? frozen = null) =>
+        ArrangeAndPosition(engine, registry, workArea, Gap, afterArrange, frozen);
 
     /// <summary>
     /// Explicit-spacing overload. Exists so a test can pin gap arithmetic WITHOUT assigning <see
@@ -74,15 +74,23 @@ internal static class TreeArranger
     /// every other class's geometry assertions -- observed as one unrelated fact failing in a full
     /// run and passing in isolation.
     /// </summary>
+    /// <param name="frozen">
+    /// Handles this pass must leave exactly where they are -- a window <see
+    /// cref="MultiMonitorWorkspaceAdapter"/> currently knows to be fullscreen. Skipped before
+    /// <see cref="IWindow.SetPosition"/> AND before the no-reposition eviction check below: a
+    /// fullscreen window is not being fought, so it must never be measured as one. <see
+    /// langword="null"/> for every caller that has no such set -- the overwhelmingly common case --
+    /// so it costs exactly what it did before.
+    /// </param>
     public static void ArrangeAndPosition(
         ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap,
-        Action<IReadOnlyList<nint>>? afterArrange)
+        Action<IReadOnlyList<nint>>? afterArrange, IReadOnlySet<nint>? frozen = null)
     {
         // Allocated only when someone is listening: the overwhelmingly common reflow has no
         // callback at all, and it should cost exactly what it did before.
         var moved = afterArrange is null ? null : new List<nint>();
 
-        Apply(engine, registry, workArea, gap, moved);
+        Apply(engine, registry, workArea, gap, moved, frozen);
 
         // AFTER the last pass, not inside it. An eviction re-enters Apply, and a listener told to
         // follow each pass would answer geometry the very next pass is about to replace.
@@ -90,7 +98,8 @@ internal static class TreeArranger
     }
 
     private static void Apply(
-        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap, List<nint>? moved)
+        ITilingEngine engine, WindowRegistry registry, Rect workArea, int gap, List<nint>? moved,
+        IReadOnlySet<nint>? frozen = null)
     {
         var evictedAny = false;
 
@@ -104,6 +113,16 @@ internal static class TreeArranger
         foreach (var (windowRef, bounds) in engine.Arrange(field))
         {
             if (!registry.TryGetWindow(windowRef.Handle, out var window) || window is not { IsAlive: true })
+            {
+                continue;
+            }
+
+            // A frozen (fullscreen) leaf keeps its slot in the tree -- Arrange above still computed
+            // a tile for it, so a later reflow lands it there the moment it stops being frozen -- but
+            // is skipped BEFORE SetPosition, and before the no-reposition check below: it is not
+            // fighting, and measuring it as though it were would evict a window that is behaving
+            // exactly as intended.
+            if (frozen is not null && frozen.Contains(windowRef.Handle))
             {
                 continue;
             }
@@ -140,7 +159,7 @@ internal static class TreeArranger
         {
             // Tree shape changed (at least one leaf evicted) -- reflow the survivors into the
             // vacated space. Terminates: each recursive pass strictly shrinks the live-leaf set.
-            Apply(engine, registry, workArea, gap, moved);
+            Apply(engine, registry, workArea, gap, moved, frozen);
         }
     }
 
