@@ -770,6 +770,27 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// Review 4 (R3-http-switch-no-host-branch-unproved): the test above has no dedicated thread
+    /// either, so it stops at the missing-thread check. This one wires the thread and leaves only
+    /// the host and player out, so the "not available" answer must come from SwitchVideoWallpaper's
+    /// own null check -- and nothing may be queued.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_WithADedicatedThreadButNoHostOrPlayer_ReturnsFalseAndQueuesNothing()
+    {
+        var queued = new Queue<Action>();
+
+        var harness = Wire(scheduleVideoWallpaperWork: queued.Enqueue, videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.False(accepted);
+            Assert.Empty(queued);
+        }
+    }
+
+    /// <summary>
     /// A composition with a host and player but NO dedicated video-wallpaper thread
     /// (<c>scheduleVideoWallpaperWork</c> unset) is exactly the shape
     /// <c>onVideoWallpaperThread</c> would fall back to running inline on whichever thread calls
