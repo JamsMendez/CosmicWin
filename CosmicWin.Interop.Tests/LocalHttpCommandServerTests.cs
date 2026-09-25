@@ -9,7 +9,7 @@ using Xunit.Abstractions;
 namespace CosmicWin.Interop.Tests;
 
 /// <summary>
-/// Integration coverage for <see cref="HttpAlertCommandServer"/>: a real loopback
+/// Integration coverage for <see cref="LocalHttpCommandServer"/>: a real loopback
 /// <see cref="System.Net.HttpListener"/>, a real <see cref="HttpClient"/>, no fakes -- the same
 /// "integration: real transport, in-process server" idiom
 /// <c>NamedPipeAlertCommandServerTests</c> uses for the pipe half of this feature. Every fact gets
@@ -17,7 +17,7 @@ namespace CosmicWin.Interop.Tests;
 /// already serialises this assembly, for the same belt-and-braces reason the pipe tests give every
 /// fact its own pipe name: a leftover listener from a previous run must never collide with this one.
 /// </summary>
-public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
+public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
 {
     private const string Token = "test-token-abc123";
     private static readonly TimeSpan ShortTimeout = TimeSpan.FromSeconds(5);
@@ -26,19 +26,19 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
 
     [Fact]
     public void Constructor_PortZero_Throws() =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => new HttpAlertCommandServer(0, Token, _ => "ok"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new LocalHttpCommandServer(0, Token, _ => "ok"));
 
     [Fact]
     public void Constructor_PortTooLarge_Throws() =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => new HttpAlertCommandServer(65536, Token, _ => "ok"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new LocalHttpCommandServer(65536, Token, _ => "ok"));
 
     [Fact]
     public void Constructor_NullToken_Throws() =>
-        Assert.Throws<ArgumentNullException>(() => new HttpAlertCommandServer(GetFreePort(), null!, _ => "ok"));
+        Assert.Throws<ArgumentNullException>(() => new LocalHttpCommandServer(GetFreePort(), null!, _ => "ok"));
 
     [Fact]
     public void Constructor_BlankToken_Throws() =>
-        Assert.Throws<ArgumentException>(() => new HttpAlertCommandServer(GetFreePort(), "   ", _ => "ok"));
+        Assert.Throws<ArgumentException>(() => new LocalHttpCommandServer(GetFreePort(), "   ", _ => "ok"));
 
     // V3: a null handleCommand no longer throws -- it means the alerts route is off, modelled the
     // same way the video route's enablement is (see the "per-route enablement" region below). The
@@ -47,7 +47,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     [Fact]
     public void Constructor_NullHandlerAndNullVideoSwitch_DoesNotThrow()
     {
-        var exception = Record.Exception(() => new HttpAlertCommandServer(GetFreePort(), Token, null));
+        var exception = Record.Exception(() => new LocalHttpCommandServer(GetFreePort(), Token, null));
         Assert.Null(exception);
     }
 
@@ -59,7 +59,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public async Task BothRoutesDisabled_AlertsRouteAnswersExactlyLikeAnUnknownPath()
     {
         var port = GetFreePort();
-        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
+        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
         server.Start();
 
         using var client = NewClient();
@@ -76,7 +76,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public async Task BothRoutesDisabled_VideoRouteAnswersExactlyLikeAnUnknownPath()
     {
         var port = GetFreePort();
-        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
+        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
         server.Start();
 
         using var client = NewClient();
@@ -95,7 +95,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public async Task Start_Idempotent_SecondCallStillServesNormally()
     {
         var port = GetFreePort();
-        using var server = new HttpAlertCommandServer(port, Token, _ => "ok");
+        using var server = new LocalHttpCommandServer(port, Token, _ => "ok");
         server.Start();
         server.Start(); // must be a no-op, not a re-bind attempt
 
@@ -109,11 +109,11 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public void Start_PortAlreadyInUse_ReportsDiagnosticAndDoesNotThrow()
     {
         var port = GetFreePort();
-        using var occupant = new HttpAlertCommandServer(port, Token, _ => "ok");
+        using var occupant = new LocalHttpCommandServer(port, Token, _ => "ok");
         occupant.Start();
 
         var diagnostics = new List<string>();
-        using var server = new HttpAlertCommandServer(port, Token, _ => "ok", diagnostics.Add);
+        using var server = new LocalHttpCommandServer(port, Token, _ => "ok", diagnostics.Add);
 
         var exception = Record.Exception(server.Start);
 
@@ -124,7 +124,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     [Fact]
     public void Dispose_BeforeStart_IsSafe()
     {
-        var server = new HttpAlertCommandServer(GetFreePort(), Token, _ => "ok");
+        var server = new LocalHttpCommandServer(GetFreePort(), Token, _ => "ok");
         var exception = Record.Exception(server.Dispose);
         Assert.Null(exception);
     }
@@ -132,7 +132,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     [Fact]
     public void Dispose_Idempotent()
     {
-        var server = new HttpAlertCommandServer(GetFreePort(), Token, _ => "ok");
+        var server = new LocalHttpCommandServer(GetFreePort(), Token, _ => "ok");
         server.Start();
         server.Dispose();
         var exception = Record.Exception(server.Dispose);
@@ -143,7 +143,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public async Task Dispose_StopsAccepting()
     {
         var port = GetFreePort();
-        var server = new HttpAlertCommandServer(port, Token, _ => "ok");
+        var server = new LocalHttpCommandServer(port, Token, _ => "ok");
         server.Start();
 
         // Prove it really was accepting first.
@@ -467,7 +467,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var port = GetFreePort();
         var diagnostics = new List<string>();
         var first = true;
-        using var server = new HttpAlertCommandServer(port, Token, _ =>
+        using var server = new LocalHttpCommandServer(port, Token, _ =>
         {
             if (first)
             {
@@ -543,7 +543,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public void IsLoopbackRemote_RecognisesLoopbackAddresses(string address, bool expected)
     {
         var endpoint = new IPEndPoint(IPAddress.Parse(address), 12345);
-        Assert.Equal(expected, HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+        Assert.Equal(expected, LocalHttpCommandServer.IsLoopbackRemote(endpoint));
     }
 
     [Fact]
@@ -554,7 +554,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var mapped = IPAddress.Parse("127.0.0.1").MapToIPv6();
         var endpoint = new IPEndPoint(mapped, 12345);
 
-        Assert.True(HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+        Assert.True(LocalHttpCommandServer.IsLoopbackRemote(endpoint));
     }
 
     [Fact]
@@ -563,12 +563,12 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var mapped = IPAddress.Parse("10.0.0.5").MapToIPv6();
         var endpoint = new IPEndPoint(mapped, 12345);
 
-        Assert.False(HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+        Assert.False(LocalHttpCommandServer.IsLoopbackRemote(endpoint));
     }
 
     [Fact]
     public void IsLoopbackRemote_NullEndpoint_IsNotLoopback() =>
-        Assert.False(HttpAlertCommandServer.IsLoopbackRemote(null));
+        Assert.False(LocalHttpCommandServer.IsLoopbackRemote(null));
 
     // ---- R3-005: bounded backoff if GetContext keeps throwing while still listening ----
     //
@@ -606,7 +606,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
     public async Task Start_AfterDispose_IsANoOpAndLeavesThePortFree()
     {
         var port = GetFreePort();
-        var server = new HttpAlertCommandServer(port, Token, _ => "ok");
+        var server = new LocalHttpCommandServer(port, Token, _ => "ok");
 
         // Never started, THEN disposed (finding R3-004): an instance that was started first already
         // has a thread, and Start's `_thread is not null` guard would hide a missing `_disposed` check.
@@ -956,7 +956,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         var port = GetFreePort();
         var diagnostics = new List<string>();
         var first = true;
-        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
             handleVideoWallpaperSwitch: _ =>
             {
                 if (first)
@@ -987,7 +987,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         // profile, which no trace line may carry. Only the exception's type is reported.
         var port = GetFreePort();
         var diagnostics = new List<string>();
-        using var server = new HttpAlertCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
             handleVideoWallpaperSwitch: _ => throw new IOException($"Could not open '{ExistingVideo}'."),
             videoWallpaperProbes: FakeVideoProbes(exists: true));
         server.Start();
@@ -1060,29 +1060,29 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
 
     private const string ExistingVideo = @"C:\videos\x.mp4";
 
-    private HttpAlertCommandServer Start(int port, Func<string, string> handleCommand)
+    private LocalHttpCommandServer Start(int port, Func<string, string> handleCommand)
     {
-        var server = new HttpAlertCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg));
+        var server = new LocalHttpCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg));
         server.Start();
         return server;
     }
 
-    private HttpAlertCommandServer StartVideoOnly(
+    private LocalHttpCommandServer StartVideoOnly(
         int port, Func<string, bool> handleVideoWallpaperSwitch, VideoWallpaperFileProbes probes)
     {
-        var server = new HttpAlertCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
+        var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
             handleVideoWallpaperSwitch, probes);
         server.Start();
         return server;
     }
 
-    private HttpAlertCommandServer StartBoth(
+    private LocalHttpCommandServer StartBoth(
         int port,
         Func<string, string> handleCommand,
         Func<string, bool> handleVideoWallpaperSwitch,
         VideoWallpaperFileProbes probes)
     {
-        var server = new HttpAlertCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg),
+        var server = new LocalHttpCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg),
             handleVideoWallpaperSwitch, probes);
         server.Start();
         return server;
@@ -1244,7 +1244,7 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
 }
 
 /// <summary>
-/// Skips <see cref="HttpAlertCommandServerTests.ConnectingThroughANonLoopbackAddress_IsRejectedOrRefused"/>
+/// Skips <see cref="LocalHttpCommandServerTests.ConnectingThroughANonLoopbackAddress_IsRejectedOrRefused"/>
 /// when this machine has no non-loopback IPv4 address to connect through. xunit 2 cannot skip a fact
 /// from inside its body -- the same reason <c>RequiresDesktopFactAttribute</c> probes its own
 /// environment gate in the constructor rather than the test method -- so the probe runs once, at

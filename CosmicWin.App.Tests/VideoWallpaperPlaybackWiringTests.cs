@@ -216,7 +216,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             persistVideoWallpaperPath: persistVideoWallpaperPath,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
             loadAlertHttpToken: () => "test-token",
-            createHttpAlertCommandServer: (_, _, _, _, videoSwitch) =>
+            createLocalHttpCommandServer: (_, _, _, _, videoSwitch) =>
             {
                 capturedVideoSwitchHandler = videoSwitch;
                 return new FakeHttpServer();
@@ -749,7 +749,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
     /// <summary>
     /// V4 (video-wallpaper-http-endpoint): the HTTP route's delegate, captured through the same
-    /// <c>createHttpAlertCommandServer</c> seam <see cref="HttpAlertCompositionWiringTests"/>
+    /// <c>createLocalHttpCommandServer</c> seam <see cref="HttpAlertCompositionWiringTests"/>
     /// uses. With no video-wallpaper host/player wired on this composition, the delegate answers
     /// "not available" (503 at the protocol layer) rather than touching either -- the same
     /// composition <see cref="Startup_WithNoCollaboratorsWired_DoesNotThrow"/> covers for the tray

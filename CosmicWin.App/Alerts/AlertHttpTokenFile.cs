@@ -57,7 +57,7 @@ namespace CosmicWin.App.Alerts;
 /// This class never throws. A read or write failure -- e.g. the file is a directory, or the
 /// directory cannot be created -- reports a diagnostic through <paramref name="onDiagnostic"/> and
 /// returns <see langword="null"/>, exactly the convention <see
-/// cref="CosmicWin.Interop.HttpAlertCommandServer"/>'s own <c>onDiagnostic</c> parameter uses, so the caller
+/// cref="CosmicWin.Interop.LocalHttpCommandServer"/>'s own <c>onDiagnostic</c> parameter uses, so the caller
 /// can leave the HTTP endpoint off while the pipe keeps working. The token VALUE is never included
 /// in a diagnostic message. A timed-out wait for the lock (see <see cref="LockTimeout"/>) is treated
 /// the same way: a diagnostic and <see langword="null"/>, never a throw and never an indefinite hang.

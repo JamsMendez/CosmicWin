@@ -182,7 +182,7 @@ public sealed class AppComposition : IDisposable
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
         // H4 (http-alert-endpoint): a second, independent front door onto the SAME HandleAlertCommand
         // queue the pipe above uses, gated on this flag in addition to alertsEnabled (default off:
-        // no port opened, token file never touched). createHttpAlertCommandServer mirrors
+        // no port opened, token file never touched). createLocalHttpCommandServer mirrors
         // createAlertCommandServer's seam; loadAlertHttpToken mirrors it for AlertHttpTokenFile.LoadOrCreate,
         // so a wiring test never binds a real port or touches %LOCALAPPDATA%.
         bool alertHttpEnabled = false,
@@ -191,10 +191,10 @@ public sealed class AppComposition : IDisposable
         // route, gated independently of alertHttpEnabled/alertsEnabled -- decision 2, "a route
         // whose switch is off answers 404, as if it did not exist". Extends the factory seam
         // above with a trailing handleVideoWallpaperSwitch delegate, mirroring
-        // HttpAlertCommandServer's own trailing optional constructor parameter, rather than
+        // LocalHttpCommandServer's own trailing optional constructor parameter, rather than
         // bypassing this seam with a second one.
         bool videoWallpaperHttpEnabled = false,
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createHttpAlertCommandServer = null,
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
         Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
@@ -520,7 +520,7 @@ public sealed class AppComposition : IDisposable
 
         /// <summary>
         /// V4: the HTTP video-wallpaper route's delegate, handed to <see
-        /// cref="createHttpAlertCommandServer"/>'s <c>handleVideoWallpaperSwitch</c> parameter
+        /// cref="createLocalHttpCommandServer"/>'s <c>handleVideoWallpaperSwitch</c> parameter
         /// when <paramref name="videoWallpaperHttpEnabled"/> is on. Never calls
         /// <see cref="VideoWallpaperImport.Import"/> itself, and never any import logic directly
         /// -- it goes through <see cref="SwitchVideoWallpaper"/>, the SAME serialized path the
@@ -536,7 +536,7 @@ public sealed class AppComposition : IDisposable
         /// defaults to running inline on whichever thread calls it -- fine for a tray click (it
         /// always ran that way before this task), but it would mean the import's multi-gigabyte
         /// copy runs SYNCHRONOUSLY on this HTTP server's one request-handling thread, which <see
-        /// cref="HttpAlertCommandServer"/>'s own contract for this delegate forbids. Answering 503
+        /// cref="LocalHttpCommandServer"/>'s own contract for this delegate forbids. Answering 503
         /// is the least surprising choice for a composition that was never going to switch
         /// anything asynchronously in the first place, and it costs nothing beyond this one null
         /// check -- no new thread is spun up just to make the endpoint technically answer 202.
@@ -1024,9 +1024,9 @@ public sealed class AppComposition : IDisposable
                 }
                 else
                 {
-                    var httpServerFactory = createHttpAlertCommandServer
+                    var httpServerFactory = createLocalHttpCommandServer
                         ?? ((port, t, handler, diagnostic, videoSwitch) =>
-                            new HttpAlertCommandServer(port, t, handler, diagnostic, videoSwitch));
+                            new LocalHttpCommandServer(port, t, handler, diagnostic, videoSwitch));
                     httpAlertServer = httpServerFactory(
                         alertHttpPort, token,
                         alertHttpRouteOn ? HandleAlertCommand : null,

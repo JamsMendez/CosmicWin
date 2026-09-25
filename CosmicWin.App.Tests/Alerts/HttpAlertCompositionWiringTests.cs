@@ -10,13 +10,13 @@ namespace CosmicWin.App.Tests.Alerts;
 
 /// <summary>
 /// H4 (http-alert-endpoint): proves <c>AppComposition.Wire</c> starts <see
-/// cref="HttpAlertCommandServer"/> alongside the named pipe -- gated on BOTH <c>alertsEnabled</c> and
+/// cref="LocalHttpCommandServer"/> alongside the named pipe -- gated on BOTH <c>alertsEnabled</c> and
 /// the new <c>alertHttpEnabled</c> flag, sharing the exact same <c>HandleAlertCommand</c> closure and
 /// <c>desktopTrace</c> sink the pipe uses, tolerant of a missing token or a failing HTTP server
 /// (which must never take the pipe down with it), and disposed together with the pipe. The real
-/// <see cref="HttpAlertCommandServer"/>'s own request-gate/protocol behaviour is covered by
+/// <see cref="LocalHttpCommandServer"/>'s own request-gate/protocol behaviour is covered by
 /// <c>CosmicWin.Interop.Tests</c>; this file only proves the composition wiring around the
-/// <c>createHttpAlertCommandServer</c>/<c>loadAlertHttpToken</c> seams.
+/// <c>createLocalHttpCommandServer</c>/<c>loadAlertHttpToken</c> seams.
 /// </summary>
 public sealed class HttpAlertCompositionWiringTests
 {
@@ -117,7 +117,7 @@ public sealed class HttpAlertCompositionWiringTests
             alertHttpEnabled: httpEnabled,
             alertHttpPort: httpPort,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
-            createHttpAlertCommandServer: resolvedHttpFactory,
+            createLocalHttpCommandServer: resolvedHttpFactory,
             loadAlertHttpToken: () =>
             {
                 tokenLoadCalls++;

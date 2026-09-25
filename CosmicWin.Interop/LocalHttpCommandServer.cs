@@ -33,7 +33,7 @@ namespace CosmicWin.Interop;
 /// </para>
 /// <para>
 /// MEASURED 2026-09-25 (raw <see cref="System.Net.Sockets.TcpClient"/> requests, no client library
-/// involved -- see <c>HttpAlertCommandServerTests</c>'s "R3-001/002" region): for a connection that
+/// involved -- see <c>LocalHttpCommandServerTests</c>'s "R3-001/002" region): for a connection that
 /// arrives on one of THIS class's own registered local addresses (i.e. loopback, the only kind it
 /// ever binds), http.sys performs NO <c>Host</c>-header filtering of its own -- it forwards the
 /// request to this listener regardless of what <c>Host</c> says. <c>Host: localhost:{port}</c>,
@@ -60,10 +60,10 @@ namespace CosmicWin.Interop;
 /// pipe's own <c>_stopping</c> token unblocks its pending <c>WaitForConnectionAsync</c>. A repeating,
 /// non-shutdown <c>GetContext</c> failure backs off exactly like
 /// <see cref="Win32.NamedPipeAlertCommandServer.RunLoop"/> does, though no black-box test can
-/// currently force that path open (see <c>HttpAlertCommandServerTests</c>'s "R3-005" note).
+/// currently force that path open (see <c>LocalHttpCommandServerTests</c>'s "R3-005" note).
 /// </para>
 /// </remarks>
-public sealed class HttpAlertCommandServer : IAlertCommandServer
+public sealed class LocalHttpCommandServer : IAlertCommandServer
 {
     /// <summary>
     /// Bounds every per-request wait (<see cref="HttpListenerTimeoutManager"/>) so a slow or silent
@@ -138,7 +138,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// make the video route deterministic without touching disk. <see langword="null"/> (the
     /// default) uses the real filesystem.
     /// </param>
-    public HttpAlertCommandServer(
+    public LocalHttpCommandServer(
         int port,
         string token,
         Func<string, string>? handleCommand,
