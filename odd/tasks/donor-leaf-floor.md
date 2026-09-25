@@ -94,5 +94,9 @@ the donor) and one two-level mixed-axis (vertical) test.
   where their `root.Sizes` assertion alone still passed. Layout suite 198 passed.
   - Review (2 files, 20 lines, medium, consent granted, one reliability lens): APPROVED and
     acknowledged, lineage `review-83825712acb4c84d`. Merged into local main.
-  - Suggestion left open (non-blocking): the exact `208` is a literal next to a check against
+  - Suggestion (non-blocking): the exact `208` is a literal next to a check against
     `DefaultMinLeafSlotLength`; if the floor constant changes, that line fails without naming why.
+    CLOSED WITHOUT CHANGE by the maintainer, 2026-09-25. The literal is the exact rounding of
+    902 * 300 / 1300 = 208.15, not a copy of the floor. The file uses computed literals throughout
+    (902, 1792, 1664). A floor change would break the fixture's 902 sizes anyway, and the next line
+    already checks the floor through the constant.
