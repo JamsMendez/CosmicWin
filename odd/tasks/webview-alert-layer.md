@@ -277,10 +277,30 @@ exception if a single cohesive slice cannot fit the budget.
     environment/controller exists, so those call sites are proven present by a structural test
     (`EveryLifecycleEventAndSilentFailurePathIsTraced`) rather than exercised -- real confirmation is
     T9e hardware.
-  - [ ] **T9b -- Page show/hide message API.** The page idles with no drawing and no
-    `requestAnimationFrame` loop. A `show` message (kind, duration) restarts the animation from
-    zero; `hide` clears and stops. `done` is still posted when the duration ends. The hash/query
-    API keeps working for a plain browser tab.
+  - [x] **T9b -- Page show/hide message API.** Commit `eb6c548` (144 additions / 34 deletions).
+    `alert-layer.js` listens for `window.chrome.webview` `message` events carrying
+    `{type:"show", kind, duration}` / `{type:"hide"}`. Idle: canvas cleared, no
+    `requestAnimationFrame` loop running (`animating` flag guards `render`). `show` resets
+    `failureStartMs`/`failureState`/`doneSignaled` and starts the loop exactly like a fresh load
+    (same shakeMs wait + reveal); calling `show` again while already showing restarts from zero
+    with the new kind WITHOUT double-queuing a frame (`if (!animating) scheduleFrame(render)`).
+    `hide` clears and stops; `done` is still posted when the page's own duration elapses; `ready`
+    is now posted once the script has initialised, so the host (T9c) knows navigation produced a
+    live page. The `#kind=/&duration=` hash (and `?kind=/&duration=` query) API still auto-shows
+    for a plain browser tab, but a BARE navigation (host preload, T9c) no longer auto-shows a
+    default warning -- gated on `hasExplicitParams`.
+    Strict TDD: RED first for 3 new `AlertLayerWebPageTests` facts (`hasExplicitParams`,
+    `addEventListener("message"`, `"ready"` all absent from the unchanged script -- 3 failures),
+    then GREEN 16/16 after the rewrite. `node --check` passed. Node was available
+    (`node --version` -> v24.19.0), so a stubbed-DOM smoke test (fake `document`/`canvas`/
+    `requestAnimationFrame`/`chrome.webview`, driven with `vm.createContext`) additionally proved
+    10 behavioral scenarios pass: bare-load idles and posts `ready`; hash auto-show still starts,
+    loops, and posts `done` at its own duration; message-driven `show` starts exactly one frame;
+    a restart mid-show does not double-queue; `hide` leaves no frame scheduled once any in-flight
+    one drains; a fresh `show` after `hide` restarts. This script and its stubbed sandbox were NOT
+    committed (throwaway, same as T1's manual check). App suite = 1030 passed / 6 skipped; Debug
+    solution build = 0 errors, same pre-existing warnings; `git diff --check` clean.
+    Not verified: real WebView2/Edge rendering of the show/hide transitions -- T9e hardware.
   - [ ] **T9c -- Persistent controller.** Preload once at startup when the host composition is
     ready; `IsVisible=false` while idle. `Start` posts `show` and makes it visible, or keeps a
     pending show until ready; `End` posts `hide` and hides it. Recreate (with backoff) on host
