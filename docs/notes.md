@@ -121,7 +121,7 @@ not passed: a run that reports skips has not verified the desktop facts at all.
 
 ## Diagnostics
 
-Five test-shaped files assert nothing on purpose. They answer a question with measured data instead
+Six test-shaped files assert nothing on purpose. They answer a question with measured data instead
 of a hypothesis, and each was written because a guess had already been wrong once.
 
 | File | Answers |
@@ -131,6 +131,7 @@ of a hypothesis, and each was written because a guess had already been wrong onc
 | `CosmicWin.Interop.Tests/Win32/FrameBoundsDiagnostic.cs` | How far is the drawn frame from `GetWindowRect`? (Measured the 7px invisible border, 0 on top.) |
 | `CosmicWin.Interop.Tests/Win32/VirtualDesktopProbeDiagnostic.cs` | Does this Windows build expose the virtual-desktop vtable we declare? |
 | `CosmicWin.App.Tests/Desktop/ModalDialogSnapshotDiagnostic.cs` | What IS the window the user calls a modal, and which predicate matches it? (Settled that GoLand's Settings dialog is owned and untrackable.) |
+| `CosmicWin.Interop.Tests/Win32/SlowAdmissionDiagnostic.cs` | Why do some windows take a second or more to join the tree? (Found that Settings is born cloaked and `EVENT_OBJECT_UNCLOAKED` was outside the subscribed range.) |
 
 The modal one takes a SNAPSHOT rather than watching a window of time. Watching was the original
 design and it failed twice for the same reason: it puts the person running it under a stopwatch, and

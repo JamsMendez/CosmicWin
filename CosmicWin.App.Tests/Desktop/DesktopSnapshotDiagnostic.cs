@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 namespace CosmicWin.App.Tests.Desktop;
 
 /// <summary>
-/// TEMPORARY diagnostic, not a behavioural test. Read-only: enumerates the real desktop's
+/// Diagnostic, not a behavioural test. Read-only: enumerates the real desktop's
 /// top-level windows and reports which ones CosmicWin's own filter chain would admit into the
 /// tree, so a "the tiling only used half the screen" report can be answered with the actual
 /// admitted set instead of a guess. Never moves, activates or closes anything.

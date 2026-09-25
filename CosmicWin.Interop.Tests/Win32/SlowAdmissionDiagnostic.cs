@@ -9,7 +9,7 @@ using Xunit.Abstractions;
 namespace CosmicWin.Interop.Tests.Win32;
 
 /// <summary>
-/// TEMPORARY diagnostic, not a behavioural test. Reported: Brave and the Windows Settings app take
+/// Diagnostic, not a behavioural test. Reported: Brave and the Windows Settings app take
 /// roughly 1 to 1.5 seconds to join the tree, where an ordinary window joins at once.
 /// </summary>
 /// <remarks>
