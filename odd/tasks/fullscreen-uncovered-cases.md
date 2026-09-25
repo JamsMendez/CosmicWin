@@ -43,13 +43,13 @@ maintainer authorized this on 2026-09-25.
 
 ## Tasks
 
-- [ ] U1 A window admitted already fullscreen is not repositioned, is recorded as fullscreen (same
+- [x] U1 A window admitted already fullscreen is not repositioned, is recorded as fullscreen (same
   trace line), and lands on its tile once it leaves fullscreen. RED first.
-- [ ] U2 A neighbour opening or closing does not reposition a fullscreen window (its SetPosition
+- [x] U2 A neighbour opening or closing does not reposition a fullscreen window (its SetPosition
   count is unchanged); the neighbour still reflows. RED first.
-- [ ] U3 A window fullscreen on a non-owner display is recognized (not repositioned, not given up
+- [x] U3 A window fullscreen on a non-owner display is recognized (not repositioned, not given up
   on). Two fake displays. RED first.
-- [ ] U4 Hardware check driven by the agent: Chrome with its own `--user-data-dir`, F11 plus probe
+- [x] U4 Hardware check driven by the agent: Chrome with its own `--user-data-dir`, F11 plus probe
   windows opening and closing, and launching Chrome straight into fullscreen (`--start-fullscreen`).
   Second monitor only if one is connected.
 
@@ -65,4 +65,43 @@ maintainer authorized this on 2026-09-25.
 - Item 4 of the pending list (watchdog) is NOT in this feature. The cursor gate it described no
   longer exists; the watchdog is backstop-only (30 min, `7a8f6a9`). The trace shows 7343 reinstalls,
   all `foundGone=0`, so the hook has never been seen dead.
-- Next: U1-U3 (one writer), then U4.
+- U1+U2 done, commit `cffbee6` (writer). One rule: `TreeArranger.ArrangeAndPosition`/`Apply` take
+  an optional `frozen` handle set; a frozen leaf keeps its slot and computed tile but is never passed
+  to `SetPosition` nor measured for eviction. The eviction re-entry passes the set on. The adapter
+  routes all 7 of its arrange call sites through one `Arrange(tree, workArea)` helper that passes
+  `_fullscreen`. `AddWindow` classifies fullscreen right after `InsertWindow`, traces the same line
+  once, and still arranges (so neighbours reflow). Handles leave `_fullscreen` on removal and when
+  the window stops being fullscreen. RED: 5 new tests failed on the old code; mutations (drop the
+  admission check; drop the frozen skip) each broke their tests, then were reverted.
+- U3 done, commit `9962b2b`. `IsFullscreen(window, IEnumerable<IDisplay>)`, checked against every
+  known display at both call sites. Ownership does NOT move. RED: the two-display test gave up
+  after 12 misses on the old code. Mutation (only the owner display) broke exactly that test.
+- Parent review of the diff: the writer lost its uncommitted work to a `git checkout --` and
+  rebuilt it; the parent read the whole production diff (frozen passed through the eviction
+  recursion, `_fullscreen` exits at `:1263`/`:1407`, no stray edits).
+- Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13,
+  Interop 387/42 skipped, App 1008/6 skipped. Assess (base `85694b1`): medium, 360 lines,
+  `under_budget`.
+- U4 hardware (2026-09-25, driven by the agent, elevated, ONE monitor 3440x1440, A/B on main
+  `85694b1` vs branch `9962b2b`). `trace-dialogs` was switched on for the runs and removed after
+  (it was off before). Chrome moves were recorded with an `EVENT_OBJECT_LOCATIONCHANGE` hook, not
+  sampling. Harness notes: Chrome started elevated hands its window to a CHILD process (match by
+  the `--user-data-dir` on the command line); Windows PowerShell 5.1 needs
+  `-ExecutionPolicy Bypass` for probe scripts; pass `[NullString]::Value`, not `$null`, to a
+  P/Invoke string.
+  - Case 1, the REAL reproduction: Chrome F11-fullscreen FIRST, then CosmicWin starts (the startup
+    enumeration admits it). main: `added ... [L=0 T=0 W=3440 H=1440] -> [L=8 T=8 W=3376 H=1424]`,
+    then `fullscreen` (it tried to tile it; Chrome refused the size). Branch: `fullscreen` FIRST,
+    no tile, never positioned. `--start-fullscreen` does NOT reproduce case 1: Chrome is admitted
+    windowed first (`W=1667 H=1413`) and goes fullscreen afterwards, the same on both builds. A
+    borderless WinForms probe covering the monitor is never admitted at all (no WS_SYSMENU,
+    THICKFRAME or min/max boxes). Chrome fullscreen (0x160B0000) keeps WS_SYSMENU + both boxes,
+    which is why it is admissible.
+  - Case 2, a neighbour opens and closes around F11 Chrome: on both builds Chrome only shows its own
+    1 px settle (3440x1440 <-> 3440x1439, the `a023fac` note). But main traces `fullscreen`
+    AGAIN after the neighbour opens (the reflow knocked it out of the set); the branch does not.
+    Leaving F11 lands it back on its tile on both builds.
+  - Case 3: not run, one monitor only; covered by the two-display unit test.
+  - Side effect: each CosmicWin start re-tiled the maintainer's own open windows (Discord, a Chrome
+    window), as any normal start does.
+- FEATURE COMPLETE on `fix/fullscreen-uncovered-cases`. Not merged, not pushed.
