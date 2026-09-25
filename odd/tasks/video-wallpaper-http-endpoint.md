@@ -85,7 +85,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [x] V3 Server routing: `HttpAlertCommandServer` dispatches `/v1/wallpaper/video` to a new handler
   delegate after the SAME gates. Real-listener tests, as in `HttpAlertCommandServerTests`, including
   401 without a token and 403 for a foreign Origin or Host on the new route.
-- [ ] V4 Composition wiring: the handler calls the operation from V1 (never `Import` directly: imports
+- [x] V4 Composition wiring: the handler calls the operation from V1 (never `Import` directly: imports
   must stay serialized), never blocks the HTTP thread,
   and traces the outcome without absolute paths. Wiring tests.
 - [ ] V5 Docs: curl or PowerShell example with the token. Hardware check, driven by the agent:
@@ -209,4 +209,20 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   null handler made the first new test fail (500 instead of 404); using the alert cap in the
   chunked loop made the video pass-through test fail (413 instead of 400). Interop 387/42 skipped
   (parent re-run).
-- Next: V4 (composition wiring and the `video-wallpaper-http` settings key).
+- V4 done (2026-09-25), commits `11ea666` (setting) and `180fc24` (wiring). Route: delegated
+  direct (writer trigger: settings + composition + three test files). `video-wallpaper-http`
+  (default off) is parsed like `alert-http`, with a commented entry naming the shared port and
+  token file. The HTTP server block moved OUT of the `alertsEnabled` block (the pipe and the alert
+  preload stay inside). It starts when `(alerts && alert-http) || video-wallpaper-http`, and an off
+  route is passed as a null delegate (404). `SwitchVideoWallpaper(path, phase = "pick")` now returns
+  whether it posted; the HTTP delegate calls it with `phase: "http"`. It answers false (503) when
+  there is no host/player, OR when the composition has no dedicated video thread, because the
+  `onOwningThread` fallback runs inline and would do the copy on the HTTP thread. Production always
+  wires the thread (`videoWallpaperThread.Post`, a `BlockingCollection`, safe to post from the HTTP
+  thread; checked by the parent). New trace lines: `video-wallpaper phase=http ...` (no path) and
+  `http-server start requested port=<p> alerts-route=<bool> video-route=<bool>`. The existing
+  `alert-http start requested port=<p>` line is kept, emitted only when the alerts route is on. Tray
+  traces are byte-identical. TDD: RED `CS1503` (factory seam signature). Checks: build clean (3
+  pre-existing warnings); `dotnet test CosmicWin.sln` (parent re-run) Layout 198, Alert 13, Interop
+  387/42 skipped, App 990/6 skipped. Assess (base `9a056d9`): medium, 683 lines, review due.
+- Next: review 4, then V5 (docs + hardware check by the agent).
