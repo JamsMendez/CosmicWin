@@ -575,4 +575,87 @@ public sealed class FullscreenWindowTests
         Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
         Assert.Equal(before, constrained.SetPositionCallCount);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // R3-003: the turned-away outcome above is not the only one a recorded floor can produce on
+    // re-admission. It can also FIT once the tree is reshaped -- given a branch of its own by
+    // TryRegroupToFit -- while the window is fullscreen. That must cost it exactly as little as
+    // being turned away: TryRegroupToFit only reshapes the TREE through the pure
+    // TreeArranger.Arrange, never SetPosition, so a fullscreen re-admission that ends up fitting
+    // is exactly as untouched as one that does not.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The unproved success path. The floor recorded above (1800 wide) does not fit beside a
+    /// single neighbour -- too wide for any share a lone donor can spare -- so the window is
+    /// turned away and parked, exactly like the baseline. A second neighbour then arrives, and
+    /// re-admitting the parked window WHILE FULLSCREEN finds three children where the recorded
+    /// floor was measured against only two: TryRegroupToFit gives it a branch of its own, full
+    /// width, and the same 1800 now fits. It must still keep its leaf, receive no
+    /// <c>SetPosition</c> of its own, and be recorded as fullscreen exactly like an ordinary
+    /// fullscreen admission -- proving the "floor helpers never position" property the fix
+    /// relies on even on the outcome where a floor helper actually answers yes.
+    /// </summary>
+    [Fact]
+    public void AWindowWithARecordedFloor_ReAdmittedFullscreen_FitsAfterRegrouping_AndIsRecordedAsFullscreen()
+    {
+        var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([primary], primary, registry);
+        var workspace = new FakeWorkspace();
+        var trace = new RecordingTrace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            Trace = trace,
+        };
+
+        var neighbour = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        var constrained = new RecordingWindow(new IntPtr(20), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        // Same shape as the turned-away fact above: wide enough that no share of a TWO-window
+        // group can ever reach it, narrower than the whole work area -- so it does not fit beside
+        // one lone neighbour, but does fit once given the full width of a branch of its own.
+        constrained.MinimumSize = (1800, 100);
+
+        workspace.RaiseWindowAdded(neighbour);
+        workspace.RaiseWindowAdded(constrained);
+
+        // Two misses records the floor and parks it -- with only one sibling, fewer than three
+        // children means no branch is possible yet, and no two-window share reaches 1800.
+        workspace.RaiseWindowBoundsChanged(constrained);
+        workspace.RaiseWindowBoundsChanged(constrained);
+        Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
+
+        // A second neighbour arrives while constrained is still parked, so re-admission finds
+        // THREE children in the flat group -- the one thing the recorded floor was missing.
+        var second = new RecordingWindow(new IntPtr(40), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        workspace.RaiseWindowAdded(second);
+
+        var before = constrained.SetPositionCallCount;
+        constrained.SnapsBackTo = Monitor;
+        constrained.SimulateFullscreen(Monitor);
+        workspace.RaiseWindowAdded(constrained);
+
+        Assert.True(registry.TryGetLeaf(constrained.Handle, out var leaf) && leaf is not null);
+        Assert.Equal(before, constrained.SetPositionCallCount);
+        Assert.Contains(trace.Lines, line => line.StartsWith("regrouped hwnd=0x14 ", StringComparison.Ordinal));
+        Assert.Equal(1, trace.Lines.Count(
+            line => line.StartsWith("fullscreen hwnd=0x14 ", StringComparison.Ordinal)));
+        Assert.Contains(trace.Lines, line =>
+            line.StartsWith("added hwnd=0x14 ", StringComparison.Ordinal) &&
+            line.EndsWith("-> left alone (fullscreen)", StringComparison.Ordinal));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // TryGrowToFit's own success is not covered here as a second fact beside the one above. With
+    // fewer than three children TryRegroupToFit is skipped by construction (Children.Count < 3),
+    // and TryGrowToFit's reach with a single fixed donor and an unchanged work area is the same
+    // number whichever admission asks for it -- there is no fixture change that flips it from a
+    // miss to a fit without either changing the display (a different feature) or adding a third
+    // child, which hands the attempt to TryRegroupToFit first (it runs before TryGrowToFit, and
+    // per its own code mutates the tree via ExtractToOppositeAxis even on the branch that goes on
+    // to fail its own fit-check, so a third child no longer measures TryGrowToFit in isolation
+    // either). The regroup fact above already proves the shared property both helpers rely on --
+    // that DoesNotFitItsFloor's own fit-check, which both call, never positions a window.
+    // -----------------------------------------------------------------------------------------
 }
