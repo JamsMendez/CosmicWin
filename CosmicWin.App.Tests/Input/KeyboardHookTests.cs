@@ -450,7 +450,21 @@ public sealed class KeyboardHookTests
             () => clock.Value, TimeSpan.FromSeconds(300));
 
         hook.Start();
-        clock.Advance(300_000);
+
+        // Past the interval, short of the backstop: the moving cursor is what holds the watchdog
+        // back here. Proven first, or the backstop below would pass just the same with a still
+        // cursor and the test would say nothing about "even while the cursor moves". Two steps,
+        // the first under the interval, so a cursor movement is on record before any pass can
+        // decide (one jump lets a pass sample at 0 and decide at 6000).
+        clock.Advance(1_000);
+        var reads = platform.CursorReadCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
+        clock.Advance(5_000);
+        reads = platform.CursorReadCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, platform.InstallCount);
+
+        clock.Advance(294_000);
 
         Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
     }
