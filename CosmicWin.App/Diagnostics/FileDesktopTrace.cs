@@ -25,6 +25,19 @@ public interface IDesktopTrace
 /// </remarks>
 public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = null) : IDesktopTrace
 {
+    /// <summary>
+    /// A reader that opens the log with <see cref="FileShare.Read"/> (many editors, <c>Get-Content</c>
+    /// without <c>-Wait</c>, <see cref="File.ReadAllLines(string)"/>) denies writers for as long as it
+    /// holds the handle. This many attempts, spaced this closely, ride out that ordinary, short-lived
+    /// case without turning <see cref="Record"/> into a background queue or making it asynchronous.
+    /// </summary>
+    private const int MaxSharingViolationAttempts = 5;
+
+    private const int RetryDelayMilliseconds = 5;
+
+    private const int ErrorSharingViolation = unchecked((int)0x80070020);
+    private const int ErrorLockViolation = unchecked((int)0x80070021);
+
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly Lock _gate = new();
 
@@ -34,7 +47,13 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
             "CosmicWin",
             "desktop-trace.log");
 
-    /// <summary>Swallows every IO failure: the app under diagnosis must not crash because of its own diagnostics.</summary>
+    /// <summary>
+    /// Swallows every IO failure: the app under diagnosis must not crash because of its own
+    /// diagnostics. A sharing violation -- another process holding the file open without write
+    /// sharing -- is retried a bounded number of times first, because that case is usually just a
+    /// reader passing through; every other IO failure keeps today's behaviour of a single swallowed
+    /// attempt.
+    /// </summary>
     public void Record(string line)
     {
         try
@@ -48,7 +67,19 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
             var stamped = _clock().ToString("O", CultureInfo.InvariantCulture) + " " + line;
             lock (_gate)
             {
-                File.AppendAllText(path, stamped + Environment.NewLine);
+                for (var attempt = 1; attempt <= MaxSharingViolationAttempts; attempt++)
+                {
+                    try
+                    {
+                        File.AppendAllText(path, stamped + Environment.NewLine);
+                        return;
+                    }
+                    catch (IOException exception) when (IsSharingViolation(exception)
+                        && attempt < MaxSharingViolationAttempts)
+                    {
+                        Thread.Sleep(RetryDelayMilliseconds);
+                    }
+                }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -56,4 +87,7 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
         {
         }
     }
+
+    private static bool IsSharingViolation(IOException exception) =>
+        exception.HResult == ErrorSharingViolation || exception.HResult == ErrorLockViolation;
 }
