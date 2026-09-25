@@ -123,9 +123,13 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         }
 
         Assert.True(written > 0, "GetClassName should read the live host window's class.");
+        string className = new(buffer[..written]);
+
+        // exStyle 0 and isShellWindow false on purpose: they isolate the class-name rule. The live
+        // window's real values could let the test pass through another exclusion path instead.
         Assert.True(
-            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(
-                new string(buffer[..written]), exStyle: 0, isShellWindow: false));
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(className, exStyle: 0, isShellWindow: false),
+            $"The live host class '{className}' should be excluded from coverage.");
     }
 
     private static void AssertNonActivatable(HWND hwnd)

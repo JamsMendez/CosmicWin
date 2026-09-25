@@ -65,6 +65,8 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
   Commit c0745bc. Review: medium, granted, approved and acknowledged (lineage
   `review-bb5e8c56fc751d31`). Two advisory SUGGESTIONs, not applied: put the read class name in the
   assertion message; comment that `exStyle: 0` deliberately isolates the class-name rule.
+  Both applied at the maintainer's request; under the same mutation the failure now reads "The live
+  host class 'CosmicWinVideoWallpaperHost<guid>' should be excluded from coverage."
 
 ## Next step
 
