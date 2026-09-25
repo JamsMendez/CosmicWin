@@ -1688,7 +1688,11 @@ public sealed class AppComposition : IDisposable
         var alertLayer = settings.AlertsEnabled
             ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record)
             : null;
-        var videoWallpaperThread = new MtaActionThread("CosmicWinVideoWallpaperHost");
+        // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
+        // wallpaper thread's failure sink can point at it directly with no reordering.
+        var videoWallpaperThread = new MtaActionThread(
+            "CosmicWinVideoWallpaperHost",
+            onWorkFailed: errorType => desktopTrace.Record($"video-wallpaper-thread work-failed error={errorType}"));
 
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
@@ -1847,14 +1851,27 @@ public sealed class AppComposition : IDisposable
         }
     }
 
-    private sealed class MtaActionThread : IDisposable
+    /// <summary>
+    /// Made <c>internal</c> (rather than extracted to its own file) so <c>CosmicWin.App.Tests</c> --
+    /// already granted access via <see cref="System.Runtime.CompilerServices.InternalsVisibleToAttribute"/>
+    /// in <c>AssemblyInfo.cs</c> -- can drive <see cref="Run"/>'s failure path directly. That path
+    /// used to swallow a posted work item's exception with no trace at all; <paramref name="onWorkFailed"/>
+    /// (see the constructor) is how a failure now reaches the desktop trace instead.
+    /// </summary>
+    internal sealed class MtaActionThread : IDisposable
     {
         private readonly BlockingCollection<Action> _queue = [];
         private readonly Thread _thread;
+        private readonly Action<string>? _onWorkFailed;
         private bool _disposed;
 
-        public MtaActionThread(string name)
+        /// <param name="onWorkFailed">
+        /// Invoked with the exception TYPE name only (never <see cref="Exception.Message"/>, which can
+        /// hold an absolute path) when posted work throws. The loop keeps serving later work either way.
+        /// </param>
+        public MtaActionThread(string name, Action<string>? onWorkFailed = null)
         {
+            _onWorkFailed = onWorkFailed;
             _thread = new Thread(Run) { IsBackground = true, Name = name };
             _thread.SetApartmentState(ApartmentState.MTA);
             _thread.Start();
@@ -1941,10 +1958,12 @@ public sealed class AppComposition : IDisposable
                     {
                         work();
                     }
-                    catch
+                    catch (Exception exception)
                     {
                         // Posted wallpaper work must not kill the thread that owns the host HWND.
                         // Synchronous Invoke callers wrap their own failures before they get here.
+                        // Only the TYPE reaches the sink: exception.Message can hold an absolute path.
+                        _onWorkFailed?.Invoke(exception.GetType().Name);
                     }
                 }
 
