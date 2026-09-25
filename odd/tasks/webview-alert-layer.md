@@ -206,7 +206,7 @@ exception if a single cohesive slice cannot fit the budget.
   recorded for new seams/startup/reattach regressions. App suite = 1013 passed / 6 skipped;
   parent focused spot check = 10 passed; Debug solution build = 0 warnings / 0 errors.
   Hardware behavior remains T6. Engram mirror pending.
-- [ ] **T6 — Supervised hardware run** (same checks as live-alert-wallpaper T9, plus GPU/memory
+- [x] **T6 — Supervised hardware run** (same checks as live-alert-wallpaper T9, plus GPU/memory
   idle vs shown). Preflight: `CosmicWin.App` is running (one process); 18 `msedgewebview2` processes
   exist, but attribution to this app is not established. With `COSMICWIN_RUN_DESKTOP_TESTS=1`,
   the 9 `Win32VideoWallpaperHostRealAttachTests` all skipped under the desktop gate; this is not
@@ -396,7 +396,15 @@ exception if a single cohesive slice cannot fit the budget.
     - `ProcessFailed` (browser process killed): `process failed kind=BrowserProcessExited
       reason=Unexpected`, close, recreate 0.7 s later, navigation 2029 ms. The next warning
       showed at 0.56 s for its full 5 s.
-    Still not verified: the 120 ms shake visual.
+    - Shake visual (2026-09-24, closes T6): raw 1200x500 top-left frames every ~11 ms for
+      450 ms after the command, `failed` vs a `warning` control (no shake). In the control, the
+      fixed background elements (blue glow at top, orange streak, stars) stay pixel-still across
+      all frames. In `failed`, the whole video shifts and zooms back and forth from ~90 ms to
+      ~230 ms: blobs jump frame to frame, and a zoomed white shape appears and disappears in
+      alternate frames. It is still by 259 ms, and the red reveal follows (visible by ~400 ms).
+      So the native shake renders, then the page reveals.
+      A pixel-diff-only probe was ambiguous (the WebView becoming visible also spikes), so the
+      frames were judged visually.
 
 ## Progress
 
