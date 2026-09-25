@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Threading;
 
 namespace CosmicWin.App.Alerts;
 
@@ -38,13 +39,19 @@ namespace CosmicWin.App.Alerts;
 /// who cached the old value to fail its next bearer check.
 /// </para>
 /// <para>
-/// R3-token-create-race: the move/replace above is also where several concurrent FIRST calls to
-/// <see cref="LoadOrCreate(string, Action{string}?)"/> for the same missing or malformed file could
-/// otherwise race each other -- a plain check-then-act between "does the file exist" and the
-/// destructive move/replace. Closed by re-reading whatever is at the path immediately before that
-/// move/replace, and again if the move/replace itself still loses the race: either way the losing
-/// caller adopts the token a concurrent caller already wrote rather than failing or overwriting it.
-/// See <see cref="CommitTemporaryFile"/>.
+/// R3-replace-branch-race-still-open: an EARLIER version of this class tried to close the race
+/// between two concurrent <see cref="LoadOrCreate(string, Action{string}?)"/> calls for the same
+/// path with a plain re-read-then-act check immediately before the move/replace. That narrowed the
+/// window but did not close it: <see cref="File.Replace(string, string, string?)"/> does not throw
+/// just because the destination already exists -- existing is the whole point of calling it -- so
+/// two callers racing to replace the SAME malformed file could both pass the re-check and then both
+/// call <c>Replace</c>, with the later one silently discarding the earlier one's already-committed,
+/// already-returned token. No exception, no diagnostic, just a lost update. The fix here is a real
+/// mutual-exclusion lock, not a better-aimed check-then-act: the entire read-validate-create
+/// sequence in <see cref="LoadOrCreate(string, Action{string}?)"/> runs inside one named,
+/// cross-process <see cref="Mutex"/> (<see cref="LockName"/>), so at most one caller on this machine
+/// is ever inside it at a time, and the existence/validity re-read that used to be a best-effort
+/// race mitigation is now simply the ordinary read of the current, unambiguous state.
 /// </para>
 /// <para>
 /// This class never throws. A read or write failure -- e.g. the file is a directory, or the
@@ -52,7 +59,8 @@ namespace CosmicWin.App.Alerts;
 /// returns <see langword="null"/>, exactly the convention <see
 /// cref="CosmicWin.Interop.HttpAlertCommandServer"/>'s own <c>onDiagnostic</c> parameter uses, so the caller
 /// can leave the HTTP endpoint off while the pipe keeps working. The token VALUE is never included
-/// in a diagnostic message.
+/// in a diagnostic message. A timed-out wait for the lock (see <see cref="LockTimeout"/>) is treated
+/// the same way: a diagnostic and <see langword="null"/>, never a throw and never an indefinite hang.
 /// </para>
 /// </remarks>
 public static class AlertHttpTokenFile
@@ -65,6 +73,20 @@ public static class AlertHttpTokenFile
     /// <c>ceil(32 / 3) * 4 - 1</c> characters (11 groups of 4, the last one short one padding byte).
     /// </summary>
     public const int TokenLength = 43;
+
+    /// <summary>
+    /// Named, session-local (<c>Local\</c>, not <c>Global\</c> -- this token is per-user, like the
+    /// file itself) mutex serialising every <see cref="LoadOrCreate(string, Action{string}?)"/> call
+    /// on this machine against every other one, closing R3-replace-branch-race-still-open for real:
+    /// see the class remarks.
+    /// </summary>
+    private const string LockName = @"Local\CosmicWin.AlertHttpToken";
+
+    /// <summary>
+    /// Bounds the wait for <see cref="LockName"/> so a stuck or crashed holder degrades this call to
+    /// a diagnostic and <see langword="null"/> rather than hanging the caller forever.
+    /// </summary>
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>Beside <c>settings.conf</c> and <c>exceptions.conf</c>, in <c>%LOCALAPPDATA%\CosmicWin</c>.</summary>
     public static string ResolvePath() =>
@@ -81,12 +103,52 @@ public static class AlertHttpTokenFile
     /// Loads or creates the token at <paramref name="path"/>. Returns the existing token unchanged
     /// when the file already holds a valid one; otherwise generates a fresh one, writes it, and
     /// returns that. <see langword="null"/>, plus one call to <paramref name="onDiagnostic"/>, only
-    /// when the file could not be read or the fresh token could not be written -- never a throw.
+    /// when the lock could not be acquired in time, or the file could not be read or the fresh token
+    /// could not be written -- never a throw.
     /// </summary>
     public static string? LoadOrCreate(string path, Action<string>? onDiagnostic = null)
     {
         var reportDiagnostic = onDiagnostic ?? (_ => { });
 
+        using var gate = new Mutex(initiallyOwned: false, LockName);
+        bool acquired;
+        try
+        {
+            acquired = gate.WaitOne(LockTimeout);
+        }
+        catch (AbandonedMutexException)
+        {
+            // The previous holder terminated (e.g. crashed) without releasing the lock. The .NET
+            // documentation is explicit that ownership is still granted to THIS caller when this is
+            // thrown -- the file on disk cannot have been left mid-write either way, since the only
+            // write below goes through a temp-file-then-move/replace that is itself crash-safe.
+            acquired = true;
+        }
+
+        if (!acquired)
+        {
+            reportDiagnostic($"alert-http token: timed out waiting for the token lock for {path}.");
+            return null;
+        }
+
+        try
+        {
+            return LoadOrCreateLocked(path, reportDiagnostic);
+        }
+        finally
+        {
+            gate.ReleaseMutex();
+        }
+    }
+
+    /// <summary>
+    /// The actual read-validate-create sequence, run with <see cref="LockName"/> held: at most one
+    /// caller on this machine is ever in here at a time, so the read below is simply the current,
+    /// unambiguous state of <paramref name="path"/> -- not a best-effort re-check racing another
+    /// writer.
+    /// </summary>
+    private static string? LoadOrCreateLocked(string path, Action<string> reportDiagnostic)
+    {
         string? existing;
         try
         {
@@ -114,7 +176,8 @@ public static class AlertHttpTokenFile
         var token = GenerateToken();
         try
         {
-            return Write(path, token, reportDiagnostic);
+            Write(path, token);
+            return token;
         }
         catch (Exception exception) when (IsRecoverable(exception))
         {
@@ -163,11 +226,13 @@ public static class AlertHttpTokenFile
 
     /// <summary>
     /// Create-directory-then-write-temp-then-move/replace: a crash between these steps leaves either
-    /// the OLD token file untouched or the NEW one complete, never a half-written one. Returns the
-    /// token that ends up authoritative on disk, which is <paramref name="token"/> itself unless a
-    /// concurrent caller won the create race (see <see cref="CommitTemporaryFile"/>).
+    /// the OLD token file untouched or the NEW one complete, never a half-written one. Safe to do as
+    /// a plain check-then-act -- <c>File.Exists</c> then <c>Move</c> or <c>Replace</c> -- because the
+    /// caller already holds <see cref="LockName"/> for the whole read-validate-create sequence; see
+    /// the class remarks for why an EARLIER version needed (and still lost the race with) a re-check
+    /// around exactly this step.
     /// </summary>
-    private static string Write(string path, string token, Action<string> reportDiagnostic)
+    private static void Write(string path, string token)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
@@ -179,7 +244,15 @@ public static class AlertHttpTokenFile
         try
         {
             File.WriteAllText(temporaryPath, token);
-            return CommitTemporaryFile(temporaryPath, path, token, reportDiagnostic);
+
+            if (File.Exists(path))
+            {
+                File.Replace(temporaryPath, path, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(temporaryPath, path);
+            }
         }
         finally
         {
@@ -196,74 +269,6 @@ public static class AlertHttpTokenFile
             {
                 // Best-effort cleanup only; the real failure already propagates to the caller.
             }
-        }
-    }
-
-    /// <summary>
-    /// Moves/replaces <paramref name="temporaryPath"/> into <paramref name="path"/>, closing
-    /// R3-token-create-race: the plain check-then-act between "does <paramref name="path"/> exist"
-    /// and the destructive move/replace lets two concurrent first-run callers both decide to create
-    /// the file, and lets a caller replacing a MALFORMED file race a concurrent caller that already
-    /// fixed it. Two checks close both windows: (1) immediately before touching disk, re-read
-    /// whatever is at <paramref name="path"/> right now, and adopt it if it is already a valid
-    /// token -- never overwriting a token a concurrent caller just finished writing; (2) if the
-    /// move/replace itself still loses a race in the instant after that check, the same re-read runs
-    /// again as the exception filter, so the losing caller adopts the winner's token instead of
-    /// failing. Either way this returns a token, never throws for an ordinary lost race, and reports
-    /// one informational diagnostic (never the token value) when it hands back someone else's token
-    /// instead of its own.
-    /// </summary>
-    private static string CommitTemporaryFile(string temporaryPath, string path, string token, Action<string> reportDiagnostic)
-    {
-        if (TryReadValidToken(path, out var alreadyThere))
-        {
-            reportDiagnostic($"alert-http token: another caller already created {path}; using its token instead of ours.");
-            return alreadyThere!;
-        }
-
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Replace(temporaryPath, path, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(temporaryPath, path);
-            }
-
-            return token;
-        }
-        catch (Exception exception) when (IsRecoverable(exception) && TryReadValidToken(path, out var winner))
-        {
-            reportDiagnostic($"alert-http token: lost a create race for {path}; using the other caller's token instead of ours.");
-            return winner!;
-        }
-    }
-
-    /// <summary>Reads <paramref name="path"/> and reports whether it currently holds a valid token, never throwing.</summary>
-    private static bool TryReadValidToken(string path, out string? token)
-    {
-        token = null;
-        try
-        {
-            if (!File.Exists(path))
-            {
-                return false;
-            }
-
-            var content = File.ReadAllText(path).Trim();
-            if (!IsValidToken(content))
-            {
-                return false;
-            }
-
-            token = content;
-            return true;
-        }
-        catch (Exception exception) when (IsRecoverable(exception))
-        {
-            return false;
         }
     }
 

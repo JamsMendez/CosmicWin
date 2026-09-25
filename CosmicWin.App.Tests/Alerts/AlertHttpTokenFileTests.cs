@@ -1,6 +1,5 @@
 using System.IO;
 using System.Threading;
-using System.Threading.Tasks;
 using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
@@ -260,11 +259,63 @@ public sealed class AlertHttpTokenFileTests : IDisposable
     }
 
     /// <summary>
+    /// Runs <paramref name="work"/> concurrently on <paramref name="callerCount"/> DEDICATED
+    /// <see cref="Thread"/>s (R3-race-test-barrier-in-parallel-for: not the thread-pool via
+    /// <c>Parallel.For</c>, which can silently run fewer than <paramref name="callerCount"/>
+    /// workers at once on a starved pool, hiding the very race this is meant to force), synchronised
+    /// on a <see cref="Barrier"/> so every caller genuinely starts at once. Every wait is bounded: a
+    /// caller that never reaches the barrier, or never finishes, FAILS the test with a clear timeout
+    /// exception instead of hanging the run.
+    /// </summary>
+    private static void RunConcurrently(int callerCount, Action<int> work)
+    {
+        var timeout = TimeSpan.FromSeconds(10);
+        using var barrier = new Barrier(callerCount);
+        var threads = new Thread[callerCount];
+        Exception? capturedException = null;
+
+        for (var i = 0; i < callerCount; i++)
+        {
+            var index = i;
+            threads[i] = new Thread(() =>
+            {
+                try
+                {
+                    if (!barrier.SignalAndWait(timeout))
+                    {
+                        throw new TimeoutException($"Caller {index} timed out waiting at the start barrier.");
+                    }
+
+                    work(index);
+                }
+                catch (Exception exception)
+                {
+                    Interlocked.CompareExchange(ref capturedException, exception, null);
+                }
+            })
+            { IsBackground = true, Name = $"AlertHttpTokenFileTests.Race.{index}" };
+            threads[i].Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            if (!thread.Join(timeout))
+            {
+                throw new TimeoutException("A concurrent caller thread did not finish within the bounded timeout.");
+            }
+        }
+
+        if (capturedException is not null)
+        {
+            throw capturedException;
+        }
+    }
+
+    /// <summary>
     /// R3-token-create-race: several callers racing to create the SAME missing token file must all
-    /// converge on one winner rather than some of them failing the check-then-act between the
-    /// existence check and the destructive move/replace. Repeated a few times, and with a
-    /// <see cref="Barrier"/> so every caller genuinely starts at once, to give the race a real chance
-    /// to happen rather than relying on scheduler luck.
+    /// converge on one winner rather than some of them losing the check-then-act between the
+    /// existence check and the destructive move/replace. Repeated a few times to give the race a
+    /// real chance to happen rather than relying on scheduler luck.
     /// </summary>
     [Fact]
     public void ConcurrentFirstRun_AllCallersConvergeOnTheSameToken()
@@ -273,14 +324,39 @@ public sealed class AlertHttpTokenFileTests : IDisposable
         {
             var racePath = Path.Combine(_directory, $"race-{iteration}.token");
             const int callerCount = 8;
-            using var barrier = new Barrier(callerCount);
             var results = new string?[callerCount];
 
-            Parallel.For(0, callerCount, i =>
-            {
-                barrier.SignalAndWait();
-                results[i] = AlertHttpTokenFile.LoadOrCreate(racePath);
-            });
+            RunConcurrently(callerCount, i => results[i] = AlertHttpTokenFile.LoadOrCreate(racePath));
+
+            Assert.All(results, Assert.NotNull);
+
+            var onDisk = File.ReadAllText(racePath).Trim();
+            Assert.All(results, result => Assert.Equal(onDisk, result));
+        }
+    }
+
+    /// <summary>
+    /// R3-replace-branch-race-still-open: the SAME race as above, but every caller sees the file
+    /// already THERE and MALFORMED, so every one of them takes the <c>File.Replace</c> branch rather
+    /// than <c>File.Move</c>. <c>File.Replace</c> does not throw just because the destination
+    /// already exists (that is its entire job), so a plain check-then-act around it lets a later
+    /// caller silently clobber an earlier caller's already-committed, already-returned token with no
+    /// exception at all -- a lost update, not a crash. Every caller must still converge on ONE token
+    /// that matches what is actually on disk once the dust settles.
+    /// </summary>
+    [Fact]
+    public void ConcurrentReplaceOfOneMalformedFile_AllCallersConvergeOnTheSameToken()
+    {
+        for (var iteration = 0; iteration < 5; iteration++)
+        {
+            var racePath = Path.Combine(_directory, $"malformed-race-{iteration}.token");
+            Directory.CreateDirectory(_directory);
+            File.WriteAllText(racePath, "not-a-valid-token");
+
+            const int callerCount = 8;
+            var results = new string?[callerCount];
+
+            RunConcurrently(callerCount, i => results[i] = AlertHttpTokenFile.LoadOrCreate(racePath));
 
             Assert.All(results, Assert.NotNull);
 
