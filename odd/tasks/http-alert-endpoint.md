@@ -194,9 +194,52 @@ Reviewed boundary: branch point `a3e3ba8`.
     vacuous `Assert.Null(h.HttpServer)` removed. RED by mutating the trace line.
   - Checks: build 0 errors (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 190,
     Alert 13, Interop 314 (+40 skipped), App 956 (+6 skipped), 0 failed (writer and parent).
-- [ ] H5 -- README section (curl + `Invoke-RestMethod` examples, token path, settings) and hardware
+- [x] H5b -- Misleading start trace. Route: delegated writer, then inline revert.
+  - What was claimed: the parent read the port-in-use hardware run as "`Start()` succeeds silently
+    under a Winsock squatter" and had a writer add a post-start self-probe (`d20f6fb`, +185 server,
+    +130 tests, a probe header).
+  - What was true: the writer could not reproduce it (`Start()` always threw), and the trace proved
+    the writer right: the server HAD reported `alert http: failed to start listening on port 47811
+    ... HttpListenerException` twice. The parent's filter matched only `alert-http` and missed them.
+    The one real defect: `AppComposition` traced `alert-http listening` regardless of the outcome.
+  - Fix: `f28dbd3` reverts the self-probe and keeps only the wording `alert-http start requested
+    port=<port>` (+ wiring tests); the server's own failure line carries the outcome. Covered by
+    `Start_PortAlreadyInUse_ReportsDiagnosticAndDoesNotThrow` and the 3 wiring assertions.
+  - Checks: build 0 errors (3 pre-existing warnings); Layout 190, Alert 13, Interop 314 (+40
+    skipped), App 956 (+6 skipped), 0 failed.
+- [x] H5 -- README section (curl + `Invoke-RestMethod` examples, token path, settings) and hardware
   check: warning and failed via HTTP, 401 without token, a browser `fetch` from a page blocked, port
   in use -> pipe still works. Route: inline.
+  - README: new "Alerts" section (pipe CLI, HTTP endpoint, settings, token, curl +
+    `Invoke-RestMethod`, status table). Uncommitted until H5b lands (it claims the port-in-use trace).
+  - Hardware run 2026-09-25 (UTC), shell elevated, build of `258ecc9` + H5 branch via
+    `scripts/run.ps1`; `settings.conf` backed up to the session scratchpad, `alert-http = on` added.
+    - [x] start: `alert-http listening port=47811`; token file created (43 bytes); token value
+      never appears in `desktop-trace.log`.
+    - [x] real curl matrix: `warning` via 127.0.0.1 -> 202 `ok`; `failed` via `localhost` -> 202;
+      no token / wrong token -> 401; `Origin` -> 403; `OPTIONS` preflight with `Origin` -> 403, no
+      `Access-Control-*` headers; bad JSON -> 400; `warning:99` -> 400 (parser message);
+      `text/plain` -> 415; GET -> 405. Every rejection traced as `alert-http rejected <status>`.
+      Browser check was done with curl sending `Origin` + a preflight, not a real browser page.
+    - [x] display: the accepted HTTP alerts were HELD while the foreground window was
+      `CosmicWin Video Wallpaper` (a pipe alert was held too). A probe form brought to the
+      foreground released them in FIFO order: warning (HTTP) 56:23.55, failed (HTTP via localhost)
+      56:26.83, warning (pipe) 56:30.10, each 3 s. NOT an HTTP issue: pre-existing, see follow-ups.
+    - [x] port in use: a Winsock `TcpListener` on 127.0.0.1:47811 before start. First run: the
+      server traced both failed attempts, but `AppComposition` also traced `listening` (-> H5b).
+      Requests timed out against the squatter; after it exited, connection refused (no listener, as
+      expected: no retry by design). Pipe alert shown (57:45.70). Re-run with `f28dbd3`
+      (06:17:24): both `failed to start listening` lines, then `alert-http start requested
+      port=47811`; pipe alert shown 06:17:33.66, done 35.67.
+    - Cleanup: app stopped (it was not running before the run), `settings.conf` restored from the
+      backup (no `alert-http` keys). `alert-http.token` left in `%LOCALAPPDATA%\CosmicWin` (reused
+      if the endpoint is turned on; delete to rotate).
+
+## Follow-ups (outside this feature)
+
+- The video wallpaper host window can be the foreground window right after start, and the covered-
+  desktop check then holds every alert until another window takes the foreground. Seen on
+  2026-09-25 with both the pipe and HTTP. Not investigated; for the maintainer to prioritise.
 
 ## Acceptance criteria
 
@@ -216,5 +259,6 @@ Reviewed boundary: branch point `a3e3ba8`.
 
 ## Next step
 
-H2 (`HttpAlertCommandServer`) on slice branch `feat/http-alert-endpoint-h2`, starting with the
-elevation measurement of the `127.0.0.1` vs `localhost` prefix.
+All tasks done. Review the last slice if due, merge `feat/http-alert-endpoint-h5` into
+`feat/http-alert-endpoint`, then ask the maintainer about merging the feature into local `main`
+(nothing is pushed).
