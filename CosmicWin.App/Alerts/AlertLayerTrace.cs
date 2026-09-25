@@ -30,6 +30,11 @@ internal static class AlertLayerTrace
 
     public static string Done() => "alert-layer done";
 
+    public static string PageReady() => "alert-layer page ready";
+
+    public static string PendingShowApplied(string kind, int remainingMilliseconds) =>
+        $"alert-layer pending show applied kind={kind} remaining={remainingMilliseconds}";
+
     public static string Close(string reason) => $"alert-layer close reason={reason}";
 
     /// <summary><paramref name="kind"/>/<paramref name="reason"/> take the enums' own <c>ToString()</c>, same reason as <see cref="NavigationCompleted"/>.</summary>

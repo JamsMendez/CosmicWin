@@ -294,7 +294,12 @@ public sealed class WebViewAlertLayerController : IDisposable
     {
         if (!_navigationCompleted || !_pageReportedReady) return;
         _state.MarkReady();
-        if (_state.ApplyPendingShowIfDue() is { } pending) PostShow(pending.Kind, pending.DurationMilliseconds);
+        _trace?.Invoke(AlertLayerTrace.PageReady());
+        if (_state.ApplyPendingShowIfDue() is { } pending)
+        {
+            _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending.Kind, pending.DurationMilliseconds));
+            PostShow(pending.Kind, pending.DurationMilliseconds);
+        }
     }
 
     [DllImport("user32.dll")]

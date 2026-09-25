@@ -437,6 +437,14 @@ exists only on `feat/live-alert-wallpaper`) is not in the chain.
       A pixel-diff-only probe was ambiguous (the WebView becoming visible also spikes), so the
       frames were judged visually.
 
+- [ ] **T10 -- Explain the ~4 s gap after an Explorer-restart recovery.** Accepted by the
+  maintainer on 2026-09-24. T9e saw red ~4 s after the recreated page's navigation completed,
+  and there is no trace line for when a pending show is applied. Route: inline (one mechanical
+  trace addition plus its tests), then a hardware re-measure with one Explorer restart.
+  - [ ] **T10a -- Trace page ready and pending-show application.** Add `alert-layer page ready`
+    and `alert-layer pending show applied kind=<k> remaining=<ms>`. Strict TDD.
+  - [ ] **T10b -- Re-measure on hardware**, and decide whether a fix is needed.
+
 ## Progress
 
 2026-09-23: document created; page located; T0 next.

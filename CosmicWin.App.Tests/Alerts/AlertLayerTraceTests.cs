@@ -40,6 +40,14 @@ public sealed class AlertLayerTraceTests
     public void Hide_IsAFixedLine() => Assert.Equal("alert-layer hide", AlertLayerTrace.Hide());
 
     [Fact]
+    public void PageReady_IsAFixedLine() => Assert.Equal("alert-layer page ready", AlertLayerTrace.PageReady());
+
+    [Fact]
+    public void PendingShowApplied_NamesKindAndRemainingDuration() =>
+        Assert.Equal("alert-layer pending show applied kind=failed remaining=17500",
+            AlertLayerTrace.PendingShowApplied("failed", 17500));
+
+    [Fact]
     public void Done_IsAFixedLine() => Assert.Equal("alert-layer done", AlertLayerTrace.Done());
 
     [Fact]
