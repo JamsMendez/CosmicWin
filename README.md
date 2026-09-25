@@ -146,7 +146,7 @@ pipe.
 | 400 | Bad JSON, unknown field, or a command the alert rules reject |
 | 401 | Missing or wrong bearer token |
 | 403 | Request from a browser (`Origin` header), a foreign `Host`, or not from this PC |
-| 404 / 405 | Any path other than `/v1/alerts`, or any method other than `POST` |
+| 404 / 405 | An unknown path, a route that is turned off, or any method other than `POST` |
 | 413 | Body larger than 1 KB |
 | 415 | `Content-Type` is not `application/json` |
 | 429 | The alert queue is full |
@@ -156,6 +156,55 @@ The endpoint listens on `127.0.0.1` and `localhost` only. It refuses connections
 machines, and it refuses web pages even when they run on your own PC. If the port is already in
 use, the HTTP endpoint stays off and the named pipe keeps working. The reason is written to
 CosmicWin's desktop trace.
+
+## Video wallpaper over HTTP
+
+The tray menu can set an MP4 as a playing wallpaper. Another program on the same PC can do the same
+over HTTP, by sending the absolute path of a video that is already on this PC. The route is **off
+by default** and independent of alerts. Turn it on in `settings.conf` and restart CosmicWin:
+
+```ini
+video-wallpaper-http = on
+```
+
+It shares the server, port (`alert-http-port`) and token file (`alert-http.token`) with the alert
+endpoint, and the same localhost-only rules apply.
+
+```powershell
+$token = Get-Content "$env:LOCALAPPDATA\CosmicWin\alert-http.token"
+$body = @{ path = 'D:\Videos\space.mp4' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:47811/v1/wallpaper/video `
+  -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body
+```
+
+```sh
+curl -X POST http://127.0.0.1:47811/v1/wallpaper/video \
+  -H "Authorization: Bearer $(cat "$LOCALAPPDATA/CosmicWin/alert-http.token")" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"D:\\Videos\\space.mp4"}'
+```
+
+The body is a JSON object with one field, `path`. The path must be absolute and start with a drive
+letter and a backslash (`C:\...`). Relative paths, forward slashes, network shares, network drives,
+device paths and URLs are rejected. Nothing is ever downloaded.
+
+The request is answered as soon as the path is checked. The switch itself then runs in the
+background, exactly like a pick from the tray menu. If the video is on the same drive as
+`%LOCALAPPDATA%`, CosmicWin imports it as a hard link, which is instant whatever the file size.
+Otherwise it copies the file, which can take minutes for a large video. Either way the wallpaper
+keeps playing if you later move or delete the original. A hard-linked import is the same data as
+the original, so editing the original in place changes the wallpaper too. If the switch fails, the
+previous video keeps playing. The outcome is written to the desktop trace, never the path.
+
+| Status | Meaning |
+|---|---|
+| 202 | Accepted; the switch runs in the background. Body `ok` |
+| 400 | Bad JSON, unknown field, or a path that is not an absolute local drive path |
+| 401 / 403 / 405 | As for alerts |
+| 404 | The file does not exist, or the route is turned off (the body tells which) |
+| 413 | Body larger than 4 KB |
+| 415 | The file is not an `.mp4`, or `Content-Type` is not `application/json` (the body tells which) |
+| 503 | This CosmicWin has no video wallpaper to switch |
 
 ## Keybindings
 
