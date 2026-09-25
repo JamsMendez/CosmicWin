@@ -68,7 +68,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 
 ## Tasks
 
-- [ ] V1 Extract the tray closure into one named operation, for example `SwitchVideoWallpaper(path)`,
+- [x] V1 Extract the tray closure into one named operation, for example `SwitchVideoWallpaper(path)`,
   dispatched on `onVideoWallpaperThread`. The tray calls it, and its behaviour and tests do not
   change. This is a pure refactor, with existing wiring tests as the guard.
 - [ ] V1b `VideoWallpaperImport.Import`: hard link (to a temp name beside the destination, then the
@@ -99,4 +99,15 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 
 ## Progress
 
-Decisions 1-5 taken with the maintainer on 2026-09-25. Next: V1.
+Decisions 1-5 taken with the maintainer on 2026-09-25.
+
+- V1 done (2026-09-25), commit `40efc84`. Route: delegated direct (writer trigger: reading that
+  prepares a write in a 1600-line file). `SwitchVideoWallpaper(string path)` is a local function in
+  `Wire`, right after `ActivateVideoWallpaper`; it null-checks host/player itself and posts the
+  unchanged stop/import/persist/activate work item. The tray now calls it. The reconcile-tick and
+  startup dispatches are different operations and were left alone. TDD: pure refactor, guarded by
+  `VideoWallpaperPlaybackWiringTests` (restore on import failure, with and without a previous path).
+  Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13,
+  Interop 315/42 skipped, App 958/6 skipped, before and after; App re-run by the parent: 958/6.
+  Review assess (base `ed85eeb`, committed-only): medium, `under_budget`, pending in the slice.
+- Next: V1b (hard-link import).
