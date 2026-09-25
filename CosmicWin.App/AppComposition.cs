@@ -942,11 +942,9 @@ public sealed class AppComposition : IDisposable
                         httpAlertServer = httpServerFactory(alertHttpPort, token, HandleAlertCommand,
                             message => desktopTrace?.Record(message));
                         httpAlertServer.Start();
-                        // H5b: Start() succeeding does not by itself prove anything is listening
-                        // behind it (see HttpAlertCommandServer's own remarks -- a squatted port can
-                        // make it succeed silently) -- the server's own background self-probe reports
-                        // the actual reachable/NOT reachable outcome asynchronously, through this same
-                        // desktopTrace sink.
+                        // H5b: Start() never throws -- a port already in use is reported by the server
+                        // itself as "alert http: failed to start listening ..." through this same sink
+                        // -- so this line must not claim the endpoint is listening.
                         desktopTrace?.Record($"alert-http start requested port={alertHttpPort}");
                     }
                 }

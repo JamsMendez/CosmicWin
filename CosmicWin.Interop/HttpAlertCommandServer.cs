@@ -55,28 +55,6 @@ namespace CosmicWin.Interop;
 /// <see cref="Win32.NamedPipeAlertCommandServer.RunLoop"/> does, though no black-box test can
 /// currently force that path open (see <c>HttpAlertCommandServerTests</c>'s "R3-005" note).
 /// </para>
-/// <para>
-/// MEASURED 2026-09-25 on hardware (bug found during the H5 manual check): a plain Winsock <see
-/// cref="System.Net.Sockets.TcpListener"/> already bound to the port made <see
-/// cref="HttpListener.Start"/> succeed WITHOUT throwing -- http.sys registered the URL prefixes, the
-/// diagnostic said the port was listening, and every request then hung forever (the squatter
-/// accepted the TCP connection at the socket level and simply never answered it; http.sys itself
-/// never saw the request). After the squatter exited, requests got connection refused: http.sys
-/// never quietly re-bound on its own. So a successful, non-throwing <see cref="HttpListener.Start"/>
-/// is NOT proof this instance can actually be reached -- <see cref="Start"/> below always follows it
-/// with a background reachability self-probe (a real HTTP request to its own <see
-/// cref="AlertHttpProtocol.AlertsPath"/>, answered by http.sys/this listener only if something is
-/// really listening behind it) and reports exactly one <c>reachable</c>/<c>NOT reachable</c>
-/// diagnostic once that resolves. An unreachable result stops and closes the listener so this
-/// instance goes -- and stays -- inert rather than holding a dead registration open; <see
-/// cref="Dispose"/> afterwards is still safe. Attempts to reproduce the underlying "<see
-/// cref="HttpListener.Start"/> silently succeeds over an already-squatted port" quirk from a test in
-/// this repository's environment -- including from a genuinely separate process -- instead always
-/// throw immediately (the existing, already-tested "port already in use" path); the self-probe
-/// mechanism is therefore covered here through an internal, test-only probe seam
-/// (<c>HttpAlertCommandServerTests</c>'s "H5b" region) rather than a literal black-box squatter race,
-/// the same documented-gap idiom "R3-005" above already uses.
-/// </para>
 /// </remarks>
 public sealed class HttpAlertCommandServer : IAlertCommandServer
 {
@@ -101,24 +79,6 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// <summary>Bound on <see cref="Dispose"/> joining the background thread.</summary>
     private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(5);
 
-    /// <summary>
-    /// Bounds the post-start reachability self-probe's own HTTP request (see the class remarks and
-    /// <see cref="VerifyReachabilityAsync"/>) -- generous enough for a loopback round trip, short
-    /// enough that a squatted port that never answers is reported quickly.
-    /// </summary>
-    public static readonly TimeSpan SelfProbeTimeout = TimeSpan.FromSeconds(1);
-
-    /// <summary>
-    /// Sent on the self-probe's own GET request so <see cref="HandleRequest"/> can recognise it and
-    /// skip the ordinary "rejected" diagnostic for the 405 it deliberately provokes (gate step 5) --
-    /// success for the probe, not an anomaly worth alarming an operator over. The header carries no
-    /// authority: it never lets a request skip an earlier gate step (loopback/Origin/Host/path), it
-    /// only silences one diagnostic on the one gate step the probe itself is designed to hit.
-    /// </summary>
-    internal const string SelfProbeHeaderName = "X-CosmicWin-Self-Probe";
-
-    private const string SelfProbeHeaderValue = "1";
-
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly int _port;
@@ -126,7 +86,6 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     private readonly byte[] _tokenBytes;
     private readonly Func<string, string> _handleCommand;
     private readonly Action<string> _onDiagnostic;
-    private readonly Func<int, Task<SelfProbeOutcome>>? _selfProbeOverride;
     private readonly CancellationTokenSource _stopping = new();
 
     private HttpListener? _listener;
@@ -148,21 +107,6 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// the raw <c>Authorization</c> header.
     /// </param>
     public HttpAlertCommandServer(int port, string token, Func<string, string> handleCommand, Action<string>? onDiagnostic = null)
-        : this(port, token, handleCommand, onDiagnostic, selfProbeOverride: null)
-    {
-    }
-
-    /// <summary>
-    /// Test-only seam (see the class remarks' "H5b" note): lets a test replace the real HTTP
-    /// self-probe with a deterministic stub, since the OS-level condition it defends against --
-    /// <see cref="HttpListener.Start"/> succeeding over a port something else already occupies --
-    /// could not be reproduced from a black-box test in this repository's environment. Production
-    /// code always uses the public constructor above, which leaves this <see langword="null"/> and
-    /// so always runs the real <see cref="DefaultSelfProbeAsync"/>.
-    /// </summary>
-    internal HttpAlertCommandServer(
-        int port, string token, Func<string, string> handleCommand, Action<string>? onDiagnostic,
-        Func<int, Task<SelfProbeOutcome>>? selfProbeOverride)
     {
         if (port is < 1 or > 65535)
         {
@@ -176,7 +120,6 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         _tokenBytes = Encoding.UTF8.GetBytes(token);
         _handleCommand = handleCommand ?? throw new ArgumentNullException(nameof(handleCommand));
         _onDiagnostic = onDiagnostic ?? (_ => { });
-        _selfProbeOverride = selfProbeOverride;
     }
 
     /// <summary>
@@ -205,105 +148,6 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         _listener = listener;
         _thread = new Thread(() => RunLoop(listener)) { IsBackground = true, Name = "CosmicWin.AlertHttp" };
         _thread.Start();
-
-        // Fire-and-forget, deliberately: Start() itself must stay fast and never throw (see its own
-        // doc comment). The probe's own diagnostic, once it resolves, is the caller-visible result.
-        _ = Task.Run(() => VerifyReachabilityAsync(listener));
-    }
-
-    /// <summary>
-    /// Runs once per successful <see cref="Start"/>, off the caller's thread: see the class remarks'
-    /// "H5b" note for why a listener that started without throwing is not by itself proof anything is
-    /// actually listening behind it. Reports exactly one diagnostic and, on failure, stops and closes
-    /// <paramref name="listener"/> so this instance goes -- and stays -- inert instead of holding a
-    /// dead registration open. Deliberately does NOT set <see cref="_disposed"/>: a real,
-    /// caller-initiated <see cref="Dispose"/> -- before, during or after this runs -- must still be
-    /// able to run its own full, symmetric teardown (join the thread, dispose <see cref="_stopping"/>)
-    /// rather than short-circuit on a flag this method set for an unrelated reason.
-    /// </summary>
-    private async Task VerifyReachabilityAsync(HttpListener listener)
-    {
-        var probe = _selfProbeOverride ?? DefaultSelfProbeAsync;
-        SelfProbeOutcome outcome;
-        try
-        {
-            outcome = await probe(_port).ConfigureAwait(false);
-        }
-        catch (Exception error)
-        {
-            outcome = SelfProbeOutcome.Unreachable($"{error.GetType().Name}: {error.Message}");
-        }
-
-        if (_disposed)
-        {
-            // A real Dispose already ran (or is racing this): nothing left to report or clean up.
-            return;
-        }
-
-        if (outcome.Reachable)
-        {
-            _onDiagnostic($"alert http: reachable on port {_port}");
-            return;
-        }
-
-        _onDiagnostic($"alert http: NOT reachable on port {_port} ({outcome.Detail}); another program may be using the port. The named pipe still works.");
-
-        try
-        {
-            listener.Stop();
-        }
-        catch
-        {
-            // Best-effort: the goal is only to make sure nothing keeps GetContext blocked forever.
-        }
-
-        try
-        {
-            listener.Close();
-        }
-        catch
-        {
-            // Best-effort cleanup on the way out.
-        }
-    }
-
-    /// <summary>
-    /// The real self-probe: a plain GET to this server's own <see
-    /// cref="AlertHttpProtocol.AlertsPath"/>, carrying <see cref="SelfProbeHeaderName"/> so <see
-    /// cref="HandleRequest"/> recognises it and skips the ordinary "rejected" diagnostic for the 405
-    /// it deliberately provokes (gate step 5, reached ahead of the bearer-token check -- this probe
-    /// carries no token and needs none). Reachable only if OUR listener answered with OUR exact
-    /// method-not-allowed body -- a squatter that merely accepted the TCP connection and never
-    /// answered at all times out instead, and anything else answering (a different server entirely)
-    /// would not match the exact body either.
-    /// </summary>
-    private static async Task<SelfProbeOutcome> DefaultSelfProbeAsync(int port)
-    {
-        using var client = new HttpClient { Timeout = SelfProbeTimeout };
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}");
-        request.Headers.TryAddWithoutValidation(SelfProbeHeaderName, SelfProbeHeaderValue);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.SendAsync(request).ConfigureAwait(false);
-        }
-        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or OperationCanceledException)
-        {
-            return SelfProbeOutcome.Unreachable($"{error.GetType().Name}: {error.Message}");
-        }
-
-        using (response)
-        {
-            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            var expected = AlertPipeProtocol.FormatError("method not allowed");
-            if (response.StatusCode == HttpStatusCode.MethodNotAllowed && string.Equals(body, expected, StringComparison.Ordinal))
-            {
-                return SelfProbeOutcome.Success();
-            }
-
-            return SelfProbeOutcome.Unreachable($"unexpected reply {(int)response.StatusCode} {response.StatusCode}");
-        }
     }
 
     /// <summary>
@@ -440,16 +284,11 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         }
 
         // 5. Method. OPTIONS (a CORS preflight) is rejected here too, and never answered with any
-        // Access-Control-* header. A request carrying the self-probe header (see
-        // VerifyReachabilityAsync/DefaultSelfProbeAsync) only ever reaches THIS branch by design --
-        // still having passed every gate step ahead of it unmodified -- and gets the identical 405
-        // reply, just without the operator-facing "rejected" diagnostic: it is the probe succeeding,
-        // not an anomaly.
+        // Access-Control-* header.
         if (!string.Equals(request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
         {
             response.Headers["Allow"] = "POST";
-            var isSelfProbe = string.Equals(request.Headers[SelfProbeHeaderName], SelfProbeHeaderValue, StringComparison.Ordinal);
-            Reject(response, 405, "method not allowed", suppressDiagnostic: isSelfProbe);
+            Reject(response, 405, "method not allowed");
             return;
         }
 
@@ -642,13 +481,9 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         return true;
     }
 
-    private void Reject(HttpListenerResponse response, int status, string reason, bool suppressDiagnostic = false)
+    private void Reject(HttpListenerResponse response, int status, string reason)
     {
-        if (!suppressDiagnostic)
-        {
-            _onDiagnostic($"alert-http rejected {status} {reason}");
-        }
-
+        _onDiagnostic($"alert-http rejected {status} {reason}");
         WriteReply(response, status, AlertPipeProtocol.FormatError(reason));
     }
 
@@ -710,16 +545,4 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             _stopping.Dispose();
         }
     }
-}
-
-/// <summary>
-/// The result of one reachability self-probe (see <see cref="HttpAlertCommandServer.VerifyReachabilityAsync"/>):
-/// either reachable, or not with a short, diagnostic-only <see cref="Detail"/> -- never the bearer
-/// token or any other request content.
-/// </summary>
-internal readonly record struct SelfProbeOutcome(bool Reachable, string? Detail)
-{
-    public static SelfProbeOutcome Success() => new(true, null);
-
-    public static SelfProbeOutcome Unreachable(string detail) => new(false, detail);
 }
