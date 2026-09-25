@@ -225,4 +225,11 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   traces are byte-identical. TDD: RED `CS1503` (factory seam signature). Checks: build clean (3
   pre-existing warnings); `dotnet test CosmicWin.sln` (parent re-run) Layout 198, Alert 13, Interop
   387/42 skipped, App 990/6 skipped. Assess (base `9a056d9`): medium, 683 lines, review due.
-- Next: review 4, then V5 (docs + hardware check by the agent).
+- Review 4 (2026-09-25): assess (base `9a056d9`) medium, `slice_budget_reached` (703 lines).
+  Maintainer granted. Lens review-reliability, lineage `review-894fc5f1fe779e0c`: APPROVED,
+  acknowledged, authority burned. The reviewed boundary is now `7403bbb`. One SUGGESTION, not yet
+  authorized: R3-http-switch-no-host-branch-unproved. `HttpSwitch_WithNoHostOrPlayer_ReturnsFalse`
+  wires no scheduler, so it stops at the missing-thread check and never reaches
+  SwitchVideoWallpaper's null host/player branch. Needed: a case with a scheduler but no
+  host/player, asserting false and nothing queued.
+- Next: the maintainer decides the suggestion, then V5 (docs + hardware check by the agent).
