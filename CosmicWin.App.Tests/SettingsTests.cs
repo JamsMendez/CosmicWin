@@ -456,4 +456,89 @@ public sealed class SettingsTests
         Assert.True(settings.AlertHttpEnabled);
         Assert.Equal(9999, settings.AlertHttpPort);
     }
+
+    /// <summary>
+    /// Off unless the file says otherwise, for the same reason <see cref="Settings.AlertHttpEnabled"/>
+    /// is: a settings file that has never been written must not open a route nobody asked for.
+    /// </summary>
+    [Fact]
+    public void VideoWallpaperHttpIsOff_UnlessTheFileSaysOtherwise()
+    {
+        Assert.False(Settings.Default.VideoWallpaperHttpEnabled);
+        Assert.False(Settings.Parse(string.Empty).VideoWallpaperHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("video-wallpaper-http = on")]
+    [InlineData("video-wallpaper-http=on")]
+    [InlineData("  VIDEO-WALLPAPER-HTTP   =   On  ")]
+    [InlineData("video-wallpaper-http = true")]
+    [InlineData("video-wallpaper-http = 1")]
+    public void VideoWallpaperHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.True(Settings.Parse(line).VideoWallpaperHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("video-wallpaper-http = off")]
+    [InlineData("video-wallpaper-http = false")]
+    [InlineData("video-wallpaper-http = 0")]
+    public void VideoWallpaperHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.False(Settings.Parse(line).VideoWallpaperHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("video-wallpaper-http = perhaps")]
+    [InlineData("video-wallpaper-http =")]
+    [InlineData("video-wallpaper-http")]
+    public void AnUnreadableVideoWallpaperHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.False(Settings.Parse(line).VideoWallpaperHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SerializeThenParse_RoundTripsTheVideoWallpaperHttpSwitch(bool videoWallpaperHttpEnabled)
+    {
+        var original = new Settings(FocusBorder: true, VideoWallpaperHttpEnabled: videoWallpaperHttpEnabled);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheVideoWallpaperHttpSwitchAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, VideoWallpaperHttpEnabled: true).Serialize();
+
+        Assert.Contains("# video-wallpaper-http:", serialized, StringComparison.Ordinal);
+        Assert.Contains("video-wallpaper-http = on", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>The comment tells the user this route shares the alert-http port and token file.</summary>
+    [Fact]
+    public void TheVideoWallpaperHttpComment_NamesTheSharedPortAndTokenFile()
+    {
+        var serialized = new Settings(FocusBorder: true).Serialize();
+        var lines = serialized.Split('\n');
+        var commentIndex = Array.FindIndex(
+            lines, line => line.Contains("video-wallpaper-http:", StringComparison.Ordinal));
+        var comment = string.Join('\n', lines.Skip(commentIndex).TakeWhile(
+            line => line.TrimStart().StartsWith('#')));
+
+        Assert.Contains("port", comment, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("alert-http", comment, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void VideoWallpaperHttpIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\nvideo-wallpaper-http = on\nalert-http = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.True(settings.VideoWallpaperHttpEnabled);
+        Assert.False(settings.AlertHttpEnabled);
+    }
 }

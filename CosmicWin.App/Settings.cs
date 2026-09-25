@@ -36,6 +36,12 @@ namespace CosmicWin.App;
 /// Defaults to <see cref="AlertHttpProtocol.DefaultPort"/>, the same constant the endpoint itself
 /// falls back to, so an unconfigured settings file and a freshly started server agree on the port.
 /// </param>
+/// <param name="VideoWallpaperHttpEnabled">
+/// Whether a request to switch the video wallpaper is also accepted over the SAME loopback-only HTTP
+/// endpoint <see cref="AlertHttpEnabled"/> gates -- the same port and the same bearer token file, no
+/// second server. Off by default, for the same reason <see cref="AlertHttpEnabled"/> is: a settings
+/// file that has never been written must not open a network-facing route nobody asked for.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -55,7 +61,7 @@ namespace CosmicWin.App;
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
-    int AlertHttpPort = AlertHttpProtocol.DefaultPort)
+    int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -79,6 +85,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string AlertHttpPortKey = "alert-http-port";
 
+    private const string VideoWallpaperHttpEnabledKey = "video-wallpaper-http";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -99,6 +107,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var alertsEnabled = Default.AlertsEnabled;
         var alertHttpEnabled = Default.AlertHttpEnabled;
         var alertHttpPort = Default.AlertHttpPort;
+        var videoWallpaperHttpEnabled = Default.VideoWallpaperHttpEnabled;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -158,10 +167,15 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 alertHttpPort = port;
             }
+            else if (key.Equals(VideoWallpaperHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var videoWallpaperHttpFlag))
+            {
+                videoWallpaperHttpEnabled = videoWallpaperHttpFlag;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
-            alertHttpEnabled, alertHttpPort);
+            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -193,6 +207,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {AlertHttpPortKey}: the loopback TCP port the HTTP endpoint listens on when {AlertHttpEnabledKey} is on.
          {AlertHttpPortKey} = {AlertHttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+
+         # {VideoWallpaperHttpEnabledKey}: on to also accept a request to switch the video wallpaper
+         # over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates -- the same port and
+         # the same alert-http.token bearer token file, off to leave that route closed.
+         {VideoWallpaperHttpEnabledKey} = {(VideoWallpaperHttpEnabled ? "on" : "off")}
 
          """;
 
