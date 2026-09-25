@@ -43,6 +43,14 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - The request carries an ABSOLUTE path to a video file already on this PC. No downloads and no
   external URLs: an `http(s)://`, `file://` or any other URI scheme is rejected with 400. This
   settles part of decision 4 below: the path must be absolute and local.
+- Decision 1: `POST /v1/wallpaper/video` with body `{"path":"C:\\...\\x.mp4"}`, on the SAME server,
+  port, token and gates as `/v1/alerts`. No second server.
+- Decision 2: a per-route switch. New settings key `video-wallpaper-http`, default off. The server
+  starts when at least one route is on (`alerts && alert-http`, or `video-wallpaper-http`); a route
+  whose switch is off answers 404, as if it did not exist. `alert-http` keeps its name.
+- Decision 3: validate synchronously, answer `202 Accepted`, and run the copy and switch on the
+  video wallpaper MTA thread, like the tray pick. Validation failures answer at once with their
+  code. The final outcome (playing, or failed and restored) goes to the trace only.
 
 ## Decisions to take first (maintainer)
 
