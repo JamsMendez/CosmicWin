@@ -351,6 +351,23 @@ public sealed class FullscreenWindowTests
     }
 
     /// <summary>
+    /// Every other admission writes an `added` line once it finishes; this path used to return
+    /// before ever reaching it. Same shape as the ordinary line, but says the window was left
+    /// alone because it is fullscreen, since nothing of its own was actually moved.
+    /// </summary>
+    [Fact]
+    public void AWindowAdmittedAlreadyFullscreen_IsTracedAsAdded()
+    {
+        using var h = new Harness();
+
+        var game = new RecordingWindow(new IntPtr(30), Monitor, className: "Game", processName: "game.exe");
+        h.Workspace.RaiseWindowAdded(game);
+
+        Assert.Contains(h.Trace.Lines, line => line ==
+            "added hwnd=0x1E class=Game proc=game.exe [L=0 T=0 W=1920 H=1080] -> left alone (fullscreen)");
+    }
+
+    /// <summary>
     /// It still gets a leaf -- InsertWindow runs before the fullscreen check turns the arrange's
     /// SetPosition off -- so the tree already has a tile on record for it, and leaving fullscreen
     /// lands it there like any other entry, not through a second admission.

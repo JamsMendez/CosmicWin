@@ -430,6 +430,14 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                     $"proc={window.ProcessName} -- left alone until it is a window again");
             }
 
+            // Every other admission ends in an `added` line; this early return used to skip it,
+            // leaving the admission invisible in the trace next to every other one. Same shape,
+            // but nothing of the window's own was moved, so it says so instead of a destination.
+            Trace?.Record(
+                $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                $"[L={window.Bounds.Left} T={window.Bounds.Top} " +
+                $"W={window.Bounds.Width} H={window.Bounds.Height}] -> left alone (fullscreen)");
+
             Arrange(tree, workArea);
             return;
         }
