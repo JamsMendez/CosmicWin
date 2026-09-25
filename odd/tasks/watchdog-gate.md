@@ -41,7 +41,8 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
 - [x] **W1 -- Gate compares against the latest session input.** RED: a dead hook, then mouse,
   then typing, must reinstall before the backstop. Keep mouse-only input from reinstalling.
   Route: delegated writer (2 non-trivial files). Commit `502f23a`.
-- [ ] **W2 -- Backstop default 30 minutes.** RED on the default value. Route: same writer.
+- [x] **W2 -- Backstop default 30 minutes.** RED on the default value. Route: same writer.
+  Commit `2f0c037`.
 - [ ] **W3 -- Hardware check.** Watch the trace for a working period and compare the reinstall
   rate with the baseline (about 64/day since 09-20).
 
@@ -65,3 +66,12 @@ too. `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj --filter
 FullyQualifiedName~KeyboardHookTests` run 30x after a real build: every run showed exactly 30
 passed / 1 failed (the not-yet-implemented W2 default-value test), no flakiness in the other 30.
 W2 next.
+
+2026-09-24: W2 done, commit `2f0c037`. RED confirmed earlier (test added alongside W1's edits,
+`DefaultWatchdogBackstop_IsThirtyMinutes`, failed `Expected 00:30:00, Actual 00:05:00`) before
+raising the default and rewriting its doc comment. `dotnet build CosmicWin.sln -c Debug`: 0
+errors. `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj`: 776 passed / 6 skipped (774
+baseline + the 2 tests added for this feature), 0 failed. `--filter
+FullyQualifiedName~KeyboardHookTests` run 30x after a real build: 30/30 runs clean, 0 flaky
+failures. `git diff --check` clean on both commits. W1 and W2 complete; W3 (hardware trace watch)
+is out of scope for this writer -- left for the maintainer.
