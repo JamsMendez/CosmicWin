@@ -495,4 +495,84 @@ public sealed class FullscreenWindowTests
         Assert.Equal(1, trace.Lines.Count(
             line => line.StartsWith("fullscreen hwnd=0x14 ", StringComparison.Ordinal)));
     }
+
+    // -----------------------------------------------------------------------------------------
+    // R3-001, the unproved path: a floor already on record. AddWindow's fullscreen early return
+    // sat BEFORE DoesNotFitItsFloor, so a window re-admitted while fullscreen skipped that check
+    // entirely -- unlike the ordinary (non-fullscreen) re-admission of the very same window.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Baseline for the comparison below: a NON-fullscreen re-admission of a window whose floor
+    /// is already on record, and still does not fit any tile with its neighbour present, is
+    /// turned away before anything of its own is moved -- no extra <c>SetPosition</c> call, and
+    /// no leaf.
+    /// </summary>
+    [Fact]
+    public void AWindowWithARecordedFloor_ReAdmittedNonFullscreen_IsTurnedAwayBeforeAnythingMoves()
+    {
+        var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([primary], primary, registry);
+        var workspace = new FakeWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null);
+
+        var neighbour = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        var constrained = new RecordingWindow(new IntPtr(20), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        // Wider than either half-tile beside a neighbour, narrower than the whole work area -- the
+        // same shape MinimumSizeWindowTests.Floor uses, so no regroup or share can ever reach it.
+        constrained.MinimumSize = (1800, 100);
+
+        workspace.RaiseWindowAdded(neighbour);
+        workspace.RaiseWindowAdded(constrained);
+
+        // Two misses records the floor and parks it (MinimumSizeWindowTests' own shape).
+        workspace.RaiseWindowBoundsChanged(constrained);
+        workspace.RaiseWindowBoundsChanged(constrained);
+        Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
+
+        var before = constrained.SetPositionCallCount;
+        workspace.RaiseWindowAdded(constrained);
+
+        Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
+        Assert.Equal(before, constrained.SetPositionCallCount);
+    }
+
+    /// <summary>
+    /// The unproved path itself. Re-admitted while ALSO fullscreen, the same window with the same
+    /// unfit floor must end up EQUIVALENT to the baseline above -- turned away, no leaf, no extra
+    /// <c>SetPosition</c> call -- not squatting on a leaf whose tile it can never fit, which is
+    /// what the earlier ordering (fullscreen checked before the floor) produced: two rounds
+    /// positioning it into an over-floor rectangle before a third round finally parked it.
+    /// </summary>
+    [Fact]
+    public void AWindowWithARecordedFloor_ReAdmittedFullscreen_IsAlsoTurnedAwayBeforeAnythingMoves()
+    {
+        var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([primary], primary, registry);
+        var workspace = new FakeWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null);
+
+        var neighbour = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        var constrained = new RecordingWindow(new IntPtr(20), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        constrained.MinimumSize = (1800, 100);
+
+        workspace.RaiseWindowAdded(neighbour);
+        workspace.RaiseWindowAdded(constrained);
+
+        workspace.RaiseWindowBoundsChanged(constrained);
+        workspace.RaiseWindowBoundsChanged(constrained);
+        Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
+
+        var before = constrained.SetPositionCallCount;
+        constrained.SnapsBackTo = Monitor;
+        constrained.SimulateFullscreen(Monitor);
+        workspace.RaiseWindowAdded(constrained);
+
+        Assert.False(registry.TryGetLeaf(constrained.Handle, out _));
+        Assert.Equal(before, constrained.SetPositionCallCount);
+    }
 }

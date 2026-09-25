@@ -412,36 +412,6 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         WorkspaceSessionAdapter.InsertWindow(tree, _registry, workArea, window, focused);
         _owners[window.Handle] = display;
 
-        // Case 1 of the fullscreen defect: a window admitted ALREADY fullscreen (a game that
-        // launches straight into it) must not be shrunk to its tile by the arrange below --
-        // measuring it against a floor it never asked for is exactly the fight this adapter is
-        // supposed to stay out of. It already has the leaf InsertWindow just gave it, so Arrange
-        // below still computes a tile for it -- only skips POSITIONING it -- and it lands there the
-        // moment OnWindowBoundsChanged sees it leave fullscreen, same as any other fullscreen entry.
-        // Judged against every display TreeManager knows, not just `display` (this window's OWNER):
-        // a game can be launched, or an already-open one dragged, straight onto a monitor other than
-        // the one its tree ends up filed under.
-        if (IsFullscreen(window, _treeManager.Displays))
-        {
-            if (_fullscreen.Add(window.Handle))
-            {
-                Trace?.Record(
-                    $"fullscreen hwnd=0x{window.Handle:X} class={window.ClassName} " +
-                    $"proc={window.ProcessName} -- left alone until it is a window again");
-            }
-
-            // Every other admission ends in an `added` line; this early return used to skip it,
-            // leaving the admission invisible in the trace next to every other one. Same shape,
-            // but nothing of the window's own was moved, so it says so instead of a destination.
-            Trace?.Record(
-                $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
-                $"[L={window.Bounds.Left} T={window.Bounds.Top} " +
-                $"W={window.Bounds.Width} H={window.Bounds.Height}] -> left alone (fullscreen)");
-
-            Arrange(tree, workArea);
-            return;
-        }
-
         // A window whose floor is already on record is measured against the tile this tree WOULD
         // hand it, and turned away BEFORE anything is moved. Arranging is arithmetic; positioning
         // is what the desktop sees and what the workspace files as the window's bounds.
@@ -454,6 +424,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // already written down.
         //
         // Admission is still retried FREELY -- this is the cheap half of it, not a refusal.
+        //
+        // Checked BEFORE the fullscreen branch below, on purpose (R3-001): TryRegroupToFit and
+        // TryGrowToFit only reshape the TREE (TreeArranger.Arrange, never SetPosition), so running
+        // them here costs a fullscreen window nothing it does not already pay elsewhere, and a
+        // floor that genuinely fits nothing must turn the window away -- fullscreen or not -- the
+        // same way it turns away an ordinary re-admission. Checking fullscreen FIRST let a window
+        // whose floor was already known not to fit keep the leaf InsertWindow just gave it anyway;
+        // leaving fullscreen then measured that leaf's tile for the first time, on a display that
+        // had already proved it never fits, and spent two more rounds positioning the window into
+        // an over-floor rectangle before the third finally parked it -- the exact fight this floor
+        // check exists to skip.
         if (DoesNotFitItsFloor(tree, workArea, window.Handle))
         {
             // Which of the two answered, never "one of them". A trace that says branch when it
@@ -481,6 +462,37 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 Untile(window.Handle, tree, display);
                 return;
             }
+        }
+
+        // Case 1 of the fullscreen defect: a window admitted ALREADY fullscreen (a game that
+        // launches straight into it) must not be shrunk to its tile by the arrange below --
+        // measuring it against a floor it never asked for is exactly the fight this adapter is
+        // supposed to stay out of. It already has the leaf InsertWindow just gave it (reshaped by
+        // the floor check above, if it had one on record), so Arrange below still computes a tile
+        // for it -- only skips POSITIONING it -- and it lands there the moment OnWindowBoundsChanged
+        // sees it leave fullscreen, same as any other fullscreen entry. Judged against every display
+        // TreeManager knows, not just `display` (this window's OWNER): a game can be launched, or an
+        // already-open one dragged, straight onto a monitor other than the one its tree ends up
+        // filed under.
+        if (IsFullscreen(window, _treeManager.Displays))
+        {
+            if (_fullscreen.Add(window.Handle))
+            {
+                Trace?.Record(
+                    $"fullscreen hwnd=0x{window.Handle:X} class={window.ClassName} " +
+                    $"proc={window.ProcessName} -- left alone until it is a window again");
+            }
+
+            // Every other admission ends in an `added` line; this early return used to skip it,
+            // leaving the admission invisible in the trace next to every other one. Same shape,
+            // but nothing of the window's own was moved, so it says so instead of a destination.
+            Trace?.Record(
+                $"added hwnd=0x{window.Handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                $"[L={window.Bounds.Left} T={window.Bounds.Top} " +
+                $"W={window.Bounds.Width} H={window.Bounds.Height}] -> left alone (fullscreen)");
+
+            Arrange(tree, workArea);
+            return;
         }
 
         // Laid out whether or not its desktop is on screen. A hidden window accepts a position --
