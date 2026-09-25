@@ -202,9 +202,13 @@ public sealed class VideoWallpaperHttpProtocolTests
     [InlineData("C:\\videos\\x|y.mp4")]
     [InlineData("C:\\videos\\x?y.mp4")]
     [InlineData("C:\\videos\\x*y.mp4")]
+    // A colon past the drive letter names an NTFS alternate data stream, not a file.
+    [InlineData("C:\\videos\\clip.txt:hidden.mp4")]
+    [InlineData("C:\\videos\\x.mp4:stream.mp4")]
     public void TryValidate_InvalidPathCharacters_Is400(string rawPath)
     {
-        var outcome = VideoWallpaperHttpProtocol.TryValidate(Body(rawPath), out var path, out var error, FakeProbes());
+        var outcome = VideoWallpaperHttpProtocol.TryValidate(
+            Body(rawPath), out var path, out var error, FakeProbes(fileExists: true, isDirectory: false, isNetwork: false));
 
         Assert.Equal(VideoWallpaperRequestOutcome.BadRequest, outcome);
         Assert.Null(path);

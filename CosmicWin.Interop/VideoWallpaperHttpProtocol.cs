@@ -259,6 +259,15 @@ public static class VideoWallpaperHttpProtocol
             return false;
         }
 
+        // Checked only once the path is known to be drive-rooted, so a URI or a device path keeps
+        // its more specific reason above: a colon past the drive letter's own names an NTFS
+        // alternate data stream (C:\x.txt:hidden.mp4), never a plain file.
+        if (candidate.IndexOf(':', 2) >= 0)
+        {
+            error = PathHasInvalidChars;
+            return false;
+        }
+
         error = null;
         return true;
     }
