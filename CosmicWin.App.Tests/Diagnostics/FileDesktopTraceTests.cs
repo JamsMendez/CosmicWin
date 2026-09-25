@@ -18,6 +18,32 @@ public sealed class FileDesktopTraceTests : IDisposable
     private string Path_ => Path.Combine(_directory, "desktop-trace.log");
 
     /// <summary>
+    /// The retry is bounded by TIME, not by a count of sleeps: File.ReadAllLines on the real 9 MB
+    /// trace held it 22-47 ms, and a count of 5 ms sleeps shrinks to ~20 ms whenever something
+    /// (Media Foundation playing the wallpaper) raises the timer resolution to 1 ms. A hold of
+    /// 200 ms inside a 2 s window must still land its line, whatever the timer resolution.
+    /// </summary>
+    [Fact]
+    public async Task Record_WhenAReaderHoldsTheFileLongerThanAFewSleeps_StillWritesTheLineWithinTheWindow()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path_, string.Empty);
+        var trace = new FileDesktopTrace(Path_, retryWindow: TimeSpan.FromSeconds(2));
+
+        using var reader = new FileStream(Path_, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(200);
+            reader.Dispose();
+        });
+
+        trace.Record("desktop switch=Left");
+        await release;
+
+        Assert.Contains("desktop switch=Left", Assert.Single(File.ReadAllLines(Path_)));
+    }
+
+    /// <summary>
     /// RED before the retry existed: a reader that denies writers for ~10 ms and then lets go must
     /// still see its line land, because the writer retries instead of giving up on the first attempt.
     /// </summary>

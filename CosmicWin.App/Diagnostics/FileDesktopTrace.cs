@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 
@@ -23,15 +24,20 @@ public interface IDesktopTrace
 /// is what breaks it.
 /// </para>
 /// </remarks>
-public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = null) : IDesktopTrace
+public sealed class FileDesktopTrace(
+    string path, Func<DateTimeOffset>? clock = null, TimeSpan? retryWindow = null) : IDesktopTrace
 {
     /// <summary>
     /// A reader that opens the log with <see cref="FileShare.Read"/> (many editors, <c>Get-Content</c>
     /// without <c>-Wait</c>, <see cref="File.ReadAllLines(string)"/>) denies writers for as long as it
-    /// holds the handle. This many attempts, spaced this closely, ride out that ordinary, short-lived
-    /// case without turning <see cref="Record"/> into a background queue or making it asynchronous.
+    /// holds the handle: 22-47 ms for <c>ReadAllLines</c> on the real 9 MB trace (measured
+    /// 2026-09-25). Retrying for this long rides out that case with a 3x margin, without turning
+    /// <see cref="Record"/> into a background queue or making it asynchronous. Bounded by elapsed
+    /// TIME, not by a count of sleeps: a 5 ms sleep lasts ~15 ms at the default timer resolution but
+    /// only 5 ms once Media Foundation (the video wallpaper) raises it to 1 ms, so a fixed count would
+    /// shrink the window exactly while the wallpaper plays.
     /// </summary>
-    private const int MaxSharingViolationAttempts = 5;
+    private static readonly TimeSpan DefaultRetryWindow = TimeSpan.FromMilliseconds(150);
 
     private const int RetryDelayMilliseconds = 5;
 
@@ -39,6 +45,7 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
     private const int ErrorLockViolation = unchecked((int)0x80070021);
 
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
+    private readonly TimeSpan _retryWindow = retryWindow ?? DefaultRetryWindow;
     private readonly Lock _gate = new();
 
     public static string ResolveDefaultPath() =>
@@ -50,7 +57,7 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
     /// <summary>
     /// Swallows every IO failure: the app under diagnosis must not crash because of its own
     /// diagnostics. A sharing violation -- another process holding the file open without write
-    /// sharing -- is retried a bounded number of times first, because that case is usually just a
+    /// sharing -- is retried for a bounded time first, because that case is usually just a
     /// reader passing through; every other IO failure keeps today's behaviour of a single swallowed
     /// attempt.
     /// </summary>
@@ -67,7 +74,8 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
             var stamped = _clock().ToString("O", CultureInfo.InvariantCulture) + " " + line;
             lock (_gate)
             {
-                for (var attempt = 1; attempt <= MaxSharingViolationAttempts; attempt++)
+                var elapsed = Stopwatch.StartNew();
+                while (true)
                 {
                     try
                     {
@@ -75,7 +83,7 @@ public sealed class FileDesktopTrace(string path, Func<DateTimeOffset>? clock = 
                         return;
                     }
                     catch (IOException exception) when (IsSharingViolation(exception)
-                        && attempt < MaxSharingViolationAttempts)
+                        && elapsed.Elapsed < _retryWindow)
                     {
                         Thread.Sleep(RetryDelayMilliseconds);
                     }
