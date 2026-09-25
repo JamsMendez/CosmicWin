@@ -38,6 +38,15 @@ namespace CosmicWin.App.Alerts;
 /// who cached the old value to fail its next bearer check.
 /// </para>
 /// <para>
+/// R3-token-create-race: the move/replace above is also where several concurrent FIRST calls to
+/// <see cref="LoadOrCreate(string, Action{string}?)"/> for the same missing or malformed file could
+/// otherwise race each other -- a plain check-then-act between "does the file exist" and the
+/// destructive move/replace. Closed by re-reading whatever is at the path immediately before that
+/// move/replace, and again if the move/replace itself still loses the race: either way the losing
+/// caller adopts the token a concurrent caller already wrote rather than failing or overwriting it.
+/// See <see cref="CommitTemporaryFile"/>.
+/// </para>
+/// <para>
 /// This class never throws. A read or write failure -- e.g. the file is a directory, or the
 /// directory cannot be created -- reports a diagnostic through <paramref name="onDiagnostic"/> and
 /// returns <see langword="null"/>, exactly the convention <see
@@ -83,7 +92,7 @@ public static class AlertHttpTokenFile
         {
             existing = File.Exists(path) ? File.ReadAllText(path).Trim() : null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsRecoverable(exception))
         {
             reportDiagnostic($"alert-http token: failed to read {path}: {exception.GetType().Name}: {exception.Message}");
             return null;
@@ -94,18 +103,24 @@ public static class AlertHttpTokenFile
             return existing;
         }
 
+        if (existing is not null)
+        {
+            // R3-vacuous-token-leak-test: the one path where a diagnostic is reported AND a token is
+            // still returned to the caller, so a test can prove the token value never leaks into a
+            // diagnostic without relying only on a failure path that never produces a token at all.
+            reportDiagnostic($"alert-http token: {path} held an invalid token; replacing it with a freshly generated one.");
+        }
+
         var token = GenerateToken();
         try
         {
-            Write(path, token);
+            return Write(path, token, reportDiagnostic);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsRecoverable(exception))
         {
             reportDiagnostic($"alert-http token: failed to write {path}: {exception.GetType().Name}: {exception.Message}");
             return null;
         }
-
-        return token;
     }
 
     /// <summary>
@@ -147,10 +162,12 @@ public static class AlertHttpTokenFile
     }
 
     /// <summary>
-    /// Create-directory-then-write-temp-then-move: a crash between these steps leaves either the OLD
-    /// token file untouched or the NEW one complete, never a half-written one.
+    /// Create-directory-then-write-temp-then-move/replace: a crash between these steps leaves either
+    /// the OLD token file untouched or the NEW one complete, never a half-written one. Returns the
+    /// token that ends up authoritative on disk, which is <paramref name="token"/> itself unless a
+    /// concurrent caller won the create race (see <see cref="CommitTemporaryFile"/>).
     /// </summary>
-    private static void Write(string path, string token)
+    private static string Write(string path, string token, Action<string> reportDiagnostic)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
@@ -162,15 +179,7 @@ public static class AlertHttpTokenFile
         try
         {
             File.WriteAllText(temporaryPath, token);
-
-            if (File.Exists(path))
-            {
-                File.Replace(temporaryPath, path, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(temporaryPath, path);
-            }
+            return CommitTemporaryFile(temporaryPath, path, token, reportDiagnostic);
         }
         finally
         {
@@ -189,4 +198,81 @@ public static class AlertHttpTokenFile
             }
         }
     }
+
+    /// <summary>
+    /// Moves/replaces <paramref name="temporaryPath"/> into <paramref name="path"/>, closing
+    /// R3-token-create-race: the plain check-then-act between "does <paramref name="path"/> exist"
+    /// and the destructive move/replace lets two concurrent first-run callers both decide to create
+    /// the file, and lets a caller replacing a MALFORMED file race a concurrent caller that already
+    /// fixed it. Two checks close both windows: (1) immediately before touching disk, re-read
+    /// whatever is at <paramref name="path"/> right now, and adopt it if it is already a valid
+    /// token -- never overwriting a token a concurrent caller just finished writing; (2) if the
+    /// move/replace itself still loses a race in the instant after that check, the same re-read runs
+    /// again as the exception filter, so the losing caller adopts the winner's token instead of
+    /// failing. Either way this returns a token, never throws for an ordinary lost race, and reports
+    /// one informational diagnostic (never the token value) when it hands back someone else's token
+    /// instead of its own.
+    /// </summary>
+    private static string CommitTemporaryFile(string temporaryPath, string path, string token, Action<string> reportDiagnostic)
+    {
+        if (TryReadValidToken(path, out var alreadyThere))
+        {
+            reportDiagnostic($"alert-http token: another caller already created {path}; using its token instead of ours.");
+            return alreadyThere!;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Replace(temporaryPath, path, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(temporaryPath, path);
+            }
+
+            return token;
+        }
+        catch (Exception exception) when (IsRecoverable(exception) && TryReadValidToken(path, out var winner))
+        {
+            reportDiagnostic($"alert-http token: lost a create race for {path}; using the other caller's token instead of ours.");
+            return winner!;
+        }
+    }
+
+    /// <summary>Reads <paramref name="path"/> and reports whether it currently holds a valid token, never throwing.</summary>
+    private static bool TryReadValidToken(string path, out string? token)
+    {
+        token = null;
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            var content = File.ReadAllText(path).Trim();
+            if (!IsValidToken(content))
+            {
+                return false;
+            }
+
+            token = content;
+            return true;
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// R3-never-throws-filter: this class promises to never throw for an ordinary IO/permission/path
+    /// problem, but must not silently swallow a process-corrupting exception as if it were just a
+    /// failed file read or write. Same corruption-class exclusion
+    /// <c>AppComposition.IsRecoverableAlertLayerFailure</c> uses for the same reason.
+    /// </summary>
+    private static bool IsRecoverable(Exception exception) =>
+        exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 }
