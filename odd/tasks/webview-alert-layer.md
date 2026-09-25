@@ -253,7 +253,7 @@ exception if a single cohesive slice cannot fit the budget.
   `git diff --check` clean. Parent spot check: 6/6 wiring tests and 9/9 shake tests passed. RDD
   assess from `7462e1c`: medium, 227 lines, `under_budget`, so it stays pending in the slice.
 
-- [ ] **T9 -- Permanent preloaded alert layer, telemetry, lower latency (fixes T6 F1/F2).** The
+- [x] **T9 -- Permanent preloaded alert layer, telemetry, lower latency (fixes T6 F1/F2).** The
   maintainer accepted it on 2026-09-24. Route: one delegated writer (4+ non-trivial files:
   controller, page, wiring, tests), one work-unit commit per sub-task, strict TDD.
   - [x] **T9a -- Alert-layer telemetry.** Commit `98c72e8` (292 additions / 27 deletions).
@@ -362,7 +362,7 @@ exception if a single cohesive slice cannot fit the budget.
     tile set instead of asserting exactly one call. App suite = 1043 passed / 6 skipped (net +1);
     Interop unaffected (249 passed / 40 skipped); Debug solution build = 0 errors, same pre-existing
     warnings; `git diff --check` clean.
-  - [ ] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
+  - [x] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
     3 s alerts, covered hold, Explorer restart, GPU/memory while hidden vs shown.
     2026-09-24 run on the T9 Debug build (copied to a scratch folder so builds are not locked),
     same screen-sampling probe as T6. Passed:
@@ -384,8 +384,19 @@ exception if a single cohesive slice cannot fit the budget.
       which predates T9. 3D total: idle 2.64 %, shown 45.24 %, after 2.46 %.
     - Memory: preloaded idle 7 WebView procs, 390 MB private (accepted cost); shown 455 MB; app
       private ~241-266 MB.
-    Not run: Explorer restart and `ProcessFailed` recovery (the parent promised not to restart
-    Explorer without asking), and the 120 ms shake visual.
+    Explorer restart and `ProcessFailed` were run after `8e1c0fa`, with the maintainer's
+    explicit authorization for one Explorer restart, on the redeployed fixed build:
+    - Explorer restart (PID 11560 -> 2584, restarted on its own): the alert
+      (`failed`, 20 s) arrived just after the kill. `post-show` threw (controller already closed),
+      then `close reason=host-changed`, recreate on generation 2 (controller 356 ms, navigation
+      2025 ms). **The alert was not lost** (the `8e1c0fa` requeue path). It showed, and `done`
+      came 20.0 s after its `show`, so the original deadline was kept. Gap: the probe saw red only
+      ~4 s after navigation completed. There is no trace line for when a pending show is applied,
+      so that latency is unexplained.
+    - `ProcessFailed` (browser process killed): `process failed kind=BrowserProcessExited
+      reason=Unexpected`, close, recreate 0.7 s later, navigation 2029 ms. The next warning
+      showed at 0.56 s for its full 5 s.
+    Still not verified: the 120 ms shake visual.
 
 ## Progress
 
