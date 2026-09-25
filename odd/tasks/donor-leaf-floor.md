@@ -37,8 +37,15 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
 
 ## Tasks
 
-- [ ] T1 Leaf floor in `TransferAcross` + Layout tests (RED then GREEN), existing suites green.
-  Route: delegated writer (2 non-trivial files: LayoutTree.cs + a new test file).
+- [x] T1 Leaf floor in `TransferAcross` + Layout tests (RED then GREEN), existing suites green.
+  Route: delegated writer (2 non-trivial files: LayoutTree.cs + a new test file). Commit 77c3d39.
+  - Writer RED was compile-only (missing constant). Behavioural RED by parent mutation (floor line
+    neutralised): 4 of the 5 new tests failed (keyboard nested group, mouse drag, across-axis donor,
+    already-under-floor no-op); the plain-transfer regression test passes either way, as intended.
+  - 4 existing tests rescaled (fixtures smaller than two 208 slots), each keeping the 10% ratio as the
+    binding bound it exercises: ResizeNode headroom, ResizeNode rounded step/ceiling, ApplyEdgeDrag
+    headroom, TilingEngineContract smoke.
+  - Suites: Layout 195, Alert 13, Interop 315/42 skipped, App 958/6 skipped; build 0 errors.
 - [ ] T2 Hardware check: four windows, resize chord and mouse drag cannot push a window under 200.
 
 ## Acceptance criteria
