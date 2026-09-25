@@ -364,6 +364,28 @@ exception if a single cohesive slice cannot fit the budget.
     warnings; `git diff --check` clean.
   - [ ] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
     3 s alerts, covered hold, Explorer restart, GPU/memory while hidden vs shown.
+    2026-09-24 run on the T9 Debug build (copied to a scratch folder so builds are not locked),
+    same screen-sampling probe as T6. Passed:
+    - Preload telemetry at startup: environment 11 ms, controller 327 ms, navigation 2037 ms. So
+      navigation was most of the old per-alert latency.
+    - **F1 fixed:** the first alert after launch appears at 0.69 s. Warm `failed` 5 s: 0.45 s and
+      0.42 s to visible, visible until ~5.15 s. Warning 5 s: 0.55 s to 5.19 s. Trace shows
+      `show` -> `done` 5.0 s apart.
+    - FIFO, sequential client calls `warning:1 duration:3` then `failed:1 duration:3`: trace shows
+      warning show/done/hide, then failed shown 0.4 ms after that hide, 3 s each. (The earlier
+      concurrent-launch probe was racy; discarded.)
+    - Covered hold: a probe cover opened *before* the command, forced to foreground (verified
+      `fg == cover`), for 5.02 s. The layer appeared 0.24 s after the cover left, full 5 s.
+      Probe gotchas: a WinForms `Show()` from a background PowerShell does not take the
+      foreground (foreground lock), and T9d's immediate tick promotes an alert before a cover
+      opened *after* the command. Both runs were discarded as probe artifacts.
+    - GPU while hidden: per-process GPU engine counters (5 x 1 s) show every `msedgewebview2`
+      below 0.1 %. `CosmicWin.App` itself is 24 % summed over all engines, including video decode,
+      which predates T9. 3D total: idle 2.64 %, shown 45.24 %, after 2.46 %.
+    - Memory: preloaded idle 7 WebView procs, 390 MB private (accepted cost); shown 455 MB; app
+      private ~241-266 MB.
+    Not run: Explorer restart and `ProcessFailed` recovery (the parent promised not to restart
+    Explorer without asking), and the 120 ms shake visual.
 
 ## Progress
 
