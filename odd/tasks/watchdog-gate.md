@@ -96,3 +96,10 @@ uncommitted merge of `fix/watchdog-gate` in a throwaway worktree, 0 conflicts; L
 28412. `trace-dialogs` is off. Baseline to compare: 320 reinstalls 2026-09-20..09-25 (~64/day),
 114 of them ~300 s apart (the old 5-minute backstop), all `foundGone=0`. Expected after the fix:
 backstop reinstalls at most every 30 min of no typing, and none from mousing.
+
+2026-09-25 W3 window interrupted. At 03:37 UTC the scratch-copy instance (PID 37336, from the
+previous session's scratchpad) was stopped by the agent and replaced by a build of
+`feat/webview-alert-layer` alone, which does NOT contain this fix, for the Direct2D-removal
+hardware check. From 03:42:19 UTC the app runs a build of local `main` at `5f4560e` (both
+branches merged, all suites green) as PID 16916. Only 03:01:40-03:37 and 03:42:19 onward count
+for W3; ignore reinstall lines between 03:37 and 03:42:19.
