@@ -76,6 +76,11 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
   the link fails. Tests: same-volume link (destination shares the file identity, no bytes copied),
   cross-volume or link failure falls back to copy, the same-file short-circuit and the
   failure-leaves-previous-import guarantees still hold.
+- [ ] V1c (review follow-up, authorized 2026-09-25) When the link succeeds but the move into place
+  fails (the source held open without FILE_SHARE_DELETE), drop the link and fall back to the copy,
+  so a link is never worse than the old copy. Add the same-source re-pick test. The PREVIOUS source
+  held open blocking the replace stays a known limitation, measured in V5 (a real fix means rotating
+  the destination name).
 - [ ] V2 Protocol in Interop: route constant, JSON parse of `path`, validation, and a status code for
   each outcome (400 bad body or path, 404 file missing, 415 wrong extension, 202 accepted, 503 video
   wallpaper not available on this composition). Unit tests, as in `AlertHttpProtocolTests`.
@@ -131,4 +136,4 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   - R3-relink-same-source-untested (SUGGESTION): no unit test for re-picking the same original after
     a linked import (checked by hand on disk above, not in the suite).
   Both are proposed as follow-up V1c; not authorized yet.
-- Next: the maintainer decides V1c, then V2.
+- Next: V1c (maintainer approved it 2026-09-25), then V2.
