@@ -457,6 +457,15 @@ exists only on `feat/live-alert-wallpaper`) is not in the chain.
     unexplained, and a probe artifact from windows restored by the restart is the likely
     suspect.
 
+- [x] **T11 -- Drop the `.local` virtual host (the ~2 s page navigation).** 2026-09-25, the
+  maintainer asked to keep advancing. The WebView2 reference for
+  `SetVirtualHostNameToFolderMapping` says: "using `.local` as the top-level domain name will work
+  but can cause a delay during navigations. You should avoid using `.local` if you can." Route:
+  inline (one mechanical rename plus its structural test). Strict TDD: RED 2/2 (the updated navigate
+  assertion and the new `VirtualHostUsesAReservedExampleDomainNotDotLocal`), then GREEN, App 1048
+  passed / 6 skipped. Hardware: navigation **2022-2037 ms -> 160, 177, 195 ms** over three
+  startups; a `failed` alert still renders (red 0.73-4.34 s for a 4 s alert).
+
 ## Progress
 
 2026-09-23: document created; page located; T0 next.
