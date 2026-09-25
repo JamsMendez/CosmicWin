@@ -130,4 +130,14 @@ maintainer authorized this on 2026-09-25.
   No test covers regroup/grow SUCCEEDING while the window is fullscreen; that test would assert the
   leaf is kept, there is no extra SetPosition, and the window lands in `_fullscreen`. It guards the
   "floor helpers never position" property the fix relies on.
+  DONE (maintainer approved), `3a24640`, test only:
+  `AWindowWithARecordedFloor_ReAdmittedFullscreen_FitsAfterRegrouping_AndIsRecordedAsFullscreen`.
+  The leaf is kept, there is no extra SetPosition, and the trace has `regrouped`, one `fullscreen`
+  and `added ... -> left alone (fullscreen)`. Grow-succeeds is not reachable with an honest fixture:
+  regroup runs first with 3+ siblings and mutates the tree even when it then misses, and grow's
+  reach with one donor is the same at record time and re-admission. The reason is kept as a comment
+  in the test file. Mutation: `DoesNotFitItsFloor` (which `TryRegroupToFit` calls to check the fit)
+  switched from `TreeArranger.Arrange` to `ArrangeAndPosition` made the test fail (SetPosition 4 ->
+  6); restored from a copy. The parent confirmed that `TryRegroupToFit` itself has no Arrange call.
+  App 1012/6 skipped.
 - FEATURE COMPLETE on `fix/fullscreen-uncovered-cases`. Not merged, not pushed.
