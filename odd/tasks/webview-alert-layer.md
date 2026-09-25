@@ -56,6 +56,37 @@ No PR or push is authorized by this choice. T4 alone currently has ~609 authored
 before the task-document update; keep that coherent unit intact and disclose its review-size
 exception if a single cohesive slice cannot fit the budget.
 
+**2026-09-24 update:** the maintainer asked for local chained PRs stacked to `main`
+(`stacked-to-main`, local branches only, no push, no remote PRs). This supersedes the
+feature-branch-chain choice above for delivery. The branch carries three features
+(explorer-restart-reattach, live-alert-wallpaper, webview-alert-layer): 81 commits, 64 files,
++10211/-51 against `main` (`fadfda7`). They were cut into 29 contiguous slices with no history
+rewrite. `chain/NN-*` points at each slice's last commit, `chain/01` is based on `main`, and each
+later branch is based on the one before it. Every slice tip was built and tested on its own in a
+throwaway worktree: 29/29 `dotnet build` ok, `dotnet test CosmicWin.sln` 0 failures. Slices over
+~400 lines are single cohesive commits (code with its tests) that cannot be split without
+rewriting history, so they carry a `size:exception`: 01 (402), 07 (595), 13 (559), 14 (479),
+15 (445), 19 (738), 20 (633), 21 (652), 28 (837). `8d5664f` (a docs-only review record that
+exists only on `feat/live-alert-wallpaper`) is not in the chain.
+
+| # | branch | lines | # | branch | lines |
+|---|---|---|---|---|---|
+| 01 | explorer-restart-reattach | 402 | 16 | host-whole-monitor | 170 |
+| 02 | alert-wallpaper-plan | 273 | 17 | covered-desktop-hold | 398 |
+| 03 | alert-command-parser | 380 | 18 | covered-desktop-shell-fix | 307 |
+| 04 | alert-tile-layout | 349 | 19 | alert-web-page | 738 |
+| 05 | alert-queue | 369 | 20 | dcomp-video-host | 633 |
+| 06 | alert-pipe-protocol | 265 | 21 | native-video-shake | 652 |
+| 07 | alert-pipe-server | 595 | 22 | lazy-webview-layer | 390 |
+| 08 | alert-client | 372 | 23 | webview-queue-routing | 307 |
+| 09 | alert-hardening | 305 | 24 | failed-timing-and-dcomp-race | 300 |
+| 10 | alert-pipe-reply-bound | 358 | 25 | start-retry-and-test-followups | 275 |
+| 11 | alert-client-timeouts | 312 | 26 | alert-layer-telemetry | 343 |
+| 12 | frame-overlay-seam | 203 | 27 | alert-page-show-hide | 206 |
+| 13 | direct2d-alert-overlay | 559 | 28 | preloaded-alert-layer | 837 |
+| 14 | alert-overlay-visuals | 479 | 29 | immediate-tick-and-stale-ready | 220+ |
+| 15 | live-alert-wiring | 445 | | | |
+
 ## TDD mode
 
 **Strict TDD: enabled** — source: user's global instructions. Runner:
