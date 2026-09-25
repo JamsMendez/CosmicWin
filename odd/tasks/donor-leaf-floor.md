@@ -65,4 +65,10 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
 
 ## Progress
 
-T1 and T2 done. Next: maintainer decides on review and merge into local main.
+T1 and T2 done. Review of the branch against main (base-diff, committed only, 6 files, 383 lines):
+risk medium, consent granted, one reliability lens, APPROVED and acknowledged (lineage
+`review-999b732e45e35cd6`, authority burned). Merged into local main.
+
+Follow-up (non-blocking, R3-001): the floor tests cover only positive growth with the donor on the
+right, one nesting level, horizontal axis. Worth adding: one shrink-direction test (focused side is
+the donor) and one two-level mixed-axis (vertical) test.
