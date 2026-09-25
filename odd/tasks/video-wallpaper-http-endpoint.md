@@ -201,5 +201,12 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   - R3-002: the per-route cap also governs the chunked (no Content-Length) read loop, but the size
     tests only send a declared Content-Length. No test sends a chunked video body between 1024 and
     4096 (should pass) or over 4096 (should be 413 without draining).
-- Next: the maintainer decides on R3-001/R3-002, then V4 (composition wiring and the
-  `video-wallpaper-http` settings key).
+- R3-001/R3-002 done (maintainer approved, 2026-09-25), commit `10d9481`, tests only. Two new
+  tests start a server with both routes off and show `/v1/alerts` and `/v1/wallpaper/video` each
+  answer exactly like an unknown path. Three raw-socket chunked tests (no Content-Length): 1237
+  bytes pass the size gate on video but get 413 on alerts; over 4096 bytes get 413 on video without
+  calling the switch delegate. Mutation checks, both reverted: registering the alert route with a
+  null handler made the first new test fail (500 instead of 404); using the alert cap in the
+  chunked loop made the video pass-through test fail (413 instead of 400). Interop 387/42 skipped
+  (parent re-run).
+- Next: V4 (composition wiring and the `video-wallpaper-http` settings key).
