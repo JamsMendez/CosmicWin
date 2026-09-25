@@ -52,3 +52,15 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
     - base (`main`): foreground became `CosmicWinVideoWallpaperHost-<guid>` "CosmicWin Video
       Wallpaper"; the alert was NOT shown within 8 s (held). Bug reproduced.
     - fix (7042caf): foreground stayed `Shell_TrayWnd`; alert shown after 69 ms.
+
+## Review
+
+- 2026-09-25: medium risk, maintainer granted. One lens (reliability), approved and acknowledged,
+  lineage `review-88186af44431b0ae` (base 24fc980, candidate ae9f166).
+- Advisory, non-blocking (`R3-host-classname-format-unlinked`, SUGGESTION): the detector test
+  hardcodes the host class-name shape; a real-attach assertion that `IsExcludedFromCoverage` accepts
+  the live host's `GetClassName` would link the two. Not done; separate later work.
+
+## Next step
+
+Merge `fix/video-host-foreground-hold` into local `main` when the maintainer decides.
