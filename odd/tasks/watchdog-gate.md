@@ -66,6 +66,11 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
     lines from the relaunch to 03:56:42.
   - W3 closes as superseded by W4: the session-input gate is gone. A longer watch should show no
     `hook reinstalled by watchdog` line unless the hook sees no key for 30 min.
+  - Review: RDD on; assess vs `a18a815` = medium, `slice_budget_reached` (554 lines). Consent granted
+    by the maintainer. Lineage `review-90f897df5a68e19b`, one lens (reliability): APPROVED,
+    acknowledged, authority burned. Advisory R3-001 (SUGGESTION, not taken): a backstop shorter than
+    the interval would fire at the interval; production uses 5 s / 30 min and only tests pass a
+    custom backstop, so it is a latent footgun, not a defect today.
 
 ## Progress
 
