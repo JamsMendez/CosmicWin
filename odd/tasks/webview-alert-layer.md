@@ -33,8 +33,12 @@ Out of scope: tiles / per-count grids, multi-monitor, the page's background scen
   plan is DirectComposition on the existing host HWND: swapchain visual (video) below, WebView2
   `CoreWebView2CompositionController` visual above, `DefaultBackgroundColor` transparent. T0
   proves or rejects this.
-- **Idle cost:** the WebView2 is created when an alert starts and disposed when it ends (the page
-  measured ~28 % GPU and 400–500 MB in Edge). No WebView2 process exists while idle.
+- **Idle cost (superseded 2026-09-24):** originally the WebView2 was created when an alert started
+  and disposed when it ended. T6 measured ~2.8 s from command to visible layer with that design,
+  plus F1 (first alert never shows). The maintainer then chose a **permanent preload**: one
+  controller is created at startup, kept hidden, and shown/hidden per alert. Cost accepted:
+  hundreds of MB of resident WebView2 memory. Condition: GPU while hidden must stay ~0 %
+  (measured in T9e).
 - **Offline:** the page loads Archivo Black from Google Fonts; the trimmed page must not need the
   network (bundle the font, SIL OFL, or fall back to Arial Black).
 - **Combined commands (default, maintainer may override):** one layer at a time, so counts are
@@ -248,6 +252,25 @@ exception if a single cohesive slice cannot fit the budget.
   Checks: Debug build 0 errors; Interop 249 passed / 40 skipped; App 1014 passed / 6 skipped;
   `git diff --check` clean. Parent spot check: 6/6 wiring tests and 9/9 shake tests passed. RDD
   assess from `7462e1c`: medium, 227 lines, `under_budget`, so it stays pending in the slice.
+
+- [ ] **T9 -- Permanent preloaded alert layer, telemetry, lower latency (fixes T6 F1/F2).** The
+  maintainer accepted it on 2026-09-24. Route: one delegated writer (4+ non-trivial files:
+  controller, page, wiring, tests), one work-unit commit per sub-task, strict TDD.
+  - [ ] **T9a -- Alert-layer telemetry.** Trace lines through `desktopTrace` for preload/create
+    start, environment and controller ready (with ms), navigation completed, show, hide, `done`,
+    close reason, process failure, and every currently silent `Debug.WriteLine` failure path.
+  - [ ] **T9b -- Page show/hide message API.** The page idles with no drawing and no
+    `requestAnimationFrame` loop. A `show` message (kind, duration) restarts the animation from
+    zero; `hide` clears and stops. `done` is still posted when the duration ends. The hash/query
+    API keeps working for a plain browser tab.
+  - [ ] **T9c -- Persistent controller.** Preload once at startup when the host composition is
+    ready; `IsVisible=false` while idle. `Start` posts `show` and makes it visible, or keeps a
+    pending show until ready; `End` posts `hide` and hides it. Recreate (with backoff) on host
+    HWND/generation change (Explorer restart) and on `ProcessFailed`; close only on dispose.
+  - [ ] **T9d -- Immediate queue tick on enqueue.** A newly accepted command triggers the alert
+    update on the UI dispatcher instead of waiting up to 400 ms for the watch tick.
+  - [ ] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
+    3 s alerts, covered hold, Explorer restart, GPU/memory while hidden vs shown.
 
 ## Progress
 
