@@ -43,15 +43,29 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
   Route: delegated writer (2 non-trivial files). Commit `da454ef`.
 - [x] **W2 -- Backstop default 30 minutes.** RED on the default value. Route: same writer.
   Commit `4b160ec`.
-- [ ] **W3 -- Hardware check.** Watch the trace for a working period and compare the reinstall
+- [x] **W3 -- Hardware check.** (FAILED; superseded by W4, see Progress) Watch the trace for a working period and compare the reinstall
   rate with the baseline (about 64/day since 09-20).
 
-- [ ] **W4 -- Backstop only (maintainer decision 2026-09-25).** W3 showed the session-input gate
+- [x] **W4 -- Backstop only (maintainer decision 2026-09-25).** W3 showed the session-input gate
   churns on wheel/click input with a still cursor. Remove the gate: reinstall only after the
   backstop (30 min with no key seen by the hook). Drop the session-input and cursor readings if
   nothing else uses them. Accepted cost: a genuinely dead hook recovers within 30 min (never observed:
   `foundGone=0` on every reinstall ever traced). Route: delegated writer (hook + platform + tests).
   Then a hardware re-check: wheel injection -> 0 reinstalls.
+  Done: commit `7a8f6a9` (4 files, +66/-451). `ShouldReinstall` now fires only after the backstop;
+  `SampleCursor`, the cursor fields and `IKeyboardHookPlatform.MillisecondsSinceSystemInput` /
+  `CursorPosition` (GetLastInputInfo / GetCursorPos) are gone, nothing else used them. The interval
+  check stays as a cheap early-out only.
+  - Strict TDD: RED `Assert.Equal() Expected 0, Actual 1` for wheel-shaped session input and for a
+    refused session reading (both reinstalled before the backstop); GREEN after; those transitional
+    tests were replaced by permanent backstop tests since the members they drove were deleted.
+  - Checks (writer): build 0 errors / 0 warnings; full suite 0 failures (App 897 + 6 skipped).
+    Parent spot check: App 897 passed, 0 failed.
+  - Hardware 2026-09-25 03:56 UTC, build of `7a8f6a9` (PID 38224): 14 s idle -> 0, then 15 s of
+    injected wheel with a still cursor -> **0 reinstalls** (was 4 with the old gate). 0 reinstall
+    lines from the relaunch to 03:56:42.
+  - W3 closes as superseded by W4: the session-input gate is gone. A longer watch should show no
+    `hook reinstalled by watchdog` line unless the hook sees no key for 30 min.
 
 ## Progress
 
