@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using CosmicWin.Interop.Win32;
@@ -46,41 +47,6 @@ public sealed class WebViewAlertLayerControllerTests
     }
 
     /// <summary>
-    /// T9a: <see cref="WebViewAlertLayerController.Start"/>/<c>End</c> trace "show"/"hide"
-    /// UNCONDITIONALLY, so this much of the telemetry is exercised without a real WebView2 -- the
-    /// host stays unattached here on purpose (Hwnd == 0, IsCompositionReady == false), so Poll()
-    /// bails out before ever reaching CreateAsync's WebView2-specific tracing (see the next test).
-    /// </summary>
-    [Fact]
-    public void StartAndEndTraceShowAndHideWithoutEverReachingWebView2()
-    {
-        var traces = new List<string>();
-        Exception? error = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                var dispatcher = Dispatcher.CurrentDispatcher;
-                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
-                using var host = new Win32VideoWallpaperHost();
-                using var layer = new WebViewAlertLayerController(host, trace: line => { lock (traces) traces.Add(line); });
-                layer.Start("warning", 1000);
-                layer.End();
-            }
-            catch (Exception ex) { error = ex; }
-            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
-        Assert.Null(error);
-        Assert.Contains("alert-layer show kind=warning duration=1000", traces);
-        Assert.Contains("alert-layer hide", traces);
-        // Never reached: the host was never attached, so no real controller ever existed to close.
-        Assert.DoesNotContain(traces, line => line.StartsWith("alert-layer close", StringComparison.Ordinal));
-    }
-
-    /// <summary>
     /// T9a: every currently-silent <c>Debug.WriteLine</c> catch site, the silent "no overlay visual"
     /// path, and the WebView2-specific lifecycle events (create start/ready, navigation, process
     /// failure, close-with-reason) must ALSO call <see cref="AlertLayerTrace"/> -- these only fire
@@ -121,60 +87,102 @@ public sealed class WebViewAlertLayerControllerTests
         File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFilePath)!,
             "..", "..", "CosmicWin.App", "Alerts", "WebViewAlertLayerController.cs")));
 
+    /// <summary>
+    /// T9c (webview-alert-layer): <c>Preload</c>/<c>Start</c>/<c>End</c> against an UNATTACHED host
+    /// (Hwnd == 0, IsCompositionReady == false) never reach a real WebView2 -- same trick as T9a's
+    /// show/hide test -- so this proves the pure wiring (trace lines, no teardown ever attempted)
+    /// without hardware. Real preload/recreate/backoff behavior stays T9e.
+    /// </summary>
     [Fact]
-    public async Task DoneAndDeadlineCloseProductionLifetime()
+    public void PreloadStartAndEndNeverReachWebView2WhenTheHostIsUnattached()
     {
-        var closed = 0;
-        var now = DateTimeOffset.UtcNow;
-        using var lifetime = new AlertLayerLifecycle(() => now);
-        lifetime.Start(100);
-        await lifetime.CreateAsync(1, 2, () => Task.FromResult<IDisposable?>(new CallbackDisposable(() => closed++)));
-        lifetime.Done();
-        Assert.Equal(1, closed);
-        lifetime.Start(100);
-        await lifetime.CreateAsync(1, 2, () => Task.FromResult<IDisposable?>(new CallbackDisposable(() => closed++)));
-        now = now.AddMilliseconds(2101);
-        Assert.False(lifetime.Poll(1, 2));
-        Assert.Equal(2, closed);
+        var traces = new List<string>();
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                using var host = new Win32VideoWallpaperHost();
+                using var layer = new WebViewAlertLayerController(host, trace: line => { lock (traces) traces.Add(line); });
+                layer.Preload();
+                layer.Start("warning", 1000);
+                layer.End();
+                layer.Start("failed", 500);
+                layer.End();
+            }
+            catch (Exception ex) { error = ex; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(error);
+        Assert.Contains("alert-layer show kind=warning duration=1000", traces);
+        Assert.Contains("alert-layer show kind=failed duration=500", traces);
+        Assert.Equal(2, traces.Count(line => line == "alert-layer hide"));
+        Assert.DoesNotContain(traces, line => line.StartsWith("alert-layer close", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// T9c: <c>End</c> only posts a "hide" message and hides the layer -- it must never tear down
+    /// the controller/environment (that only happens on Dispose, a host identity change, or a real
+    /// creation/process failure). This is the persistent-preload model's core difference from the old
+    /// per-alert create/dispose controller.
+    /// </summary>
     [Fact]
-    public async Task FailureBacksOffAndInvalidationClosesLateCreation()
+    public void EndOnlyHidesThePageAndNeverTearsDownTheController()
     {
-        var now = DateTimeOffset.UtcNow;
-        var closed = 0;
-        using var lifetime = new AlertLayerLifecycle(() => now);
-        lifetime.Start(1000);
-        await lifetime.CreateAsync(1, 2, () => throw new InvalidOperationException());
-        Assert.False(lifetime.CanCreate);
-        now = now.AddMilliseconds(251);
-        Assert.False(lifetime.CanCreate);
-        now = now.AddSeconds(2);
-        Assert.True(lifetime.CanCreate);
-        var pending = new TaskCompletionSource<IDisposable?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var creation = lifetime.CreateAsync(1, 2, () => pending.Task);
-        lifetime.Poll(3, 2);
-        pending.SetResult(new CallbackDisposable(() => closed++));
-        await creation;
-        Assert.Equal(1, closed);
-        Assert.False(lifetime.IsActive);
+        var source = ReadControllerSource();
+        var start = source.IndexOf("private void End(string reason)", StringComparison.Ordinal);
+        Assert.True(start >= 0, "expected a private void End(string reason) method");
+        var next = new[]
+            {
+                source.IndexOf("\n    private", start + 1, StringComparison.Ordinal),
+                source.IndexOf("\n    public", start + 1, StringComparison.Ordinal),
+            }
+            .Where(i => i > 0).DefaultIfEmpty(source.Length).Min();
+        var body = source[start..next];
+        Assert.DoesNotContain("TearDown(", body);
+        Assert.Contains("PostWebMessageAsJson", body);
+        Assert.Contains("type\\\":\\\"hide", body); // the JSON literal's escaped quotes, as they appear in source
+        Assert.Contains("IsVisible = false", body);
     }
 
+    /// <summary>
+    /// T9c: a preloaded page is navigated ONCE, with no kind/duration in the URL -- it starts idle
+    /// and is driven entirely by later show/hide messages (T9b). The old per-alert hash-based
+    /// navigation must be gone.
+    /// </summary>
     [Fact]
-    public async Task NullCreationResultBacksOffThroughProductionLifecycle()
+    public void PreloadNavigatesTheBarePageWithNoKindOrDurationHash()
     {
-        var now = DateTimeOffset.UtcNow;
-        using var lifetime = new AlertLayerLifecycle(() => now);
-        lifetime.Start(1000);
-        await lifetime.CreateAsync(1, 2, () => Task.FromResult<IDisposable?>(null));
-        Assert.False(lifetime.IsActive);
-        Assert.False(lifetime.CanCreate);
-        now = now.AddMilliseconds(500);
-        Assert.True(lifetime.CanCreate);
+        var source = ReadControllerSource();
+        Assert.Contains("Navigate(\"https://cosmicwin-alert.local/alert-layer.html\")", source);
+        Assert.DoesNotContain("#kind=", source);
+        Assert.Contains("PostWebMessageAsJson", source);
     }
 
-    private sealed class CallbackDisposable(Action callback) : IDisposable
+    /// <summary>
+    /// T9c: host identity changes (Explorer restart) and creation/process failures must both drive
+    /// the SAME pure backoff/recreate decision (<see cref="AlertLayerPreloadState"/>, tested directly
+    /// in <c>AlertLayerPreloadStateTests</c>), and the environment is dropped ONLY for a real
+    /// creation/process failure -- not for an ordinary host change (feature doc, "Keep _environment
+    /// for the process lifetime unless creation failed/process failed").
+    /// </summary>
+    [Fact]
+    public void RecreatesOnHostChangeOrFailureAndOnlyDropsTheEnvironmentOnARealFailure()
     {
-        public void Dispose() => callback();
+        var source = ReadControllerSource();
+        Assert.Contains("_state.HostChanged(", source);
+        Assert.Contains("_state.CanCreate", source);
+        Assert.Contains("_state.Failed()", source);
+        Assert.Contains("_state.Created()", source);
+        Assert.Contains("TearDown(\"create-failed\", dropEnvironment: true)", source);
+        Assert.Contains("TearDown(\"process-failed\", dropEnvironment: true)", source);
+        Assert.Contains("TearDown(\"host-changed\")", source);
+        Assert.DoesNotContain("TearDown(\"host-changed\", dropEnvironment: true)", source);
     }
+
 }

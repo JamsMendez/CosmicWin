@@ -11,20 +11,25 @@ using Windows.Win32.Foundation;
 namespace CosmicWin.App.Alerts;
 
 /// <summary>
-/// Single-alert WebView2 composition layer. Construct on the owning STA; start on its pumped
-/// dispatcher.
+/// Permanently preloaded WebView2 composition layer. Construct on the owning STA; call <see
+/// cref="Preload"/> once its dispatcher is pumping, then drive it with <see cref="Start"/>/<see
+/// cref="End"/> per alert.
 /// </summary>
 /// <remarks>
-/// T9a (webview-alert-layer): every lifecycle event is traced through the optional <paramref
-/// name="trace"/> delegate (production wires <c>desktopTrace.Record</c>, see
-/// <c>AppComposition.WireProduction</c>) -- T6 found production had NO navigation/render telemetry
-/// at all, which left F1 (the first alert after launch never showing) and F2 (WebView startup eating
-/// the alert's duration) unexplained. <see cref="AlertLayerTrace"/> owns the exact wording and is
-/// unit-tested directly; the call sites here that only fire once a real WebView2 environment/
-/// controller exists (create start/ready, navigation, process-failed) stay a hardware-only concern
-/// like the rest of this class's async creation path -- see T3/T6's progress notes. <see cref="Start"/>/
-/// <see cref="End"/> trace "show"/"hide" unconditionally, so those two ARE exercised without a real
-/// WebView2 (see <c>WebViewAlertLayerControllerTests</c>).
+/// T9c (webview-alert-layer): T6 measured ~2.8s from an alert command to a visible layer under the
+/// OLD model -- a fresh WebView2 environment + controller created per alert and disposed when it
+/// ended -- plus F1 (the first alert after launch never showing at all). The maintainer's fix
+/// (feature doc, "Idle cost (superseded 2026-09-24)") is a PERMANENT PRELOAD: one controller is
+/// created at startup and kept alive, hidden, for the process's life; <see cref="Start"/>/<see
+/// cref="End"/> only show/hide the already-navigated page. <see cref="AlertLayerPreloadState"/> is
+/// the pure state machine behind this (host identity/backoff/readiness/pending-show), unit-tested
+/// directly; this class is the thin WebView2-specific shell around it -- real environment/controller/
+/// navigation stay a hardware-only concern, same split T3/T6 established for the old per-alert model.
+/// <para>
+/// Every lifecycle event is traced through the optional <paramref name="trace"/> delegate
+/// (production wires <c>desktopTrace.Record</c>, see <c>AppComposition.WireProduction</c>) --
+/// <see cref="AlertLayerTrace"/> owns the exact wording and is unit-tested directly.
+/// </para>
 /// </remarks>
 public sealed class WebViewAlertLayerController : IDisposable
 {
@@ -32,26 +37,50 @@ public sealed class WebViewAlertLayerController : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _poll;
     private readonly Action<string>? _trace;
+    private readonly AlertLayerPreloadState _state;
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
     private nint _hwnd;
-    private readonly AlertLayerLifecycle _lifecycle;
     private bool _disposed;
     private bool _creating;
-    private string? _kind;
-    private int _duration;
+    private bool _preloading;
+    private bool _navigationCompleted;
+    private bool _pageReportedReady;
+    private int _epoch;
 
-    public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null)
+    // Set right before Navigate() so OnNavigationCompleted can report elapsed time since THAT call,
+    // not since the whole creation started (environment/controller creation already has its own
+    // separately-traced timings).
+    private Stopwatch? _navigateStopwatch;
+
+    public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null, Func<DateTimeOffset>? clock = null)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("A WPF UI STA is required.");
         _host = host;
         _trace = trace;
-        _lifecycle = new AlertLayerLifecycle(trace: trace);
+        _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
         _poll = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
             (_, _) => Poll(), _dispatcher);
+    }
+
+    /// <summary>
+    /// Begins keeping one WebView2 controller alive PERMANENTLY: creates the environment/composition
+    /// controller, adds the overlay visual, and navigates to the bare (idle) alert page, hidden. The
+    /// 250ms poll then keeps running for the process's life -- not just while an alert is active --
+    /// watching for a host identity change (Explorer restart) or a lost composition surface, and
+    /// recreating (with the existing exponential backoff) when either happens. Idempotent.
+    /// </summary>
+    public void Preload()
+    {
+        CheckAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_preloading) return;
+        _preloading = true;
+        _poll.Start();
+        Poll();
     }
 
     public void Start(string kind, int durationMilliseconds)
@@ -62,13 +91,14 @@ public sealed class WebViewAlertLayerController : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (kind is not ("warning" or "failed")) throw new ArgumentOutOfRangeException(nameof(kind));
         if (durationMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(durationMilliseconds));
-        End("restart");
         _trace?.Invoke(AlertLayerTrace.Show(kind, durationMilliseconds));
-        _lifecycle.Start(durationMilliseconds);
-        _kind = kind;
-        _duration = durationMilliseconds;
-        _poll.Start();
-        Poll();
+        // Safety net: the queue must never lose a Start because production forgot to call Preload
+        // first. Calling it here when it was already called is a no-op.
+        Preload();
+        // Ready while already visible still re-shows (a fresh Start must never be swallowed as a
+        // no-op): AlertLayerPreloadState.RequestShow always returns a tuple while Ready, regardless
+        // of Visible -- see its own tests.
+        if (_state.RequestShow(kind, durationMilliseconds) is { } show) PostShow(show.Kind, show.DurationMilliseconds);
     }
 
     public void End() => End("end");
@@ -76,73 +106,91 @@ public sealed class WebViewAlertLayerController : IDisposable
     private void End(string reason)
     {
         CheckAccess();
-        if (_kind is not null) _trace?.Invoke(AlertLayerTrace.Hide());
-        _lifecycle.Done();
-        _kind = null;
-        _poll.Stop();
-        Close(reason);
+        _trace?.Invoke(AlertLayerTrace.Hide());
+        _state.Hide();
+        if (_controller is null) return;
+        try
+        {
+            _controller.CoreWebView2.PostWebMessageAsJson("{\"type\":\"hide\"}");
+            _controller.IsVisible = false;
+        }
+        catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error($"end-{reason}", ex)); }
+    }
+
+    private void PostShow(string kind, int durationMilliseconds)
+    {
+        if (_controller is null) return;
+        try
+        {
+            _controller.CoreWebView2.PostWebMessageAsJson(
+                $"{{\"type\":\"show\",\"kind\":\"{kind}\",\"duration\":{durationMilliseconds}}}");
+            _controller.IsVisible = true;
+        }
+        catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-show", ex)); }
     }
 
     private void Poll()
     {
-        if (_kind is null) return;
+        if (!_preloading) return;
         try
         {
-            if (!_lifecycle.Poll(_host.Hwnd, _host.CompositionGeneration))
+            var hwnd = _host.Hwnd;
+            var generation = _host.CompositionGeneration;
+            if (_state.HostChanged(hwnd, generation) && _controller is not null)
             {
-                End("deadline");
+                TearDown("host-changed");
+            }
+            if (!_host.IsCompositionReady || hwnd == 0)
+            {
+                if (_controller is not null) TearDown("host-not-ready");
                 return;
             }
-            if (!_host.IsCompositionReady || _host.Hwnd == 0)
-            {
-                Close("host-not-ready");
-                return;
-            }
-            if (_controller is not null &&
-                (_generation != _host.CompositionGeneration || _hwnd != _host.Hwnd)) Close("host-changed");
-            if (_controller is null && !_creating && _lifecycle.CanCreate)
-                _ = CreateAsync(_host.Hwnd, _host.CompositionGeneration);
-            else if (_controller is not null) Resize();
+            if (_controller is null && !_creating && _state.CanCreate)
+                _ = CreateAsync(hwnd, generation);
+            else if (_controller is not null)
+                Resize();
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
             _trace?.Invoke(AlertLayerTrace.Error("poll", ex));
-            _lifecycle.Failed();
-            Close("poll-failed");
+            _state.Failed();
+            TearDown("poll-failed");
         }
     }
 
     private async Task CreateAsync(nint hwnd, int generation)
     {
         _creating = true;
+        _navigationCompleted = false;
+        _pageReportedReady = false;
+        var epoch = _epoch;
         var stopwatch = Stopwatch.StartNew();
         _trace?.Invoke(AlertLayerTrace.CreateStart(hwnd, generation));
         CoreWebView2CompositionController? candidate = null;
         bool visualAdded = false;
-        var epoch = _lifecycle.Epoch;
         try
         {
             _environment ??= await CoreWebView2Environment.CreateAsync(
                 userDataFolder: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "CosmicWin", "WebView2Alerts"));
             _trace?.Invoke(AlertLayerTrace.EnvironmentReady(stopwatch.ElapsedMilliseconds));
-            if (!Current()) return;
+            if (!StillCurrent(epoch, hwnd, generation)) return;
             var options = _environment.CreateCoreWebView2ControllerOptions();
             options.DefaultBackgroundColor = Color.Transparent;
             candidate = await _environment.CreateCoreWebView2CompositionControllerAsync(hwnd, options);
             _trace?.Invoke(AlertLayerTrace.ControllerReady(stopwatch.ElapsedMilliseconds));
-            if (!Current()) return;
+            if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.DefaultBackgroundColor = Color.Transparent;
             var visual = _host.AddCompositionOverlayVisual();
             if (visual is null)
             {
                 _trace?.Invoke(AlertLayerTrace.NoOverlayVisual());
-                await _lifecycle.CreateAsync(hwnd, generation, () => Task.FromResult<IDisposable?>(null));
+                _state.Failed();
                 return;
             }
             visualAdded = true;
-            if (!Current()) return;
+            if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.RootVisualTarget = visual;
             _host.CommitComposition();
             candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.local",
@@ -156,18 +204,21 @@ public sealed class WebViewAlertLayerController : IDisposable
             _hwnd = hwnd;
             _generation = generation;
             Resize();
-            _controller.IsVisible = true;
-            var navigateStopwatch = Stopwatch.StartNew();
-            _navigateStopwatch = navigateStopwatch;
-            _controller.CoreWebView2.Navigate($"https://cosmicwin-alert.local/alert-layer.html#kind={_kind}&duration={_duration}");
-            await _lifecycle.CreateAsync(hwnd, generation, () => Task.FromResult<IDisposable?>(new CallbackDisposable(() => Close("lifecycle-invalidated"))));
+            // Preloaded and hidden -- show/hide is driven entirely by Start/End posting messages
+            // once the page reports itself ready (see OnNavigationCompleted/OnMessage below).
+            _controller.IsVisible = false;
+            _state.Created();
+            _navigateStopwatch = Stopwatch.StartNew();
+            // No kind/duration hash any more (T9b): the page loads idle and is driven by show/hide
+            // messages once it is ready.
+            _controller.CoreWebView2.Navigate("https://cosmicwin-alert.local/alert-layer.html");
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"WebView alert creation failed: {ex}");
             _trace?.Invoke(AlertLayerTrace.Error("create", ex));
-            _lifecycle.Failed();
-            Close("create-failed");
+            _state.Failed();
+            TearDown("create-failed", dropEnvironment: true);
         }
         finally
         {
@@ -179,18 +230,13 @@ public sealed class WebViewAlertLayerController : IDisposable
                 catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("create-cleanup-visual", ex)); }
             }
             _creating = false;
-            if (_controller is null) _environment = null;
-            if (_kind is not null && _controller is null && epoch != _lifecycle.Epoch) Poll();
         }
-
-        bool Current() => epoch == _lifecycle.Epoch && _kind is not null && _lifecycle.Poll(hwnd, generation) && _host.IsCompositionReady &&
-            _host.Hwnd == hwnd && _host.CompositionGeneration == generation;
     }
 
-    // Set right before Navigate() so OnNavigationCompleted can report elapsed time since THAT call,
-    // not since the whole creation started (environment/controller creation already has its own
-    // separately-traced timings above).
-    private Stopwatch? _navigateStopwatch;
+    /// <summary>Whether an in-flight <see cref="CreateAsync"/> call is still the one that started it -- a host change or Dispose during an await bumps <see cref="_epoch"/> and invalidates it.</summary>
+    private bool StillCurrent(int epoch, nint hwnd, int generation) =>
+        epoch == _epoch && !_disposed && _preloading &&
+        _host.IsCompositionReady && _host.Hwnd == hwnd && _host.CompositionGeneration == generation;
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
     {
@@ -198,6 +244,14 @@ public sealed class WebViewAlertLayerController : IDisposable
         {
             _trace?.Invoke(AlertLayerTrace.NavigationCompleted(
                 args.IsSuccess, args.WebErrorStatus, _navigateStopwatch?.ElapsedMilliseconds ?? 0));
+            if (!args.IsSuccess)
+            {
+                _state.Failed();
+                TearDown("navigation-failed");
+                return;
+            }
+            _navigationCompleted = true;
+            TryMarkReady();
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("navigation-completed", ex)); }
     }
@@ -207,7 +261,8 @@ public sealed class WebViewAlertLayerController : IDisposable
         try
         {
             _trace?.Invoke(AlertLayerTrace.ProcessFailed(args.ProcessFailedKind, args.Reason));
-            Close("process-failed");
+            _state.Failed();
+            TearDown("process-failed", dropEnvironment: true);
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("process-failed", ex)); }
     }
@@ -216,13 +271,30 @@ public sealed class WebViewAlertLayerController : IDisposable
     {
         try
         {
-            if (args.TryGetWebMessageAsString() == "done")
+            var message = args.TryGetWebMessageAsString();
+            if (message == "ready")
+            {
+                _pageReportedReady = true;
+                TryMarkReady();
+            }
+            else if (message == "done")
             {
                 _trace?.Invoke(AlertLayerTrace.Done());
-                End("done");
+                // The page reports nothing else: the QUEUE owns ending the alert (AppComposition
+                // calls End() itself once it advances) -- this only reflects the page's own state.
+                _state.PageDone();
+                if (_controller is not null) _controller.IsVisible = false;
             }
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("message", ex)); }
+    }
+
+    /// <summary>Ready = navigation completed AND the page's own "ready" message received (feature doc). Applies any show that arrived while not yet ready, with its REMAINING duration.</summary>
+    private void TryMarkReady()
+    {
+        if (!_navigationCompleted || !_pageReportedReady) return;
+        _state.MarkReady();
+        if (_state.ApplyPendingShowIfDue() is { } pending) PostShow(pending.Kind, pending.DurationMilliseconds);
     }
 
     [DllImport("user32.dll")]
@@ -235,13 +307,24 @@ public sealed class WebViewAlertLayerController : IDisposable
             _controller.Bounds = new Rectangle(0, 0, rect.right - rect.left, rect.bottom - rect.top);
     }
 
-    private void Close(string reason)
+    /// <summary>
+    /// Tears down the controller/environment -- unlike the old per-alert model, this is NOT what
+    /// <see cref="End"/> does. It only ever runs on <see cref="Dispose"/>, a host identity change, a
+    /// lost composition surface, or a real creation/process/navigation failure. <paramref
+    /// name="dropEnvironment"/> is true ONLY for a real creation/process failure (feature doc: "Keep
+    /// _environment for the process lifetime unless creation failed/process failed") -- an ordinary
+    /// host change reuses the same environment for the next controller.
+    /// </summary>
+    private void TearDown(string reason, bool dropEnvironment = false)
     {
+        ++_epoch;
+        _navigationCompleted = false;
+        _pageReportedReady = false;
+        if (dropEnvironment) _environment = null;
         var old = _controller;
         _controller = null;
         if (old is null) return;
         _trace?.Invoke(AlertLayerTrace.Close(reason));
-        _environment = null;
         try { old.CoreWebView2.WebMessageReceived -= OnMessage; }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("close-unsubscribe-message", ex)); }
         try { old.CoreWebView2.NavigationCompleted -= OnNavigationCompleted; }
@@ -263,98 +346,9 @@ public sealed class WebViewAlertLayerController : IDisposable
     {
         CheckAccess();
         if (_disposed) return;
-        End("disposed");
-        _environment = null;
-        _lifecycle.Dispose();
+        _poll.Stop();
+        _state.Hide();
+        TearDown("disposed", dropEnvironment: true);
         _disposed = true;
     }
-}
-
-internal sealed class CallbackDisposable(Action callback) : IDisposable
-{
-    public void Dispose() => callback();
-}
-
-/// <summary>Request deadline, host identity, and async resource ownership shared by the UI controller.</summary>
-public sealed class AlertLayerLifecycle(Func<DateTimeOffset>? clock = null, Action<string>? trace = null) : IDisposable
-{
-    private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
-    private readonly Action<string>? _trace = trace;
-    private IDisposable? _active;
-    private DateTimeOffset _deadline;
-    private DateTimeOffset _retryAfter;
-    private bool _running;
-    private bool _disposed;
-    private nint _hwnd;
-    private int _generation;
-    private int _failures;
-    public int Epoch { get; private set; }
-    public bool IsActive => _active is not null;
-    public bool CanCreate => _running && _clock() >= _retryAfter;
-
-    public void Start(int durationMilliseconds)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        Done();
-        _running = true;
-        _deadline = _clock().AddMilliseconds(Math.Clamp((long)durationMilliseconds + 2000, 2000, 60000));
-        _failures = 0;
-        _retryAfter = DateTimeOffset.MinValue;
-    }
-
-    public bool Poll(nint hwnd, int generation)
-    {
-        if (!_running) return false;
-        if (_clock() >= _deadline) { Done(); return false; }
-        if (_hwnd != hwnd || _generation != generation)
-        {
-            ++Epoch;
-            _active?.Dispose();
-            _active = null;
-            _hwnd = hwnd;
-            _generation = generation;
-        }
-        return true;
-    }
-
-    public async Task CreateAsync(nint hwnd, int generation, Func<Task<IDisposable?>> create)
-    {
-        if (!CanCreate || !Poll(hwnd, generation)) return;
-        var epoch = Epoch;
-        IDisposable? candidate = null;
-        try
-        {
-            candidate = await create();
-            if (_running && epoch == Epoch && Poll(hwnd, generation))
-            {
-                if (candidate is null) { Failed(); return; }
-                _active?.Dispose();
-                _active = candidate;
-                candidate = null;
-                _failures = 0;
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine(ex);
-            _trace?.Invoke(AlertLayerTrace.Error("lifecycle-create", ex));
-            Failed();
-        }
-        finally { candidate?.Dispose(); }
-    }
-
-    public void Failed()
-    {
-        _retryAfter = _clock().AddMilliseconds(Math.Min(8000, 500 * (1 << Math.Min(_failures++, 4))));
-    }
-
-    public void Done()
-    {
-        ++Epoch;
-        _running = false;
-        _active?.Dispose();
-        _active = null;
-    }
-
-    public void Dispose() { if (_disposed) return; Done(); _disposed = true; }
 }

@@ -73,7 +73,7 @@ public sealed class WebViewAlertCompositionWiringTests
 
     private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
-        Host? host = null, Action<string, int>? startAlertLayer = null)
+        Host? host = null, Action<string, int>? startAlertLayer = null, Action? preloadAlertLayer = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
@@ -98,8 +98,31 @@ public sealed class WebViewAlertCompositionWiringTests
             startAlertLayer: startAlertLayer ?? ((kind, duration) => events.Add($"start:{kind}:{duration}")),
             endAlertLayer: () => events.Add("end"),
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
+            preloadAlertLayer: preloadAlertLayer,
             timeProvider: clock);
         return (composition, timer, server!, events, clock);
+    }
+
+    /// <summary>
+    /// T9c (webview-alert-layer): the preloaded controller must be created once, at startup, when
+    /// alerts are enabled -- not lazily on the first alert (the whole point of the persistent-preload
+    /// fix for T6's F1/F2). <c>onOwningThread</c> runs synchronously in these tests (no
+    /// <c>scheduleOnOwningThread</c> supplied), so this is exercised without a real dispatcher.
+    /// </summary>
+    [Fact]
+    public void PreloadAlertLayerRunsOnceDuringWiringWhenAlertsAreEnabled()
+    {
+        var calls = 0;
+        var h = Create(preloadAlertLayer: () => calls++);
+        using (h.Composition) Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void PreloadAlertLayerNeverRunsWhenAlertsAreDisabled()
+    {
+        var calls = 0;
+        var h = Create(enabled: false, preloadAlertLayer: () => calls++);
+        using (h.Composition) Assert.Equal(0, calls);
     }
 
     [Fact]

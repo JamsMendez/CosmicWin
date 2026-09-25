@@ -213,6 +213,13 @@ public sealed class AppComposition : IDisposable
         Action<TimeSpan>? shakeAlertVideo = null,
         IDisposable? alertLayer = null,
         Func<bool>? alertRendererReady = null,
+        // T9c (webview-alert-layer): begins keeping ONE WebView2 controller alive for the process's
+        // life (feature doc, "Idle cost (superseded 2026-09-24)") instead of the old create/dispose
+        // per alert. Called once, on the owning UI thread once it is pumping, when alerts are
+        // enabled -- never gates alertRendererReady, which stays the host's own composition
+        // readiness; a Start before the layer is ready is held as a pending show instead (see
+        // WebViewAlertLayerController.Start/AlertLayerPreloadState).
+        Action? preloadAlertLayer = null,
         // Where the alert queue's own time reads (Enqueue/Advance and the remaining-duration
         // check below) come from. Unset -- as every test predating this parameter, and production
         // via WireProduction -- reads the real system clock. Tests inject a manual TimeProvider so
@@ -937,6 +944,9 @@ public sealed class AppComposition : IDisposable
             alertServer = serverFactory(AlertPipeName.Resolve(), HandleAlertCommand,
                 message => desktopTrace?.Record(message));
             alertServer.Start();
+            // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
+            // the first alert command -- the whole point of the persistent-preload fix.
+            if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
         }
 
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
@@ -1602,6 +1612,7 @@ public sealed class AppComposition : IDisposable
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
             alertLayer: alertLayer,
             alertRendererReady: () => videoWallpaperHost.IsCompositionReady,
+            preloadAlertLayer: alertLayer is null ? null : alertLayer.Preload,
             // T10 (live-alert-wallpaper): the real covered-desktop signal T9 found missing --
             // without it an alert played out unseen under a fullscreen video or browser instead of
             // being held. Reused, not re-invented: PrimaryMonitorFullscreenDetector applies the SAME
