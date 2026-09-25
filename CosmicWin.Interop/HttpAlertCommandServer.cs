@@ -13,22 +13,47 @@ namespace CosmicWin.Interop;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Bound to the single, literal prefix <c>http://127.0.0.1:{port}/</c> -- measured 2026-09-24: this
-/// starts fine WITHOUT elevation (no urlacl reservation needed), unlike a wildcard <c>+</c> or
-/// <c>*</c> prefix, which <c>HttpListener</c> refuses to register for a non-admin process. Binding to
-/// the literal loopback address is also what keeps a client on another NIC from ever reaching this
-/// listener at the socket level in the first place; the <see
-/// cref="HttpListenerRequest.RemoteEndPoint"/> check below is defense in depth on top of that, not
-/// instead of it, because http.sys matches a request to whichever registered prefix's HOST header it
-/// declares, not the interface the packet actually arrived on.
+/// Bound to two literal (never wildcard) prefixes: <c>http://127.0.0.1:{port}/</c> and
+/// <c>http://localhost:{port}/</c> -- measured 2026-09-24: both start fine WITHOUT elevation (no
+/// urlacl reservation needed), unlike a wildcard <c>+</c> or <c>*</c> prefix, which
+/// <c>HttpListener</c> refuses to register for a non-admin process. Both are needed for a mundane
+/// reason, not a security one: measured 2026-09-25, a caller that types the literal URL
+/// <c>http://localhost:{port}/...</c> resolves "localhost" through DNS first, and on this machine
+/// that resolves to the IPv6 loopback address -- a listener bound only to the IPv4 literal
+/// <c>127.0.0.1</c> prefix never even receives that connection at the socket level (it just times
+/// out). If registering both together ever fails (e.g. IPv6 disabled on some machine), <see
+/// cref="Start"/> falls back to the IPv4 literal alone rather than refusing to start at all.
+/// </para>
+/// <para>
+/// MEASURED 2026-09-25 (raw <see cref="System.Net.Sockets.TcpClient"/> requests, no client library
+/// involved -- see <c>HttpAlertCommandServerTests</c>'s "R3-001/002" region): for a connection that
+/// arrives on one of THIS class's own registered local addresses (i.e. loopback, the only kind it
+/// ever binds), http.sys performs NO <c>Host</c>-header filtering of its own -- it forwards the
+/// request to this listener regardless of what <c>Host</c> says. <c>Host: localhost:{port}</c>,
+/// <c>Host: 127.0.0.1:{port}</c>, and an arbitrary <c>Host: evil.example:1234</c> all reached <see
+/// cref="HandleRequest"/> unmodified and got back whatever THIS class decided. So the <c>Host</c>
+/// check in <see cref="HandleRequest"/> (gate step 3) is not defense in depth on top of an http.sys
+/// filter for THAT case -- it is the entire defense against DNS rebinding from a loopback client.
+/// Separately, ALSO measured 2026-09-25: once two literal hostname prefixes share a port (127.0.0.1
+/// and localhost), http.sys DOES validate a connection that arrives on neither registered local
+/// address at all -- e.g. a LAN NIC -- and turns it away itself with its own
+/// "400 Bad Request - Invalid Hostname" page before <see cref="HandleRequest"/> ever runs. Binding
+/// only loopback prefixes is what makes that http.sys-level rejection possible in the first place;
+/// the <see cref="HttpListenerRequest.RemoteEndPoint"/> check (gate step 1, extracted as the pure,
+/// unit-tested <see cref="IsLoopbackRemote"/>) is this class's OWN, independent line of defense for
+/// the case a connection reaches here anyway -- e.g. a dual-stack socket handing back an address
+/// shape this class did not expect -- not a bet on http.sys always doing that filtering for it.
 /// </para>
 /// <para>
 /// One background thread, calling the synchronous, blocking <see cref="HttpListener.GetContext"/> in
 /// a loop -- the same "one connection at a time, never throws the loop down" shape as <see
 /// cref="Win32.NamedPipeAlertCommandServer.RunLoop"/>. <see cref="Dispose"/> calling <see
 /// cref="HttpListener.Stop"/> is what makes the blocked <c>GetContext</c> call return (with an
-/// <see cref="HttpListenerException"/>), the same way cancelling <c>_stopping</c> unblocks the pipe's
-/// pending <c>WaitForConnectionAsync</c>.
+/// exception caught by the <c>!listener.IsListening</c> branch below), the same way cancelling the
+/// pipe's own <c>_stopping</c> token unblocks its pending <c>WaitForConnectionAsync</c>. A repeating,
+/// non-shutdown <c>GetContext</c> failure backs off exactly like
+/// <see cref="Win32.NamedPipeAlertCommandServer.RunLoop"/> does, though no black-box test can
+/// currently force that path open (see <c>HttpAlertCommandServerTests</c>'s "R3-005" note).
 /// </para>
 /// </remarks>
 public sealed class HttpAlertCommandServer : IAlertCommandServer
@@ -40,6 +65,17 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// </summary>
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// Starting delay before <see cref="RunLoop"/> retries a repeating, non-shutdown
+    /// <see cref="HttpListener.GetContext"/> failure, doubled up to <see cref="MaxRetryBackoff"/> and
+    /// reset the moment a context is actually accepted -- the HTTP analogue of
+    /// <see cref="Win32.NamedPipeAlertCommandServer.InitialRetryBackoff"/>.
+    /// </summary>
+    public static readonly TimeSpan InitialRetryBackoff = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Ceiling for the backoff above, matching <see cref="Win32.NamedPipeAlertCommandServer.MaxRetryBackoff"/>.</summary>
+    public static readonly TimeSpan MaxRetryBackoff = TimeSpan.FromMilliseconds(500);
+
     /// <summary>Bound on <see cref="Dispose"/> joining the background thread.</summary>
     private static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(5);
 
@@ -50,6 +86,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     private readonly byte[] _tokenBytes;
     private readonly Func<string, string> _handleCommand;
     private readonly Action<string> _onDiagnostic;
+    private readonly CancellationTokenSource _stopping = new();
 
     private HttpListener? _listener;
     private Thread? _thread;
@@ -87,37 +124,61 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
 
     /// <summary>
     /// Starts listening on a background thread. Idempotent: a second call while already listening is
-    /// a no-op. Never throws: a failure to bind the port (e.g. already in use) is reported through
-    /// <see cref="_onDiagnostic"/> and this instance stays inert -- the pipe keeps working either
-    /// way, the same contract <see cref="IAlertCommandServer"/> documents.
+    /// a no-op, and so is any call after <see cref="Dispose"/> (R3-004: a disposed instance stays
+    /// disposed -- it never quietly re-binds the port). Never throws: a failure to bind the port
+    /// (e.g. already in use) is reported through <see cref="_onDiagnostic"/> and this instance stays
+    /// inert -- the pipe keeps working either way, the same contract <see cref="IAlertCommandServer"/>
+    /// documents.
     /// </summary>
     public void Start()
     {
-        if (_thread is not null)
+        if (_disposed || _thread is not null)
         {
             return;
         }
 
-        HttpListener listener;
-        try
+        var listener = TryCreateListener(includeLocalhostPrefix: true)
+            ?? TryCreateListener(includeLocalhostPrefix: false);
+
+        if (listener is null)
         {
-            listener = new HttpListener();
-            listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
-            listener.TimeoutManager.EntityBody = RequestTimeout;
-            listener.TimeoutManager.HeaderWait = RequestTimeout;
-            listener.TimeoutManager.IdleConnection = RequestTimeout;
-            listener.TimeoutManager.DrainEntityBody = RequestTimeout;
-            listener.Start();
-        }
-        catch (Exception error)
-        {
-            _onDiagnostic($"alert http: failed to start listening on port {_port}: {error.GetType().Name}: {error.Message}");
             return;
         }
 
         _listener = listener;
         _thread = new Thread(() => RunLoop(listener)) { IsBackground = true, Name = "CosmicWin.AlertHttp" };
         _thread.Start();
+    }
+
+    /// <summary>
+    /// Builds and starts one <see cref="HttpListener"/> attempt. <see langword="null"/> on failure,
+    /// with a diagnostic already reported -- the caller decides whether to retry with a narrower set
+    /// of prefixes or give up for good.
+    /// </summary>
+    private HttpListener? TryCreateListener(bool includeLocalhostPrefix)
+    {
+        try
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
+            if (includeLocalhostPrefix)
+            {
+                listener.Prefixes.Add($"http://localhost:{_port}/");
+            }
+
+            listener.TimeoutManager.EntityBody = RequestTimeout;
+            listener.TimeoutManager.HeaderWait = RequestTimeout;
+            listener.TimeoutManager.IdleConnection = RequestTimeout;
+            listener.TimeoutManager.DrainEntityBody = RequestTimeout;
+            listener.Start();
+            return listener;
+        }
+        catch (Exception error)
+        {
+            var prefixes = includeLocalhostPrefix ? "127.0.0.1 and localhost" : "127.0.0.1";
+            _onDiagnostic($"alert http: failed to start listening on port {_port} ({prefixes}): {error.GetType().Name}: {error.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -129,12 +190,15 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// </summary>
     private void RunLoop(HttpListener listener)
     {
+        var backoff = InitialRetryBackoff;
+
         while (true)
         {
             HttpListenerContext context;
             try
             {
                 context = listener.GetContext();
+                backoff = InitialRetryBackoff; // reset the moment a context is actually accepted
             }
             catch (Exception) when (!listener.IsListening)
             {
@@ -145,6 +209,8 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             catch (Exception error)
             {
                 _onDiagnostic($"alert http: {error.GetType().Name}: {error.Message}");
+                _stopping.Token.WaitHandle.WaitOne(backoff);
+                backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxRetryBackoff.Ticks));
                 continue;
             }
 
@@ -175,11 +241,9 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         var request = context.Request;
         var response = context.Response;
 
-        // 1. Loopback RemoteEndPoint. Defense in depth on top of binding the literal 127.0.0.1
-        // prefix: http.sys matches a request to a registered prefix by its Host header, not by
-        // which interface the packet actually arrived on.
-        var remote = request.RemoteEndPoint;
-        if (remote is null || !IPAddress.IsLoopback(remote.Address))
+        // 1. Loopback RemoteEndPoint -- see IsLoopbackRemote and the class remarks for exactly what
+        // this does and does not add on top of binding only loopback prefixes.
+        if (!IsLoopbackRemote(request.RemoteEndPoint))
         {
             Reject(response, 403, "remote endpoint is not loopback");
             return;
@@ -260,6 +324,30 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         WriteReply(response, AlertHttpProtocol.StatusCodeFor(reply), reply);
     }
 
+    /// <summary>
+    /// The pure loopback test behind gate step 1 (R3-003: extracted so it can be unit-tested
+    /// deterministically, without a real socket). <see langword="null"/> -- no remote endpoint at all
+    /// -- is never loopback. Recognises IPv4 127.0.0.0/8, IPv6 <c>::1</c>, and an IPv4 address mapped
+    /// into IPv6 (<c>::ffff:127.x.x.x</c>) -- the shape a dual-stack socket can hand back for an IPv4
+    /// peer even though this listener's own prefixes are literal IPv4/hostname, never <c>::</c> or
+    /// <c>+</c>.
+    /// </summary>
+    internal static bool IsLoopbackRemote(IPEndPoint? remote)
+    {
+        if (remote is null)
+        {
+            return false;
+        }
+
+        var address = remote.Address;
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        return IPAddress.IsLoopback(address);
+    }
+
     private bool IsAllowedHost(string? host)
     {
         if (string.IsNullOrEmpty(host))
@@ -283,21 +371,34 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     }
 
     /// <summary>
-    /// Constant-time comparison over UTF-8 bytes, per the task file: <see
-    /// cref="CryptographicOperations.FixedTimeEquals"/> returns <see langword="false"/> immediately
-    /// when the lengths differ (a documented, deliberate short-circuit -- a length mismatch is not a
-    /// secret worth constant time over), and compares every byte otherwise.
+    /// The <c>Bearer</c> scheme name is matched case-insensitively (R3-006: RFC 7235's <c>auth-scheme</c>
+    /// is explicitly case-insensitive, and real clients disagree on casing) -- but the token itself
+    /// is compared with <see cref="CryptographicOperations.FixedTimeEquals"/> over UTF-8 bytes,
+    /// case-SENSITIVE and constant-time, per the task file. <c>FixedTimeEquals</c> returns
+    /// <see langword="false"/> immediately when the lengths differ (a documented, deliberate
+    /// short-circuit -- a length mismatch is not a secret worth constant time over).
     /// </summary>
     private bool HasValidToken(HttpListenerRequest request)
     {
-        const string prefix = "Bearer ";
         var header = request.Headers["Authorization"];
-        if (string.IsNullOrEmpty(header) || !header.StartsWith(prefix, StringComparison.Ordinal))
+        if (string.IsNullOrEmpty(header))
         {
             return false;
         }
 
-        var providedBytes = Encoding.UTF8.GetBytes(header.AsSpan(prefix.Length).ToString());
+        var spaceIndex = header.IndexOf(' ');
+        if (spaceIndex < 0)
+        {
+            return false;
+        }
+
+        var scheme = header[..spaceIndex];
+        if (!string.Equals(scheme, "Bearer", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var providedBytes = Encoding.UTF8.GetBytes(header[(spaceIndex + 1)..]);
         return CryptographicOperations.FixedTimeEquals(providedBytes, _tokenBytes);
     }
 
@@ -401,6 +502,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         }
 
         _disposed = true;
+        _stopping.Cancel(); // wakes RunLoop promptly even mid-backoff-wait
 
         try
         {
@@ -421,5 +523,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         {
             // Best-effort cleanup on the way out.
         }
+
+        _stopping.Dispose();
     }
 }

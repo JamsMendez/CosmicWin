@@ -130,19 +130,93 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         Assert.StartsWith("error: ", await response.Content.ReadAsStringAsync());
     }
 
+    // ---- R3-001/002: raw-socket Host-header measurement ----
+    //
+    // A review of H2 assumed http.sys would answer `Host: localhost:{port}` and
+    // `Host: evil.example:1234` itself with its own 400 "Invalid Hostname", before HandleRequest ever
+    // ran, reasoning from a single literal (non-wildcard) prefix. MEASURED 2026-09-25 with a raw
+    // TcpClient against a listener bound only to `http://127.0.0.1:{port}/` (no client library
+    // involved, so nothing could rewrite the Host header):
+    //
+    //   Host: localhost:{port}        -> reached HandleRequest (UserHostName == "localhost:{port}"),
+    //                                     replied 202 "ok" -- OUR code accepted it (IsAllowedHost).
+    //   Host: 127.0.0.1:{port}        -> reached HandleRequest, replied 202 "ok".
+    //   Host: evil.example:1234       -> reached HandleRequest (UserHostName == "evil.example:1234",
+    //                                     Request.Url.Host == "evil.example"), replied 403
+    //                                     "error: unexpected host header" -- OUR IsAllowedHost check
+    //                                     rejected it. http.sys never answered on its own.
+    //
+    // Conclusion: with a single literal prefix registered, http.sys performs NO Host-header
+    // filtering at all -- it forwards every request on that port to this listener regardless of what
+    // Host says, because there is no ambiguity between competing prefixes for it to resolve. The
+    // application-level Host check (gate step 3) is therefore the ENTIRE defense against DNS
+    // rebinding here, not defense in depth layered on top of an http.sys-level filter. The three
+    // facts below prove exactly that: OUR layer answers every one of these, never http.sys.
+    //
+    // Separately: a REAL caller typing the literal URL `http://localhost:{port}/...` does a DNS
+    // resolution of "localhost" first, and on this machine that resolves to the IPv6 loopback
+    // address (verified: HttpListener bound additionally to the `localhost` prefix reported
+    // Request.LocalEndPoint == [::1]:{port}) -- a request that a listener bound ONLY to the IPv4
+    // literal `127.0.0.1` prefix never even receives at the socket level (measured: it timed out,
+    // never reaching HandleRequest at all). That is a real, separate gap from the Host-HEADER
+    // question above, and it is why Start() below registers the `localhost` prefix too.
+
     [Fact]
-    public async Task HostHeaderWrong_Returns403()
+    public async Task RawHost_ArbitraryHostname_IsRejectedByOurOwnCheckWith403()
     {
         var port = GetFreePort();
         using var server = Start(port, _ => "ok");
 
-        using var request = NewRequest(port, HttpMethod.Post, "{\"warning\":1}");
-        request.Headers.Host = "evil.example:1234";
+        var (status, body) = await SendRawAsync(port, BuildRawRequest("evil.example:1234", "{\"warning\":1}"));
+
+        Assert.Equal(403, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("unexpected host header"), body);
+    }
+
+    [Fact]
+    public async Task RawHost_ExactLoopbackIp_ReachesOurHandlerAndReturns202()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
+
+        var (status, body) = await SendRawAsync(port, BuildRawRequest($"127.0.0.1:{port}", "{\"warning\":1}"));
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", body);
+    }
+
+    [Fact]
+    public async Task RawHost_LocalhostAlias_ReachesOurHandlerAndReturns202()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
+
+        var (status, body) = await SendRawAsync(port, BuildRawRequest($"localhost:{port}", "{\"warning\":1}"));
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", body);
+    }
+
+    /// <summary>
+    /// The gap the raw Host-HEADER facts above cannot show: a caller that types the literal URL
+    /// <c>http://localhost:{port}/...</c> resolves "localhost" through DNS first, and never sends a
+    /// raw request to 127.0.0.1 at all if that resolves elsewhere. MEASURED 2026-09-25: on this
+    /// machine "localhost" resolves to the IPv6 loopback address, so this real end-to-end path needs
+    /// the `localhost` prefix actually registered, not just accepted at the Host-header gate.
+    /// </summary>
+    [Fact]
+    public async Task LiteralLocalhostUrl_ViaRealDnsResolution_ReachesTheServer()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
 
         using var client = NewClient();
-        using var response = await client.SendAsync(request);
+        client.Timeout = TimeSpan.FromSeconds(5);
+        using var response = await client.PostAsync(
+            $"http://localhost:{port}{AlertHttpProtocol.AlertsPath}", JsonContent("{\"warning\":1}"));
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal("ok", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -390,16 +464,177 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         try
         {
             using var response = await client.SendAsync(request);
-            // The listener is bound only to the literal 127.0.0.1 prefix, so if a connection was
-            // even accepted through the other interface, the RemoteEndPoint check must still 403 it.
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            // MEASURED 2026-09-25: with TWO literal hostname prefixes registered (127.0.0.1 and
+            // localhost), http.sys itself now validates a connection that arrived on neither
+            // registered local address -- a LAN NIC gets turned away with http.sys's own
+            // "400 Bad Request - Invalid Hostname" page, before this class ever sees it. That is a
+            // DIFFERENT outcome than the single-prefix measurement in the class remarks (where every
+            // Host header reached HandleRequest unfiltered), because http.sys only needs to
+            // disambiguate between competing prefixes once there is more than one. Either 403 (this
+            // class's own RemoteEndPoint check, if http.sys ever did route it here) or any other 4xx
+            // (http.sys's own rejection) proves the same thing: this LAN connection is refused one
+            // way or the other, never accepted.
+            Assert.True(
+                (int)response.StatusCode is >= 400 and < 500,
+                $"Expected some 4xx rejection, got {(int)response.StatusCode} {response.StatusCode}.");
+            output.WriteLine($"LAN connection through {address} got {(int)response.StatusCode} {response.StatusCode}.");
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException)
         {
-            // Also acceptable: http.sys never routed the connection to this listener at all,
-            // because it is bound to the literal loopback address, not a wildcard prefix.
+            // Also acceptable: the connection never completed at all -- refused or unreachable.
             output.WriteLine($"Connection through {address} was refused/unreachable: {error.Message}");
         }
+    }
+
+    // ---- R3-003: the pure loopback-remote check, unit-tested deterministically ----
+
+    [Theory]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("127.5.6.7", true)]
+    [InlineData("::1", true)]
+    [InlineData("10.0.0.5", false)]
+    [InlineData("192.168.1.10", false)]
+    [InlineData("203.0.113.4", false)]
+    public void IsLoopbackRemote_RecognisesLoopbackAddresses(string address, bool expected)
+    {
+        var endpoint = new IPEndPoint(IPAddress.Parse(address), 12345);
+        Assert.Equal(expected, HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+    }
+
+    [Fact]
+    public void IsLoopbackRemote_Ipv4MappedToIPv6Loopback_IsLoopback()
+    {
+        // The shape a dual-stack socket can hand back for an IPv4 peer (::ffff:127.0.0.1), even
+        // though this listener's own prefixes are IPv4/hostname literals, never "::" or "+".
+        var mapped = IPAddress.Parse("127.0.0.1").MapToIPv6();
+        var endpoint = new IPEndPoint(mapped, 12345);
+
+        Assert.True(HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+    }
+
+    [Fact]
+    public void IsLoopbackRemote_Ipv4MappedToIPv6NonLoopback_IsNotLoopback()
+    {
+        var mapped = IPAddress.Parse("10.0.0.5").MapToIPv6();
+        var endpoint = new IPEndPoint(mapped, 12345);
+
+        Assert.False(HttpAlertCommandServer.IsLoopbackRemote(endpoint));
+    }
+
+    [Fact]
+    public void IsLoopbackRemote_NullEndpoint_IsNotLoopback() =>
+        Assert.False(HttpAlertCommandServer.IsLoopbackRemote(null));
+
+    // ---- R3-005: bounded backoff if GetContext keeps throwing while still listening ----
+    //
+    // NamedPipeAlertCommandServer's RunLoop can be driven into repeated, non-terminal failures
+    // deterministically: a second pipe server on the SAME pipe name collides on every single
+    // CreateNamedPipe call, because that resource is exclusively named and nMaxInstances = 1. There
+    // is no HTTP equivalent -- an HttpListener bound to one prefix does not "collide" with anything
+    // once Start() has succeeded, and every realistic way GetContext() can fail after that (Stop(),
+    // Close(), or the listener being disposed) is exactly the shutdown path already handled by the
+    // `when (!listener.IsListening)` branch, not a repeating, in-place failure. Nothing short of
+    // reaching into http.sys internals reproduces a genuinely repeating GetContext() failure while
+    // IsListening stays true. The backoff below is still added, mirroring
+    // NamedPipeAlertCommandServer's InitialRetryBackoff/MaxRetryBackoff idiom, as a defensive measure
+    // against a failure mode that cannot be provoked from a black-box test -- this is a deliberate
+    // gap in coverage, not an oversight.
+
+    // ---- R3-006: the Bearer scheme is case-insensitive; the token itself is not ----
+
+    [Fact]
+    public async Task BearerSchemeLowercase_IsAccepted()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
+
+        var (status, body) = await SendRawAsync(
+            port, BuildRawRequest($"127.0.0.1:{port}", "{\"warning\":1}", authorization: $"bearer {Token}"));
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", body);
+    }
+
+    // ---- R3-004: Start after Dispose must be a no-op, and the port must stay free ----
+
+    [Fact]
+    public async Task Start_AfterDispose_IsANoOpAndLeavesThePortFree()
+    {
+        var port = GetFreePort();
+        var server = new HttpAlertCommandServer(port, Token, _ => "ok");
+        server.Start();
+        server.Dispose();
+
+        // Must be a genuine no-op: no exception, and -- the actual proof -- the port comes back
+        // free, because Start() did not quietly re-bind it.
+        var exception = Record.Exception(server.Start);
+        Assert.Null(exception);
+
+        using var probe = new TcpListener(IPAddress.Loopback, port);
+        var bindException = Record.Exception(probe.Start);
+        probe.Stop();
+        Assert.Null(bindException);
+
+        // And a well-behaved client genuinely gets nothing back -- this instance stayed inert.
+        using var client = NewClient();
+        await Assert.ThrowsAnyAsync<Exception>(() => client.PostAsync(
+            $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}", JsonContent("{\"warning\":1}")));
+    }
+
+    // ---- R3-007: boundary tests around MaxBodyBytes ----
+
+    [Fact]
+    public async Task BodyExactlyAtTheCap_ValidJsonPaddedWithWhitespace_Returns202()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
+
+        const string prefix = "{\"warning\":1";
+        const string suffix = "}";
+        var padding = new string(' ', AlertHttpProtocol.MaxBodyBytes - prefix.Length - suffix.Length);
+        var body = prefix + padding + suffix;
+        Assert.Equal(AlertHttpProtocol.MaxBodyBytes, Encoding.UTF8.GetByteCount(body));
+
+        var (status, responseBody) = await PostAsync(port, body);
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", responseBody);
+    }
+
+    [Fact]
+    public async Task BodyOneByteOverTheCap_Returns413()
+    {
+        var port = GetFreePort();
+        var handlerCalls = 0;
+        using var server = Start(port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
+
+        const string prefix = "{\"warning\":1";
+        const string suffix = "}";
+        var padding = new string(' ', AlertHttpProtocol.MaxBodyBytes - prefix.Length - suffix.Length + 1);
+        var body = prefix + padding + suffix;
+        Assert.Equal(AlertHttpProtocol.MaxBodyBytes + 1, Encoding.UTF8.GetByteCount(body));
+
+        var (status, _) = await PostAsync(port, body);
+
+        Assert.Equal(413, status);
+        Assert.Equal(0, handlerCalls);
+    }
+
+    [Fact]
+    public async Task TrulyChunkedBody_RawSocket_OverTheCap_Returns413()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok");
+
+        const string prefix = "{\"warning\":1";
+        const string suffix = "}";
+        var padding = new string(' ', AlertHttpProtocol.MaxBodyBytes - prefix.Length - suffix.Length + 50);
+        var body = prefix + padding + suffix;
+
+        var (status, responseBody) = await SendRawAsync(port, BuildRawChunkedRequest($"127.0.0.1:{port}", body));
+
+        Assert.Equal(413, status);
+        Assert.StartsWith("error: ", responseBody);
     }
 
     // ---- helpers ----
@@ -456,6 +691,81 @@ public sealed class HttpAlertCommandServerTests(ITestOutputHelper output)
         {
             listener.Stop();
         }
+    }
+
+    /// <summary>
+    /// Builds a raw HTTP/1.1 request with a Content-Length body, byte for byte -- no client library
+    /// involved, so nothing can normalise or reject the <paramref name="hostHeader"/> on its way out.
+    /// </summary>
+    private static string BuildRawRequest(string hostHeader, string body, string? authorization = null)
+    {
+        var bodyBytes = Encoding.UTF8.GetByteCount(body);
+        return "POST " + AlertHttpProtocol.AlertsPath + " HTTP/1.1\r\n" +
+            "Host: " + hostHeader + "\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Authorization: " + (authorization ?? $"Bearer {Token}") + "\r\n" +
+            "Content-Length: " + bodyBytes + "\r\n" +
+            "Connection: close\r\n\r\n" +
+            body;
+    }
+
+    /// <summary>
+    /// Builds a raw, genuinely chunked HTTP/1.1 request (<c>Transfer-Encoding: chunked</c>, no
+    /// <c>Content-Length</c> at all) -- proof that the "unknown length" branch of the body reader is
+    /// exercised by real chunked wire framing, not by a client library's own internal buffering.
+    /// </summary>
+    private static string BuildRawChunkedRequest(string hostHeader, string body)
+    {
+        var sb = new StringBuilder();
+        sb.Append("POST ").Append(AlertHttpProtocol.AlertsPath).Append(" HTTP/1.1\r\n");
+        sb.Append("Host: ").Append(hostHeader).Append("\r\n");
+        sb.Append("Content-Type: application/json\r\n");
+        sb.Append("Authorization: Bearer ").Append(Token).Append("\r\n");
+        sb.Append("Transfer-Encoding: chunked\r\n");
+        sb.Append("Connection: close\r\n\r\n");
+
+        var bytes = Encoding.UTF8.GetBytes(body);
+        const int chunkSize = 256;
+        for (var offset = 0; offset < bytes.Length; offset += chunkSize)
+        {
+            var length = Math.Min(chunkSize, bytes.Length - offset);
+            sb.Append(length.ToString("x")).Append("\r\n");
+            sb.Append(Encoding.UTF8.GetString(bytes, offset, length)).Append("\r\n");
+        }
+
+        sb.Append("0\r\n\r\n");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Sends <paramref name="requestText"/> byte for byte over a raw <see cref="TcpClient"/> and
+    /// parses the raw response back into a status code and body -- proof of whichever layer actually
+    /// answered (http.sys itself, or this class's own <c>HandleRequest</c>), since a client library
+    /// never gets a chance to reinterpret anything in between.
+    /// </summary>
+    private static async Task<(int Status, string Body)> SendRawAsync(int port, string requestText)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        using var stream = client.GetStream();
+        var requestBytes = Encoding.UTF8.GetBytes(requestText);
+        await stream.WriteAsync(requestBytes);
+
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var readTask = reader.ReadToEndAsync();
+        var completed = await Task.WhenAny(readTask, Task.Delay(ShortTimeout));
+        if (completed != readTask)
+        {
+            throw new TimeoutException($"No response within {ShortTimeout}.");
+        }
+
+        var raw = await readTask;
+        var statusLine = raw[..raw.IndexOf("\r\n", StringComparison.Ordinal)];
+        var status = int.Parse(statusLine.Split(' ')[1]);
+
+        var bodyIndex = raw.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        var body = bodyIndex >= 0 ? raw[(bodyIndex + 4)..] : string.Empty;
+        return (status, body);
     }
 }
 
