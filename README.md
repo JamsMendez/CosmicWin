@@ -96,6 +96,67 @@ Four things worth knowing before you rely on it:
   installation, not a configuration file — editing it changes nothing until the next install, which
   overwrites it.
 
+## Alerts
+
+CosmicWin can flash a `warning` or `failed` alert over the desktop, for example when a build breaks.
+Alerts are on by default (`alerts-enabled = on` in `%LOCALAPPDATA%\CosmicWin\settings.conf`). Each
+command asks for 1–16 tiles per kind (16 in total) and an optional duration of 1–60 seconds
+(default 5).
+
+From a terminal, `CosmicWinAlert.exe` sends a command over a per-user named pipe:
+
+```powershell
+CosmicWinAlert.exe warning:2 failed:1 duration:5
+```
+
+### Over HTTP (localhost only)
+
+Other programs on the same PC can send the same command over HTTP. The endpoint is **off by
+default**. Turn it on in `settings.conf` and restart CosmicWin:
+
+```ini
+alert-http = on
+alert-http-port = 47811
+```
+
+On first start CosmicWin writes a random token to `%LOCALAPPDATA%\CosmicWin\alert-http.token`. It
+keeps that token across restarts. Delete the file to get a new one on the next start.
+
+```powershell
+$token = Get-Content "$env:LOCALAPPDATA\CosmicWin\alert-http.token"
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:47811/v1/alerts `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType 'application/json' -Body '{ "warning": 2, "failed": 1, "duration": 5 }'
+```
+
+```sh
+curl -X POST http://127.0.0.1:47811/v1/alerts \
+  -H "Authorization: Bearer $(cat "$LOCALAPPDATA/CosmicWin/alert-http.token")" \
+  -H "Content-Type: application/json" \
+  -d '{"warning":1}'
+```
+
+The body is a JSON object with `warning`, `failed` and `duration`, all integers and all optional.
+At least one of `warning` or `failed` is required. The request is checked by the same rules as the
+pipe.
+
+| Status | Meaning |
+|---|---|
+| 202 | Queued; body `ok` |
+| 400 | Bad JSON, unknown field, or a command the alert rules reject |
+| 401 | Missing or wrong bearer token |
+| 403 | Request from a browser (`Origin` header), a foreign `Host`, or not from this PC |
+| 404 / 405 | Any path other than `/v1/alerts`, or any method other than `POST` |
+| 413 | Body larger than 1 KB |
+| 415 | `Content-Type` is not `application/json` |
+| 429 | The alert queue is full |
+| 503 | Alerts are turned off |
+
+The endpoint listens on `127.0.0.1` and `localhost` only. It refuses connections from other
+machines, and it refuses web pages even when they run on your own PC. If the port is already in
+use, the HTTP endpoint stays off and the named pipe keeps working. The reason is written to
+CosmicWin's desktop trace.
+
 ## Keybindings
 
 | Chord | Action |
