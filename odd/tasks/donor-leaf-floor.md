@@ -91,4 +91,8 @@ the donor) and one two-level mixed-axis (vertical) test.
   (one test file). Shared helper arranges 2000 px and asserts the focused group's small leaf is
   exactly 208 (902 * 300 / 1300 = 208.15) and no window is under 208. Proven by mutating
   `RescaleSizes` to drop one pixel (`scaled - 1`): both role-swap tests now fail with 207 vs 208,
-  where their `root.Sizes` assertion alone still passed.
+  where their `root.Sizes` assertion alone still passed. Layout suite 198 passed.
+  - Review (2 files, 20 lines, medium, consent granted, one reliability lens): APPROVED and
+    acknowledged, lineage `review-83825712acb4c84d`. Merged into local main.
+  - Suggestion left open (non-blocking): the exact `208` is a literal next to a check against
+    `DefaultMinLeafSlotLength`; if the floor constant changes, that line fails without naming why.
