@@ -59,6 +59,23 @@ gone; GREEN is the deletion with every suite still passing.
     Alert 13, Interop 241+40 skipped, App 891+6 skipped). Parent spot check: App tests 891 passed,
     0 failed. `rg` for removed names: only the structural guard.
   - Review: RDD on; assess vs `b2f0624` = medium, `slice_budget_reached` (1863 lines) -> review due.
+    Consent granted by the maintainer. Lineage `review-38ecb53f520d985d`, one lens (reliability):
+    APPROVED, acknowledged, authority burned. Reviewed boundary advances to `7f6d0e0`.
+    Advisory (non-blocking) findings: dropped malformed-command wiring coverage (WARNING, accepted ->
+    T1b); vacuous `Type.GetType` structural guard (WARNING, accepted -> T1b); per-frame tick pipeline
+    order no longer unit-tested after inlining `TickCore` (SUGGESTION, not taken: the inlined code is
+    equivalent and the old test existed only through the removed overlay seam).
+- [x] T1b — Port the malformed-command wiring test (error reply, `alert rejected` trace, no layer
+  start) to `WebViewAlertCompositionWiringTests`; make the structural guard resolve assemblies from a
+  known type with a positive control. Route: delegated writer (same writer, context reuse).
+  Commit `e1fc934` (2 test files, +71/-7).
+  - New `MalformedAlertCommand_ReturnsErrorAndDoesNotStartTheLayer`. Production already behaved, so
+    RED was by mutation (both reverted): dropping the `alert rejected` trace -> `Assert.Contains()`
+    failed; starting the layer on rejection -> `Assert.Empty()` failed with `start:warning:1000`.
+  - Guard now resolves via `typeof(MediaFoundationVideoWallpaperPlayer).Assembly` /
+    `typeof(AppComposition).Assembly`, plus 2 positive-control facts.
+  - Checks (writer): build 0 errors; full suite 0 failures (App 894+6 skipped). Parent spot check:
+    App tests 894 passed, 0 failed.
 - [ ] T2 — Docs: mark `live-alert-wallpaper` superseded in its plan and feature doc; note the removal
   in the webview feature doc; clean doc comments in `AlertQueue.cs` / `AlertCommandParser.cs`.
 - [ ] T3 — Hardware re-check with the preloaded layer: warning, failed with shake, FIFO, covered hold.
