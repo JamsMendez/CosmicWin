@@ -193,7 +193,7 @@ public sealed class WebViewAlertLayerController : IDisposable
             if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.RootVisualTarget = visual;
             _host.CommitComposition();
-            candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.local",
+            candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.example",
                 Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
             candidate.CoreWebView2.WebMessageReceived += OnMessage;
             candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
@@ -211,7 +211,7 @@ public sealed class WebViewAlertLayerController : IDisposable
             _navigateStopwatch = Stopwatch.StartNew();
             // No kind/duration hash any more (T9b): the page loads idle and is driven by show/hide
             // messages once it is ready.
-            _controller.CoreWebView2.Navigate("https://cosmicwin-alert.local/alert-layer.html");
+            _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
         }
         catch (Exception ex)
         {

@@ -159,9 +159,24 @@ public sealed class WebViewAlertLayerControllerTests
     public void PreloadNavigatesTheBarePageWithNoKindOrDurationHash()
     {
         var source = ReadControllerSource();
-        Assert.Contains("Navigate(\"https://cosmicwin-alert.local/alert-layer.html\")", source);
+        Assert.Contains("Navigate(\"https://cosmicwin-alert.example/alert-layer.html\")", source);
         Assert.DoesNotContain("#kind=", source);
         Assert.Contains("PostWebMessageAsJson", source);
+    }
+
+    /// <summary>
+    /// The virtual host must use an RFC 6761 reserved TLD, never <c>.local</c>. The WebView2
+    /// reference for <c>SetVirtualHostNameToFolderMapping</c>: "using .local as the top-level domain
+    /// name will work but can cause a delay during navigations. You should avoid using .local if
+    /// you can." Every controller creation (startup and every recovery) pays that navigation.
+    /// </summary>
+    [Fact]
+    public void VirtualHostUsesAReservedExampleDomainNotDotLocal()
+    {
+        var source = ReadControllerSource();
+        Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-alert.example\"", source);
+        Assert.DoesNotContain(".local\"", source);
+        Assert.DoesNotContain(".local/", source);
     }
 
     /// <summary>
