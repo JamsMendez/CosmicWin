@@ -45,9 +45,10 @@ Out of scope: LAN access, TLS, other verbs or routes, changing the pipe or the a
 - Status mapping: 202 ok, 400 bad JSON / parser error, 401 bad or missing token, 403 origin/host/
   non-loopback, 404 other path, 405 other method, 413 body too large, 415 wrong content type,
   429 `queue full`, 503 `alerts are disabled`. Body: the handler's reply text (`ok` / `error: ...`).
-- Open uncertainty (H2): `HttpListener` on `http://127.0.0.1:<port>/` may need elevation or a urlacl
-  when the app is NOT elevated; `http://localhost:<port>/` may not. H2 must measure both and pick the
-  one that works unelevated; the loopback `RemoteEndPoint` check stays either way.
+- Resolved 2026-09-24 (H2 measurement): run under `runas /trustlevel:0x20000` (basic user, `admin=False`),
+  `HttpListener.Start()` succeeded for BOTH `http://127.0.0.1:47899/` and `http://localhost:47899/`.
+  Chosen: `http://127.0.0.1:<port>/`, no urlacl. http.sys routes by the `Host` header, not by the
+  interface, so the loopback `RemoteEndPoint` check is the real LAN guard and stays mandatory.
 
 ## TDD mode
 
@@ -75,10 +76,29 @@ Reviewed boundary: branch point `a3e3ba8`.
   - Checks: build 0 errors (3 pre-existing warnings in untouched files); Interop suite 270 passed,
     40 skipped, 0 failed.
   - Review: assess vs `a3e3ba8` = medium, `under_budget` (308 lines) -> pending in the slice.
-- [ ] H2 -- `HttpAlertCommandServer : IAlertCommandServer`: listener lifecycle (`Start` idempotent,
+- [x] H2 -- `HttpAlertCommandServer : IAlertCommandServer`: listener lifecycle (`Start` idempotent,
   never throws, `Dispose` stops), request gate in the order of the constraints above, handler call,
   handler exceptions -> 500 `error: internal error`. Integration tests over a real loopback port
-  (`HttpClient`), plus the elevation measurement. Route: delegated writer.
+  (`HttpClient`), plus the elevation measurement. Route: delegated writer (writer trigger: server +
+  integration tests). Commit `3eef308` (2 files, +921).
+  - Strict TDD (writer): RED 27/27 failed against a `NotImplementedException` stub (e.g.
+    `Constructor_PortTooLarge_Throws`: no exception thrown); GREEN 27/27, re-run stable.
+  - Checks: writer build 0 errors (3 pre-existing warnings); Interop 297 passed / 40 skipped /
+    0 failed. Parent spot check: same 297/40/0.
+  - Review: assess vs `a3e3ba8` = medium, `slice_budget_reached` (1236 lines, H1+H2) -> due. Consent
+    granted by the maintainer. Lineage `review-d774e6b4251162d2`, one lens (reliability): APPROVED,
+    acknowledged, authority burned. Reviewed boundary advances to `3eef308`.
+    Advisory findings (non-blocking), all accepted into H2b: R3-001/002 Host gate may be shadowed by
+    http.sys prefix routing (localhost:port possibly 400, host-403 test may not prove the app gate);
+    R3-003 non-loopback 403 not deterministically tested; R3-004 `Start` after `Dispose` leaks a
+    listener; R3-005 no backoff when `GetContext` keeps failing; R3-006 `Bearer` scheme matched
+    case-sensitively; R3-007 no exact-size body boundary test, chunked test may not be chunked.
+- [ ] H2b -- Close the H2 review findings above. First MEASURE R3-001/002 with raw TCP requests
+  (what http.sys answers for `Host: localhost:<port>` and a foreign host against the `127.0.0.1`
+  prefix) and fix code/tests/doc to match the observed truth; make the loopback check a pure,
+  unit-tested predicate; `Start` after `Dispose` is a no-op; bounded backoff on repeated
+  `GetContext` failure; case-insensitive `Bearer`; exact-boundary and truly chunked body tests.
+  Route: delegated writer (same writer, context reuse).
 - [ ] H3 -- Token store (create-once, 32 random bytes base64url, file readable by the user only,
   reuse on restart, constant-time compare) + `Settings` keys `alert-http` / `alert-http-port` with
   defaults and round-trip. Route: delegated writer (2 non-trivial files).
