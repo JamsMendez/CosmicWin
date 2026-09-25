@@ -46,6 +46,12 @@ public sealed class FileDesktopTrace(
 
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
     private readonly TimeSpan _retryWindow = retryWindow ?? DefaultRetryWindow;
+
+    // Review R3-001: set when a line used up its whole retry window, cleared by the next write
+    // that succeeds. While set, lines fail at once instead of waiting again, so a reader that holds
+    // the file for a long time costs callers ONE window, not one per line -- Record runs on chord
+    // and layout paths that write several lines in a row. Guarded by _gate.
+    private bool _gaveUpOnLastHold;
     private readonly Lock _gate = new();
 
     public static string ResolveDefaultPath() =>
@@ -74,17 +80,24 @@ public sealed class FileDesktopTrace(
             var stamped = _clock().ToString("O", CultureInfo.InvariantCulture) + " " + line;
             lock (_gate)
             {
+                var window = _gaveUpOnLastHold ? TimeSpan.Zero : _retryWindow;
                 var elapsed = Stopwatch.StartNew();
                 while (true)
                 {
                     try
                     {
                         File.AppendAllText(path, stamped + Environment.NewLine);
+                        _gaveUpOnLastHold = false;
                         return;
                     }
-                    catch (IOException exception) when (IsSharingViolation(exception)
-                        && elapsed.Elapsed < _retryWindow)
+                    catch (IOException exception) when (IsSharingViolation(exception))
                     {
+                        if (elapsed.Elapsed >= window)
+                        {
+                            _gaveUpOnLastHold = true;
+                            throw;
+                        }
+
                         Thread.Sleep(RetryDelayMilliseconds);
                     }
                 }

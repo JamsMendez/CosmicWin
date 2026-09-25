@@ -88,6 +88,61 @@ public sealed class FileDesktopTraceTests : IDisposable
         Assert.Empty(File.ReadAllLines(Path_));
     }
 
+    /// <summary>
+    /// Review R3-001: a reader that holds the file for a long time must cost ONE retry window, not
+    /// one per line -- Record runs on chord and layout paths that write several lines at once.
+    /// Once a line gives up, later lines fail at once until a write succeeds again.
+    /// </summary>
+    [Fact]
+    public void Record_AfterALineGaveUpOnAPermanentHold_LaterLinesDoNotWaitAgain()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path_, string.Empty);
+        var trace = new FileDesktopTrace(Path_, retryWindow: TimeSpan.FromMilliseconds(300));
+
+        using var reader = new FileStream(Path_, FileMode.Open, FileAccess.Read, FileShare.Read);
+        trace.Record("first");
+
+        var second = System.Diagnostics.Stopwatch.StartNew();
+        trace.Record("second");
+        second.Stop();
+
+        Assert.True(second.Elapsed < TimeSpan.FromMilliseconds(100), $"second line waited {second.Elapsed}");
+    }
+
+    /// <summary>
+    /// The breaker closes again on the first write that succeeds, so a LATER short hold is ridden
+    /// out with the full window again instead of dropping lines forever.
+    /// </summary>
+    [Fact]
+    public async Task Record_OnceAWriteSucceedsAgain_ALaterShortHoldIsRiddenOutAgain()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path_, string.Empty);
+        var trace = new FileDesktopTrace(Path_, retryWindow: TimeSpan.FromMilliseconds(300));
+
+        using (new FileStream(Path_, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            trace.Record("dropped");
+        }
+
+        trace.Record("lands");
+
+        var reader = new FileStream(Path_, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            reader.Dispose();
+        });
+        trace.Record("rides out");
+        await release;
+
+        var lines = File.ReadAllLines(Path_);
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("lands", lines[0]);
+        Assert.Contains("rides out", lines[1]);
+    }
+
     [Fact]
     public void Record_AppendsOneLinePerChord_RatherThanOverwriting()
     {
