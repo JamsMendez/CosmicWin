@@ -235,6 +235,21 @@ Reviewed boundary: branch point `a3e3ba8`.
       backup (no `alert-http` keys). `alert-http.token` left in `%LOCALAPPDATA%\CosmicWin` (reused
       if the endpoint is turned on; delete to rotate).
 
+- [x] Final slice review: assess vs `22e9205` (H4b, H5b + revert, README) = medium,
+  `slice_budget_reached` (414 lines) -> due. Consent granted by the maintainer. Lineage
+  `review-0bfef30a5ed7bab0`, one lens (reliability): APPROVED, acknowledged, authority burned.
+  Reviewed boundary advances to `ba0bb62`. Advisory findings, both taken inline (route: inline, one
+  understood file + its tests):
+  - R3-mutex-ctor-outside-never-throws (WARNING): the named `Mutex` constructor ran outside the
+    never-throw contract. Now caught with `IsRecoverable` -> diagnostic + null. RED observed for
+    real: `WaitHandleCannotBeOpenedException` escaped when an `EventWaitHandle` owned the name.
+  - R3-lock-timeout-path-unproved (SUGGESTION): new test holds a private lock past a 100 ms timeout
+    -> null, one `timed out` diagnostic, no file. The branch already worked, so RED came from a
+    mutation (timeout branch proceeds anyway -> `Assert.Null() Failure`), then restored. Enabled by
+    an internal `LoadOrCreate(path, onDiagnostic, lockName, lockTimeout)` overload.
+  - Checks: build 0 errors (3 pre-existing warnings); Layout 190, Alert 13, Interop 314 (+40
+    skipped), App 958 (+6 skipped), 0 failed.
+
 ## Follow-ups (outside this feature)
 
 - The video wallpaper host window can be the foreground window right after start, and the covered-
