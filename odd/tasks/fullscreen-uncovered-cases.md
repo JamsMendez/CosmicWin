@@ -123,4 +123,11 @@ maintainer authorized this on 2026-09-25.
     was true instead of false. Mutation (`false &&` on the floor check) failed both new tests.
   - Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13,
     Interop 387/42 skipped, App 1011/6 skipped.
+- Review of the fixes (2026-09-25, 202 lines, under budget, the maintainer asked for it). Lens
+  review-reliability, lineage `review-23ff49d1ad4158e3`: APPROVED, acknowledged, authority burned.
+  The reviewed boundary is now `b618414`. One SUGGESTION, not yet authorized: R3-003. The new tests
+  cover only the turned-away (Untile) outcome of a fullscreen re-admission with a floor on record.
+  No test covers regroup/grow SUCCEEDING while the window is fullscreen; that test would assert the
+  leaf is kept, there is no extra SetPosition, and the window lands in `_fullscreen`. It guards the
+  "floor helpers never position" property the fix relies on.
 - FEATURE COMPLETE on `fix/fullscreen-uncovered-cases`. Not merged, not pushed.
