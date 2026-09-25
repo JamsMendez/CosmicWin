@@ -301,10 +301,51 @@ exception if a single cohesive slice cannot fit the budget.
     committed (throwaway, same as T1's manual check). App suite = 1030 passed / 6 skipped; Debug
     solution build = 0 errors, same pre-existing warnings; `git diff --check` clean.
     Not verified: real WebView2/Edge rendering of the show/hide transitions -- T9e hardware.
-  - [ ] **T9c -- Persistent controller.** Preload once at startup when the host composition is
-    ready; `IsVisible=false` while idle. `Start` posts `show` and makes it visible, or keeps a
-    pending show until ready; `End` posts `hide` and hides it. Recreate (with backoff) on host
-    HWND/generation change (Explorer restart) and on `ProcessFailed`; close only on dispose.
+  - [x] **T9c -- Persistent controller.** Commit `1776cc2` (551 additions / 237 deletions -- exceeds
+    the ~400-line review budget; it is one cohesive rewrite (production + its pure state machine +
+    tests + wiring), so it stays a single unit rather than splitting code from its tests, same size
+    exception T4 disclosed). Replaces the old per-alert create/dispose `WebViewAlertLayerController`
+    with a permanent preload:
+    - New pure `AlertLayerPreloadState` (host identity change detection, exponential
+      creation/process-failure backoff via `Failed()`/`CanCreate`/`Created()`, `Ready`/`Visible`
+      flags, and one pending show with an absolute deadline via `RequestShow`/`ApplyPendingShowIfDue`).
+      Fully unit-tested (10 facts), no WebView2 involved. Supersedes and removes the old
+      `AlertLayerLifecycle` (deadline-based auto-close did not fit a controller that must survive
+      past any one alert's duration) and its 3 now-obsolete tests.
+    - `Preload()` creates the environment/composition controller once, adds the overlay visual, and
+      navigates the BARE page (no `#kind=`/`&duration=` hash any more -- T9b's idle page). Ready =
+      navigation completed AND the page's own `"ready"` message (both tracked, `TryMarkReady`).
+      `Start`/`End` now post JSON `{"type":"show",...}`/`{"type":"hide"}` via
+      `PostWebMessageAsJson` and flip `IsVisible`, instead of creating/disposing anything --
+      `End` NEVER tears down the controller (proven both behaviorally, an unattached host reaches
+      neither WebView2 nor a "close" trace line across two Start/End cycles, and structurally, `End`'s
+      own method body contains no `TearDown(` call).
+    - The 250ms poll now runs for the whole preloaded lifetime (started by `Preload()`, not by
+      `Start()`), detecting a host HWND/generation change or `IsCompositionReady` loss and
+      recreating with the same exponential backoff; `ProcessFailed` also triggers recreate. The
+      environment is kept across an ordinary host-change recreate and dropped ONLY for
+      `"create-failed"`/`"process-failed"` (feature doc's "Keep _environment ... unless creation
+      failed/process failed"), proven structurally (`TearDown("host-changed")` has no
+      `dropEnvironment: true`, the other two do).
+    - `AppComposition` gains a `preloadAlertLayer` seam, invoked once on the owning UI thread inside
+      the existing `alertsEnabled` block (same place the alert pipe server starts), wired from
+      `WireProduction` as `alertLayer.Preload`. `alertRendererReady` is UNCHANGED
+      (`videoWallpaperHost.IsCompositionReady`) -- not gated on WebView readiness, since a pending
+      show already covers that race.
+    Strict TDD: RED first for `AlertLayerPreloadStateTests` (`CS0246`, type did not exist) -> GREEN
+    10/10, covering exactly the 6 named cases (pending show applied with remaining duration; pending
+    show dropped once expired; host identity change detection; failure backoff/recreate timing;
+    `Hide` clears visibility without touching `Ready`; `RequestShow` still posts while already
+    visible). Then RED for the 4 new/changed `WebViewAlertLayerControllerTests` facts against the
+    OLD controller (`CS1061`, no `Preload` method) -> GREEN 7/7 after the rewrite. Then RED for 2 new
+    `WebViewAlertCompositionWiringTests` facts (`CS1739`, no `preloadAlertLayer` parameter on `Wire`)
+    -> GREEN after wiring it through. App suite = 1042 passed / 6 skipped (net +12 over T9b: +10
+    state tests, +2 wiring tests; the 7 controller facts are a like-for-like replacement of the old
+    7); Interop unaffected (249 passed / 40 skipped); Debug solution build = 0 errors, same
+    pre-existing warnings; `git diff --check` clean.
+    Not verified (hardware-only, same limitation as T3/T6): real preload creation/navigation timing,
+    real Explorer-restart recreate, real `ProcessFailed` recovery, and the Idle-cost GPU condition
+    itself -- all T9e.
   - [ ] **T9d -- Immediate queue tick on enqueue.** A newly accepted command triggers the alert
     update on the UI dispatcher instead of waiting up to 400 ms for the watch tick.
   - [ ] **T9e -- Hardware re-run.** First alert after launch, latency (warm and first), FIFO with
