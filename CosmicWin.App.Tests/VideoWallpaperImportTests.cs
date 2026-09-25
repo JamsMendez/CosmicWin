@@ -272,8 +272,9 @@ public sealed class VideoWallpaperImportTests : IDisposable
     /// replaced (see <see cref="Import_WhenMovingIntoPlaceFails_LeavesTheExistingDestinationUntouchedAndNoTempFileBehind"/>,
     /// which holds the destination open BY ITS OWN NAME and does fail). This is therefore a
     /// regression guard on the actual, observed behaviour -- import succeeds via the link, with the
-    /// destination correctly sharing the source's identity, and the fallback below is never invoked
-    /// for this scenario -- rather than a repro of the warning as originally described.
+    /// destination correctly sharing the source's identity -- rather than a repro of the warning as
+    /// originally described. It is also why Import has no "retry as a copy after a failed linked
+    /// move" branch: if a future Windows changes this, this test is what starts failing.
     /// </summary>
     [Fact]
     public void Import_WhenTheSourceIsHeldOpenWithoutFileShareDelete_TheLinkedMoveStillSucceeds()
@@ -288,66 +289,6 @@ public sealed class VideoWallpaperImportTests : IDisposable
 
         Assert.Equal("held-open-payload", File.ReadAllText(destination));
         Assert.Equal(GetFileIdentity(source), GetFileIdentity(destination));
-    }
-
-    /// <summary>
-    /// V1c's actual fallback, exercised deterministically: since <see
-    /// cref="Import_WhenTheSourceIsHeldOpenWithoutFileShareDelete_TheLinkedMoveStillSucceeds"/>
-    /// shows the real sharing violation the review warned about does not reproduce through
-    /// ordinary <see cref="FileShare"/> locks on this filesystem, this drives the "link succeeded,
-    /// move into place failed" branch directly through an injected move, the same seam convention
-    /// <see cref="TryCreateHardLink"/> already uses one level up. The first move throws (standing
-    /// in for whatever locks the real linked move in the field); the retry underneath must fall
-    /// back to an ordinary byte copy under a FRESH temp name and succeed.
-    /// </summary>
-    [Fact]
-    public void Import_WhenTheLinkedMoveFails_FallsBackToCopyingBytesUnderAFreshTempName()
-    {
-        var source = WriteSourceFile("clip.mp4", "fallback-payload");
-        var moveAttempts = 0;
-
-        var destination = VideoWallpaperImport.Import(
-            _destinationDirectory,
-            source,
-            tryCreateHardLink: (_, _) => true,
-            moveIntoPlace: (temp, dest) =>
-            {
-                moveAttempts++;
-                if (moveAttempts == 1)
-                {
-                    throw new IOException("simulated sharing violation on the linked move");
-                }
-
-                File.Move(temp, dest, overwrite: true);
-            });
-
-        Assert.Equal(2, moveAttempts);
-        Assert.Equal("fallback-payload", File.ReadAllText(destination));
-        Assert.NotEqual(GetFileIdentity(source), GetFileIdentity(destination));
-        Assert.Equal([destination], Directory.GetFiles(_destinationDirectory));
-    }
-
-    /// <summary>
-    /// The copy-fallback's OWN failure must still propagate as it always has -- V1c only adds a
-    /// second chance, never a second safety net -- and it must still leave the previous destination
-    /// untouched and no temp file behind, exactly like the plain (non-linked) copy failure above.
-    /// </summary>
-    [Fact]
-    public void Import_WhenTheLinkedMoveAndTheFallbackCopyBothFail_PropagatesAndLeavesNoTempFileBehind()
-    {
-        Directory.CreateDirectory(_destinationDirectory);
-        var destination = Path.Combine(_destinationDirectory, "video-wallpaper.mp4");
-        File.WriteAllText(destination, "previously imported");
-        var source = WriteSourceFile("clip.mp4", "never lands");
-
-        Assert.Throws<IOException>(() => VideoWallpaperImport.Import(
-            _destinationDirectory,
-            source,
-            tryCreateHardLink: (_, _) => true,
-            moveIntoPlace: (_, _) => throw new IOException("simulated sharing violation, every attempt")));
-
-        Assert.Equal("previously imported", File.ReadAllText(destination));
-        Assert.Equal([destination], Directory.GetFiles(_destinationDirectory));
     }
 
     /// <summary>
@@ -370,9 +311,9 @@ public sealed class VideoWallpaperImportTests : IDisposable
     }
 
     /// <summary>
-    /// V1c: a leftover temp file from an import whose final move failed (e.g. the sharing
-    /// violation above, when even the best-effort delete of the stale link could not run because
-    /// the source was still held open) must not accumulate forever -- the NEXT import sweeps it up.
+    /// V1c: a leftover temp file from an import that could not clean up after itself (the process
+    /// died mid-copy, or the best-effort delete failed) must not accumulate forever -- the NEXT
+    /// import sweeps it up.
     /// An unrelated file in the same directory is never touched by that sweep.
     /// </summary>
     [Fact]
