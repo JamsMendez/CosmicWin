@@ -79,7 +79,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [x] V1c (review follow-up, authorized 2026-09-25) Handle the held-source case of
   R3-linked-destination-inherits-source-sharing and add the same-source re-pick test. OUTCOME: the
   premise does not reproduce (see Progress), so no fallback ships; the tests and a temp sweep do.
-- [ ] V2 Protocol in Interop: route constant, JSON parse of `path`, validation, and a status code for
+- [x] V2 Protocol in Interop: route constant, JSON parse of `path`, validation, and a status code for
   each outcome (400 bad body or path, 404 file missing, 415 wrong extension, 202 accepted, 503 video
   wallpaper not available on this composition). Unit tests, as in `AlertHttpProtocolTests`.
 - [ ] V3 Server routing: `HttpAlertCommandServer` dispatches `/v1/wallpaper/video` to a new handler
@@ -148,4 +148,19 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   leftover `video-wallpaper*.tmp-*` files at the start of `Import`. Checks: build clean (3
   pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop 315/42 skipped,
   App 964/6 skipped. Assess (base `deb1a5a`): medium, 173 lines, `under_budget`, pending in the slice.
-- Next: V2 (protocol in Interop).
+- V2 done (2026-09-25), commits `ed5438b` (writer) and `a1108b6` (parent fix). Route: delegated
+  direct (writer trigger: new source + probes + tests). New `VideoWallpaperHttpProtocol` (Interop):
+  `VideoPath = "/v1/wallpaper/video"`, `MaxBodyBytes = 4096`, `NotAvailableStatusCode = 503` for
+  V4, `TryValidate(body, out path, out error, probes?)` returning `VideoWallpaperRequestOutcome`,
+  and `StatusCodeFor` (202/400/404/415). Filesystem probes are injectable
+  (`VideoWallpaperFileProbes`). Check order, cheapest first: JSON shape (unknown fields rejected,
+  duplicate `path` last-wins), path syntax, `.mp4`, network drive, exists. So a missing `.txt`
+  answers 415, never 404. Each error carries its own message, so a caller can tell this 404/415
+  from the server's unknown-route and Content-Type ones. Error messages never echo the path.
+  Writer's call, kept: `C:/x/y.mp4` (forward slashes) answers 400 (fail closed; decision 4 says
+  `C:\...`). Parent review found and fixed a hole: a colon past the drive letter (an NTFS
+  alternate data stream, `C:\x.txt:hidden.mp4`) passed as `.mp4`; now 400, checked after the URI
+  and drive-rooted checks so those keep their specific reasons. TDD: writer RED `CS0246` (missing
+  type); parent RED 2 failing ADS cases, then GREEN. Checks: build clean (3 pre-existing warnings);
+  `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop 361/42 skipped, App 964/6 skipped.
+- Next: V3 (server routing).
