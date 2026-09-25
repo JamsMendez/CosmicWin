@@ -82,3 +82,10 @@ worktree). The unpushed branch was rebuilt with the same messages and the test m
 commit. The final tree is identical. W1 is now `da454ef` (App 775 passed / 6 skipped at that
 commit), W2 is `4b160ec` (776 / 6), and the hashes above were updated. W3 (a hardware trace
 watch) is next.
+
+2026-09-24 native review of `main..99a197c` (10 files, 597 lines, risk high: the only evidence was
+process-starting code in `SlowAdmissionDiagnostic.cs`, where this branch changed one comment
+word). The maintainer granted consent. Lineage `review-1b81838a03f749ea`, four lenses (risk,
+resilience, readability, reliability) captured concurrently. Result: **approved** with no
+correction, and the acknowledgement burned authority. The reviewed boundary is now `99a197c`.
+W3 (the hardware trace watch) remains.
