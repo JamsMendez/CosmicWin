@@ -437,13 +437,25 @@ exists only on `feat/live-alert-wallpaper`) is not in the chain.
       A pixel-diff-only probe was ambiguous (the WebView becoming visible also spikes), so the
       frames were judged visually.
 
-- [ ] **T10 -- Explain the ~4 s gap after an Explorer-restart recovery.** Accepted by the
+- [x] **T10 -- Explain the ~4 s gap after an Explorer-restart recovery.** Accepted by the
   maintainer on 2026-09-24. T9e saw red ~4 s after the recreated page's navigation completed,
   and there is no trace line for when a pending show is applied. Route: inline (one mechanical
   trace addition plus its tests), then a hardware re-measure with one Explorer restart.
-  - [ ] **T10a -- Trace page ready and pending-show application.** Add `alert-layer page ready`
-    and `alert-layer pending show applied kind=<k> remaining=<ms>`. Strict TDD.
-  - [ ] **T10b -- Re-measure on hardware**, and decide whether a fix is needed.
+  - [x] **T10a -- Trace page ready and pending-show application.** Add `alert-layer page ready`
+    and `alert-layer pending show applied kind=<k> remaining=<ms>`. Strict TDD. Commit
+    `61edb3f`: RED `CS0117` x2 (members missing), GREEN 13/13 trace tests, App 1047 passed / 6
+    skipped, Debug build 0 errors, `git diff --check` clean.
+  - [x] **T10b -- Re-measure on hardware**, and decide whether a fix is needed. 2026-09-24,
+    one Explorer restart (PID 2584 -> 19304, restarted on its own) *while* a 20 s `failed` layer
+    was visible. Times are relative to the client launch: show 0.29 s -> red 0.70 s; Explorer
+    killed 3.21 s -> layer gone 3.25 s; `close reason=host-changed` 3.55 s; recreate from 4.33 s
+    (controller 407 ms, navigation 2027 ms); `page ready` and `pending show applied
+    remaining=13518` at 6.77 s; **red again at 7.14 s (0.37 s, the normal reveal)**; `done` at
+    20.30 s, the original deadline. **The ~4 s gap did not reproduce; no fix needed.**
+    Recovery costs ~3.9 s from the kill to visible again, and the page's ~2 s navigation is most
+    of it. The T9e ordering (restart *before* the command) was not re-run; its extra delay stays
+    unexplained, and a probe artifact from windows restored by the restart is the likely
+    suspect.
 
 ## Progress
 
