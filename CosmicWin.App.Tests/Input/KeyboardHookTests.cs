@@ -135,15 +135,16 @@ public sealed class KeyboardHookTests
         Assert.Equal(TimeSpan.FromMinutes(30), LowLevelKeyboardHook.DefaultWatchdogBackstop);
     }
 
+    /// <summary>The interval is a cheap early-out, never an independent trigger: the backstop alone decides whether to reinstall.</summary>
     [Fact]
-    public void Watchdog_DoesNotReinstallBeforeItsIntervalHasPassed()
+    public void Watchdog_DoesNotReinstallBeforeTheBackstopHasPassed()
     {
         var platform = new FakeKeyboardHookPlatform();
         var clock = new FakeClock();
         var callerThread = Environment.CurrentManagedThreadId;
         var channel = Channel.CreateUnbounded<HotkeyAction>();
         using var hook = new LowLevelKeyboardHook(
-            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value, TimeSpan.FromSeconds(5));
 
         hook.Start();
         clock.Advance(4000);
@@ -169,7 +170,7 @@ public sealed class KeyboardHookTests
     /// <para>
     /// Windows silently uninstalls a low-level keyboard hook whose callback overruns
     /// <c>LowLevelHooksTimeout</c>. A ghosted hook delivers no events, so <c>_lastActivity</c>
-    /// stops moving, and five seconds later the watchdog puts it back -- which is exactly what "the
+    /// stops moving, and the backstop eventually puts it back -- which is exactly what "the
     /// chord went dead and I had to press the modifier again" would look like from the outside.
     /// </para>
     /// <para>
@@ -189,7 +190,7 @@ public sealed class KeyboardHookTests
         var clock = new FakeClock();
         var channel = Channel.CreateUnbounded<HotkeyAction>();
         using var hook = new LowLevelKeyboardHook(
-            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+            channel.Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value, TimeSpan.FromSeconds(5));
 
         hook.Start();
         Assert.Equal(0, hook.WatchdogReinstalls);
@@ -208,13 +209,13 @@ public sealed class KeyboardHookTests
     /// The counter above says the watchdog fired 200 times in twenty minutes. It does not say
     /// whether it was ever needed once, and those are completely different findings: one is a
     /// window manager rescuing itself from a hook Windows keeps killing, the other is a window
-    /// manager tearing down a healthy hook every five seconds and opening 200 gaps a keypress can
+    /// manager tearing down a healthy hook every backstop and opening a gap a keypress can
     /// fall into.
     /// </para>
     /// <para>
     /// `_lastActivity` moves only when a key arrives, so the watchdog's condition is "nobody has
-    /// typed for five seconds" -- which is the resting state of every keyboard. It has no test of
-    /// whether the hook is alive at all.
+    /// typed for the backstop" -- which is the resting state of every idle keyboard. It has no test
+    /// of whether the hook is alive at all.
     /// </para>
     /// <para>
     /// UnhookWindowsHookEx is that test, and it is already being called. It succeeds on a handle
@@ -229,7 +230,8 @@ public sealed class KeyboardHookTests
         var platform = new FakeKeyboardHookPlatform { UninstallResult = true };
         var clock = new FakeClock();
         using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(5));
 
         hook.Start();
         clock.Advance(5000);
@@ -254,7 +256,8 @@ public sealed class KeyboardHookTests
         var platform = new FakeKeyboardHookPlatform { UninstallResult = false };
         var clock = new FakeClock();
         using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(5));
 
         hook.Start();
         clock.Advance(5000);
@@ -264,253 +267,57 @@ public sealed class KeyboardHookTests
     }
 
     /// <summary>
-    /// An idle machine is not a broken hook, and the watchdog must leave it alone.
+    /// A machine nobody is touching -- no key, no click, no wheel -- is not a broken hook, and the
+    /// watchdog must leave it alone short of the backstop.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Measured on hardware, nobody at the keyboard: 39 reinstalls in 200 seconds, `foundGone=0`
-    /// on every one. The trigger was "no key has arrived for five seconds", which is the resting
-    /// state of every keyboard on earth, so a healthy hook was torn down and put back roughly
-    /// twelve times a minute for the life of the process -- and each teardown is a window a
-    /// keypress can fall into, which is exactly what "it went dead, I pressed it again and it
-    /// worked" looks like.
-    /// </para>
-    /// <para>
-    /// Silence is not evidence. MISSED INPUT is: the session received something and this hook did
-    /// not see it. GetLastInputInfo answers that without a hook, which is what makes it usable as
-    /// evidence about one.
-    /// </para>
+    /// This used to be tested by simulating an idle SESSION reading. That reading, and the cursor
+    /// sampling it was compared against, are gone: the gate now asks only "how long since a key
+    /// reached this hook", so an idle machine needs no simulated evidence at all -- the default fake
+    /// platform, which reports no key, already is one.
     /// </remarks>
     [Fact]
-    public void Watchdog_OnAnIdleMachine_LeavesTheHookAlone()
+    public void Watchdog_WithNoKeyForLessThanTheBackstop_LeavesTheHookAlone()
     {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 60_000 };
+        var platform = new FakeKeyboardHookPlatform();
         var clock = new FakeClock();
         using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromMinutes(30));
+
+        hook.Start();
+        clock.Advance((long)TimeSpan.FromMinutes(30).TotalMilliseconds - 1);
+
+        // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
+        // decided to do nothing, which a timeout would only have guessed at.
+        var pumps = platform.PumpCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
+
+        Assert.Equal(1, platform.InstallCount);
+        Assert.Equal(0, hook.WatchdogReinstalls);
+    }
+
+    /// <summary>
+    /// The decision this whole feature is: the backstop is the ONLY trigger. No key for that long,
+    /// with nothing else consulted, puts the hook back.
+    /// </summary>
+    /// <remarks>
+    /// Measured 2026-09-25: comparing missed input against the session's latest input -- the gate
+    /// this replaces -- read an ordinary wheel or click with a still cursor as a missed key, 129
+    /// reinstalls in 35 minutes, `foundGone=0` on every one. `foundGone=0` on every reinstall ever
+    /// traced, in fact, so trading early recovery for no false reinstalls is the accepted cost.
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WithNoKeyForAtLeastTheBackstop_PutsItBack()
+    {
+        var platform = new FakeKeyboardHookPlatform();
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(60));
 
         hook.Start();
         clock.Advance(60_000);
-
-        // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
-        // decided to do nothing, which a timeout would only have guessed at.
-        var pumps = platform.PumpCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
-
-        Assert.Equal(1, platform.InstallCount);
-        Assert.Equal(0, hook.WatchdogReinstalls);
-    }
-
-    /// <summary>
-    /// The safety net still has a floor under it: a long enough silence puts the hook back
-    /// regardless of what the session says.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Gating the watchdog on GetLastInputInfo makes the whole net depend on that one reading being
-    /// truthful. If it ever under-reports, a genuinely dead hook would never be replaced, and the
-    /// symptom is a keyboard that stays dead until the app is restarted -- a worse failure than the
-    /// churn being removed here. The reading has since been measured to be truthful about injected
-    /// input as well as physical, so this is insurance rather than a correction for a known fault;
-    /// it stays because one API deciding whether the keyboard ever recovers is a bet worth not
-    /// taking.
-    /// </para>
-    /// <para>
-    /// So the reading decides HOW OFTEN, not WHETHER. The backstop is sixty times the interval, so
-    /// it costs a sixtieth of the teardowns the old trigger produced while keeping a guaranteed
-    /// recovery for a reading that turns out to be wrong.
-    /// </para>
-    /// </remarks>
-    [Fact]
-    public void Watchdog_AfterALongEnoughSilence_PutsTheHookBackAnyway()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 600_000 };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
-            () => clock.Value, TimeSpan.FromSeconds(300));
-
-        hook.Start();
-        clock.Advance(300_000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>
-    /// And the case it exists for: the session got input that never reached this hook.
-    /// </summary>
-    [Fact]
-    public void Watchdog_WhenTheSystemSawInputThisHookDidNot_PutsItBack()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500 };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
-
-        hook.Start();
-        clock.Advance(5000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>
-    /// A question the shell refuses is not an answer of "idle", so the net stays up.
-    /// </summary>
-    /// <remarks>
-    /// GetLastInputInfo fails when the calling thread is not on the interactive desktop, and
-    /// reading that as "nothing has happened" would silently retire the watchdog on exactly the
-    /// machines nobody can look at. Unknown reinstalls, which is what this code did before the
-    /// reading existed at all.
-    /// </remarks>
-    [Fact]
-    public void Watchdog_WhenTheShellWillNotSay_PutsItBack()
-    {
-        var platform = new FakeKeyboardHookPlatform { RefuseSystemInputQuestion = true };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
-
-        hook.Start();
-        clock.Advance(5000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>
-    /// The measured defect: <c>GetLastInputInfo</c> counts the mouse, and a keyboard hook does not
-    /// see it. A cursor that has moved since our last key names the mouse as the source, so this
-    /// missed input is not evidence of a dead hook.
-    /// </summary>
-    /// <remarks>
-    /// Measured on hardware with mouse-only input: a reinstall every ~4.9 seconds, 72 times in one
-    /// session, `foundGone=0` on every single one -- the watchdog tearing down a hook that was never
-    /// gone.
-    /// </remarks>
-    [Fact]
-    public void Watchdog_WhenTheMissedInputWasTheCursorMoving_LeavesTheHookAlone()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, MoveCursorOnEveryReading = true };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
-
-        hook.Start();
-
-        // The first advance stays under the interval, so no pass can decide anything while it
-        // runs -- it exists only to put a baseline AND one recorded move on the clock before the
-        // interval is ever crossed. The remaining distance to the interval is crossed in STEPS
-        // smaller than SystemInputAge: see AdvanceWhileCursorKeepsMoving for why a single further
-        // jump would be racy under the gate's own fresh clock reading.
-        clock.Advance(1000);
-        var reads = platform.CursorReadCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount > reads + 1, TimeSpan.FromSeconds(2)));
-        AdvanceWhileCursorKeepsMoving(clock, platform, 4000, 250);
-
-        // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
-        // decided to do nothing, which a timeout would only have guessed at.
-        var pumps = platform.PumpCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
-
-        Assert.Equal(1, platform.InstallCount);
-        Assert.Equal(0, hook.WatchdogReinstalls);
-    }
-
-    /// <summary>
-    /// The gap the old gate left open: a dead hook, then a mouse move, then a keystroke. Judging
-    /// against the hook's own stale last key -- instead of the session's latest input -- makes any
-    /// later cursor move look newer than that key forever, so the gate blamed the mouse and only
-    /// the backstop recovered.
-    /// </summary>
-    /// <remarks>
-    /// Sequence: the cursor moves once at ~1s (recorded), then goes still while the session
-    /// reports a key 100 ms old that this hook never saw, at clock 6s. Judged against the hook's
-    /// last key (0, since no real key ever reached this hook), the ~1s cursor move is AFTER it and
-    /// reads as "the mouse did it" forever. Judged against the session's latest input instead
-    /// (6000 - 100 = 5900), that same ~1s-old move is well BEFORE it, so it reads as "that key
-    /// never reached us" and reinstalls within one interval -- no backstop wait needed.
-    /// </remarks>
-    [Fact]
-    public void Watchdog_WhenTheCursorMovedBeforeAKeyThatFollowed_ReinstallsWithoutWaitingForTheBackstop()
-    {
-        var platform = new FakeKeyboardHookPlatform { MoveCursorOnEveryReading = true };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
-            () => clock.Value, TimeSpan.FromSeconds(300));
-
-        hook.Start();
-
-        // A cursor move on record before the key that follows it: baseline, then one confirmed move.
-        clock.Advance(1_000);
-        var reads = platform.CursorReadCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
-
-        // The cursor goes still, and the session reports a key 100 ms old that this hook never saw.
-        platform.MoveCursorOnEveryReading = false;
-        platform.SystemInputAge = 100;
-        clock.Advance(5_000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>The recovery this whole reading exists for, preserved: the session saw input and the cursor never moved, so the missed input could only have been a key.</summary>
-    [Fact]
-    public void Watchdog_WhenTheSessionSawInputAndTheCursorHasNotMoved_PutsItBack()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500 };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
-
-        hook.Start();
-        clock.Advance(5000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>An unanswered cursor question is not evidence of an idle mouse, so it reinstalls -- the same rule already applied to a refused input reading.</summary>
-    [Fact]
-    public void Watchdog_WhenTheShellWillNotSayWhereTheCursorIs_PutsItBack()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, RefuseCursorQuestion = true };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5), () => clock.Value);
-
-        hook.Start();
-        clock.Advance(5000);
-
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-    }
-
-    /// <summary>The backstop floor still holds even while the cursor keeps moving: a long enough silence puts the hook back regardless.</summary>
-    [Fact]
-    public void Watchdog_AfterTheBackstop_PutsTheHookBackEvenWhileTheCursorMoves()
-    {
-        var platform = new FakeKeyboardHookPlatform { SystemInputAge = 500, MoveCursorOnEveryReading = true };
-        var clock = new FakeClock();
-        using var hook = new LowLevelKeyboardHook(
-            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
-            () => clock.Value, TimeSpan.FromSeconds(300));
-
-        hook.Start();
-
-        // Past the interval, short of the backstop: the moving cursor is what holds the watchdog
-        // back here. Proven first, or the backstop below would pass just the same with a still
-        // cursor and the test would say nothing about "even while the cursor moves". The first
-        // step stays under the interval, so a cursor movement is on record before any pass can
-        // decide; the rest crosses the interval in STEPS smaller than SystemInputAge -- see
-        // AdvanceWhileCursorKeepsMoving for why a single further jump would be racy under the
-        // gate's own fresh clock reading.
-        clock.Advance(1_000);
-        var reads = platform.CursorReadCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
-        AdvanceWhileCursorKeepsMoving(clock, platform, 5_000, 250);
-        reads = platform.CursorReadCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
-        Assert.Equal(1, platform.InstallCount);
-
-        clock.Advance(294_000);
 
         Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
     }
@@ -543,30 +350,6 @@ public sealed class KeyboardHookTests
 
         Assert.Equal(1, platform.UninstallCount);
         Assert.Equal(nativeResult, hook.UnhookSucceeded);
-    }
-
-    /// <summary>
-    /// Advances a FAKE clock by small steps while the platform keeps moving the cursor, waiting for
-    /// fresh cursor reads between steps.
-    /// </summary>
-    /// <remarks>
-    /// The gate reads the clock twice in the same pass -- once in <c>SampleCursor</c> to timestamp
-    /// a cursor move, again in <c>ShouldReinstall</c> to age the session's latest input -- and a
-    /// fake clock's <c>Advance</c> can land in the gap between those two reads, a torn read a real,
-    /// continuously-creeping clock cannot produce: the recorded move would be timestamped BEFORE
-    /// the jump while the age is computed AFTER it. Stepping by less than the platform's
-    /// <c>SystemInputAge</c> bounds that gap to less than the margin the gate needs, so even the
-    /// worst-case torn read still reads as a moving mouse.
-    /// </remarks>
-    private static void AdvanceWhileCursorKeepsMoving(
-        FakeClock clock, FakeKeyboardHookPlatform platform, long totalMilliseconds, long stepMilliseconds)
-    {
-        for (var advanced = 0L; advanced < totalMilliseconds; advanced += stepMilliseconds)
-        {
-            clock.Advance(stepMilliseconds);
-            var reads = platform.CursorReadCount;
-            Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 3, TimeSpan.FromSeconds(2)));
-        }
     }
 
     private sealed class FakeClock

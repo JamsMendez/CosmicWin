@@ -105,7 +105,7 @@ public sealed class WatchdogReinstallWiringTests
             focusTrace: new RecordingFocusTrace(),
             disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
-            hookFactory: writer => hook = new LowLevelKeyboardHook(writer, platform, WatchdogInterval, clock.Read),
+            hookFactory: writer => hook = new LowLevelKeyboardHook(writer, platform, WatchdogInterval, clock.Read, WatchdogInterval),
             loadExceptions: () => ExceptionList.Empty,
             shutdown: () => { },
             buildTray: _ => new NullDisposable(),
