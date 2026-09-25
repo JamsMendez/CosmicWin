@@ -73,3 +73,19 @@ Fix the three pre-existing problems found while building the video wallpaper HTT
   unchanged. `grep HttpAlertCommandServer --include=*.cs` finds 0 matches.
 - Checks after all three: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout
   198, Alert 13, Interop 387/42 skipped, App 999/6 skipped.
+- Review (2026-09-25): assess (base `f03b7f4`) medium, 4278 lines (inflated: the F3 `git mv` counts
+  as delete + add; about 300 real lines). Maintainer granted. Lens review-reliability, lineage
+  `review-a7b989665b0ed223`: APPROVED, acknowledged, authority burned. The reviewed boundary is
+  now `5155350`. Both findings were fixed with maintainer approval:
+  - R3-001 (WARNING): the retry sleeps while holding `_gate`, and `Record` runs on chord, layout
+    and alert paths (53 call sites). A LONG hold would stall every line by up to 150 ms. Fix
+    `362efe1`: a breaker. When a line uses up its window, later lines fail at once until a write
+    succeeds again. RED: the second line under a permanent hold waited the full window. A
+    breaker-reset test (a later short hold is ridden out again) passed first; its mutation check
+    (drop the reset) compiled and failed, then was reverted.
+  - R3-002 (SUGGESTION): a throwing `onWorkFailed` sink escaped `Run`. Fix `a896b98`: the sink call
+    is guarded. RED: the test host process CRASHED (`Unhandled exception ...
+    InvalidOperationException: sink failed`), then GREEN.
+  - Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert
+    13, Interop 387/42 skipped, App 1002/6 skipped.
+- FEATURE COMPLETE on `fix/video-endpoint-followups`. Not merged, not pushed.
