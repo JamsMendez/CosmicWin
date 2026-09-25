@@ -82,3 +82,8 @@ the donor) and one two-level mixed-axis (vertical) test.
   - across-axis group floored at one leaf slot: only the mixed-axis test fails;
   - same-axis floor without the proportion: 5 of 8 floor tests fail.
   - Layout suite 198 passed.
+  - Review (base-diff vs main, 2 files, 89 lines, medium, consent granted, one reliability lens):
+    APPROVED and acknowledged, lineage `review-885d67456785e2b8`. Merged into local main.
+  - Follow-up (non-blocking, R3-001 of that review): the two role-swap tests assert only
+    `root.Sizes`; an `Arrange` assertion that the focused group's small leaf lands at >= 208 px would
+    also bind the rounding on the shrink path.
