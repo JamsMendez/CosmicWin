@@ -28,6 +28,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
 {
     private const uint WsChild = 0x40000000;
+    private const uint WsExNoActivate = 0x08000000;
 
     [RequiresDesktopSessionFact]
     public void TryAttach_AttachesTheHostWindowBehindTheDesktopIcons()
@@ -83,6 +84,32 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         Assert.Equal(mi.rcMonitor.top, actual.top);
         Assert.Equal(mi.rcMonitor.right, actual.right);
         Assert.Equal(mi.rcMonitor.bottom, actual.bottom);
+    }
+
+    /// <summary>
+    /// video-host-foreground-hold: the host used to be created as a visible, activatable popup, so
+    /// right after start it took the foreground and the covered-desktop check held every alert.
+    /// It must be non-activatable on first creation AND when recreated after an Explorer restart.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TryAttach_CreatesAndRecreatesTheHostWindowAsNonActivatable()
+    {
+        using var host = new Win32VideoWallpaperHost();
+
+        Assert.True(host.TryAttach());
+        AssertNonActivatable(new HWND(host.Hwnd));
+
+        Assert.True(PInvoke.DestroyWindow(new HWND(host.Hwnd)));
+        Assert.True(host.TryAttach());
+        AssertNonActivatable(new HWND(host.Hwnd));
+    }
+
+    private static void AssertNonActivatable(HWND hwnd)
+    {
+        var exStyle = unchecked((uint)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE));
+        Assert.Equal(WsExNoActivate, exStyle & WsExNoActivate);
+        Assert.True(PInvoke.IsWindowVisible(hwnd).Value != 0);
+        Assert.NotEqual(hwnd, PInvoke.GetForegroundWindow());
     }
 
     private static HWND ResolveExpectedDesktopParent()

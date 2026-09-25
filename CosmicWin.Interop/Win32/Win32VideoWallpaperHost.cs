@@ -720,7 +720,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             return false;
         }
 
-        PInvoke.ShowWindow(childHwnd, SHOW_WINDOW_CMD.SW_SHOW);
+        PInvoke.ShowWindow(childHwnd, SHOW_WINDOW_CMD.SW_SHOWNA);
         return true;
     }
 
@@ -1256,11 +1256,15 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
         // No WS_EX_LAYERED: a DXGI flip-model swapchain presents through DWM directly and never
         // touches the GDI-era layered/UpdateLayeredWindow path.
+        // Hidden and WS_EX_NOACTIVATE (video-host-foreground-hold): a visible, activatable,
+        // monitor-sized popup took the foreground right after start and stayed foreground after
+        // SetParent, so the covered-desktop check held every alert. AttachToDesktop shows it, without
+        // activation, only once it is a WS_CHILD behind the icons.
         return PInvoke.CreateWindowEx(
-            0,
+            WINDOW_EX_STYLE.WS_EX_NOACTIVATE,
             _className,
             "CosmicWin Video Wallpaper",
-            WINDOW_STYLE.WS_POPUP | WINDOW_STYLE.WS_VISIBLE,
+            WINDOW_STYLE.WS_POPUP,
             monitorRect.left,
             monitorRect.top,
             width,
