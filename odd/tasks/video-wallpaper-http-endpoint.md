@@ -71,7 +71,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [x] V1 Extract the tray closure into one named operation, for example `SwitchVideoWallpaper(path)`,
   dispatched on `onVideoWallpaperThread`. The tray calls it, and its behaviour and tests do not
   change. This is a pure refactor, with existing wiring tests as the guard.
-- [ ] V1b `VideoWallpaperImport.Import`: hard link (to a temp name beside the destination, then the
+- [x] V1b `VideoWallpaperImport.Import`: hard link (to a temp name beside the destination, then the
   same move) when source and destination share a volume; fall back to the copy otherwise or when
   the link fails. Tests: same-volume link (destination shares the file identity, no bytes copied),
   cross-volume or link failure falls back to copy, the same-file short-circuit and the
@@ -110,4 +110,25 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13,
   Interop 315/42 skipped, App 958/6 skipped, before and after; App re-run by the parent: 958/6.
   Review assess (base `ed85eeb`, committed-only): medium, `under_budget`, pending in the slice.
-- Next: V1b (hard-link import).
+- V1b done (2026-09-25), commit `deb1a5a`. Route: delegated direct (writer trigger: source + tests).
+  Link first through an injected `Func<string,string,bool>` seam (internal third `Import` overload),
+  inline `CreateHardLinkW` P/Invoke, copy fallback unchanged. TDD: RED observed (`CS1501: No
+  overload for method 'Import' takes 3 arguments`), then GREEN. Finding while writing it: a hard link
+  never opens the source's data, so a `FileShare.None` lock no longer blocks the import; the one
+  pre-existing test that relied on that lock now forces the link to fail through the seam. Checks:
+  build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop
+  315/42 skipped, App 961/6 skipped; App re-run by the parent: 961/6. Parent check on disk: moving
+  a fresh link over a destination that is already a link to the SAME file succeeds and removes the
+  temp name (the same-source re-pick case).
+- Review: assess (base `ed85eeb`) medium, `slice_budget_reached` (482 lines). Maintainer granted.
+  Lens review-reliability, lineage `review-77ad03c2731f30e8`: APPROVED, acknowledged, authority
+  burned. The reviewed boundary is now `deb1a5a`. Two advisory, non-blocking findings:
+  - R3-linked-destination-inherits-source-sharing (WARNING): after a link, the destination IS the
+    source's file object, so another process holding the source open without FILE_SHARE_DELETE (an
+    editor, another player, a sync client) blocks the rename into place. The switch then falls back
+    to restore, where a copy would have landed. The same hold on the PREVIOUS source blocks replacing
+    the destination on a later switch.
+  - R3-relink-same-source-untested (SUGGESTION): no unit test for re-picking the same original after
+    a linked import (checked by hand on disk above, not in the suite).
+  Both are proposed as follow-up V1c; not authorized yet.
+- Next: the maintainer decides V1c, then V2.
