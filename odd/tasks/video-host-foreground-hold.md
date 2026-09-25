@@ -62,6 +62,9 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
   the live host's `GetClassName` would link the two. Done on `test/live-host-class-exclusion`:
   `TheLiveHostWindowClass_IsExcludedFromCoverage`. Green on first run, so proven by mutation (host
   class format without the hyphen): the new test failed while the 7 detector unit tests passed.
+  Commit c0745bc. Review: medium, granted, approved and acknowledged (lineage
+  `review-bb5e8c56fc751d31`). Two advisory SUGGESTIONs, not applied: put the read class name in the
+  assertion message; comment that `exStyle: 0` deliberately isolates the class-name rule.
 
 ## Next step
 
