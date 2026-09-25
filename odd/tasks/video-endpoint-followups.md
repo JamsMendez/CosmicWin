@@ -41,7 +41,7 @@ Fix the three pre-existing problems found while building the video wallpaper HTT
   on disk. Plus a test that a permanent hold still never throws and gives up within the bound.
 - [ ] F2 `MtaActionThread`: trace the exception type from a failed posted work item; the loop keeps
   serving. RED first.
-- [ ] F3 Rename `HttpAlertCommandServer` (name to be confirmed by the maintainer). Pure refactor:
+- [ ] F3 Rename `HttpAlertCommandServer` to `LocalHttpCommandServer` (maintainer's choice, 2026-09-25). Pure refactor:
   the suites are the guard.
 
 ## Constraints
