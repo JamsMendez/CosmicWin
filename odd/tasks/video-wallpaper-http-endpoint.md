@@ -88,7 +88,7 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [x] V4 Composition wiring: the handler calls the operation from V1 (never `Import` directly: imports
   must stay serialized), never blocks the HTTP thread,
   and traces the outcome without absolute paths. Wiring tests.
-- [ ] V5 Docs: curl or PowerShell example with the token. Hardware check, driven by the agent:
+- [x] V5 Docs: curl or PowerShell example with the token. Hardware check, driven by the agent:
   switch while playing, a missing file, a non-mp4 file, the 6.6 GB file (switch delay with the
   link), deleting the source while it plays, and two requests back to back. (The held-source
   sharing case is settled by V1c and needs no hardware check.)
@@ -232,4 +232,42 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   wires no scheduler, so it stops at the missing-thread check and never reaches
   SwitchVideoWallpaper's null host/player branch. Needed: a case with a scheduler but no
   host/player, asserting false and nothing queued.
-- Next: the maintainer decides the suggestion, then V5 (docs + hardware check by the agent).
+- Review 4 suggestion done (maintainer approved), commit `464ea7f`: a scheduler but no host or
+  player answers false and queues nothing. Mutation check: replacing the null guard with
+  `if (false)` compiled and made the test fail (`Assert.False`); reverted. App 991/6 skipped.
+- V5 docs, commit `687e204`: README section "Video wallpaper over HTTP" (settings key, PowerShell
+  and curl examples, path rules, link vs copy, status table). The alerts table's 404 row now also
+  covers a route that is turned off.
+- V5 hardware check (2026-09-25, driven by the agent, elevated shell, app PID 15560 from `run\`).
+  Before starting: a hard-link backup of the 6.6 GB import and a copy of `settings.conf`; then
+  `video-wallpaper-http = on` was added. Startup trace: `http-server start requested port=47811
+  alerts-route=False video-route=True`, and the startup video played.
+  - Rejections, all answered in 1-67 ms: missing file 404 "file does not exist"; `.txt` and
+    `.MP4.txt` 415; relative, UNC and forward slashes 400 (drive-rooted reason); URL 400 (URI
+    reason); ADS 400 (invalid characters); `/v1/alerts` with its route off 404 "no such route".
+  - Switches: the answer takes 1-26 ms; the `phase=http ... tryPlay=True` line follows in
+    0.33-0.75 s. C: small file: linked (`fsutil hardlink list` shows both names). D: small file:
+    copied (a single name). The 6.6 GB file: linked, 344-529 ms over 7 switches in a
+    13-switch soak alternating with a small file, 13/13 traced.
+  - Back to back (two requests with no pause): both 202, both traced in order, and the second one
+    won.
+  - Deleting the source while it plays: the delete succeeds, the destination stays intact, and the
+    app stays alive.
+  - One false alarm, root-caused: in the first run, one 6.6 GB switch linked correctly but its
+    trace line never appeared. Cause: the harness polled `desktop-trace.log` with
+    `File.ReadAllLines` (FileShare.Read, which denies writers), so the app's `File.AppendAllText`
+    hit a sharing violation and `FileDesktopTrace.Record` silently dropped the line. With a
+    `FileShare.ReadWrite` reader, the 13/13 soak lost nothing. Also a harness bug, not the app:
+    the "unknown field" probe body had lost a backslash (`"C:\x.mp4"` is invalid JSON), so its 400
+    "not valid JSON" was correct.
+  - Restored afterwards: app stopped by PID (it was not running before), `settings.conf`
+    byte-identical to the backup, `video-wallpaper.mp4` is the 6.6 GB data again, test files and
+    `D:\cosmicwin-hw-test` removed. The hard-link backup name remains in the session scratchpad
+    (harmless: deleting it leaves the import intact).
+- Pre-existing, found during V5, NOT fixed (outside this feature's scope):
+  - `FileDesktopTrace.Record` drops a line whenever another process reads the trace without write
+    sharing.
+  - `MtaActionThread.Run` swallows every exception from a posted work item without tracing it, so
+    a failed video switch after the import would leave no trace at all.
+- FEATURE COMPLETE on `feat/video-wallpaper-http-endpoint`. Not merged, not pushed: merging into
+  local main is the maintainer's call.
