@@ -103,3 +103,17 @@ previous session's scratchpad) was stopped by the agent and replaced by a build 
 hardware check. From 03:42:19 UTC the app runs a build of local `main` at `5f4560e` (both
 branches merged, all suites green) as PID 16916. Only 03:01:40-03:37 and 03:42:19 onward count
 for W3; ignore reinstall lines between 03:37 and 03:42:19.
+
+2026-09-25 W3 result: **FAILED -- the corrected gate churns far MORE than before.**
+- Hourly `hook reinstalled by watchdog` lines, old build: 1-10/h (09-22..09-25, typically ~5/h).
+  New build, 03:01:40-03:37: **129** in 35 min, 97 of them under 10 s apart, in bursts at the
+  ~5 s interval (longest: 23 in 03:31:31-03:33:36). `foundGone=0` on every one.
+- Cause, reproduced 03:45 UTC (build of main `5f4560e`): a fullscreen probe form under a still
+  cursor; 14 s with no input -> 0 reinstalls; then `mouse_event(WHEEL)` once per second for 15 s ->
+  4 reinstalls at 5 s spacing, cursor never moved.
+- Why: `ShouldReinstall` now compares the last cursor MOVE with the SESSION's latest input. A wheel
+  or click with a still cursor is session input newer than the last move, so it reads as a missed
+  key. The code comment calls that residue 'far smaller than cursor movement'; in real use
+  (scrolling, clicking, touchpad) it dominates. The old gate compared with the hook's own last key,
+  so a scroll after any cursor move never tripped it.
+- W3 stays open. A fix needs a maintainer decision.
