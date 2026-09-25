@@ -1559,9 +1559,16 @@ public sealed class AppComposition : IDisposable
 
         var videoWallpaperHost = new Win32VideoWallpaperHost();
         var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
+        // T9a (webview-alert-layer): the desktop trace is created here, ahead of the alert layer, so
+        // BOTH the controller's own lifecycle telemetry and Wire's desktopTrace parameter share the
+        // exact same sink -- T6 found production had no alert-layer navigation/render telemetry at
+        // all, which left F1/F2 unexplained.
+        var desktopTrace = new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath());
         // Startup runs on the owning STA before its dispatcher synchronization context may
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
-        var alertLayer = settings.AlertsEnabled ? new WebViewAlertLayerController(videoWallpaperHost) : null;
+        var alertLayer = settings.AlertsEnabled
+            ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record)
+            : null;
         var videoWallpaperThread = new MtaActionThread("CosmicWinVideoWallpaperHost");
 
         return Wire(
@@ -1577,7 +1584,7 @@ public sealed class AppComposition : IDisposable
             // Gated internally: an unrecognised Windows build reports unsupported and the desktop
             // chords become inert, rather than calling through a vtable that may have moved.
             virtualDesktops: desktops,
-            desktopTrace: new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath()),
+            desktopTrace: desktopTrace,
             resolveWindowDesktop: desktops.ResolveWindowDesktop,
             windowShown: new Win32WindowShownWatcher(),
             focusBorder: new FocusBorderOverlay(),
