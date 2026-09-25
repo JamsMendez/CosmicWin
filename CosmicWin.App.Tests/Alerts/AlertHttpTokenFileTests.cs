@@ -375,4 +375,65 @@ public sealed class AlertHttpTokenFileTests : IDisposable
             Path.GetDirectoryName(SettingsFile.ResolvePath()),
             Path.GetDirectoryName(path));
     }
+
+    /// <summary>
+    /// Finding R3-lock-timeout-path-unproved: another holder keeps the lock past the timeout, so the
+    /// call gives up with one diagnostic and <see langword="null"/> instead of hanging, and writes
+    /// nothing. A private lock name keeps this from colliding with the real one or other facts.
+    /// </summary>
+    [Fact]
+    public void LockHeldPastTheTimeout_ReturnsNullWithOneDiagnosticAndWritesNothing()
+    {
+        var lockName = $@"Local\CosmicWin.AlertHttpToken.Test.{Guid.NewGuid():N}";
+        using var held = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var holder = new Thread(() =>
+        {
+            using var mutex = new Mutex(initiallyOwned: true, lockName);
+            held.Set();
+            release.Wait(TimeSpan.FromSeconds(10));
+            mutex.ReleaseMutex();
+        }) { IsBackground = true };
+        holder.Start();
+        Assert.True(held.Wait(TimeSpan.FromSeconds(5)));
+
+        try
+        {
+            var diagnostics = new List<string>();
+            var token = AlertHttpTokenFile.LoadOrCreate(
+                TokenPath, diagnostics.Add, lockName, TimeSpan.FromMilliseconds(100));
+
+            Assert.Null(token);
+            Assert.Single(diagnostics);
+            Assert.Contains("timed out", diagnostics[0]);
+            Assert.False(File.Exists(TokenPath));
+        }
+        finally
+        {
+            release.Set();
+            holder.Join(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    /// <summary>
+    /// Finding R3-mutex-ctor-outside-never-throws: a synchronization object of another type already
+    /// owns the lock name, so creating the mutex itself throws. The loader must still keep its
+    /// contract: a diagnostic and <see langword="null"/>, never a throw.
+    /// </summary>
+    [Fact]
+    public void LockNameTakenByAnotherObjectType_ReturnsNullWithADiagnosticInsteadOfThrowing()
+    {
+        var lockName = $@"Local\CosmicWin.AlertHttpToken.Test.{Guid.NewGuid():N}";
+        using var squatter = new EventWaitHandle(false, EventResetMode.ManualReset, lockName);
+
+        var diagnostics = new List<string>();
+        string? token = null;
+        var exception = Record.Exception(() =>
+            token = AlertHttpTokenFile.LoadOrCreate(TokenPath, diagnostics.Add, lockName, TimeSpan.FromSeconds(1)));
+
+        Assert.Null(exception);
+        Assert.Null(token);
+        Assert.Single(diagnostics);
+        Assert.False(File.Exists(TokenPath));
+    }
 }

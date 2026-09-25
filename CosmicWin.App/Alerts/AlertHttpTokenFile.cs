@@ -106,15 +106,36 @@ public static class AlertHttpTokenFile
     /// when the lock could not be acquired in time, or the file could not be read or the fresh token
     /// could not be written -- never a throw.
     /// </summary>
-    public static string? LoadOrCreate(string path, Action<string>? onDiagnostic = null)
+    public static string? LoadOrCreate(string path, Action<string>? onDiagnostic = null) =>
+        LoadOrCreate(path, onDiagnostic, LockName, LockTimeout);
+
+    /// <summary>
+    /// <see cref="LoadOrCreate(string, Action{string}?)"/> with the lock name and timeout exposed, so
+    /// tests can hold a private lock past a short timeout instead of the real one for 5 seconds.
+    /// </summary>
+    internal static string? LoadOrCreate(string path, Action<string>? onDiagnostic, string lockName, TimeSpan lockTimeout)
     {
         var reportDiagnostic = onDiagnostic ?? (_ => { });
 
-        using var gate = new Mutex(initiallyOwned: false, LockName);
+        // Finding R3-mutex-ctor-outside-never-throws: creating the named mutex can itself throw (a
+        // same-named object of another type, or one with a restrictive ACL), so it is inside the same
+        // never-throw contract as the file access below.
+        Mutex gate;
+        try
+        {
+            gate = new Mutex(initiallyOwned: false, lockName);
+        }
+        catch (Exception exception) when (IsRecoverable(exception))
+        {
+            reportDiagnostic($"alert-http token: could not open the token lock: {exception.GetType().Name}: {exception.Message}");
+            return null;
+        }
+
+        using var ownedGate = gate;
         bool acquired;
         try
         {
-            acquired = gate.WaitOne(LockTimeout);
+            acquired = gate.WaitOne(lockTimeout);
         }
         catch (AbandonedMutexException)
         {
