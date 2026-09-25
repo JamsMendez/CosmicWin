@@ -64,11 +64,17 @@ Reviewed boundary: branch point `a3e3ba8`.
 
 ## Tasks
 
-- [ ] H1 -- `AlertHttpProtocol` (pure, Interop): JSON body -> command text (`warning`, `failed`
-  non-negative ints, `duration` optional int; unknown fields, wrong types, non-object, duplicate
-  keys -> error); handler reply -> HTTP status (`ok`=202, `queue full`=429, `alerts are disabled`=503,
-  other `error:`=400). Grammar limits (counts, duration 1..60) stay owned by `AlertCommandParser`.
-  Route: inline (one new file + its tests).
+- [x] H1 -- `AlertHttpProtocol` (pure, Interop): JSON body -> command text, fields in the order
+  written (`warning` / `failed` / `duration`, exact lowercase, JSON int32); unknown field, non-int
+  value, non-object, invalid JSON -> short error. Repeated fields and all numeric limits are passed
+  through for `AlertCommandParser` to reject, so both transports reject exactly the same commands.
+  Reply -> status: `ok` 202, `queue full` 429, `alerts are disabled` 503, `internal error` 500,
+  other `error:` 400, unrecognised 500. Constants `AlertsPath`, `MaxBodyBytes` 1024, `DefaultPort`
+  47811. Route: inline (one new file + its tests). Commit `4bad3d3` (2 files, +204).
+  - Strict TDD: RED 29/29 failed against a `NotImplementedException` stub; GREEN 29/29.
+  - Checks: build 0 errors (3 pre-existing warnings in untouched files); Interop suite 270 passed,
+    40 skipped, 0 failed.
+  - Review: assess vs `a3e3ba8` = medium, `under_budget` (308 lines) -> pending in the slice.
 - [ ] H2 -- `HttpAlertCommandServer : IAlertCommandServer`: listener lifecycle (`Start` idempotent,
   never throws, `Dispose` stops), request gate in the order of the constraints above, handler call,
   handler exceptions -> 500 `error: internal error`. Integration tests over a real loopback port
@@ -101,4 +107,5 @@ Reviewed boundary: branch point `a3e3ba8`.
 
 ## Next step
 
-H1 RED on slice branch `feat/http-alert-endpoint-h1`.
+H2 (`HttpAlertCommandServer`) on slice branch `feat/http-alert-endpoint-h2`, starting with the
+elevation measurement of the `127.0.0.1` vs `localhost` prefix.
