@@ -104,6 +104,19 @@ public sealed class PrimaryMonitorFullscreenDetectorExclusionTests
             PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(shellClassName, NoExStyle, isShellWindow: false));
     }
 
+    /// <summary>
+    /// CosmicWin's own video wallpaper host is a caption-less, monitor-sized window that can be
+    /// foreground right after start; it IS the wallpaper, so it never covers the desktop. Its class
+    /// name carries a per-instance GUID suffix.
+    /// </summary>
+    [Fact]
+    public void TheVideoWallpaperHostClass_IsExcludedFromCoverage()
+    {
+        Assert.True(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(
+                "CosmicWinVideoWallpaperHost-0123456789abcdef0123456789abcdef", NoExStyle, isShellWindow: false));
+    }
+
     [Fact]
     public void TheShellWindowFlag_IsExcludedFromCoverageRegardlessOfClassName()
     {

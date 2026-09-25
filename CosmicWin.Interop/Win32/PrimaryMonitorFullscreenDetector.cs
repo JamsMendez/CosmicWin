@@ -39,7 +39,8 @@ namespace CosmicWin.Interop.Win32;
 /// shell (<c>Progman</c>/<c>WorkerW</c>) becomes foreground on a plain desktop click or Win+D, a
 /// caption-less popup spanning the whole monitor, exactly when the wallpaper is actually visible. A
 /// click-through overlay (<c>WS_EX_TRANSPARENT</c> + <c>WS_EX_LAYERED</c>, e.g. the NVIDIA overlay's
-/// "Press Alt+Z" toast) hides nothing underneath it either. See <see cref="IsExcludedFromCoverage"/>.
+/// "Press Alt+Z" toast) hides nothing underneath it either, and neither does CosmicWin's own video
+/// wallpaper host, which can be foreground right after start. See <see cref="IsExcludedFromCoverage"/>.
 /// </para>
 /// </remarks>
 public static unsafe class PrimaryMonitorFullscreenDetector
@@ -156,6 +157,13 @@ public static unsafe class PrimaryMonitorFullscreenDetector
         }
 
         if (className is ProgmanClassName or WorkerWClassName or TaskbarClassName or SecondaryTaskbarClassName)
+        {
+            return true;
+        }
+
+        // CosmicWin's own video wallpaper host IS the wallpaper: caption-less and monitor-sized, it
+        // can still be the foreground window right after start (video-host-foreground-hold).
+        if (className.StartsWith(Win32VideoWallpaperHost.ClassName + "-", StringComparison.Ordinal))
         {
             return true;
         }

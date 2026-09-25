@@ -72,7 +72,9 @@ namespace CosmicWin.Interop.Win32;
 /// </remarks>
 public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 {
-    private const string ClassName = "CosmicWinVideoWallpaperHost";
+    /// <summary>Class-name prefix; each instance appends <c>-{guid}</c>. Internal so
+    /// <see cref="PrimaryMonitorFullscreenDetector"/> can recognise the host as the wallpaper itself.</summary>
+    internal const string ClassName = "CosmicWinVideoWallpaperHost";
 
     /// <summary>
     /// Presented until a later task (Media Foundation frame-server playback) writes real video
