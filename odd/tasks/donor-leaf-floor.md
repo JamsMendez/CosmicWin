@@ -87,3 +87,8 @@ the donor) and one two-level mixed-axis (vertical) test.
   - Follow-up (non-blocking, R3-001 of that review): the two role-swap tests assert only
     `root.Sizes`; an `Arrange` assertion that the focused group's small leaf lands at >= 208 px would
     also bind the rounding on the shrink path.
+- [x] T4 Arrange assertion in both role-swap tests, branch `test/donor-floor-arrange`. Route: inline
+  (one test file). Shared helper arranges 2000 px and asserts the focused group's small leaf is
+  exactly 208 (902 * 300 / 1300 = 208.15) and no window is under 208. Proven by mutating
+  `RescaleSizes` to drop one pixel (`scaled - 1`): both role-swap tests now fail with 207 vs 208,
+  where their `root.Sizes` assertion alone still passed.

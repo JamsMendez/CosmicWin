@@ -66,6 +66,19 @@ public class LayoutTreeDonorLeafFloorTests
     }
 
     /// <summary>
+    /// Arranges a 2000 px wide root whose first slot is the 300/1000 group built by <see cref="Group"/>
+    /// and checks what the user actually sees: its small leaf (<c>WindowRef(1)</c>) lands at exactly
+    /// the floor after <c>RescaleSizes</c> rounds 902 * 300 / 1300 = 208.15, and no window is under it.
+    /// </summary>
+    private static void AssertSmallInnerLeafLandsAtTheFloor(GroupNode root)
+    {
+        var result = new LayoutTree(root).Arrange(new Rect(0, 0, 2000, 800));
+
+        Assert.Equal(208, result.Single(item => item.Window == new WindowRef(1)).Bounds.Width);
+        Assert.All(result, item => Assert.True(item.Bounds.Width >= LayoutTree.DefaultMinLeafSlotLength));
+    }
+
+    /// <summary>
     /// Keyboard resize into a neighbour GROUP of two leaves stacked on the SAME axis: growth stops
     /// where the smaller inner leaf would be rescaled under 208, not where the group's own total
     /// crosses some fixed amount -- the sizes are deliberately uneven so only the proportional rule
@@ -161,6 +174,7 @@ public class LayoutTreeDonorLeafFloorTests
 
         Assert.True(resized);
         Assert.Equal([902, 1098], root.Sizes);
+        AssertSmallInnerLeafLandsAtTheFloor(root);
     }
 
     /// <summary>The same role swap through the mouse: dragging the focused group's own right edge inward.</summary>
@@ -178,6 +192,7 @@ public class LayoutTreeDonorLeafFloorTests
 
         Assert.True(applied);
         Assert.Equal([902, 1098], root.Sizes);
+        AssertSmallInnerLeafLandsAtTheFloor(root);
     }
 
     /// <summary>
