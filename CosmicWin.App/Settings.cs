@@ -1,3 +1,5 @@
+using CosmicWin.Interop;
+
 namespace CosmicWin.App;
 
 /// <summary>
@@ -24,6 +26,16 @@ namespace CosmicWin.App;
 /// <param name="AlertsEnabled">
 /// Whether live alert commands are accepted over the named pipe and drawn over the video wallpaper.
 /// </param>
+/// <param name="AlertHttpEnabled">
+/// Whether the same alert commands are also accepted over a loopback-only HTTP endpoint, next to the
+/// named pipe. Off by default: a settings file that has never been written must not open a
+/// network-facing port nobody asked for, even a loopback one.
+/// </param>
+/// <param name="AlertHttpPort">
+/// The loopback TCP port the HTTP endpoint listens on when <see cref="AlertHttpEnabled"/> is on.
+/// Defaults to <see cref="AlertHttpProtocol.DefaultPort"/>, the same constant the endpoint itself
+/// falls back to, so an unconfigured settings file and a freshly started server agree on the port.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -42,7 +54,8 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, bool AlertsEnabled = true)
+    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
+    int AlertHttpPort = AlertHttpProtocol.DefaultPort)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -62,6 +75,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string AlertsEnabledKey = "alerts-enabled";
 
+    private const string AlertHttpEnabledKey = "alert-http";
+
+    private const string AlertHttpPortKey = "alert-http-port";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -80,6 +97,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
         var alertsEnabled = Default.AlertsEnabled;
+        var alertHttpEnabled = Default.AlertHttpEnabled;
+        var alertHttpPort = Default.AlertHttpPort;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -129,9 +148,20 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 alertsEnabled = alertsFlag;
             }
+            else if (key.Equals(AlertHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var alertHttpFlag))
+            {
+                alertHttpEnabled = alertHttpFlag;
+            }
+            else if (key.Equals(AlertHttpPortKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadPort(value, out var port))
+            {
+                alertHttpPort = port;
+            }
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
+            alertHttpEnabled, alertHttpPort);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -154,6 +184,15 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {AlertsEnabledKey}: on to accept live alert commands, off to ignore the alert pipe.
          {AlertsEnabledKey} = {(AlertsEnabled ? "on" : "off")}
+
+         # {AlertHttpEnabledKey}: on to also accept alert commands over a local, loopback-only HTTP
+         # endpoint (127.0.0.1 / localhost only -- never reachable over the network), off to leave it
+         # closed. Its bearer token lives in %LOCALAPPDATA%\CosmicWin\alert-http.token, created
+         # automatically the first time the endpoint starts.
+         {AlertHttpEnabledKey} = {(AlertHttpEnabled ? "on" : "off")}
+
+         # {AlertHttpPortKey}: the loopback TCP port the HTTP endpoint listens on when {AlertHttpEnabledKey} is on.
+         {AlertHttpPortKey} = {AlertHttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;
 
@@ -214,6 +253,23 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
         colour = digits.Length == 6 ? parsed : Expand(parsed);
         return true;
+    }
+
+    /// <summary>
+    /// Reads a TCP port, 1-65535. Same rule as every other key: anything outside that range, or not
+    /// a whole number at all, keeps the default rather than opening a port that makes no sense.
+    /// </summary>
+    private static bool TryReadPort(string value, out int port)
+    {
+        if (int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out port)
+            && port is >= 1 and <= 65535)
+        {
+            return true;
+        }
+
+        port = 0;
+        return false;
     }
 
     /// <summary>Doubles each of the three nibbles: <c>0xF80</c> becomes <c>0xFF8800</c>.</summary>
