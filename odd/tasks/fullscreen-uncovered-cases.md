@@ -104,4 +104,23 @@ maintainer authorized this on 2026-09-25.
   - Case 3: not run, one monitor only; covered by the two-display unit test.
   - Side effect: each CosmicWin start re-tiled the maintainer's own open windows (Discord, a Chrome
     window), as any normal start does.
+- Review (2026-09-25): 399 lines (under budget), offered per the maintainer's "always review"
+  rule. Maintainer granted. Lens review-reliability, lineage `review-b32fde7cd6524b5b`: APPROVED,
+  acknowledged, authority burned. The reviewed boundary is now `5347436`. Both findings were fixed
+  with maintainer approval:
+  - R3-002 (SUGGESTION): the `Arrange` helper sat between `OnWindowAdded`'s remarks and its
+    declaration, so the docs attached to the wrong member. Moved below `OnWindowAdded`, `35a665e`.
+  - R3-001 (WARNING), part 1: fullscreen admissions now also trace
+    `added hwnd=0x.. class=.. proc=.. [L= T= W= H=] -> left alone (fullscreen)`, `8b11dfa`. RED then
+    GREEN; mutation (drop the Record) failed the test.
+  - R3-001, part 2, a REAL defect found by the test-first probe (`21dbabe`): the fullscreen early
+    return ran BEFORE the floor-on-record check, so a window with a known floor, re-admitted while
+    fullscreen, kept a leaf it could not fit. Leaving fullscreen then cost 2 extra SetPosition
+    rounds into an overflowing tile before it was parked; the non-fullscreen path costs 0. Fix: the
+    floor block (DoesNotFitItsFloor / TryRegroupToFit / TryGrowToFit / Untile) now runs before the
+    fullscreen check. That is safe because those helpers only call the pure `TreeArranger.Arrange`,
+    and `Untile` goes through the frozen-aware `Arrange` (checked by the parent). RED: `TryGetLeaf`
+    was true instead of false. Mutation (`false &&` on the floor check) failed both new tests.
+  - Checks: build clean (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13,
+    Interop 387/42 skipped, App 1011/6 skipped.
 - FEATURE COMPLETE on `fix/fullscreen-uncovered-cases`. Not merged, not pushed.
