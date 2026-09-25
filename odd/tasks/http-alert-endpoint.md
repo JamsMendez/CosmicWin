@@ -176,6 +176,24 @@ Reviewed boundary: branch point `a3e3ba8`.
     failed; null-token branch skipped -> `NullToken_...` failed.
   - Checks: build 0 errors (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 190,
     Alert 13, Interop 314 (+40 skipped), App 955 (+6 skipped), 0 failed (writer and parent).
+- [x] H4 review: assess vs `033255d` (H3b+H4) = medium, `slice_budget_reached` (541 lines) -> due.
+  Consent granted by the maintainer. Lineage `review-ce5067b3ed04237d`, one lens (reliability):
+  APPROVED, acknowledged, authority burned. Reviewed boundary advances to `22e9205`. Advisory
+  findings, all accepted into H4b: the token Replace branch could still silently overwrite a token
+  another caller had just returned (WARNING, true: the H3b re-read only narrowed it); race test used
+  `Parallel.For` + `Barrier` (WARNING); start-failure trace unasserted (SUGGESTION).
+- [x] H4b -- Close the H4 review findings. Route: delegated writer (H3 writer, context reuse).
+  Commit `2298692` (3 files, +183/-95).
+  - Token creation serialized by a named mutex `Local\CosmicWin.AlertHttpToken` (5 s timeout ->
+    diagnostic + null; abandoned = acquired); read-validate-create runs inside it; the re-check
+    machinery was removed. RED against the H3b code: the new malformed-file race test failed 3/3
+    runs (different tokens, none on disk); the first-run race test failed 1/3 once on dedicated
+    threads (`Parallel.For` had masked it). GREEN 5/5 repeated runs.
+  - Race tests now use 8 dedicated threads with bounded barrier and join timeouts.
+  - Wiring tests assert `alert-http-start-failed` present and `alert-http listening` absent; the
+    vacuous `Assert.Null(h.HttpServer)` removed. RED by mutating the trace line.
+  - Checks: build 0 errors (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 190,
+    Alert 13, Interop 314 (+40 skipped), App 956 (+6 skipped), 0 failed (writer and parent).
 - [ ] H5 -- README section (curl + `Invoke-RestMethod` examples, token path, settings) and hardware
   check: warning and failed via HTTP, 401 without token, a browser `fetch` from a page blocked, port
   in use -> pipe still works. Route: inline.
