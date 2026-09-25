@@ -93,12 +93,31 @@ Reviewed boundary: branch point `a3e3ba8`.
     R3-003 non-loopback 403 not deterministically tested; R3-004 `Start` after `Dispose` leaks a
     listener; R3-005 no backoff when `GetContext` keeps failing; R3-006 `Bearer` scheme matched
     case-sensitively; R3-007 no exact-size body boundary test, chunked test may not be chunked.
-- [ ] H2b -- Close the H2 review findings above. First MEASURE R3-001/002 with raw TCP requests
-  (what http.sys answers for `Host: localhost:<port>` and a foreign host against the `127.0.0.1`
-  prefix) and fix code/tests/doc to match the observed truth; make the loopback check a pure,
-  unit-tested predicate; `Start` after `Dispose` is a no-op; bounded backoff on repeated
-  `GetContext` failure; case-insensitive `Bearer`; exact-boundary and truly chunked body tests.
-  Route: delegated writer (same writer, context reuse).
+- [x] H2b -- Close the H2 review findings above. Route: delegated writer (same writer, context
+  reuse) + one inline test fix. Commits `3895628` (2 files, ~+500) and `94a962d` (test only).
+  - R3-001/002 measured with raw `TcpClient` requests against the single `127.0.0.1` prefix:
+    `Host: localhost:<port>` and `127.0.0.1:<port>` reached the app (202); `Host: evil.example:1234`
+    reached the app and got OUR 403. So the reviewer's "http.sys answers 400 first" was wrong for
+    that setup. But a real `http://localhost:<port>/` URL TIMED OUT: this machine resolves
+    `localhost` to `::1`, which the IPv4-literal prefix never listens on. Fix: register
+    `http://localhost:<port>/` too (fallback to `127.0.0.1` only if that bind fails). With two
+    prefixes, http.sys itself rejects a LAN-address connection with 400 Invalid Hostname; loopback
+    connections with any Host still reach our gate. Tests `RawHost_*`,
+    `LiteralLocalhostUrl_ViaRealDnsResolution_ReachesTheServer`; LAN fact accepts any 4xx or refusal.
+  - R3-003: pure `IsLoopbackRemote(IPEndPoint?)`, unit-tested (RED: CS0117 compile failure).
+  - R3-004: `Start` after `Dispose` is a no-op. The writer's test started the server first, so the
+    `_thread` guard hid the missing check: a parent mutation (drop `_disposed`) failed NO test.
+    Fixed inline in `94a962d` (never-started -> Dispose -> Start); mutation now fails it
+    (`Assert.Null() Failure`), restored code passes.
+  - R3-005: bounded 100 -> 500 ms backoff, mirroring the pipe server. NOT unit-tested: a repeating,
+    non-shutdown `GetContext` failure cannot be produced from a black-box test (documented gap).
+  - R3-006: `Bearer` case-insensitive. The writer did not observe RED; parent mutation (back to
+    `Ordinal`) failed `BearerSchemeLowercase_IsAccepted`, restored code passes.
+  - R3-007: exact 1024-byte body accepted, 1025 -> 413, raw chunked over the cap -> 413.
+  - Honest TDD note: for R3-004..007 the writer batched the fixes and did not observe RED per item;
+    RED was recovered by parent mutation for R3-004 and R3-006 only.
+  - Checks: build 0 errors (3 pre-existing warnings); Interop 314 passed / 40 skipped / 0 failed
+    (writer, and parent after `94a962d`).
 - [ ] H3 -- Token store (create-once, 32 random bytes base64url, file readable by the user only,
   reuse on restart, constant-time compare) + `Settings` keys `alert-http` / `alert-http-port` with
   defaults and round-trip. Route: delegated writer (2 non-trivial files).
