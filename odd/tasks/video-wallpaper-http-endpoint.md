@@ -51,6 +51,13 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - Decision 3: validate synchronously, answer `202 Accepted`, and run the copy and switch on the
   video wallpaper MTA thread, like the tray pick. Validation failures answer at once with their
   code. The final outcome (playing, or failed and restored) goes to the trace only.
+- Decision 4: validation, all before answering:
+  - the path is absolute and drive-rooted (`C:\...`); relative, drive-relative (`C:foo`), UNC,
+    device (`\\?\`, `\\.\`) and any URI scheme answer 400;
+  - the drive is not a network drive (a mapped letter is remote too): 400;
+  - the file exists, otherwise 404;
+  - the extension is `.mp4`, case-insensitive, otherwise 415;
+  - the body limit is 4096 bytes for this route only; `/v1/alerts` keeps 1024.
 
 ## Decisions to take first (maintainer)
 
