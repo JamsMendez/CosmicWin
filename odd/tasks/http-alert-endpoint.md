@@ -47,8 +47,11 @@ Out of scope: LAN access, TLS, other verbs or routes, changing the pipe or the a
   429 `queue full`, 503 `alerts are disabled`. Body: the handler's reply text (`ok` / `error: ...`).
 - Resolved 2026-09-24 (H2 measurement): run under `runas /trustlevel:0x20000` (basic user, `admin=False`),
   `HttpListener.Start()` succeeded for BOTH `http://127.0.0.1:47899/` and `http://localhost:47899/`.
-  Chosen: `http://127.0.0.1:<port>/`, no urlacl. http.sys routes by the `Host` header, not by the
-  interface, so the loopback `RemoteEndPoint` check is the real LAN guard and stays mandatory.
+  Chosen (updated in H2b): BOTH `http://127.0.0.1:<port>/` and `http://localhost:<port>/` (this
+  machine resolves `localhost` to `::1`), falling back to `127.0.0.1` alone if the pair fails; no
+  urlacl. Loopback connections with any `Host` reach our gate; with two prefixes http.sys itself
+  answers a LAN-address connection with 400 Invalid Hostname. The loopback `RemoteEndPoint` check
+  stays mandatory either way (the fallback single-prefix setup does not filter LAN connections).
 
 ## TDD mode
 
@@ -118,6 +121,15 @@ Reviewed boundary: branch point `a3e3ba8`.
     RED was recovered by parent mutation for R3-004 and R3-006 only.
   - Checks: build 0 errors (3 pre-existing warnings); Interop 314 passed / 40 skipped / 0 failed
     (writer, and parent after `94a962d`).
+  - Review: assess vs `3eef308` = medium, `slice_budget_reached` (553 lines) -> due. Consent granted
+    by the maintainer. Lineage `review-f2885fa52f1d8c8e`, one lens (reliability): APPROVED,
+    acknowledged, authority burned. Reviewed boundary advances to the H2b doc commit.
+    Advisory findings, all taken inline (route: inline, one file already understood):
+    R3-101 `Dispose` no longer disposes `_stopping` when the bounded join timed out (RunLoop could
+    still read its token); R3-102 a failed listener attempt is closed before the fallback;
+    R3-103 the constraint above now states the two-prefix choice. R3-101/102 are NOT unit-tested:
+    a join timeout and a lingering failed listener cannot be observed from a black-box test.
+    Checks after the fixes: build 0 errors; Interop 314 / 40 / 0.
 - [ ] H3 -- Token store (create-once, 32 random bytes base64url, file readable by the user only,
   reuse on restart, constant-time compare) + `Settings` keys `alert-http` / `alert-http-port` with
   defaults and round-trip. Route: delegated writer (2 non-trivial files).
