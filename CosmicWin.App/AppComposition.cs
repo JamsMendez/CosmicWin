@@ -180,6 +180,15 @@ public sealed class AppComposition : IDisposable
         Action? disposeVideoWallpaper = null,
         bool alertsEnabled = false,
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
+        // H4 (http-alert-endpoint): a second, independent front door onto the SAME HandleAlertCommand
+        // queue the pipe above uses, gated on this flag in addition to alertsEnabled (default off:
+        // no port opened, token file never touched). createHttpAlertCommandServer mirrors
+        // createAlertCommandServer's seam; loadAlertHttpToken mirrors it for AlertHttpTokenFile.LoadOrCreate,
+        // so a wiring test never binds a real port or touches %LOCALAPPDATA%.
+        bool alertHttpEnabled = false,
+        int alertHttpPort = AlertHttpProtocol.DefaultPort,
+        Func<int, string, Func<string, string>, Action<string>?, IAlertCommandServer>? createHttpAlertCommandServer = null,
+        Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
         // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
@@ -295,6 +304,7 @@ public sealed class AppComposition : IDisposable
         var alertQueueLock = new object();
         var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
         IAlertCommandServer? alertServer = null;
+        IAlertCommandServer? httpAlertServer = null;
         ActiveAlert? displayedAlert = null;
         ActiveAlert? shakenAlert = null;
 
@@ -909,6 +919,40 @@ public sealed class AppComposition : IDisposable
             // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
             // the first alert command -- the whole point of the persistent-preload fix.
             if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
+
+            // H4 (http-alert-endpoint): the pipe above has already started by the time this runs, so
+            // any failure below -- a bad port, a listener that cannot bind, the token file being
+            // unreadable -- is caught and traced here rather than left to unwind Wire and take the
+            // pipe down with it. The two servers stay independent on purpose.
+            if (alertHttpEnabled)
+            {
+                try
+                {
+                    var loadToken = loadAlertHttpToken
+                        ?? (() => AlertHttpTokenFile.LoadOrCreate(message => desktopTrace?.Record(message)));
+                    var token = loadToken();
+                    if (token is null)
+                    {
+                        desktopTrace?.Record("alert-http token unavailable, HTTP alert endpoint not started");
+                    }
+                    else
+                    {
+                        var httpServerFactory = createHttpAlertCommandServer
+                            ?? ((port, t, handler, diagnostic) => new HttpAlertCommandServer(port, t, handler, diagnostic));
+                        httpAlertServer = httpServerFactory(alertHttpPort, token, HandleAlertCommand,
+                            message => desktopTrace?.Record(message));
+                        httpAlertServer.Start();
+                        desktopTrace?.Record($"alert-http listening port={alertHttpPort}");
+                    }
+                }
+                // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a
+                // per-alert render failure below: a bad port or a listener refusal is this server's
+                // problem, not a reason to treat the whole composition as unsafe to continue.
+                catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+                {
+                    desktopTrace?.Record($"alert-http-start-failed {ex.GetType().Name}: {ex.Message}");
+                }
+            }
         }
 
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
@@ -1474,6 +1518,7 @@ public sealed class AppComposition : IDisposable
             focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
             {
                 alertServer?.Dispose();
+                httpAlertServer?.Dispose();
                 alertLayer?.Dispose();
                 disposeVideoWallpaperBase();
             },
@@ -1568,6 +1613,8 @@ public sealed class AppComposition : IDisposable
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
             alertsEnabled: settings.AlertsEnabled,
+            alertHttpEnabled: settings.AlertHttpEnabled,
+            alertHttpPort: settings.AlertHttpPort,
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
