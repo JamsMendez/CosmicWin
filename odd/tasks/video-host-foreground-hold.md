@@ -32,7 +32,8 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
   Commit 7042caf. RED: `TryAttach_CreatesAndRecreatesTheHostWindowAsNonActivatable` failed on the
   ex-style bit (desktop opt-in run); GREEN 20/20 host tests. Full suites: Layout 190, Alert 13,
   Interop 315/41 skipped (341/15 with `COSMICWIN_RUN_DESKTOP_TESTS=1`), App 958/6 skipped.
-- [ ] T3 Hardware check: after start, an alert plays immediately with no other window focused.
+- [x] T3 Hardware check: after start, an alert plays immediately with no other window focused.
+  A/B with the desktop shown (`Shell.Application.MinimizeAll`) before launch, see Progress.
 
 ## Acceptance criteria
 
@@ -46,4 +47,8 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
   - base (`main` 24fc980): shown after 197 ms -- did NOT reproduce: the user's Chrome held the
     foreground, so the new process could not take it.
   - fix (7042caf): shown after 223 ms; `video-wallpaper phase=startup tryAttach=True tryPlay=True`.
-  - T3 still open: a reproducing A/B needs the foreground free at launch.
+  - A/B with the desktop shown first (maintainer authorized taking the focus), foreground before
+    launch `Shell_TrayWnd`:
+    - base (`main`): foreground became `CosmicWinVideoWallpaperHost-<guid>` "CosmicWin Video
+      Wallpaper"; the alert was NOT shown within 8 s (held). Bug reproduced.
+    - fix (7042caf): foreground stayed `Shell_TrayWnd`; alert shown after 69 ms.
