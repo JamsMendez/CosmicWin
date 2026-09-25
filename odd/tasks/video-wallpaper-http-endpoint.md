@@ -85,7 +85,8 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
 - [ ] V3 Server routing: `HttpAlertCommandServer` dispatches `/v1/wallpaper/video` to a new handler
   delegate after the SAME gates. Real-listener tests, as in `HttpAlertCommandServerTests`, including
   401 without a token and 403 for a foreign Origin or Host on the new route.
-- [ ] V4 Composition wiring: the handler calls the operation from V1, never blocks the HTTP thread,
+- [ ] V4 Composition wiring: the handler calls the operation from V1 (never `Import` directly: imports
+  must stay serialized), never blocks the HTTP thread,
   and traces the outcome without absolute paths. Wiring tests.
 - [ ] V5 Docs: curl or PowerShell example with the token. Hardware check, driven by the agent:
   switch while playing, a missing file, a non-mp4 file, the 6.6 GB file (switch delay with the
@@ -163,4 +164,16 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   and drive-rooted checks so those keep their specific reasons. TDD: writer RED `CS0246` (missing
   type); parent RED 2 failing ADS cases, then GREEN. Checks: build clean (3 pre-existing warnings);
   `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop 361/42 skipped, App 964/6 skipped.
+- Review 2 (2026-09-25): assess (base `deb1a5a`) medium, `slice_budget_reached` (931 lines).
+  Maintainer granted. Lens review-reliability, lineage `review-ece51ce347268439`: APPROVED,
+  acknowledged, authority burned. The reviewed boundary is now `b92783f`. Two advisory findings:
+  - R3-json-invalid-surrogate-escapes-throws (WARNING): CONFIRMED by a RED test. A lone
+    `\uD800` escape is valid JSON, but reading it as a string throws InvalidOperationException,
+    which escaped `TryValidate` AND the older `AlertHttpProtocol.TryTranslate` (through a key).
+    Fixed in both, `d27f225`: now 400 "body is not valid JSON". Interop 364/42 skipped.
+  - R3-temp-sweep-races-concurrent-import (WARNING): does not happen today. Every production
+    import is serialized (inside SwitchVideoWallpaper's work item on the one video thread, or
+    inline on the tray thread only when there is no video thread). Documented as a requirement
+    at the sweep, `3dfbe44`. CONSTRAINT for V4: the HTTP handler must call SwitchVideoWallpaper
+    (503 when it is unavailable), never `VideoWallpaperImport.Import` directly.
 - Next: V3 (server routing).
