@@ -157,9 +157,10 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
     /// </summary>
     private HttpListener? TryCreateListener(bool includeLocalhostPrefix)
     {
+        HttpListener? listener = null;
         try
         {
-            var listener = new HttpListener();
+            listener = new HttpListener();
             listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
             if (includeLocalhostPrefix)
             {
@@ -177,6 +178,18 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
         {
             var prefixes = includeLocalhostPrefix ? "127.0.0.1 and localhost" : "127.0.0.1";
             _onDiagnostic($"alert http: failed to start listening on port {_port} ({prefixes}): {error.GetType().Name}: {error.Message}");
+
+            // Finding R3-102: a failed attempt must not linger until finalization, and the fallback
+            // attempt that may follow creates a second listener on the same port.
+            try
+            {
+                listener?.Close();
+            }
+            catch
+            {
+                // Best-effort: the attempt already failed and was reported.
+            }
+
             return null;
         }
     }
@@ -513,7 +526,7 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             // Best-effort: the goal below is only to make the blocked GetContext call return.
         }
 
-        _thread?.Join(JoinTimeout);
+        var threadStopped = _thread?.Join(JoinTimeout) ?? true;
 
         try
         {
@@ -524,6 +537,12 @@ public sealed class HttpAlertCommandServer : IAlertCommandServer
             // Best-effort cleanup on the way out.
         }
 
-        _stopping.Dispose();
+        // Finding R3-101: if the bounded join timed out, RunLoop may still reach its backoff wait,
+        // which reads _stopping.Token -- disposing the source under it would throw on a background
+        // thread and take the process down. Leaving one cancelled source to the GC is harmless.
+        if (threadStopped)
+        {
+            _stopping.Dispose();
+        }
     }
 }
