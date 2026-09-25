@@ -1,5 +1,10 @@
 # Live alert wallpaper
 
+> **Superseded (2026-09-24).** Replaced by the WebView2 alert layer
+> (`odd/tasks/webview-alert-layer.md`). The Direct2D overlay, its frame-overlay seam and
+> `AlertTileLayout` were deleted in `dc80b4f` (`odd/tasks/remove-direct2d-alert-overlay.md`).
+> Kept as a historical record; the text below is unchanged.
+
 ## Objective
 
 An external command such as `CosmicWin.exe --alert "warning:2 failed:1"` shows N alert tiles

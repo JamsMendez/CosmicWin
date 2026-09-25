@@ -1,5 +1,11 @@
 # Live alert wallpaper — feasibility and plan
 
+> **Superseded (2026-09-24).** The Direct2D renderer planned here was built (feature
+> `live-alert-wallpaper`), then replaced by the WebView2 alert layer (`odd/tasks/webview-alert-layer.md`)
+> and deleted in `dc80b4f` (`odd/tasks/remove-direct2d-alert-overlay.md`). The maintainer's reason:
+> Direct2D was efficient, but its styling fell short; the web page is easier to style and to preview
+> in a browser. Kept as a historical record; the text below is unchanged.
+
 **Status:** analysis and plan only, 2026-09-23. Nothing implemented. Route decided on 2026-09-23:
 **native Direct2D / DirectWrite** (§3). Next step is the T0 spike.
 

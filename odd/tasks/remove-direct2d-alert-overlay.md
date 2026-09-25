@@ -76,8 +76,12 @@ gone; GREEN is the deletion with every suite still passing.
     `typeof(AppComposition).Assembly`, plus 2 positive-control facts.
   - Checks (writer): build 0 errors; full suite 0 failures (App 894+6 skipped). Parent spot check:
     App tests 894 passed, 0 failed.
-- [ ] T2 — Docs: mark `live-alert-wallpaper` superseded in its plan and feature doc; note the removal
+- [x] T2 — Docs: mark `live-alert-wallpaper` superseded in its plan and feature doc; note the removal
   in the webview feature doc; clean doc comments in `AlertQueue.cs` / `AlertCommandParser.cs`.
+  Route: inline (3 mechanical banner inserts; the code comments were already cleaned in `dc80b4f`).
+  Banners added on top, history below left unchanged. No README mentions Direct2D.
+  Check: structural readback of the three headers. Review: passive docs, none.
+  T1b review assessment vs `7f6d0e0`: medium, `under_budget` (95 lines) -> pending in the slice.
 - [ ] T3 — Hardware re-check with the preloaded layer: warning, failed with shake, FIFO, covered hold.
 
 ## Acceptance criteria
@@ -95,4 +99,4 @@ gone; GREEN is the deletion with every suite still passing.
 
 ## Next step
 
-T1.
+T3 (hardware re-check), then merge to local `main`.

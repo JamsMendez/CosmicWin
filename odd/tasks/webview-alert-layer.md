@@ -1,5 +1,10 @@
 # WebView alert layer
 
+> **Update (2026-09-24).** This layer is now the only alert path. The legacy Direct2D overlay that
+> was kept for rollback (mentions below) was deleted in `dc80b4f`
+> (`odd/tasks/remove-direct2d-alert-overlay.md`). The `chain/*` slices listed below predate that
+> removal.
+
 ## Objective
 
 Show the great-sage warning / failed alert layer as the original HTML, rendered by a transparent
