@@ -59,8 +59,11 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
   lineage `review-88186af44431b0ae` (base 24fc980, candidate ae9f166).
 - Advisory, non-blocking (`R3-host-classname-format-unlinked`, SUGGESTION): the detector test
   hardcodes the host class-name shape; a real-attach assertion that `IsExcludedFromCoverage` accepts
-  the live host's `GetClassName` would link the two. Not done; separate later work.
+  the live host's `GetClassName` would link the two. Done on `test/live-host-class-exclusion`:
+  `TheLiveHostWindowClass_IsExcludedFromCoverage`. Green on first run, so proven by mutation (host
+  class format without the hyphen): the new test failed while the 7 detector unit tests passed.
 
 ## Next step
 
-Merge `fix/video-host-foreground-hold` into local `main` when the maintainer decides.
+Merged into local `main` (fast-forward, acd9478) 2026-09-25; branch deleted. Follow-up test on
+`test/live-host-class-exclusion`.

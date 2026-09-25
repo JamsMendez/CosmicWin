@@ -104,6 +104,30 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         AssertNonActivatable(new HWND(host.Hwnd));
     }
 
+    /// <summary>
+    /// Links the detector's host exclusion to the REAL class name the host registers, so a change to
+    /// the host's class-name format cannot silently stop the exclusion from matching while the
+    /// detector's own unit test (which hardcodes the format) keeps passing.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void TheLiveHostWindowClass_IsExcludedFromCoverage()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+
+        Span<char> buffer = stackalloc char[256];
+        int written;
+        fixed (char* pBuffer = buffer)
+        {
+            written = PInvoke.GetClassName(new HWND(host.Hwnd), pBuffer, buffer.Length);
+        }
+
+        Assert.True(written > 0, "GetClassName should read the live host window's class.");
+        Assert.True(
+            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(
+                new string(buffer[..written]), exStyle: 0, isShellWindow: false));
+    }
+
     private static void AssertNonActivatable(HWND hwnd)
     {
         var exStyle = unchecked((uint)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE));
