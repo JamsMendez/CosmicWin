@@ -18,16 +18,20 @@ namespace CosmicWin.App;
 /// Func{string, string, bool})"/>), the same convention applied one level deeper: production code
 /// calls the two-argument overload, which supplies the real <c>CreateHardLinkW</c>-backed
 /// attempt, and a test supplies a fake one to exercise the fallback without needing a second
-/// volume.
+/// volume. A fourth, internal overload injects the final move-into-place the same way, so V1c's
+/// own fallback (below) can be driven deterministically by a test instead of depending on a real
+/// sharing violation that, measured directly, does not reproduce through ordinary <see
+/// cref="FileShare"/> locks on this filesystem.
 ///
 /// CRITICAL invariant: after a linked import, <c>video-wallpaper&lt;ext&gt;</c> is not a copy of
 /// the user's source video -- it IS the same file's data, reached through a second directory
 /// entry. Nothing downstream may ever open that destination for writing, or copy onto it in
 /// place: doing so would silently rewrite the user's own source file. The temp-then-move scheme
 /// below already guarantees this for playback (the destination is only ever produced by moving a
-/// freshly-created temp file into place, never edited after the fact), and the copy fallback keeps
-/// exactly the same shape -- it only ever writes bytes to that same fresh temp name, never to the
-/// destination directly -- so this invariant holds on both paths.
+/// freshly-created temp file into place, never edited after the fact), and both the copy fallback
+/// and V1c's own copy-after-failed-link fallback keep exactly the same shape -- each only ever
+/// writes bytes to its own fresh temp name, never to the destination directly -- so this invariant
+/// holds on every path.
 /// </remarks>
 public static class VideoWallpaperImport
 {
@@ -70,9 +74,34 @@ public static class VideoWallpaperImport
     /// failure, a non-NTFS volume, a different volume from a second real drive) deterministically,
     /// without needing a second volume attached to the test machine.
     /// </summary>
-    internal static string Import(string directory, string sourcePath, Func<string, string, bool> tryCreateHardLink)
+    internal static string Import(string directory, string sourcePath, Func<string, string, bool> tryCreateHardLink) =>
+        Import(directory, sourcePath, tryCreateHardLink, MoveIntoPlace);
+
+    /// <summary>
+    /// The same import again, with the final move ALSO injected as <paramref name="moveIntoPlace"/>
+    /// -- <c>internal</c>, for the same reason as <paramref name="tryCreateHardLink"/> one level up:
+    /// V1c's own fallback below (drop a link whose move into place failed, and retry with an
+    /// ordinary copy) needs a deterministic way to simulate that failure, because a real sharing
+    /// violation on the linked move turned out NOT to reproduce through ordinary <see
+    /// cref="FileShare"/> locks when measured directly against this filesystem (see the remarks on
+    /// <see cref="VideoWallpaperImport"/> and the tests this seam exists for).
+    /// </summary>
+    internal static string Import(
+        string directory,
+        string sourcePath,
+        Func<string, string, bool> tryCreateHardLink,
+        Action<string, string> moveIntoPlace)
     {
         Directory.CreateDirectory(directory);
+
+        // V1c: a move into place that fails AFTER a successful link (see below) may leave its temp
+        // link behind forever, because the very thing that blocked the move -- something else
+        // holding the file open without delete access -- is just as likely to block deleting that
+        // same temp name right afterwards. Best effort, and never worth failing today's import
+        // over: it only ever removes names matching the temp pattern this method itself produces,
+        // never the fixed destination or anything a caller put here.
+        SweepLeftoverTempFiles(directory);
+
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
         var destination = Path.Combine(directory, "video-wallpaper" + extension);
 
@@ -94,7 +123,8 @@ public static class VideoWallpaperImport
         // means the destination is only ever replaced by a file that imported completely: a
         // failure before the move leaves the previous import exactly as it was. This holds
         // regardless of which of the two paths below produced the temp file.
-        var temp = Path.Combine(directory, $"video-wallpaper{extension}.tmp-{Guid.NewGuid():N}");
+        var temp = NewTempPath(directory, extension);
+        var linked = false;
         try
         {
             // Decision 5: try the hard link first -- it is instant no matter the file size, because
@@ -105,35 +135,95 @@ public static class VideoWallpaperImport
             // the same way, because a link failure here is never the caller's problem to see --
             // the byte copy below is the well-understood fallback that already worked before this
             // task existed.
-            if (!tryCreateHardLink(temp, sourcePath))
+            linked = tryCreateHardLink(temp, sourcePath);
+            if (!linked)
             {
                 File.Copy(sourcePath, temp, overwrite: true);
             }
 
-            File.Move(temp, destination, overwrite: true);
+            moveIntoPlace(temp, destination);
+        }
+        catch when (linked)
+        {
+            // V1c (R3-linked-destination-inherits-source-sharing): once linked, `temp` IS the
+            // source's own file object, so the one thing that can make THIS move fail where a
+            // plain copy's move never would is something else holding that data open in a way that
+            // blocks the rename -- and a link must never end up worse than the copy this class
+            // always did. `temp` itself is likely stuck for the very same reason, so its best-effort
+            // delete below is expected to sometimes fail quietly; SweepLeftoverTempFiles above is
+            // what actually reclaims it, on a LATER import once whatever was holding it lets go.
+            TryDeleteBestEffort(temp);
+
+            var copyTemp = NewTempPath(directory, extension);
+            try
+            {
+                File.Copy(sourcePath, copyTemp, overwrite: true);
+                moveIntoPlace(copyTemp, destination);
+            }
+            catch
+            {
+                // Same best-effort cleanup contract as the outer catch below: never mask why the
+                // fallback itself failed.
+                TryDeleteBestEffort(copyTemp);
+                throw;
+            }
+
+            return destination;
         }
         catch
         {
             // Best effort, and deliberately never lets a cleanup failure mask the original one --
             // the caller needs to see WHY the import failed, not why the leftover temp file could
             // not be removed.
-            try
-            {
-                if (File.Exists(temp))
-                {
-                    File.Delete(temp);
-                }
-            }
-            catch
-            {
-                // Best effort, see above.
-            }
-
+            TryDeleteBestEffort(temp);
             throw;
         }
 
         return destination;
     }
+
+    private static string NewTempPath(string directory, string extension) =>
+        Path.Combine(directory, $"video-wallpaper{extension}.tmp-{Guid.NewGuid():N}");
+
+    private static void TryDeleteBestEffort(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best effort, see the callers above.
+        }
+    }
+
+    /// <summary>
+    /// Sweeps leftover <c>video-wallpaper*.tmp-*</c> files -- the fixed name this method's own temp
+    /// files always start with -- so a move-into-place failure that could not even clean up after
+    /// itself (V1c, above) does not accumulate forever. Matches only that pattern: never the fixed
+    /// destination itself, and never anything else a caller might keep in this directory.
+    /// </summary>
+    private static void SweepLeftoverTempFiles(string directory)
+    {
+        try
+        {
+            foreach (var leftover in Directory.EnumerateFiles(directory, "video-wallpaper*.tmp-*"))
+            {
+                TryDeleteBestEffort(leftover);
+            }
+        }
+        catch
+        {
+            // Best effort -- see TryDeleteBestEffort. Enumerating the directory itself can throw
+            // too (e.g. a momentary I/O hiccup), and that is never worth failing an import over.
+        }
+    }
+
+    private static void MoveIntoPlace(string temp, string destination) =>
+        File.Move(temp, destination, overwrite: true);
 
     /// <summary>
     /// The real hard-link attempt behind the injectable overload above: true on success, false on

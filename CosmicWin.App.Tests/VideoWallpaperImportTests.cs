@@ -259,6 +259,140 @@ public sealed class VideoWallpaperImportTests : IDisposable
         Assert.Equal("first-must-stay-untouched", File.ReadAllText(first));
     }
 
+    /// <summary>
+    /// V1c (review follow-up, <c>R3-linked-destination-inherits-source-sharing</c>): the review's
+    /// premise was that holding the source open WITHOUT <see cref="FileShare.Delete"/> blocks the
+    /// final rename of the linked temp into place. Measured directly against the real link and the
+    /// real move (no injected seam) on this machine's NTFS volume, that premise does NOT hold: a
+    /// hard-linked ALIAS can be renamed freely regardless of any share mode another open holds
+    /// against a DIFFERENT alias of the same file -- confirmed even one step further down, with
+    /// <see cref="FileShare.None"/> (denying even reads) instead of just <see cref="FileShare.Read"/>,
+    /// and with an already-existing unrelated destination being replaced rather than created fresh.
+    /// Windows only appears to enforce the sharing check against the EXACT path being renamed or
+    /// replaced (see <see cref="Import_WhenMovingIntoPlaceFails_LeavesTheExistingDestinationUntouchedAndNoTempFileBehind"/>,
+    /// which holds the destination open BY ITS OWN NAME and does fail). This is therefore a
+    /// regression guard on the actual, observed behaviour -- import succeeds via the link, with the
+    /// destination correctly sharing the source's identity, and the fallback below is never invoked
+    /// for this scenario -- rather than a repro of the warning as originally described.
+    /// </summary>
+    [Fact]
+    public void Import_WhenTheSourceIsHeldOpenWithoutFileShareDelete_TheLinkedMoveStillSucceeds()
+    {
+        var source = WriteSourceFile("clip.mp4", "held-open-payload");
+
+        string destination;
+        using (new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+        }
+
+        Assert.Equal("held-open-payload", File.ReadAllText(destination));
+        Assert.Equal(GetFileIdentity(source), GetFileIdentity(destination));
+    }
+
+    /// <summary>
+    /// V1c's actual fallback, exercised deterministically: since <see
+    /// cref="Import_WhenTheSourceIsHeldOpenWithoutFileShareDelete_TheLinkedMoveStillSucceeds"/>
+    /// shows the real sharing violation the review warned about does not reproduce through
+    /// ordinary <see cref="FileShare"/> locks on this filesystem, this drives the "link succeeded,
+    /// move into place failed" branch directly through an injected move, the same seam convention
+    /// <see cref="TryCreateHardLink"/> already uses one level up. The first move throws (standing
+    /// in for whatever locks the real linked move in the field); the retry underneath must fall
+    /// back to an ordinary byte copy under a FRESH temp name and succeed.
+    /// </summary>
+    [Fact]
+    public void Import_WhenTheLinkedMoveFails_FallsBackToCopyingBytesUnderAFreshTempName()
+    {
+        var source = WriteSourceFile("clip.mp4", "fallback-payload");
+        var moveAttempts = 0;
+
+        var destination = VideoWallpaperImport.Import(
+            _destinationDirectory,
+            source,
+            tryCreateHardLink: (_, _) => true,
+            moveIntoPlace: (temp, dest) =>
+            {
+                moveAttempts++;
+                if (moveAttempts == 1)
+                {
+                    throw new IOException("simulated sharing violation on the linked move");
+                }
+
+                File.Move(temp, dest, overwrite: true);
+            });
+
+        Assert.Equal(2, moveAttempts);
+        Assert.Equal("fallback-payload", File.ReadAllText(destination));
+        Assert.NotEqual(GetFileIdentity(source), GetFileIdentity(destination));
+        Assert.Equal([destination], Directory.GetFiles(_destinationDirectory));
+    }
+
+    /// <summary>
+    /// The copy-fallback's OWN failure must still propagate as it always has -- V1c only adds a
+    /// second chance, never a second safety net -- and it must still leave the previous destination
+    /// untouched and no temp file behind, exactly like the plain (non-linked) copy failure above.
+    /// </summary>
+    [Fact]
+    public void Import_WhenTheLinkedMoveAndTheFallbackCopyBothFail_PropagatesAndLeavesNoTempFileBehind()
+    {
+        Directory.CreateDirectory(_destinationDirectory);
+        var destination = Path.Combine(_destinationDirectory, "video-wallpaper.mp4");
+        File.WriteAllText(destination, "previously imported");
+        var source = WriteSourceFile("clip.mp4", "never lands");
+
+        Assert.Throws<IOException>(() => VideoWallpaperImport.Import(
+            _destinationDirectory,
+            source,
+            tryCreateHardLink: (_, _) => true,
+            moveIntoPlace: (_, _) => throw new IOException("simulated sharing violation, every attempt")));
+
+        Assert.Equal("previously imported", File.ReadAllText(destination));
+        Assert.Equal([destination], Directory.GetFiles(_destinationDirectory));
+    }
+
+    /// <summary>
+    /// R3-relink-same-source-untested: re-picking the SAME original after a linked import must
+    /// still work end to end -- the second <see cref="VideoWallpaperImport.Import(string, string)"/>
+    /// call moves a fresh link over the destination, which is already a link to that very same
+    /// file, without disturbing the source's own bytes or leaving a temp file behind.
+    /// </summary>
+    [Fact]
+    public void Import_ReImportingTheSameSourceAfterALinkedImport_KeepsWorkingAndLeavesNoTempFileBehind()
+    {
+        var source = WriteSourceFile("clip.mp4", "re-picked-payload");
+
+        VideoWallpaperImport.Import(_destinationDirectory, source);
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+
+        Assert.Equal(GetFileIdentity(source), GetFileIdentity(destination));
+        Assert.Equal("re-picked-payload", File.ReadAllText(source));
+        Assert.Equal([destination], Directory.GetFiles(_destinationDirectory));
+    }
+
+    /// <summary>
+    /// V1c: a leftover temp file from an import whose final move failed (e.g. the sharing
+    /// violation above, when even the best-effort delete of the stale link could not run because
+    /// the source was still held open) must not accumulate forever -- the NEXT import sweeps it up.
+    /// An unrelated file in the same directory is never touched by that sweep.
+    /// </summary>
+    [Fact]
+    public void Import_SweepsLeftoverTempFilesFromAPreviousImport_ButLeavesUnrelatedFilesAlone()
+    {
+        Directory.CreateDirectory(_destinationDirectory);
+        var leftoverTemp = Path.Combine(_destinationDirectory, $"video-wallpaper.mp4.tmp-{Guid.NewGuid():N}");
+        File.WriteAllText(leftoverTemp, "stale");
+        var unrelated = Path.Combine(_destinationDirectory, "notes.txt");
+        File.WriteAllText(unrelated, "keep me");
+        var source = WriteSourceFile("clip.mp4", "swept-payload");
+
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+
+        Assert.False(File.Exists(leftoverTemp));
+        Assert.True(File.Exists(unrelated));
+        Assert.Equal("keep me", File.ReadAllText(unrelated));
+        Assert.Equal("swept-payload", File.ReadAllText(destination));
+    }
+
     private static (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) GetFileIdentity(string path)
     {
         using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
