@@ -452,7 +452,7 @@ failed. The 4 new desktop-gated composition facts in `Win32VideoWallpaperHostRea
 compiled and skipped for the documented reason (CosmicWin.App running) -- not yet exercised for
 real on hardware. Commits: `1d18e82` (T1), `c9e8114` (T2).
 
-2026-09-23 recovery: Claude left an uncommitted T4 native shake across 11 paths. A delegated
+2026-09-23 recovery: an earlier session left an uncommitted T4 native shake across 11 paths. A delegated
 writer preserved it and fixed shake restart/expiry serialization and Stop/Dispose cleanup. The
 inherited focused tests passed before the first fix (no observed RED); the new Stop/Dispose
 regressions failed twice before the cleanup and passed twice afterward. Independent verification:
