@@ -65,12 +65,12 @@ public sealed class HttpAlertCompositionWiringTests
     private sealed record Harness(
         AppComposition Composition, FakeServer? Pipe, RecordingDesktopTrace Trace,
         List<string> HttpFactoryCalls, int TokenLoadCalls, Func<string, string>? HttpHandler,
-        IAlertCommandServer? HttpServer, List<string> Events);
+        Func<string, bool>? HttpVideoSwitchHandler, IAlertCommandServer? HttpServer, List<string> Events);
 
     private static Harness Wire(
         bool alertsEnabled = true, bool httpEnabled = false, int httpPort = 47811,
-        string? token = "test-token",
-        Func<int, string, Func<string, string>, Action<string>?, IAlertCommandServer>? httpFactory = null)
+        string? token = "test-token", bool videoWallpaperHttpEnabled = false,
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
     {
         var primary = new FakeDisplay(
             new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -81,14 +81,17 @@ public sealed class HttpAlertCompositionWiringTests
         var httpFactoryCalls = new List<string>();
         var tokenLoadCalls = 0;
         Func<string, string>? httpHandler = null;
+        Func<string, bool>? httpVideoSwitchHandler = null;
         IAlertCommandServer? httpServer = null;
         var events = new List<string>();
 
-        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic) =>
+        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic, videoSwitch) =>
         {
             httpFactoryCalls.Add($"port={port} token={tok}");
             httpHandler = handler;
-            var server = new FakeServer(handler);
+            httpVideoSwitchHandler = videoSwitch;
+            var server = new FakeServer(handler ?? (_ => throw new InvalidOperationException(
+                "the alerts route is off -- this fake never routes to it")));
             httpServer = server;
             return server;
         });
@@ -113,6 +116,7 @@ public sealed class HttpAlertCompositionWiringTests
             endAlertLayer: () => events.Add("end"),
             alertHttpEnabled: httpEnabled,
             alertHttpPort: httpPort,
+            videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
             createHttpAlertCommandServer: resolvedHttpFactory,
             loadAlertHttpToken: () =>
             {
@@ -120,7 +124,9 @@ public sealed class HttpAlertCompositionWiringTests
                 return token;
             });
 
-        return new Harness(composition, pipe, trace, httpFactoryCalls, tokenLoadCalls, httpHandler, httpServer, events);
+        return new Harness(
+            composition, pipe, trace, httpFactoryCalls, tokenLoadCalls, httpHandler,
+            httpVideoSwitchHandler, httpServer, events);
     }
 
     [Fact]
@@ -143,6 +149,76 @@ public sealed class HttpAlertCompositionWiringTests
         {
             Assert.Empty(h.HttpFactoryCalls);
             Assert.Equal(0, h.TokenLoadCalls);
+        }
+    }
+
+    /// <summary>
+    /// V4 (video-wallpaper-http-endpoint), decision 2: the server now starts when AT LEAST ONE
+    /// route is on. With alerts fully disabled and only the video route on, the shared server
+    /// still starts -- this is the composition WireProduction never reached before V4, since the
+    /// HTTP server used to live entirely inside the alertsEnabled block.
+    /// </summary>
+    [Fact]
+    public void VideoOnly_AlertsFullyDisabled_StartsHttpServerWithNoAlertHandlerButAVideoSwitchHandler()
+    {
+        var h = Wire(alertsEnabled: false, httpEnabled: false, videoWallpaperHttpEnabled: true, httpPort: 6001);
+        using (h.Composition)
+        {
+            Assert.Equal(["port=6001 token=test-token"], h.HttpFactoryCalls);
+            Assert.Null(h.HttpHandler);
+            Assert.NotNull(h.HttpVideoSwitchHandler);
+            Assert.True(((FakeServer)h.HttpServer!).Started);
+            Assert.DoesNotContain(
+                h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
+            Assert.Contains(
+                h.Trace.Lines,
+                l => l == "http-server start requested port=6001 alerts-route=False video-route=True");
+        }
+    }
+
+    [Fact]
+    public void AlertsOnly_StartsHttpServerWithAnAlertHandlerButNoVideoSwitchHandler()
+    {
+        var h = Wire(alertsEnabled: true, httpEnabled: true, videoWallpaperHttpEnabled: false, httpPort: 6002);
+        using (h.Composition)
+        {
+            Assert.NotNull(h.HttpHandler);
+            Assert.Null(h.HttpVideoSwitchHandler);
+            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6002");
+            Assert.Contains(
+                h.Trace.Lines,
+                l => l == "http-server start requested port=6002 alerts-route=True video-route=False");
+        }
+    }
+
+    [Fact]
+    public void BothRoutesOn_StartsHttpServerWithBothHandlers()
+    {
+        var h = Wire(alertsEnabled: true, httpEnabled: true, videoWallpaperHttpEnabled: true, httpPort: 6003);
+        using (h.Composition)
+        {
+            Assert.NotNull(h.HttpHandler);
+            Assert.NotNull(h.HttpVideoSwitchHandler);
+            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6003");
+            Assert.Contains(
+                h.Trace.Lines,
+                l => l == "http-server start requested port=6003 alerts-route=True video-route=True");
+        }
+    }
+
+    /// <summary>Neither route on, alerts otherwise enabled: the shared server never starts, exactly
+    /// as before V4 -- the pipe alone is not enough to bring it up.</summary>
+    [Fact]
+    public void NeitherRouteOn_HttpServerNeverStartedButPipeDoes()
+    {
+        var h = Wire(alertsEnabled: true, httpEnabled: false, videoWallpaperHttpEnabled: false);
+        using (h.Composition)
+        {
+            Assert.Empty(h.HttpFactoryCalls);
+            Assert.Equal(0, h.TokenLoadCalls);
+            Assert.True(h.Pipe!.Started);
+            Assert.DoesNotContain(
+                h.Trace.Lines, l => l.StartsWith("http-server start requested", StringComparison.Ordinal));
         }
     }
 
@@ -184,7 +260,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpFactoryThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _) => throw new InvalidOperationException("factory boom"));
+            httpFactory: (_, _, _, _, _) => throw new InvalidOperationException("factory boom"));
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
@@ -201,7 +277,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpServerStartThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _) => new ThrowingStartServer());
+            httpFactory: (_, _, _, _, _) => new ThrowingStartServer());
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);

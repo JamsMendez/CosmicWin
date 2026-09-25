@@ -155,7 +155,21 @@ public sealed class VideoWallpaperPlaybackWiringTests
         }
     }
 
-    private sealed record Harness(AppComposition Composition, TrayMenuController Tray);
+    /// <summary>No-op stand-in for the shared HTTP server -- only ever constructed here to capture
+    /// the delegate <c>AppComposition.Wire</c> hands it, never actually listens.</summary>
+    private sealed class FakeHttpServer : IAlertCommandServer
+    {
+        public void Start()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed record Harness(
+        AppComposition Composition, TrayMenuController Tray, Func<string, bool>? HandleVideoWallpaperHttpSwitch);
 
     private static Harness Wire(
         IVideoWallpaperHost? videoWallpaperHost = null,
@@ -166,7 +180,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Action<Action>? scheduleVideoWallpaperWork = null,
         Action? disposeVideoWallpaper = null,
         Action<string>? persistVideoWallpaperPath = null,
-        Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null)
+        Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
+        bool videoWallpaperHttpEnabled = false)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -175,6 +190,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var treeManager = new TreeManager([primary], primary, registry);
         var foreground = new NoForeground();
         TrayMenuController? tray = null;
+        Func<string, bool>? capturedVideoSwitchHandler = null;
 
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
@@ -197,9 +213,16 @@ public sealed class VideoWallpaperPlaybackWiringTests
             scheduleVideoWallpaperWork: scheduleVideoWallpaperWork,
             disposeVideoWallpaper: disposeVideoWallpaper,
             videoWallpaperPath: videoWallpaperPath,
-            persistVideoWallpaperPath: persistVideoWallpaperPath);
+            persistVideoWallpaperPath: persistVideoWallpaperPath,
+            videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
+            loadAlertHttpToken: () => "test-token",
+            createHttpAlertCommandServer: (_, _, _, _, videoSwitch) =>
+            {
+                capturedVideoSwitchHandler = videoSwitch;
+                return new FakeHttpServer();
+            });
 
-        return new Harness(composition, tray!);
+        return new Harness(composition, tray!, capturedVideoSwitchHandler);
     }
 
     [Fact]
@@ -721,6 +744,177 @@ public sealed class VideoWallpaperPlaybackWiringTests
             scheduler.Fire();
 
             Assert.Single(queued);
+        }
+    }
+
+    /// <summary>
+    /// V4 (video-wallpaper-http-endpoint): the HTTP route's delegate, captured through the same
+    /// <c>createHttpAlertCommandServer</c> seam <see cref="HttpAlertCompositionWiringTests"/>
+    /// uses. With no video-wallpaper host/player wired on this composition, the delegate answers
+    /// "not available" (503 at the protocol layer) rather than touching either -- the same
+    /// composition <see cref="Startup_WithNoCollaboratorsWired_DoesNotThrow"/> covers for the tray
+    /// side.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_WithNoHostOrPlayer_ReturnsFalse()
+    {
+        var harness = Wire(videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            Assert.NotNull(harness.HandleVideoWallpaperHttpSwitch);
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.False(accepted);
+        }
+    }
+
+    /// <summary>
+    /// A composition with a host and player but NO dedicated video-wallpaper thread
+    /// (<c>scheduleVideoWallpaperWork</c> unset) is exactly the shape
+    /// <c>onVideoWallpaperThread</c> would fall back to running inline on whichever thread calls
+    /// it -- fine for the tray click that shape has always served, but it would mean the import's
+    /// copy runs SYNCHRONOUSLY on the HTTP server's one request thread if the delegate dispatched
+    /// anyway. It must not: the delegate answers "not available" instead, and neither collaborator
+    /// is ever touched -- proving the switch did not run inline on this (the test's own) thread.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_WithHostAndPlayerButNoDedicatedThread_ReturnsFalseWithoutRunningInline()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.False(accepted);
+            Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+        }
+    }
+
+    /// <summary>
+    /// With a dedicated video-wallpaper thread wired (the shape every real composition uses, per
+    /// <c>AppComposition.WireProduction</c>), the delegate returns <see langword="true"/> the
+    /// instant the work is QUEUED -- before the scheduler ever runs it -- and the switch that
+    /// eventually runs is the exact same stop/import/persist/activate sequence the tray's own
+    /// pick uses, proven here by running it through the SAME <c>importVideoWallpaper</c> seam and
+    /// observing the SAME host/player call sequence <see
+    /// cref="PickingAVideo_StopsPlaybackBeforeImportingBeforeReattachingAndReplaying"/> proves for
+    /// the tray.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_WithDedicatedThread_ReturnsTrueAtOnceAndRunsOnlyOnceTheSchedulerDrainsIt()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var imported = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        var trace = new RecordingDesktopTrace();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            scheduleVideoWallpaperWork: queued.Enqueue, importVideoWallpaper: _ => imported,
+            desktopTrace: trace, videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            // Clears the "http-server start requested" line construction itself just traced, so
+            // the assertion below reads only the switch's own line.
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+
+            // Accepted for dispatch, and QUEUED, not run -- on the caller's own thread (this test
+            // method) nothing has attached or played yet.
+            Assert.True(accepted);
+            Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+            Assert.Single(queued);
+
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, player.TryPlayCallCount);
+            Assert.Equal(imported, player.LastVideoPath);
+            Assert.Equal(
+                ["video-wallpaper phase=http pathExists=True tryAttach=True tryPlay=True"],
+                trace.Lines);
+        }
+    }
+
+    /// <summary>
+    /// The failure/restore contract the tray already gets
+    /// (<see cref="PickingAVideo_WhenImportThrows_TracesAndRestoresThePreviousVideoWithoutPersisting"/>)
+    /// applies identically to an HTTP-initiated switch: no absolute path in the trace, the
+    /// previous video restored, and nothing persisted -- only the phase on the failure line reads
+    /// <c>http</c> instead of <c>pick</c>. The restore itself stays <c>phase=restore</c> either
+    /// way, since restoring is the same fallback regardless of who triggered the switch.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_WhenImportThrows_TracesPhaseHttpAndRestoresThePreviousVideoWithoutPersisting()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var persisted = new List<string>();
+        var previousPath = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: previousPath,
+            scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
+            persistVideoWallpaperPath: persisted.Add, videoWallpaperHttpEnabled: true,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            // Startup queued its own activation work item ahead of anything this test posts.
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+            Assert.True(accepted);
+            queued.Dequeue().Invoke();
+
+            Assert.Contains("video-wallpaper phase=http import-failed error=IOException", trace.Lines);
+            Assert.Contains(
+                trace.Lines,
+                line => line.StartsWith("video-wallpaper phase=restore") && line.Contains("tryPlay=True"));
+            Assert.Empty(persisted);
+        }
+    }
+
+    /// <summary>
+    /// Both entry points share one composition without interfering: a tray pick still traces
+    /// <c>phase=pick</c> and an HTTP switch still traces <c>phase=http</c>, proving V4 did not
+    /// collapse the two or leave the tray's own phase hard-coded to the wrong word.
+    /// </summary>
+    [Fact]
+    public void TrayPickAndHttpSwitch_ShareOneCompositionButTraceTheirOwnDistinctPhase()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
+            videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\tray.mp4");
+            queued.Dequeue().Invoke();
+
+            harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\http.mp4");
+            queued.Dequeue().Invoke();
+
+            Assert.Contains(trace.Lines, l => l.StartsWith("video-wallpaper phase=pick "));
+            Assert.Contains(trace.Lines, l => l.StartsWith("video-wallpaper phase=http "));
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("tray.mp4", StringComparison.Ordinal));
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("http.mp4", StringComparison.Ordinal));
         }
     }
 }

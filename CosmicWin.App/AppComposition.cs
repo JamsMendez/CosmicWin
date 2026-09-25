@@ -187,7 +187,14 @@ public sealed class AppComposition : IDisposable
         // so a wiring test never binds a real port or touches %LOCALAPPDATA%.
         bool alertHttpEnabled = false,
         int alertHttpPort = AlertHttpProtocol.DefaultPort,
-        Func<int, string, Func<string, string>, Action<string>?, IAlertCommandServer>? createHttpAlertCommandServer = null,
+        // V4 (video-wallpaper-http-endpoint): the SAME server now optionally carries a second
+        // route, gated independently of alertHttpEnabled/alertsEnabled -- decision 2, "a route
+        // whose switch is off answers 404, as if it did not exist". Extends the factory seam
+        // above with a trailing handleVideoWallpaperSwitch delegate, mirroring
+        // HttpAlertCommandServer's own trailing optional constructor parameter, rather than
+        // bypassing this seam with a second one.
+        bool videoWallpaperHttpEnabled = false,
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createHttpAlertCommandServer = null,
         Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
@@ -413,9 +420,23 @@ public sealed class AppComposition : IDisposable
         /// The "stop, import, persist, (re)activate" sequence <c>setVideoWallpaperPath</c> below
         /// used to run as an inline closure, now a named operation next to
         /// <see cref="ActivateVideoWallpaper"/> so a second caller -- the HTTP video-wallpaper
-        /// endpoint (V4) -- can trigger the exact same switch without duplicating it. Posts the
-        /// work and returns at once: never blocks whichever thread calls this.
+        /// endpoint (V4) -- can trigger the exact same switch without duplicating it (the V4
+        /// constraint: imports must stay serialized on this one path, never a second caller of
+        /// <c>importVideoWallpaper</c> directly). Posts the work and returns at once: never blocks
+        /// whichever thread calls this. Returns whether the switch was actually POSTED for
+        /// dispatch -- never whether it finished, since the caller is told before the work item
+        /// even runs -- so the HTTP endpoint can answer 503 instead of 202 when there is nothing
+        /// to switch on this composition; the tray call site below ignores the return value and
+        /// behaves exactly as it always has.
         /// </summary>
+        /// <param name="phase">
+        /// Recorded on every trace line this switch produces, so an HTTP-initiated switch reads
+        /// distinctly from a tray pick (<c>phase=http</c> vs the tray's own default
+        /// <c>phase=pick</c>) without duplicating this whole method for one word. The restore
+        /// branch, taken by either caller when the import fails and a previous video exists,
+        /// always traces <c>phase=restore</c> regardless of what switched it -- restoring is the
+        /// same fallback either way, not a per-caller outcome.
+        /// </param>
         /// <remarks>
         /// Checks its own collaborators the same way <see cref="ActivateVideoWallpaper"/> does,
         /// rather than trusting a caller's earlier check -- redundant for
@@ -423,11 +444,11 @@ public sealed class AppComposition : IDisposable
         /// already checked, the same redundancy the startup activation further down this method
         /// accepts by checking before calling <see cref="ActivateVideoWallpaper"/> itself.
         /// </remarks>
-        void SwitchVideoWallpaper(string path)
+        bool SwitchVideoWallpaper(string path, string phase = "pick")
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
             {
-                return;
+                return false;
             }
 
             // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
@@ -473,7 +494,7 @@ public sealed class AppComposition : IDisposable
                     // bug 1 itself reported; not persisting means the failed switch never gets
                     // remembered as if it had landed on disk.
                     desktopTrace?.Record(
-                        $"video-wallpaper phase=pick import-failed error={error.GetType().Name}");
+                        $"video-wallpaper phase={phase} import-failed error={error.GetType().Name}");
                     if (previous is not null)
                     {
                         ActivateVideoWallpaper("restore", previous);
@@ -491,9 +512,37 @@ public sealed class AppComposition : IDisposable
                 // configured yet) and every later re-switch identically: TryAttach is documented
                 // idempotent and TryPlay is documented to tear down and restart cleanly, so
                 // there is no need to branch on whether this is the first attach.
-                ActivateVideoWallpaper("pick", imported);
+                ActivateVideoWallpaper(phase, imported);
             });
+
+            return true;
         }
+
+        /// <summary>
+        /// V4: the HTTP video-wallpaper route's delegate, handed to <see
+        /// cref="createHttpAlertCommandServer"/>'s <c>handleVideoWallpaperSwitch</c> parameter
+        /// when <paramref name="videoWallpaperHttpEnabled"/> is on. Never calls
+        /// <see cref="VideoWallpaperImport.Import"/> itself, and never any import logic directly
+        /// -- it goes through <see cref="SwitchVideoWallpaper"/>, the SAME serialized path the
+        /// tray uses, so a concurrent tray pick and HTTP request can never race the shared
+        /// temp-name import (Review 2's R3-temp-sweep-races-concurrent-import constraint).
+        /// </summary>
+        /// <remarks>
+        /// Answers "not available" (503) rather than dispatching when THIS composition has no
+        /// dedicated video-wallpaper thread of its own (<paramref name="scheduleVideoWallpaperWork"/>
+        /// unset) -- checked here, on the raw constructor parameter, before <see
+        /// cref="SwitchVideoWallpaper"/> ever runs. Without a dedicated thread,
+        /// <c>onVideoWallpaperThread</c> falls back to <c>onOwningThread</c>, which itself
+        /// defaults to running inline on whichever thread calls it -- fine for a tray click (it
+        /// always ran that way before this task), but it would mean the import's multi-gigabyte
+        /// copy runs SYNCHRONOUSLY on this HTTP server's one request-handling thread, which <see
+        /// cref="HttpAlertCommandServer"/>'s own contract for this delegate forbids. Answering 503
+        /// is the least surprising choice for a composition that was never going to switch
+        /// anything asynchronously in the first place, and it costs nothing beyond this one null
+        /// check -- no new thread is spun up just to make the endpoint technically answer 202.
+        /// </remarks>
+        bool HandleVideoWallpaperHttpSwitch(string path) =>
+            scheduleVideoWallpaperWork is null ? false : SwitchVideoWallpaper(path, phase: "http");
 
         string HandleAlertCommand(string text)
         {
@@ -946,42 +995,66 @@ public sealed class AppComposition : IDisposable
             // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
             // the first alert command -- the whole point of the persistent-preload fix.
             if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
+        }
 
-            // H4 (http-alert-endpoint): the pipe above has already started by the time this runs, so
-            // any failure below -- a bad port, a listener that cannot bind, the token file being
-            // unreadable -- is caught and traced here rather than left to unwind Wire and take the
-            // pipe down with it. The two servers stay independent on purpose.
-            if (alertHttpEnabled)
+        // H4 (http-alert-endpoint)/V4 (video-wallpaper-http-endpoint): the shared HTTP server
+        // starts whenever AT LEAST ONE of its two routes is on -- decision 2. The alerts route
+        // additionally needs alertsEnabled (there is no alert queue to answer through otherwise,
+        // see HandleAlertCommand above); the video route needs nothing but its own flag, so this
+        // whole block -- token file included -- now runs OUTSIDE the alertsEnabled block above,
+        // unlike before V4 when the HTTP server could only ever exist nested inside it. Every
+        // alert behaviour and trace line above (the pipe, preloadAlertLayer) is untouched by this
+        // move; only the server that answers HTTP requests was ever nested unnecessarily.
+        var alertHttpRouteOn = alertsEnabled && alertHttpEnabled;
+        var videoWallpaperHttpRouteOn = videoWallpaperHttpEnabled;
+        if (alertHttpRouteOn || videoWallpaperHttpRouteOn)
+        {
+            try
             {
-                try
+                // The pipe above (when alertsEnabled) has already started by the time this runs, so
+                // any failure below -- a bad port, a listener that cannot bind, the token file being
+                // unreadable -- is caught and traced here rather than left to unwind Wire and take the
+                // pipe down with it. The two servers stay independent on purpose.
+                var loadToken = loadAlertHttpToken
+                    ?? (() => AlertHttpTokenFile.LoadOrCreate(message => desktopTrace?.Record(message)));
+                var token = loadToken();
+                if (token is null)
                 {
-                    var loadToken = loadAlertHttpToken
-                        ?? (() => AlertHttpTokenFile.LoadOrCreate(message => desktopTrace?.Record(message)));
-                    var token = loadToken();
-                    if (token is null)
+                    desktopTrace?.Record("alert-http token unavailable, HTTP alert endpoint not started");
+                }
+                else
+                {
+                    var httpServerFactory = createHttpAlertCommandServer
+                        ?? ((port, t, handler, diagnostic, videoSwitch) =>
+                            new HttpAlertCommandServer(port, t, handler, diagnostic, videoSwitch));
+                    httpAlertServer = httpServerFactory(
+                        alertHttpPort, token,
+                        alertHttpRouteOn ? HandleAlertCommand : null,
+                        message => desktopTrace?.Record(message),
+                        videoWallpaperHttpRouteOn ? HandleVideoWallpaperHttpSwitch : null);
+                    httpAlertServer.Start();
+                    // H5b: Start() never throws -- a port already in use is reported by the server
+                    // itself as "alert http: failed to start listening ..." through this same sink
+                    // -- so these lines must not claim the endpoint is listening.
+                    if (alertHttpRouteOn)
                     {
-                        desktopTrace?.Record("alert-http token unavailable, HTTP alert endpoint not started");
-                    }
-                    else
-                    {
-                        var httpServerFactory = createHttpAlertCommandServer
-                            ?? ((port, t, handler, diagnostic) => new HttpAlertCommandServer(port, t, handler, diagnostic));
-                        httpAlertServer = httpServerFactory(alertHttpPort, token, HandleAlertCommand,
-                            message => desktopTrace?.Record(message));
-                        httpAlertServer.Start();
-                        // H5b: Start() never throws -- a port already in use is reported by the server
-                        // itself as "alert http: failed to start listening ..." through this same sink
-                        // -- so this line must not claim the endpoint is listening.
                         desktopTrace?.Record($"alert-http start requested port={alertHttpPort}");
                     }
+
+                    // V4: which routes actually ended up in the routing table, so a trace reader
+                    // can tell a video-only start (alerts fully disabled) from every other
+                    // combination without inferring it from the line above being absent.
+                    desktopTrace?.Record(
+                        $"http-server start requested port={alertHttpPort} " +
+                        $"alerts-route={alertHttpRouteOn} video-route={videoWallpaperHttpRouteOn}");
                 }
-                // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a
-                // per-alert render failure below: a bad port or a listener refusal is this server's
-                // problem, not a reason to treat the whole composition as unsafe to continue.
-                catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
-                {
-                    desktopTrace?.Record($"alert-http-start-failed {ex.GetType().Name}: {ex.Message}");
-                }
+            }
+            // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a
+            // per-alert render failure below: a bad port or a listener refusal is this server's
+            // problem, not a reason to treat the whole composition as unsafe to continue.
+            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            {
+                desktopTrace?.Record($"alert-http-start-failed {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -1645,6 +1718,7 @@ public sealed class AppComposition : IDisposable
             alertsEnabled: settings.AlertsEnabled,
             alertHttpEnabled: settings.AlertHttpEnabled,
             alertHttpPort: settings.AlertHttpPort,
+            videoWallpaperHttpEnabled: settings.VideoWallpaperHttpEnabled,
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
