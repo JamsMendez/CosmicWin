@@ -46,6 +46,13 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
 - [ ] **W3 -- Hardware check.** Watch the trace for a working period and compare the reinstall
   rate with the baseline (about 64/day since 09-20).
 
+- [ ] **W4 -- Backstop only (maintainer decision 2026-09-25).** W3 showed the session-input gate
+  churns on wheel/click input with a still cursor. Remove the gate: reinstall only after the
+  backstop (30 min with no key seen by the hook). Drop the session-input and cursor readings if
+  nothing else uses them. Accepted cost: a genuinely dead hook recovers within 30 min (never observed:
+  `foundGone=0` on every reinstall ever traced). Route: delegated writer (hook + platform + tests).
+  Then a hardware re-check: wheel injection -> 0 reinstalls.
+
 ## Progress
 
 2026-09-24: document created; W1 next.
