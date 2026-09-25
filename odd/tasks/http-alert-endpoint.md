@@ -130,9 +130,36 @@ Reviewed boundary: branch point `a3e3ba8`.
     R3-103 the constraint above now states the two-prefix choice. R3-101/102 are NOT unit-tested:
     a join timeout and a lingering failed listener cannot be observed from a black-box test.
     Checks after the fixes: build 0 errors; Interop 314 / 40 / 0.
-- [ ] H3 -- Token store (create-once, 32 random bytes base64url, file readable by the user only,
+- [x] H3 -- Token store (create-once, 32 random bytes base64url, file readable by the user only,
   reuse on restart, constant-time compare) + `Settings` keys `alert-http` / `alert-http-port` with
-  defaults and round-trip. Route: delegated writer (2 non-trivial files).
+  defaults and round-trip. Route: delegated writer (writer trigger: 2 non-trivial files).
+  Commit `033255d` (4 files, +575/-2): `CosmicWin.App/Alerts/AlertHttpTokenFile.cs` (no custom ACL:
+  `%LOCALAPPDATA%` inherits a per-user ACL; atomic temp-file + `File.Replace`/`File.Move`),
+  `Settings.cs` `AlertHttpEnabled` (default off) / `AlertHttpPort` (default 47811, 1..65535).
+  - Strict TDD (writer): token file RED 14/14 `NotImplementedException` against a stub; settings RED
+    = 15 compile errors (CS1061/CS1739, members absent); GREEN 14/14 and 107/107.
+  - Checks: build 0 errors (3 pre-existing warnings); App 943 passed / 6 skipped / 0 failed
+    (writer and parent spot check).
+  - Review: assess vs `4ecd665` = medium, `slice_budget_reached` (577 lines) -> due. Consent granted
+    by the maintainer. Lineage `review-c7c037a7fe9ab126`, one lens (reliability): APPROVED,
+    acknowledged, authority burned. Reviewed boundary advances to `033255d`.
+    Advisory findings, all accepted into H3b: first-run creation race (WARNING); catch filters too
+    narrow for "never throws" (WARNING); token-leak test is vacuous (SUGGESTION); Replace-branch
+    persistence untested (SUGGESTION).
+- [x] H3b -- Close the H3 review findings. Route: delegated writer (same writer, context reuse).
+  Commit `7ff2c97` (2 files, +214/-17).
+  - Race: re-read the destination before the destructive move/replace and again if it loses the
+    race, adopting the winner's token. RED: 8-thread first run, 7/8 callers got null. GREEN, 3x.
+  - Never throws: `IsRecoverable` filter (all but OOM/StackOverflow/AccessViolation, mirroring
+    `AppComposition.IsRecoverableAlertLayerFailure`). RED: empty path threw `ArgumentException`
+    under the old filter. The colon-in-segment case already surfaced as `IOException` here, so its
+    test is coverage, not a fix (stated in the test).
+  - Token-leak test: a malformed-file replacement now emits a diagnostic; new test asserts the new
+    token value is absent from it (RED by removing the diagnostic: empty collection).
+  - Replace persistence: second call after replacement returns the same token; no defect existed,
+    RED recovered by mutation (skip `File.Replace`).
+  - Checks: build 0 errors (3 pre-existing warnings); App 948 passed / 6 skipped / 0 failed (writer
+    and parent spot check).
 - [ ] H4 -- `AppComposition` wiring: when `alerts-enabled` AND `alert-http` are on, start the HTTP
   server with `HandleAlertCommand`; start failure is traced and the pipe still runs; disposed with
   the app. Wiring tests with a fake server factory. Route: inline or delegated per size.
