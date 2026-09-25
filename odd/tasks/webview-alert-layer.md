@@ -561,3 +561,18 @@ ready (navigation completed AND its own `"ready"` message received), never re-de
 original duration. The old per-alert `AlertLayerLifecycle` class and its 3 tests were removed
 (superseded, not extended) because its deadline-based auto-close does not fit a controller that
 must now survive past any one alert's duration.
+
+2026-09-24 native review of `7462e1c..0fa5aba` (T9a-e: 14 files, 1600 lines, risk medium,
+`slice_budget_reached`). The maintainer granted consent. Lineage `review-f4fee9cc7e38696e`, one
+reliability lens. It found one CRITICAL, deterministic, candidate-caused finding,
+`R3-stale-ready-after-teardown`: a `host-changed` or `host-not-ready` teardown never cleared
+`AlertLayerPreloadState.Ready`. A `Start` during the ~2 s recreate was marked visible with no
+controller and was silently lost. The parent confirmed it in the code. Correction commit `8e1c0fa`
+(route: delegated writer, 74 of the 90 declared lines) adds `ControllerLost()`, which `TearDown`
+now calls for every reason. It clears `Ready`, and it requeues an on-screen alert as pending with
+its original deadline, so after an Explorer restart it re-shows for the remaining time only. RED
+was a `CS1061` for the missing `ControllerLost`; GREEN is 12/12 state tests, App 1045 passed / 6
+skipped, Debug build 0 errors, `git diff --check` clean. Parent spot check: 12/12. Targeted
+validation **approved**, and the acknowledgement burned authority. The reviewed boundary is now
+`8e1c0fa`. T9e still lacks Explorer-restart and `ProcessFailed` checks on hardware; the new
+requeue path is only unit-tested.
