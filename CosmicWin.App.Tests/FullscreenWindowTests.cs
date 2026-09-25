@@ -425,4 +425,57 @@ public sealed class FullscreenWindowTests
         Assert.Equal(chromeBefore, h.Chrome.SetPositionCallCount);
         Assert.True(third.SetPositionCallCount > thirdBefore);
     }
+
+    // -----------------------------------------------------------------------------------------
+    // U3: non-owner display. IsFullscreen compared only against _owners[handle]'s display, so a
+    // window fullscreen on a monitor other than the one its tree is filed under was never
+    // recognized.
+    // -----------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A window owned by display A (its tree is filed there) that goes fullscreen covering display
+    /// B is still recognized: not repositioned, not given up on however long it stays there, and
+    /// traced once -- exactly as if it had gone fullscreen on its own display.
+    /// </summary>
+    [Fact]
+    public void AWindowFullscreenOnANonOwnerDisplay_IsRecognized()
+    {
+        var left = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var rightBounds = Rectangle.FromSize(1920, 0, 2560, 1440);
+        var right = new FakeDisplay(new IntPtr(2), rightBounds, rightBounds, 1.0, false);
+
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([left, right], left, registry);
+        var workspace = new FakeWorkspace();
+        var trace = new RecordingTrace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            Trace = trace,
+        };
+
+        var neighbour = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300), style: CaptionedStyle);
+        var chrome = new RecordingWindow(
+            new IntPtr(20), Rectangle.FromSize(0, 0, 400, 300),
+            className: "Chrome_WidgetWin_1", processName: "chrome.exe", style: CaptionedStyle);
+        workspace.RaiseWindowAdded(neighbour);
+        workspace.RaiseWindowAdded(chrome);
+
+        // Chrome's tree is filed under LEFT (its admission bounds resolved there), but it goes
+        // fullscreen on RIGHT -- dragged there, or launched onto it directly.
+        chrome.SimulateFullscreen(rightBounds);
+        chrome.SnapsBackTo = rightBounds;
+
+        var before = chrome.SetPositionCallCount;
+        for (var round = 0; round < EnoughRounds; round++)
+        {
+            workspace.RaiseWindowBoundsChanged(chrome);
+        }
+
+        Assert.Equal(before, chrome.SetPositionCallCount);
+        Assert.True(registry.TryGetLeaf(chrome.Handle, out _));
+        Assert.DoesNotContain(trace.Lines, line => line.Contains("gave up", StringComparison.Ordinal));
+        Assert.Equal(1, trace.Lines.Count(
+            line => line.StartsWith("fullscreen hwnd=0x14 ", StringComparison.Ordinal)));
+    }
 }

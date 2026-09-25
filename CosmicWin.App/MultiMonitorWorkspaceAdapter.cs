@@ -418,7 +418,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // supposed to stay out of. It already has the leaf InsertWindow just gave it, so Arrange
         // below still computes a tile for it -- only skips POSITIONING it -- and it lands there the
         // moment OnWindowBoundsChanged sees it leave fullscreen, same as any other fullscreen entry.
-        if (IsFullscreen(window, display))
+        // Judged against every display TreeManager knows, not just `display` (this window's OWNER):
+        // a game can be launched, or an already-open one dragged, straight onto a monitor other than
+        // the one its tree ends up filed under.
+        if (IsFullscreen(window, _treeManager.Displays))
         {
             if (_fullscreen.Add(window.Handle))
             {
@@ -1179,18 +1182,26 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private const int FullscreenTolerance = 2;
 
     /// <summary>
-    /// Whether <paramref name="window"/> is fullscreen on <paramref name="display"/>: no caption, not
-    /// maximised, and covering the monitor to within <see cref="FullscreenTolerance"/>.
+    /// Whether <paramref name="window"/> is fullscreen on ANY of <paramref name="displays"/>: no
+    /// caption, not maximised, and covering that monitor to within <see cref="FullscreenTolerance"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Measured with Chrome. Tiled it has style 0x16CF0000; fullscreen it has 0x160B0000 -- <c>WS_CAPTION</c>
     /// and <c>WS_THICKFRAME</c> cleared, <c>WS_MAXIMIZE</c> never set -- on the whole monitor. All three
     /// conditions are needed. A MAXIMISED window on a monitor with an auto-hide taskbar covers the
     /// monitor too but keeps its caption and <c>WS_MAXIMIZE</c>, and must stay on the ordinary path.
     /// <c>WS_CAPTION</c> is two bits (<c>WS_BORDER | WS_DLGFRAME</c>) and both must be set for a window
     /// to have one.
+    /// </para>
+    /// <para>
+    /// Every KNOWN display, deliberately not just the one <see cref="_owners"/> files this window's
+    /// tree under. A window can be dragged, or launched straight, into fullscreen on a monitor other
+    /// than the one that owns its tile -- the owner never asked the desktop it is actually covering,
+    /// so comparing against it only would miss the exact case this exists to catch.
+    /// </para>
     /// </remarks>
-    private static bool IsFullscreen(IWindow window, IDisplay display)
+    private static bool IsFullscreen(IWindow window, IEnumerable<IDisplay> displays)
     {
         var style = window.Style;
 
@@ -1201,12 +1212,21 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var bounds = window.Bounds;
-        var monitor = display.Bounds;
 
-        return bounds.Left <= monitor.Left + FullscreenTolerance &&
-               bounds.Top <= monitor.Top + FullscreenTolerance &&
-               bounds.Right >= monitor.Right - FullscreenTolerance &&
-               bounds.Bottom >= monitor.Bottom - FullscreenTolerance;
+        foreach (var display in displays)
+        {
+            var monitor = display.Bounds;
+
+            if (bounds.Left <= monitor.Left + FullscreenTolerance &&
+                bounds.Top <= monitor.Top + FullscreenTolerance &&
+                bounds.Right >= monitor.Right - FullscreenTolerance &&
+                bounds.Bottom >= monitor.Bottom - FullscreenTolerance)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1362,7 +1382,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // closing) no longer repositions it either -- Arrange skips every handle in _fullscreen, so
         // this window is left alone by every arrange for as long as it stays in that set, not only
         // by the one this method would otherwise have run below.
-        if (IsFullscreen(window, display))
+        //
+        // Judged against every display TreeManager knows, not only this window's OWNER: a window
+        // can go fullscreen on a monitor other than the one its tree is filed under (dragged there,
+        // or launched onto it directly), and it is still the same fact about the window. Ownership
+        // itself does not move -- fullscreen is transient, and the tile stays with the tree that
+        // holds the leaf -- only the JUDGEMENT looks past `display` to the monitor actually covered.
+        if (IsFullscreen(window, _treeManager.Displays))
         {
             _misses.Remove(handle);
 
