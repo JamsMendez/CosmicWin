@@ -240,15 +240,22 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// The silence after which the hook is replaced regardless of what the session reports.
     /// </summary>
     /// <remarks>
-    /// Sixty times the interval, deliberately. Gating on GetLastInputInfo makes the whole net
-    /// depend on that one reading being truthful, and if it ever under-reports, a dead hook would
-    /// never be replaced and the keyboard would stay dead until a restart -- a worse failure than
-    /// the churn being removed. So the reading decides how OFTEN, and this decides that it happens
-    /// at all. The reading has since been measured to be truthful about injected input as well as
-    /// physical, which makes this insurance rather than a known-necessary correction; it is kept
+    /// Three hundred sixty times the interval, deliberately generous. Gating on GetLastInputInfo
+    /// makes the whole net depend on that one reading being truthful, and if it ever under-reports,
+    /// a dead hook would never be replaced and the keyboard would stay dead until a restart -- a
+    /// worse failure than the churn being removed. So the reading decides how OFTEN, and this
+    /// decides that it happens at all. The reading has since been measured to be truthful about
+    /// injected input as well as physical, which makes this insurance for a fault never observed
+    /// rather than a known-necessary correction.
+    /// <para>
+    /// Raised from five minutes to thirty, once the gate above was corrected: a trace
+    /// (2026-09-10..09-25) showed 320 reinstalls since 09-20, and every one of the 155 gaps over
+    /// ~310 s was this backstop firing on nothing but five quiet minutes -- churn the corrected
+    /// gate makes unnecessary, not insurance paying out. Kept, rather than removed outright,
     /// because one API deciding whether the keyboard ever recovers is a bet worth not taking.
+    /// </para>
     /// </remarks>
-    public static readonly TimeSpan DefaultWatchdogBackstop = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan DefaultWatchdogBackstop = TimeSpan.FromMinutes(30);
     private readonly ChannelWriter<HotkeyAction> _writer;
     private readonly IKeyboardHookPlatform _platform;
     private readonly TimeSpan _watchdogInterval;

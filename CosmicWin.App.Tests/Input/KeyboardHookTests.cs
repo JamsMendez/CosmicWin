@@ -128,6 +128,13 @@ public sealed class KeyboardHookTests
         Assert.True(hook.IsPaused);
     }
 
+    /// <summary>The raised default: most churn measured in the trace was this backstop firing on nothing but five quiet minutes.</summary>
+    [Fact]
+    public void DefaultWatchdogBackstop_IsThirtyMinutes()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(30), LowLevelKeyboardHook.DefaultWatchdogBackstop);
+    }
+
     [Fact]
     public void Watchdog_DoesNotReinstallBeforeItsIntervalHasPassed()
     {
