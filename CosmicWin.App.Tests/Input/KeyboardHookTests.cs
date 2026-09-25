@@ -389,16 +389,15 @@ public sealed class KeyboardHookTests
 
         hook.Start();
 
-        // Advanced in TWO steps, because a fake clock jumps where the real one creeps. The loop's
-        // very first cursor sample only establishes a baseline -- it cannot yet tell whether the
-        // cursor has moved -- so the hook needs a baseline AND one move on the clock before ourAge
-        // is allowed past the interval. This first advance stays under it, which makes the wait
-        // race-free rather than merely narrow: no pass can decide to reinstall while it happens.
-        // The production loop, at ~5ms a pass, has a thousand of them before five seconds are up.
+        // The first advance stays under the interval, so no pass can decide anything while it
+        // runs -- it exists only to put a baseline AND one recorded move on the clock before the
+        // interval is ever crossed. The remaining distance to the interval is crossed in STEPS
+        // smaller than SystemInputAge: see AdvanceWhileCursorKeepsMoving for why a single further
+        // jump would be racy under the gate's own fresh clock reading.
         clock.Advance(1000);
         var reads = platform.CursorReadCount;
         Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount > reads + 1, TimeSpan.FromSeconds(2)));
-        clock.Advance(4000);
+        AdvanceWhileCursorKeepsMoving(clock, platform, 4000, 250);
 
         // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
         // decided to do nothing, which a timeout would only have guessed at.
@@ -407,6 +406,44 @@ public sealed class KeyboardHookTests
 
         Assert.Equal(1, platform.InstallCount);
         Assert.Equal(0, hook.WatchdogReinstalls);
+    }
+
+    /// <summary>
+    /// The gap the old gate left open: a dead hook, then a mouse move, then a keystroke. Judging
+    /// against the hook's own stale last key -- instead of the session's latest input -- makes any
+    /// later cursor move look newer than that key forever, so the gate blamed the mouse and only
+    /// the backstop recovered.
+    /// </summary>
+    /// <remarks>
+    /// Sequence: the cursor moves once at ~1s (recorded), then goes still while the session
+    /// reports a key 100 ms old that this hook never saw, at clock 6s. Judged against the hook's
+    /// last key (0, since no real key ever reached this hook), the ~1s cursor move is AFTER it and
+    /// reads as "the mouse did it" forever. Judged against the session's latest input instead
+    /// (6000 - 100 = 5900), that same ~1s-old move is well BEFORE it, so it reads as "that key
+    /// never reached us" and reinstalls within one interval -- no backstop wait needed.
+    /// </remarks>
+    [Fact]
+    public void Watchdog_WhenTheCursorMovedBeforeAKeyThatFollowed_ReinstallsWithoutWaitingForTheBackstop()
+    {
+        var platform = new FakeKeyboardHookPlatform { MoveCursorOnEveryReading = true };
+        var clock = new FakeClock();
+        using var hook = new LowLevelKeyboardHook(
+            Channel.CreateUnbounded<HotkeyAction>().Writer, platform, TimeSpan.FromSeconds(5),
+            () => clock.Value, TimeSpan.FromSeconds(300));
+
+        hook.Start();
+
+        // A cursor move on record before the key that follows it: baseline, then one confirmed move.
+        clock.Advance(1_000);
+        var reads = platform.CursorReadCount;
+        Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
+
+        // The cursor goes still, and the session reports a key 100 ms old that this hook never saw.
+        platform.MoveCursorOnEveryReading = false;
+        platform.SystemInputAge = 100;
+        clock.Advance(5_000);
+
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
     }
 
     /// <summary>The recovery this whole reading exists for, preserved: the session saw input and the cursor never moved, so the missed input could only have been a key.</summary>
@@ -453,13 +490,15 @@ public sealed class KeyboardHookTests
 
         // Past the interval, short of the backstop: the moving cursor is what holds the watchdog
         // back here. Proven first, or the backstop below would pass just the same with a still
-        // cursor and the test would say nothing about "even while the cursor moves". Two steps,
-        // the first under the interval, so a cursor movement is on record before any pass can
-        // decide (one jump lets a pass sample at 0 and decide at 6000).
+        // cursor and the test would say nothing about "even while the cursor moves". The first
+        // step stays under the interval, so a cursor movement is on record before any pass can
+        // decide; the rest crosses the interval in STEPS smaller than SystemInputAge -- see
+        // AdvanceWhileCursorKeepsMoving for why a single further jump would be racy under the
+        // gate's own fresh clock reading.
         clock.Advance(1_000);
         var reads = platform.CursorReadCount;
         Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
-        clock.Advance(5_000);
+        AdvanceWhileCursorKeepsMoving(clock, platform, 5_000, 250);
         reads = platform.CursorReadCount;
         Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 10, TimeSpan.FromSeconds(2)));
         Assert.Equal(1, platform.InstallCount);
@@ -497,6 +536,30 @@ public sealed class KeyboardHookTests
 
         Assert.Equal(1, platform.UninstallCount);
         Assert.Equal(nativeResult, hook.UnhookSucceeded);
+    }
+
+    /// <summary>
+    /// Advances a FAKE clock by small steps while the platform keeps moving the cursor, waiting for
+    /// fresh cursor reads between steps.
+    /// </summary>
+    /// <remarks>
+    /// The gate reads the clock twice in the same pass -- once in <c>SampleCursor</c> to timestamp
+    /// a cursor move, again in <c>ShouldReinstall</c> to age the session's latest input -- and a
+    /// fake clock's <c>Advance</c> can land in the gap between those two reads, a torn read a real,
+    /// continuously-creeping clock cannot produce: the recorded move would be timestamped BEFORE
+    /// the jump while the age is computed AFTER it. Stepping by less than the platform's
+    /// <c>SystemInputAge</c> bounds that gap to less than the margin the gate needs, so even the
+    /// worst-case torn read still reads as a moving mouse.
+    /// </remarks>
+    private static void AdvanceWhileCursorKeepsMoving(
+        FakeClock clock, FakeKeyboardHookPlatform platform, long totalMilliseconds, long stepMilliseconds)
+    {
+        for (var advanced = 0L; advanced < totalMilliseconds; advanced += stepMilliseconds)
+        {
+            clock.Advance(stepMilliseconds);
+            var reads = platform.CursorReadCount;
+            Assert.True(SpinWait.SpinUntil(() => platform.CursorReadCount >= reads + 3, TimeSpan.FromSeconds(2)));
+        }
     }
 
     private sealed class FakeClock

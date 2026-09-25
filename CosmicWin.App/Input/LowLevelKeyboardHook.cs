@@ -433,11 +433,20 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// </para>
     /// <para>
     /// The correction: missed input is evidence of a dead KEYBOARD hook only if the input could
-    /// have been a KEY. A cursor that has moved since this hook last saw a key names the mouse as
-    /// the source, and that reading needs no hook at all -- <see cref="SampleCursor"/> takes it on
-    /// every loop pass, exactly like <see cref="OnKeyboardEvent"/> takes <see cref="_lastActivity"/>
-    /// on every key. So a stale <see cref="_lastCursorMove"/> -- no later than the last key this
-    /// hook saw -- is what a keypress, and only a keypress, looks like.
+    /// have been a KEY. Judged against the SESSION's latest input -- <c>now - sessionAge</c> --
+    /// rather than this hook's own last key: a cursor that has moved AT OR AFTER that latest input
+    /// names the mouse as the source, and one that has NOT names the input as the key this hook
+    /// missed. That reading needs no hook at all -- <see cref="SampleCursor"/> takes it on every
+    /// loop pass, exactly like <see cref="OnKeyboardEvent"/> takes <see cref="_lastActivity"/> on
+    /// every key.
+    /// </para>
+    /// <para>
+    /// The earlier version compared against this hook's own last key instead, and that left a gap:
+    /// a hook dies, the user moves the mouse, then types. The cursor move is newer than the
+    /// now-stale last key, so the old comparison named the mouse as the source and never let go --
+    /// only the backstop recovered, minutes later. Comparing against the session's latest input
+    /// closes it: that same sequence now reinstalls within one interval, because the cursor's last
+    /// move sits BEFORE the key that followed it, not after.
     /// </para>
     /// <para>
     /// The REMAINING imprecision, stated rather than hidden: a click or a scroll wheel with a still
@@ -458,7 +467,8 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private bool ShouldReinstall()
     {
         var lastActivity = Volatile.Read(ref _lastActivity);
-        var ourAge = _clock() - lastActivity;
+        var now = _clock();
+        var ourAge = now - lastActivity;
         if (ourAge < _watchdogInterval.TotalMilliseconds)
         {
             return false;
@@ -475,8 +485,10 @@ public sealed class LowLevelKeyboardHook : IDisposable
         if (sessionAge >= ourAge) return false;
 
         // The session saw something this hook did not, but only a KEY could mean the hook is dead --
-        // a cursor that has moved since our last key names the mouse as the source instead.
-        return Volatile.Read(ref _lastCursorMove) <= lastActivity;
+        // a cursor that has NOT moved at or after the session's latest input names that input as
+        // the key this hook missed. Ties go to "mouse": continued typing re-evaluates next pass.
+        var lastInputAt = now - sessionAge;
+        return Volatile.Read(ref _lastCursorMove) < lastInputAt;
     }
 
     private bool OnKeyboardEvent(KeyboardKey key, bool isKeyDown, ModifierKeys modifiers)
