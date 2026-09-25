@@ -232,7 +232,10 @@ public static class VideoWallpaperHttpProtocol
             error = null;
             return true;
         }
-        catch (JsonException)
+        // InvalidOperationException: the body is valid JSON, but a lone escaped surrogate
+        // ("\uD800") in a key or in the path cannot be turned into a .NET string -- still a
+        // malformed body, and TryValidate must never throw.
+        catch (Exception parseFailure) when (parseFailure is JsonException or InvalidOperationException)
         {
             error = InvalidJson;
             return false;

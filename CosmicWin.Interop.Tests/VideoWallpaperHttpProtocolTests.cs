@@ -51,6 +51,10 @@ public sealed class VideoWallpaperHttpProtocolTests
     [InlineData("")]
     [InlineData("not json")]
     [InlineData("{")]
+    // Valid JSON, but a lone escaped surrogate cannot become a .NET string: reading the value or
+    // the key throws InvalidOperationException, not JsonException.
+    [InlineData("""{"path":"C:\\videos\\\uD800.mp4"}""")]
+    [InlineData("""{"\uD800":"C:\\videos\\x.mp4"}""")]
     public void TryValidate_MalformedJson_Is400(string body)
     {
         var outcome = VideoWallpaperHttpProtocol.TryValidate(body, out var path, out var error, FakeProbes());

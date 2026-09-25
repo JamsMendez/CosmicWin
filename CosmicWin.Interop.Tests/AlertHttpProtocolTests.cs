@@ -38,6 +38,9 @@ public sealed class AlertHttpProtocolTests
     [InlineData("", "body is not valid JSON")]
     [InlineData("{", "body is not valid JSON")]
     [InlineData("warning:2", "body is not valid JSON")]
+    // Valid JSON, but a lone escaped surrogate cannot become a .NET string: reading the key throws
+    // InvalidOperationException, not JsonException.
+    [InlineData("""{"\uD800":1}""", "body is not valid JSON")]
     [InlineData("[1]", "body must be a JSON object")]
     [InlineData("2", "body must be a JSON object")]
     [InlineData("null", "body must be a JSON object")]
