@@ -84,6 +84,11 @@ public static class VideoWallpaperImport
         // process died mid-copy, or the delete itself failed). Best effort, and never worth failing
         // today's import over: it only ever removes names matching the temp pattern this method
         // itself produces, never the fixed destination or anything a caller put here.
+        // REQUIRES Import calls into one directory to be serialized: the sweep would delete another
+        // in-flight import's temp. Production guarantees it -- AppComposition only imports inside
+        // SwitchVideoWallpaper's work item on the single video wallpaper thread, or inline on the
+        // tray thread when there is no video wallpaper thread at all, never both. A new caller
+        // (the HTTP route included) must go through SwitchVideoWallpaper, not call this directly.
         SweepLeftoverTempFiles(directory);
 
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
