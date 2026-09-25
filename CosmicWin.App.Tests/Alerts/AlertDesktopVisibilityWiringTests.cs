@@ -18,6 +18,16 @@ namespace CosmicWin.App.Tests.Alerts;
 /// alert-wiring test uses): a covered desktop holds a queued alert, and it is shown once the fake
 /// coverage source reports uncovered.
 /// </summary>
+/// <remarks>
+/// Re-wired for remove-direct2d-alert-overlay (T1): this file used to drive the deleted Direct2D
+/// renderer's own overlay-tile seam, which was unwired dead code -- production never passed it to
+/// <c>Wire</c>. It now drives the same <c>isPrimaryMonitorCovered</c> composition seam through
+/// <c>startAlertLayer</c>/
+/// <c>endAlertLayer</c>, the preloaded WebView2 alert layer that is the only renderer a real user
+/// ever reaches. <c>WebViewAlertCompositionWiringTests</c> proves the WebView path's own
+/// queue/FIFO/covered-hold behaviour through the <c>alertDesktopVisible</c> override shortcut; this
+/// file is what actually exercises the real coverage seam those tests bypass.
+/// </remarks>
 public sealed class AlertDesktopVisibilityWiringTests
 {
     private sealed class NoForeground : IForegroundWindowSource
@@ -110,8 +120,7 @@ public sealed class AlertDesktopVisibilityWiringTests
     }
 
     private sealed record Harness(
-        AppComposition Composition, Scheduler Scheduler, FakeAlertCommandServer Server,
-        List<IReadOnlyList<FrameOverlayTile>> TileSets);
+        AppComposition Composition, Scheduler Scheduler, FakeAlertCommandServer Server, List<string> Events);
 
     private static Harness Wire(Func<bool> isPrimaryMonitorCovered)
     {
@@ -121,7 +130,7 @@ public sealed class AlertDesktopVisibilityWiringTests
         var registry = new WindowRegistry();
         var treeManager = new TreeManager([primary], primary, registry);
         var scheduler = new Scheduler();
-        var tileSets = new List<IReadOnlyList<FrameOverlayTile>>();
+        var events = new List<string>();
         FakeAlertCommandServer? server = null;
         var path = typeof(AlertDesktopVisibilityWiringTests).Assembly.Location;
 
@@ -138,8 +147,6 @@ public sealed class AlertDesktopVisibilityWiringTests
             importVideoWallpaper: p => p,
             alertsEnabled: true,
             createAlertCommandServer: (_, handle, _) => server = new FakeAlertCommandServer(handle),
-            setAlertOverlayTiles: tiles => tileSets.Add(tiles.ToArray()),
-            clearAlertOverlay: () => { },
             // Deliberately NOT set: leaving this null is what lets the production fallback --
             // videoWallpaperActive.Value && !isPrimaryMonitorCovered() -- actually run.
             alertDesktopVisible: null,
@@ -147,9 +154,11 @@ public sealed class AlertDesktopVisibilityWiringTests
             videoWallpaperHost: new FakeVideoWallpaperHost(),
             videoWallpaperPlayer: new FakeVideoWallpaperPlayer(),
             videoWallpaperPath: path,
-            scheduleVideoWallpaperWork: work => work());
+            scheduleVideoWallpaperWork: work => work(),
+            startAlertLayer: (kind, duration) => events.Add($"start:{kind}:{duration}"),
+            endAlertLayer: () => events.Add("end"));
 
-        return new Harness(composition, scheduler, server!, tileSets);
+        return new Harness(composition, scheduler, server!, events);
     }
 
     [Fact]
@@ -162,7 +171,7 @@ public sealed class AlertDesktopVisibilityWiringTests
 
             harness.Scheduler.Fire();
 
-            Assert.Empty(harness.TileSets);
+            Assert.Empty(harness.Events);
         }
     }
 
@@ -175,12 +184,12 @@ public sealed class AlertDesktopVisibilityWiringTests
             Assert.Equal(AlertPipeProtocol.OkReply, harness.Server.Send("warning:1"));
 
             // T9d: enqueuing itself already ticks the overlay once, so the watch tick below repeats
-            // the SAME (idempotent) tile set rather than being the only update.
-            Assert.NotEmpty(harness.TileSets);
+            // the SAME (idempotent) start -- no second event -- rather than being the only trigger.
+            Assert.StartsWith("start:warning:", Assert.Single(harness.Events));
 
             harness.Scheduler.Fire();
 
-            Assert.Single(harness.TileSets[^1]);
+            Assert.StartsWith("start:warning:", Assert.Single(harness.Events));
         }
     }
 
@@ -194,13 +203,12 @@ public sealed class AlertDesktopVisibilityWiringTests
             Assert.Equal(AlertPipeProtocol.OkReply, harness.Server.Send("warning:1"));
 
             harness.Scheduler.Fire();
-            Assert.Empty(harness.TileSets);
+            Assert.Empty(harness.Events);
 
             covered = false;
             harness.Scheduler.Fire();
 
-            var tiles = Assert.Single(harness.TileSets);
-            Assert.Single(tiles);
+            Assert.StartsWith("start:warning:", Assert.Single(harness.Events));
         }
     }
 }

@@ -180,9 +180,6 @@ public sealed class AppComposition : IDisposable
         Action? disposeVideoWallpaper = null,
         bool alertsEnabled = false,
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
-        Action<IReadOnlyList<FrameOverlayTile>>? setAlertOverlayTiles = null,
-        Action? clearAlertOverlay = null,
-        IDisposable? alertOverlay = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
         // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
@@ -248,16 +245,6 @@ public sealed class AppComposition : IDisposable
         var primary = treeManager.Primary;
         treeManager.TryGetTree(primary, out var primaryTree);
         var workArea = WorkAreaResolver.Resolve(primary);
-
-        // T11 (live-alert-wallpaper): the video wallpaper host (and its back buffer) now spans the
-        // WHOLE monitor, not just the work area -- so the work area's own top-left corner can sit
-        // away from the back buffer's (0,0) (a taskbar docked top or left; docked right or bottom
-        // leaves this at zero, which is what every machine measured on hardware so far has). The
-        // alert tile layout below is computed in work-area-local coordinates and then shifted by
-        // this offset before it reaches the overlay, which draws directly in back-buffer coordinates
-        // -- see AlertTileLayout.ToBackBufferCoordinates.
-        var workAreaOffsetX = primary.WorkArea.Left - primary.Bounds.Left;
-        var workAreaOffsetY = primary.WorkArea.Top - primary.Bounds.Top;
 
         // A chord that throws no longer kills the pump; this is where it says so. Without a sink
         // the manager would drop the chord in silence and look perfectly healthy doing it.
@@ -467,68 +454,48 @@ public sealed class AppComposition : IDisposable
                 active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
             }
 
-            if (startAlertLayer is not null)
+            // The preloaded WebView2 alert layer (webview-alert-layer) is the only renderer left --
+            // the Direct2D overlay this branched to (remove-direct2d-alert-overlay) was unwired dead
+            // code kept only for rollback. Unset only in tests that never exercise the overlay at all.
+            if (startAlertLayer is null) return;
+
+            if (ReferenceEquals(active, displayedAlert)) return;
+            if (displayedAlert is not null)
             {
-                if (ReferenceEquals(active, displayedAlert)) return;
-                if (displayedAlert is not null)
-                {
-                    endAlertLayer?.Invoke();
-                    // Torn down, not yet replaced: leave nothing marked displayed until a start
-                    // below actually succeeds, so a failed retry never re-ends the same layer.
-                    displayedAlert = null;
-                }
-                if (active is null) return;
-                // The queue's deadline starts when Advance promotes the command, not when the
-                // renderer starts. Never grant an extra watch interval to a late UI tick.
-                var remaining = active.Command.Duration - (alertClock.GetUtcNow() - active.StartedAt);
-                if (remaining <= TimeSpan.Zero) return;
-                var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
-                if (failed && !ReferenceEquals(shakenAlert, active))
-                {
-                    // Shake once per alert: startAlertLayer below can fail and retry this same
-                    // alert across several ticks, and the shake must not repeat on retry.
-                    shakenAlert = active;
-                    shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
-                }
-                try
-                {
-                    // Started before recording displayedAlert on purpose: on failure the alert
-                    // must not count as shown, so the next tick retries it while duration remains.
-                    // The alert page itself waits 120ms before revealing, so shaking here ahead of
-                    // a not-yet-confirmed start is harmless.
-                    startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
-                }
-                catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
-                {
-                    // Recorded, not swallowed, and not re-thrown into the watch tick: an escaping
-                    // exception here would also skip that tick's UpdateFocusBorder call.
-                    desktopTrace?.Record($"alert-layer-start-failed {ex.GetType().Name}: {ex.Message}");
-                    return;
-                }
-                displayedAlert = active;
+                endAlertLayer?.Invoke();
+                // Torn down, not yet replaced: leave nothing marked displayed until a start
+                // below actually succeeds, so a failed retry never re-ends the same layer.
+                displayedAlert = null;
+            }
+            if (active is null) return;
+            // The queue's deadline starts when Advance promotes the command, not when the
+            // renderer starts. Never grant an extra watch interval to a late UI tick.
+            var remaining = active.Command.Duration - (alertClock.GetUtcNow() - active.StartedAt);
+            if (remaining <= TimeSpan.Zero) return;
+            var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
+            if (failed && !ReferenceEquals(shakenAlert, active))
+            {
+                // Shake once per alert: startAlertLayer below can fail and retry this same
+                // alert across several ticks, and the shake must not repeat on retry.
+                shakenAlert = active;
+                shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
+            }
+            try
+            {
+                // Started before recording displayedAlert on purpose: on failure the alert
+                // must not count as shown, so the next tick retries it while duration remains.
+                // The alert page itself waits 120ms before revealing, so shaking here ahead of
+                // a not-yet-confirmed start is harmless.
+                startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
+            }
+            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            {
+                // Recorded, not swallowed, and not re-thrown into the watch tick: an escaping
+                // exception here would also skip that tick's UpdateFocusBorder call.
+                desktopTrace?.Record($"alert-layer-start-failed {ex.GetType().Name}: {ex.Message}");
                 return;
             }
-
-            if (active is null)
-            {
-                clearAlertOverlay?.Invoke();
-                return;
-            }
-
-            var kinds = active.Command.Groups
-                .SelectMany(group => Enumerable.Repeat(group.Kind, group.Count))
-                .ToArray();
-            var localBounds = AlertTileLayout.Layout(kinds, workArea.Width, workArea.Height);
-            var bounds = AlertTileLayout.ToBackBufferCoordinates(localBounds, workAreaOffsetX, workAreaOffsetY);
-            var tiles = kinds.Zip(bounds, (kind, bounds) => new FrameOverlayTile(
-                bounds,
-                MapAlertKind(kind),
-                LabelFor(kind),
-                active.StartedAt,
-                active.Command.Duration))
-                .ToArray();
-
-            setAlertOverlayTiles?.Invoke(tiles);
+            displayedAlert = active;
         }
 
         // Same corruption-class exclusion as an "is fatal" filter: recoverable per-alert start
@@ -536,18 +503,6 @@ public sealed class AppComposition : IDisposable
         // ones are left to propagate rather than treated as one alert's problem.
         static bool IsRecoverableAlertLayerFailure(Exception ex) =>
             ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
-
-        static FrameOverlayTileKind MapAlertKind(AlertKind kind) => kind switch
-        {
-            AlertKind.Failed => FrameOverlayTileKind.Failed,
-            _ => FrameOverlayTileKind.Warning,
-        };
-
-        static string LabelFor(AlertKind kind) => kind switch
-        {
-            AlertKind.Failed => "FAILED",
-            _ => "WARNING",
-        };
 
         /// <summary>
         /// Takes the border off the screen right now, without deciding anything about where it
@@ -1521,7 +1476,6 @@ public sealed class AppComposition : IDisposable
                 alertServer?.Dispose();
                 alertLayer?.Dispose();
                 disposeVideoWallpaperBase();
-                alertOverlay?.Dispose();
             },
             unfollowFocusedWindow: () =>
             {

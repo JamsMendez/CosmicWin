@@ -73,7 +73,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopJoinTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly IFrameOverlay _overlay;
     private readonly TimeProvider _timeProvider;
 
     private Thread? _workerThread;
@@ -90,9 +89,8 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
     private bool _disposed;
 
-    public MediaFoundationVideoWallpaperPlayer(IFrameOverlay? overlay = null, TimeProvider? timeProvider = null)
+    public MediaFoundationVideoWallpaperPlayer(TimeProvider? timeProvider = null)
     {
-        _overlay = overlay ?? NoOpFrameOverlay.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -103,8 +101,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     /// an effect at all; the effect's own decay always reaches identity by
     /// <see cref="VideoShakeMath.DurationMilliseconds"/> regardless (see
     /// <see cref="VideoShakeMath.Compute"/>) -- production wiring always passes exactly that many
-    /// milliseconds, matching the page's own <c>shakeMs</c> and
-    /// <see cref="Direct2DAlertOverlay"/>'s <c>FailureShakeMilliseconds</c>. Calling this again while
+    /// milliseconds, matching the page's own <c>shakeMs</c> constant. Calling this again while
     /// a shake is already active restarts the elapsed clock rather than being ignored or queued --
     /// there is only ever one video to shake. Thread-safe: called from the wiring's UI thread while
     /// the tick loop that applies it runs on this player's own dedicated worker thread.
@@ -125,9 +122,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
     /// <summary>
     /// Test-only entry point into the exact per-tick shake logic <see cref="Tick"/> calls, with no
-    /// real <see cref="IMFMediaEngine"/> anywhere near it -- mirrors how
-    /// <see cref="TickForTests"/> lets the existing frame-overlay tests exercise <see cref="TickCore"/>
-    /// without one.
+    /// real <see cref="IMFMediaEngine"/> anywhere near it.
     /// </summary>
     internal void ApplyShakeForTests(IVideoWallpaperHost host) => ApplyShakeTransform(host);
 
@@ -413,7 +408,7 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             {
                 while (!stopSignal.Wait(TickIntervalMs))
                 {
-                    Tick(engine!, host, _overlay);
+                    Tick(engine!, host);
                 }
             }
             finally
@@ -554,50 +549,13 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         return true;
     }
 
-    private void Tick(IMFMediaEngine engine, IVideoWallpaperHost host, IFrameOverlay overlay)
+    private void Tick(IMFMediaEngine engine, IVideoWallpaperHost host)
     {
-        // T4 (webview-alert-layer): applied before the ordinary pipeline, not inside TickCore --
-        // TickCore/TickForTests stay exactly as the existing frame-overlay tests exercise them,
-        // untouched by this feature. A no-op call (see ApplyShakeTransform's remarks) when no shake
-        // is active, which is every tick outside a `failed` alert's own 230 ms.
+        // T4 (webview-alert-layer): applied before the ordinary pipeline. A no-op call (see
+        // ApplyShakeTransform's remarks) when no shake is active, which is every tick outside a
+        // `failed` alert's own 230 ms.
         ApplyShakeTransform(host);
 
-        TickCore(
-            overlay,
-            onVideoStreamTick: () => engine.OnVideoStreamTick(out long _),
-            getBackBuffer: host.GetBackBuffer,
-            getDesc: backBuffer =>
-            {
-                backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
-                return desc;
-            },
-            transferVideoFrame: (backBuffer, destination) =>
-            {
-                RECT localDestination = destination;
-                engine.TransferVideoFrame(backBuffer, null, &localDestination, null);
-            },
-            present: host.Present);
-    }
-
-    internal static void TickForTests(
-        IFrameOverlay overlay,
-        Action onVideoStreamTick,
-        Func<ID3D11Texture2D> getBackBuffer,
-        Func<ID3D11Texture2D, D3D11_TEXTURE2D_DESC> getDesc,
-        Action<ID3D11Texture2D, RECT> transferVideoFrame,
-        Action present)
-    {
-        TickCore(overlay, onVideoStreamTick, getBackBuffer, getDesc, transferVideoFrame, present);
-    }
-
-    private static void TickCore(
-        IFrameOverlay overlay,
-        Action onVideoStreamTick,
-        Func<ID3D11Texture2D> getBackBuffer,
-        Func<ID3D11Texture2D, D3D11_TEXTURE2D_DESC> getDesc,
-        Action<ID3D11Texture2D, RECT> transferVideoFrame,
-        Action present)
-    {
         try
         {
             // IMFMediaEngine::OnVideoStreamTick is documented to return S_OK when a new frame is
@@ -607,33 +565,19 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             // TransferVideoFrame is called unconditionally every tick instead; it is a no-op (or
             // a cheap re-present of the current frame) when there is nothing new, and any failure
             // is caught below rather than crashing the pump.
-            onVideoStreamTick();
+            engine.OnVideoStreamTick(out long _);
 
-            ID3D11Texture2D backBuffer = getBackBuffer();
-            D3D11_TEXTURE2D_DESC desc = getDesc(backBuffer);
+            ID3D11Texture2D backBuffer = host.GetBackBuffer();
+            backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
 
             RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
-            transferVideoFrame(backBuffer, destRect);
-            DrawOverlay(overlay, backBuffer, destRect);
-            present();
+            engine.TransferVideoFrame(backBuffer, null, &destRect, null);
+            host.Present();
         }
         catch
         {
             // The frame pump must never crash the process or tear down the host window -- a bad
             // tick is skipped and playback is retried on the next tick.
-        }
-    }
-
-    private static void DrawOverlay(IFrameOverlay overlay, ID3D11Texture2D backBuffer, RECT destination)
-    {
-        try
-        {
-            overlay.Draw(backBuffer, destination);
-        }
-        catch
-        {
-            // Overlay failures are contained to this frame: a transferred video frame should still
-            // be presented, and the next tick gets another chance to draw.
         }
     }
 
@@ -676,19 +620,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         if (comObject is IDisposable disposable)
         {
             disposable.Dispose();
-        }
-    }
-
-    private sealed class NoOpFrameOverlay : IFrameOverlay
-    {
-        public static readonly NoOpFrameOverlay Instance = new();
-
-        private NoOpFrameOverlay()
-        {
-        }
-
-        public void Draw(ID3D11Texture2D backBuffer, RECT destination)
-        {
         }
     }
 

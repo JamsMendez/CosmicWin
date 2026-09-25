@@ -12,8 +12,7 @@ public sealed record ActiveAlert(AlertCommand Command, DateTimeOffset StartedAt)
 /// <remarks>
 /// <para>
 /// Pure and time-free by design (plan &#167;4/&#167;6, T2): every method takes <c>now</c> from the
-/// caller rather than reading the clock or owning a timer, the same way <see cref="AlertTileLayout"/>
-/// takes the area from its caller rather than measuring a monitor itself. <see cref="Advance"/> is
+/// caller rather than reading the clock or owning a timer. <see cref="Advance"/> is
 /// meant to be called once per tick, alongside whether the desktop is currently visible, by the
 /// overlay driver T5/T6 add.
 /// </para>

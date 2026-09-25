@@ -12,8 +12,7 @@ namespace CosmicWin.App.Alerts;
 /// tokens, <c>kind</c> one of <c>warning</c> / <c>failed</c> (case-insensitive), <c>count</c> a
 /// plain decimal integer 1..16, each key written at most once, plus an optional
 /// <c>duration:seconds</c> token (1..60, default 5). At least one <c>warning</c>/<c>failed</c>
-/// group is required, and the tile counts must not sum past 16 -- the same ceiling
-/// <see cref="AlertTileLayout"/> is designed against.
+/// group is required, and the tile counts must not sum past 16.
 /// </para>
 /// <para>
 /// Deliberately never throws. The input reaches this parser from outside the process, over the
