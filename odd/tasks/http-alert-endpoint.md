@@ -160,9 +160,22 @@ Reviewed boundary: branch point `a3e3ba8`.
     RED recovered by mutation (skip `File.Replace`).
   - Checks: build 0 errors (3 pre-existing warnings); App 948 passed / 6 skipped / 0 failed (writer
     and parent spot check).
-- [ ] H4 -- `AppComposition` wiring: when `alerts-enabled` AND `alert-http` are on, start the HTTP
+- [x] H4 -- `AppComposition` wiring: when `alerts-enabled` AND `alert-http` are on, start the HTTP
   server with `HandleAlertCommand`; start failure is traced and the pipe still runs; disposed with
-  the app. Wiring tests with a fake server factory. Route: inline or delegated per size.
+  the app. Wiring tests with a fake server factory. Route: delegated writer (writer trigger:
+  `AppComposition.cs` + a new wiring test file). Commit `a8ca0c1` (2 files, +262).
+  - `Wire` gains `alertHttpEnabled`, `alertHttpPort`, `createHttpAlertCommandServer`,
+    `loadAlertHttpToken`; the HTTP block runs after the pipe started, inside `alertsEnabled`, wrapped
+    in `IsRecoverableAlertLayerFailure`; token loaded only when starting; production passes
+    `settings.AlertHttpEnabled` / `AlertHttpPort`. Trace `alert-http listening port=<port>` is written
+    after `Start()` even if the listener then reports a bind failure through its own diagnostic.
+  - TDD: the writer observed RED only as one compile error (CS1739, new `Wire` parameter absent),
+    not per behavior. Parent recovered per-behavior RED by mutation, each restored afterwards:
+    gate forced on -> `HttpDisabled_FactoryNeverCalledAndTokenNeverLoaded` failed; catch disabled ->
+    both `...Throws_PipeStillStarted...` failed; dispose removed -> `BothServersAreDisposedOnShutdown`
+    failed; null-token branch skipped -> `NullToken_...` failed.
+  - Checks: build 0 errors (3 pre-existing warnings); `dotnet test CosmicWin.sln` Layout 190,
+    Alert 13, Interop 314 (+40 skipped), App 955 (+6 skipped), 0 failed (writer and parent).
 - [ ] H5 -- README section (curl + `Invoke-RestMethod` examples, token path, settings) and hardware
   check: warning and failed via HTTP, 401 without token, a browser `fetch` from a page blocked, port
   in use -> pipe still works. Route: inline.
