@@ -89,3 +89,10 @@ word). The maintainer granted consent. Lineage `review-1b81838a03f749ea`, four l
 resilience, readability, reliability) captured concurrently. Result: **approved** with no
 correction, and the acknowledgement burned authority. The reviewed boundary is now `99a197c`.
 W3 (the hardware trace watch) remains.
+
+2026-09-25 W3 started at **03:01:40 UTC**. A combined build (`feat/webview-alert-layer` + an
+uncommitted merge of `fix/watchdog-gate` in a throwaway worktree, 0 conflicts; Layout 190, Alert
+13, App 1057 passed / 6 skipped, Interop 249 / 40, 0 failed) runs from the scratch copy as PID
+28412. `trace-dialogs` is off. Baseline to compare: 320 reinstalls 2026-09-20..09-25 (~64/day),
+114 of them ~300 s apart (the old 5-minute backstop), all `foundGone=0`. Expected after the fix:
+backstop reinstalls at most every 30 min of no typing, and none from mousing.
