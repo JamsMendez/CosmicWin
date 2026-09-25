@@ -1,3 +1,5 @@
+using CosmicWin.Interop.Win32;
+
 namespace CosmicWin.App.Tests;
 
 /// <summary>
@@ -11,36 +13,65 @@ namespace CosmicWin.App.Tests;
 /// anything still works -- behavior stays proven by <c>WebViewAlertCompositionWiringTests</c> and
 /// <c>AlertDesktopVisibilityWiringTests</c>.
 /// </summary>
+/// <remarks>
+/// T1b: the assembly for each removed-type lookup is resolved from a known SURVIVING type in that
+/// same assembly (<see cref="MediaFoundationVideoWallpaperPlayer"/> for <c>CosmicWin.Interop</c>,
+/// <see cref="AppComposition"/> for <c>CosmicWin.App</c>) rather than by assembly NAME --
+/// <c>Type.GetType("Foo, SomeAssembly")</c> also returns null when <c>SomeAssembly</c> itself fails
+/// to resolve (a typo'd name, a renamed assembly, one not yet loaded), which would make every
+/// "no longer exists" assertion here pass for the wrong reason. <see
+/// cref="Direct2DAlertOverlay_NoLongerExistsInCosmicWinInterop"/> and <see
+/// cref="AlertTileLayout_NoLongerExistsInCosmicWinApp"/>'s sibling positive-control facts prove the
+/// assembly lookup itself still works, so a broken lookup fails loudly instead of reading as
+/// "removed".
+/// </remarks>
 public sealed class RemovedDirect2DAlertOverlayTests
 {
+    private static readonly System.Reflection.Assembly InteropAssembly =
+        typeof(MediaFoundationVideoWallpaperPlayer).Assembly;
+
+    private static readonly System.Reflection.Assembly AppAssembly = typeof(AppComposition).Assembly;
+
+    [Fact]
+    public void PositiveControl_TheInteropAssemblyLookupStillFindsASurvivingType()
+    {
+        Assert.NotNull(InteropAssembly.GetType("CosmicWin.Interop.Win32.MediaFoundationVideoWallpaperPlayer"));
+    }
+
+    [Fact]
+    public void PositiveControl_TheAppAssemblyLookupStillFindsASurvivingType()
+    {
+        Assert.NotNull(AppAssembly.GetType("CosmicWin.App.AppComposition"));
+    }
+
     [Fact]
     public void Direct2DAlertOverlay_NoLongerExistsInCosmicWinInterop()
     {
-        Assert.Null(Type.GetType("CosmicWin.Interop.Win32.Direct2DAlertOverlay, CosmicWin.Interop"));
+        Assert.Null(InteropAssembly.GetType("CosmicWin.Interop.Win32.Direct2DAlertOverlay"));
     }
 
     [Fact]
     public void IFrameOverlay_NoLongerExistsInCosmicWinInterop()
     {
-        Assert.Null(Type.GetType("CosmicWin.Interop.IFrameOverlay, CosmicWin.Interop"));
+        Assert.Null(InteropAssembly.GetType("CosmicWin.Interop.IFrameOverlay"));
     }
 
     [Fact]
     public void FrameOverlayTile_NoLongerExistsInCosmicWinInterop()
     {
-        Assert.Null(Type.GetType("CosmicWin.Interop.FrameOverlayTile, CosmicWin.Interop"));
+        Assert.Null(InteropAssembly.GetType("CosmicWin.Interop.FrameOverlayTile"));
     }
 
     [Fact]
     public void FrameOverlayTileKind_NoLongerExistsInCosmicWinInterop()
     {
-        Assert.Null(Type.GetType("CosmicWin.Interop.FrameOverlayTileKind, CosmicWin.Interop"));
+        Assert.Null(InteropAssembly.GetType("CosmicWin.Interop.FrameOverlayTileKind"));
     }
 
     [Fact]
     public void AlertTileLayout_NoLongerExistsInCosmicWinApp()
     {
-        Assert.Null(Type.GetType("CosmicWin.App.Alerts.AlertTileLayout, CosmicWin.App"));
+        Assert.Null(AppAssembly.GetType("CosmicWin.App.Alerts.AlertTileLayout"));
     }
 
     [Fact]

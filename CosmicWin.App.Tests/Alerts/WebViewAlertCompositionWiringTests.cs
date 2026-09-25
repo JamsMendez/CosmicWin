@@ -51,6 +51,13 @@ public sealed class WebViewAlertCompositionWiringTests
         public string Send(string command) => handle(command);
     }
 
+    private sealed class RecordingDesktopTrace : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
     private sealed class Host : IVideoWallpaperHost
     {
         public int Attempts { get; private set; }
@@ -71,13 +78,14 @@ public sealed class WebViewAlertCompositionWiringTests
         public void Dispose() { }
     }
 
-    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock) Create(
+    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
         Host? host = null, Action<string, int>? startAlertLayer = null, Action? preloadAlertLayer = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
         var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var trace = new RecordingDesktopTrace();
         Server? server = null;
         var display = new FakeDisplay((nint)1, Rectangle.FromSize(0, 0, 1920, 1080),
             Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -87,6 +95,7 @@ public sealed class WebViewAlertCompositionWiringTests
             () => { }, timer.Schedule,
             writer => new LowLevelKeyboardHook(writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),
             () => ExceptionList.Empty, () => { }, _ => new Disposable(), path => path,
+            desktopTrace: trace,
             alertsEnabled: enabled,
             createAlertCommandServer: (_, handle, _) => server = new Server(handle),
             alertDesktopVisible: host is null ? visible ?? (() => true) : null,
@@ -100,7 +109,7 @@ public sealed class WebViewAlertCompositionWiringTests
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
             preloadAlertLayer: preloadAlertLayer,
             timeProvider: clock);
-        return (composition, timer, server!, events, clock);
+        return (composition, timer, server!, events, clock, trace);
     }
 
     /// <summary>
@@ -267,5 +276,29 @@ public sealed class WebViewAlertCompositionWiringTests
         var h = Create(enabled: false);
         using (h.Composition) h.Timer.Tick();
         Assert.Empty(h.Events);
+    }
+
+    /// <summary>
+    /// remove-direct2d-alert-overlay (T1b): the only composition-level proof that a malformed pipe
+    /// command is rejected without ever reaching the renderer -- ported from the deleted Direct2D
+    /// <c>AlertWallpaperWiringTests.MalformedAlertCommand_ReturnsErrorAndDoesNotUpdateOverlay</c>.
+    /// <c>AlertCommandParserTests</c> covers the parser alone; nothing else proves the composition
+    /// wiring drops a malformed command before <c>startAlertLayer</c>.
+    /// </summary>
+    [Fact]
+    public void MalformedAlertCommand_ReturnsErrorAndDoesNotStartTheLayer()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            var reply = h.Server.Send("nonsense");
+
+            Assert.StartsWith("error: ", reply, StringComparison.Ordinal);
+
+            h.Timer.Tick();
+
+            Assert.Empty(h.Events);
+            Assert.Contains(h.Trace.Lines, line => line.Contains("alert rejected", StringComparison.Ordinal));
+        }
     }
 }
