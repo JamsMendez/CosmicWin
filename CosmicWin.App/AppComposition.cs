@@ -409,6 +409,92 @@ public sealed class AppComposition : IDisposable
                 $"tryAttach={attached} tryPlay={(played is { } result ? result.ToString() : "skipped")}");
         }
 
+        /// <summary>
+        /// The "stop, import, persist, (re)activate" sequence <c>setVideoWallpaperPath</c> below
+        /// used to run as an inline closure, now a named operation next to
+        /// <see cref="ActivateVideoWallpaper"/> so a second caller -- the HTTP video-wallpaper
+        /// endpoint (V4) -- can trigger the exact same switch without duplicating it. Posts the
+        /// work and returns at once: never blocks whichever thread calls this.
+        /// </summary>
+        /// <remarks>
+        /// Checks its own collaborators the same way <see cref="ActivateVideoWallpaper"/> does,
+        /// rather than trusting a caller's earlier check -- redundant for
+        /// <c>setVideoWallpaperPath</c> below, which only ever reaches this far once it has
+        /// already checked, the same redundancy the startup activation further down this method
+        /// accepts by checking before calling <see cref="ActivateVideoWallpaper"/> itself.
+        /// </remarks>
+        void SwitchVideoWallpaper(string path)
+        {
+            if (videoWallpaperHost is null || videoWallpaperPlayer is null)
+            {
+                return;
+            }
+
+            // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
+            // ONE work item on the video wallpaper thread, in that order. Bug 1 was exactly this
+            // ordering: import ran on the tray thread BEFORE playback stopped, so Media
+            // Foundation still held the fixed destination open and the copy threw a sharing
+            // violation. Moving the whole sequence here, after the stop, also moves the
+            // multi-gigabyte copy itself off the tray thread, which used to block the tray menu
+            // for as long as the copy took.
+            onVideoWallpaperThread(() =>
+            {
+                // Idempotent and never throws, per the interface contract -- releases the fixed
+                // destination file so the import below can overwrite it.
+                videoWallpaperPlayer.Stop();
+
+                // F1 (video-wallpaper-review-followups, R3-stale-active-after-failed-pick):
+                // nothing is playing the instant Stop() returns, so the flag the watch tick
+                // reads must say so immediately -- not only once an ActivateVideoWallpaper call
+                // happens to run below. Every path that goes on to actually (re)play
+                // (ActivateVideoWallpaper, on both the restore and the pick-success branches
+                // further down) overwrites this with the real outcome; only the "import threw
+                // and there is no previous path to restore" branch returns without calling it,
+                // and this is what keeps that branch honest too.
+                videoWallpaperActive.Value = false;
+
+                // Read HERE, inside the work item, never on the caller's thread before posting it.
+                // Work items run one at a time in order, so this sees whatever the switch queued
+                // ahead of this one actually landed; read at call time, a second switch queued
+                // behind a first-ever one would see null and have nothing to fall back to.
+                var previous = currentVideoWallpaperPath;
+
+                string imported;
+                try
+                {
+                    imported = importVideoWallpaper(path);
+                }
+                catch (Exception error)
+                {
+                    // The constraint from the feature doc: a failed switch must never leave the
+                    // wallpaper dead. No absolute paths in the trace line -- the picked path and
+                    // the import destination both live under the user's profile. Falling back to
+                    // the PREVIOUS video (if any) is what keeps this from being the empty desktop
+                    // bug 1 itself reported; not persisting means the failed switch never gets
+                    // remembered as if it had landed on disk.
+                    desktopTrace?.Record(
+                        $"video-wallpaper phase=pick import-failed error={error.GetType().Name}");
+                    if (previous is not null)
+                    {
+                        ActivateVideoWallpaper("restore", previous);
+                    }
+
+                    return;
+                }
+
+                persistVideoWallpaperPath?.Invoke(imported);
+                currentVideoWallpaperPath = imported;
+
+                // (Re)start playback with the IMPORTED path -- never the raw one the caller
+                // passed in, since that is what actually landed on disk. Handles both the
+                // first-ever switch (the startup activation below never ran, because no path was
+                // configured yet) and every later re-switch identically: TryAttach is documented
+                // idempotent and TryPlay is documented to tear down and restart cleanly, so
+                // there is no need to branch on whether this is the first attach.
+                ActivateVideoWallpaper("pick", imported);
+            });
+        }
+
         string HandleAlertCommand(string text)
         {
             var parsed = AlertCommandParser.Parse(text);
@@ -828,69 +914,10 @@ public sealed class AppComposition : IDisposable
                     return;
                 }
 
-                // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
-                // ONE work item on the video wallpaper thread, in that order. Bug 1 was exactly this
-                // ordering: import ran on the tray thread BEFORE playback stopped, so Media
-                // Foundation still held the fixed destination open and the copy threw a sharing
-                // violation. Moving the whole sequence here, after the stop, also moves the
-                // multi-gigabyte copy itself off the tray thread, which used to block the tray menu
-                // for as long as the copy took.
-                onVideoWallpaperThread(() =>
-                {
-                    // Idempotent and never throws, per the interface contract -- releases the fixed
-                    // destination file so the import below can overwrite it.
-                    videoWallpaperPlayer.Stop();
-
-                    // F1 (video-wallpaper-review-followups, R3-stale-active-after-failed-pick):
-                    // nothing is playing the instant Stop() returns, so the flag the watch tick
-                    // reads must say so immediately -- not only once an ActivateVideoWallpaper call
-                    // happens to run below. Every path that goes on to actually (re)play
-                    // (ActivateVideoWallpaper, on both the restore and the pick-success branches
-                    // further down) overwrites this with the real outcome; only the "import threw
-                    // and there is no previous path to restore" branch returns without calling it,
-                    // and this is what keeps that branch honest too.
-                    videoWallpaperActive.Value = false;
-
-                    // Read HERE, inside the work item, never on the tray thread before posting it.
-                    // Work items run one at a time in order, so this sees whatever the pick queued
-                    // ahead of this one actually landed; read at click time, a second pick queued
-                    // behind a first-ever one would see null and have nothing to fall back to.
-                    var previous = currentVideoWallpaperPath;
-
-                    string imported;
-                    try
-                    {
-                        imported = importVideoWallpaper(path);
-                    }
-                    catch (Exception error)
-                    {
-                        // The constraint from the feature doc: a failed pick must never leave the
-                        // wallpaper dead. No absolute paths in the trace line -- the picked path and
-                        // the import destination both live under the user's profile. Falling back to
-                        // the PREVIOUS video (if any) is what keeps this from being the empty desktop
-                        // bug 1 itself reported; not persisting means the failed pick never gets
-                        // remembered as if it had landed on disk.
-                        desktopTrace?.Record(
-                            $"video-wallpaper phase=pick import-failed error={error.GetType().Name}");
-                        if (previous is not null)
-                        {
-                            ActivateVideoWallpaper("restore", previous);
-                        }
-
-                        return;
-                    }
-
-                    persistVideoWallpaperPath?.Invoke(imported);
-                    currentVideoWallpaperPath = imported;
-
-                    // (Re)start playback with the IMPORTED path -- never the raw one the user
-                    // picked, since that is what actually landed on disk. Handles both the
-                    // first-ever pick (the startup activation below never ran, because no path was
-                    // configured yet) and every later re-pick identically: TryAttach is documented
-                    // idempotent and TryPlay is documented to tear down and restart cleanly, so
-                    // there is no need to branch on whether this is the first attach.
-                    ActivateVideoWallpaper("pick", imported);
-                });
+                // The full stop/import/persist/(re)activate sequence is SwitchVideoWallpaper,
+                // right after ActivateVideoWallpaper -- the tray's own operation, callable from
+                // elsewhere too.
+                SwitchVideoWallpaper(path);
             },
             exit: () =>
             {
