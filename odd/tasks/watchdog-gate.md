@@ -38,9 +38,9 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
 
 ## Tasks
 
-- [ ] **W1 -- Gate compares against the latest session input.** RED: a dead hook, then mouse,
+- [x] **W1 -- Gate compares against the latest session input.** RED: a dead hook, then mouse,
   then typing, must reinstall before the backstop. Keep mouse-only input from reinstalling.
-  Route: delegated writer (2 non-trivial files).
+  Route: delegated writer (2 non-trivial files). Commit `502f23a`.
 - [ ] **W2 -- Backstop default 30 minutes.** RED on the default value. Route: same writer.
 - [ ] **W3 -- Hardware check.** Watch the trace for a working period and compare the reinstall
   rate with the baseline (about 64/day since 09-20).
@@ -48,3 +48,20 @@ Strict TDD: enabled. Source: the user's global instructions. Runner:
 ## Progress
 
 2026-09-24: document created; W1 next.
+
+2026-09-24: W1 done, commit `502f23a`. RED: added
+`Watchdog_WhenTheCursorMovedBeforeAKeyThatFollowed_ReinstallsWithoutWaitingForTheBackstop` (dead
+hook -> mouse move at ~1s -> a 100ms-old key the hook never saw at clock 6s) -- confirmed failing
+under the old gate (`Assert.True() Failure: Expected True, Actual False`) before implementing.
+Sabotage check after GREEN: reverted the gate line to the old `<= lastActivity` comparison,
+reconfirmed the same test fails, restored the fix. Also fixed two pre-existing mouse-only tests
+(`Watchdog_WhenTheMissedInputWasTheCursorMoving_LeavesTheHookAlone` and the backstop test's phase
+1) that jumped the fake clock in one large step, which is racy under the new gate (it reads the
+clock fresh in `ShouldReinstall`, so a test's `Advance` can land between that read and
+`SampleCursor`'s own read of the same pass); replaced with a shared
+`AdvanceWhileCursorKeepsMoving` helper that steps in increments smaller than `SystemInputAge`.
+Verified they still passed under the OLD gate before the gate changed, and pass under the new one
+too. `dotnet test CosmicWin.App.Tests/CosmicWin.App.Tests.csproj --filter
+FullyQualifiedName~KeyboardHookTests` run 30x after a real build: every run showed exactly 30
+passed / 1 failed (the not-yet-implemented W2 default-value test), no flakiness in the other 30.
+W2 next.
