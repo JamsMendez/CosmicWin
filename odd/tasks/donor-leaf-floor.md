@@ -46,7 +46,16 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
     binding bound it exercises: ResizeNode headroom, ResizeNode rounded step/ceiling, ApplyEdgeDrag
     headroom, TilingEngineContract smoke.
   - Suites: Layout 195, Alert 13, Interop 315/42 skipped, App 958/6 skipped; build 0 errors.
-- [ ] T2 Hardware check: four windows, resize chord and mouse drag cannot push a window under 200.
+- [x] T2 Hardware check: four windows, resize chord and mouse drag cannot push a window under 200.
+  Route: inline (scripted run, no source change). Four WinForms probes (MinimumSize 32x32, a
+  terminal-like floor) on a fresh virtual desktop, 3440x1392 work area; Ctrl+Alt+H/L/K/J x15 at leaf
+  and group scope, two passes, then right/bottom edge drags of +/-3000 px on every probe.
+  - Base (main 2132eef): smallest tile 122 wide, 136 high (keyboard 122/136; mouse bottom drag 136).
+  - Fix (bf429c0): smallest tile 200 wide, 200 high on both paths; every tile started >= 708.
+  - First attempt used Windows Terminal windows as fillers and killed the Claude session, which runs
+    inside the same WindowsTerminal.exe. Fillers are now the agent's own probes, stopped by PID.
+  - A mouse grab at the DWM frame edge minus 2 px lands in the client area and resizes nothing; the
+    resize border is outside the visible frame (grab at edge plus 3 px).
 
 ## Acceptance criteria
 
@@ -56,4 +65,4 @@ Mode: enabled (session configuration, Strict TDD). Runner: `dotnet test`.
 
 ## Progress
 
-(none yet)
+T1 and T2 done. Next: maintainer decides on review and merge into local main.
