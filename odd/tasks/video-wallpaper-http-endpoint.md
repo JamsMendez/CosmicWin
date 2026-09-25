@@ -76,11 +76,9 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
   the link fails. Tests: same-volume link (destination shares the file identity, no bytes copied),
   cross-volume or link failure falls back to copy, the same-file short-circuit and the
   failure-leaves-previous-import guarantees still hold.
-- [ ] V1c (review follow-up, authorized 2026-09-25) When the link succeeds but the move into place
-  fails (the source held open without FILE_SHARE_DELETE), drop the link and fall back to the copy,
-  so a link is never worse than the old copy. Add the same-source re-pick test. The PREVIOUS source
-  held open blocking the replace stays a known limitation, measured in V5 (a real fix means rotating
-  the destination name).
+- [x] V1c (review follow-up, authorized 2026-09-25) Handle the held-source case of
+  R3-linked-destination-inherits-source-sharing and add the same-source re-pick test. OUTCOME: the
+  premise does not reproduce (see Progress), so no fallback ships; the tests and a temp sweep do.
 - [ ] V2 Protocol in Interop: route constant, JSON parse of `path`, validation, and a status code for
   each outcome (400 bad body or path, 404 file missing, 415 wrong extension, 202 accepted, 503 video
   wallpaper not available on this composition). Unit tests, as in `AlertHttpProtocolTests`.
@@ -91,7 +89,8 @@ this PC drive CosmicWin. Switching the wallpaper today needs the tray menu and a
   and traces the outcome without absolute paths. Wiring tests.
 - [ ] V5 Docs: curl or PowerShell example with the token. Hardware check, driven by the agent:
   switch while playing, a missing file, a non-mp4 file, the 6.6 GB file (switch delay with the
-  link), deleting the source while it plays, and two requests back to back.
+  link), deleting the source while it plays, and two requests back to back. (The held-source
+  sharing case is settled by V1c and needs no hardware check.)
 
 ## Constraints
 
@@ -136,4 +135,17 @@ Decisions 1-5 taken with the maintainer on 2026-09-25.
   - R3-relink-same-source-untested (SUGGESTION): no unit test for re-picking the same original after
     a linked import (checked by hand on disk above, not in the suite).
   Both are proposed as follow-up V1c; not authorized yet.
-- Next: V1c (maintainer approved it 2026-09-25), then V2.
+- V1c done (2026-09-25), commits `b1bfe42` (writer) then `8846600` (simplified by the parent,
+  maintainer's call). The writer's RED did not appear: with the source held open with
+  `FileShare.Read`, and even `FileShare.None`, the real link AND the move into place both succeed.
+  The parent re-measured it independently: moving another link of a held file works, and moving
+  the held name itself fails (the control). NTFS checks delete sharing per opened NAME, not per
+  file, so R3-linked-destination-inherits-source-sharing does not happen, including the
+  previous-source case. The writer's link-then-move copy fallback (plus a fourth `moveIntoPlace`
+  seam) therefore guarded a case Windows does not produce; the maintainer chose to drop it.
+  Kept: `Import_WhenTheSourceIsHeldOpenWithoutFileShareDelete_TheLinkedMoveStillSucceeds` (a
+  regression guard on the real behaviour), the same-source re-pick test, and a best-effort sweep of
+  leftover `video-wallpaper*.tmp-*` files at the start of `Import`. Checks: build clean (3
+  pre-existing warnings); `dotnet test CosmicWin.sln` Layout 198, Alert 13, Interop 315/42 skipped,
+  App 964/6 skipped. Assess (base `deb1a5a`): medium, 173 lines, `under_budget`, pending in the slice.
+- Next: V2 (protocol in Interop).
