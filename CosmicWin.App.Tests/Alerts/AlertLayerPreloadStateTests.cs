@@ -157,4 +157,50 @@ public sealed class AlertLayerPreloadStateTests
         Assert.False(state.Visible);
         Assert.True(state.Ready);
     }
+
+    [Fact]
+    public void ControllerLostClearsReadySoALaterShowIsKeptPendingAndAppliedOnceReadyAgain()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = new AlertLayerPreloadState(() => now);
+        state.MarkReady();
+
+        state.ControllerLost();
+        Assert.False(state.Ready, "the replacement controller has not navigated/reported ready yet");
+
+        var posted = state.RequestShow("warning", 1000);
+        Assert.Null(posted);
+        now = now.AddMilliseconds(400);
+
+        state.MarkReady();
+        var applied = state.ApplyPendingShowIfDue();
+
+        Assert.NotNull(applied);
+        Assert.Equal("warning", applied.Value.Kind);
+        Assert.InRange(applied.Value.DurationMilliseconds, 599, 601);
+        Assert.True(state.Visible);
+    }
+
+    [Fact]
+    public void ControllerLostWhileShowingRequeuesTheRemainingDurationOfTheShownAlert()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = new AlertLayerPreloadState(() => now);
+        state.MarkReady();
+        state.RequestShow("failed", 5000);
+        now = now.AddMilliseconds(2000);
+
+        state.ControllerLost();
+        Assert.False(state.Visible, "the old controller is gone -- nothing is on screen any more");
+        Assert.False(state.Ready);
+        Assert.True(state.CanCreate, "ControllerLost must never touch the Failed() backoff");
+
+        now = now.AddMilliseconds(500);
+        state.MarkReady();
+        var applied = state.ApplyPendingShowIfDue();
+
+        Assert.NotNull(applied);
+        Assert.Equal(("failed", 2500), applied);
+        Assert.True(state.Visible);
+    }
 }

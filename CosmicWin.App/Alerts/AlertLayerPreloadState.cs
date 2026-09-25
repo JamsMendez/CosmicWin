@@ -29,6 +29,7 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
     private DateTimeOffset _retryAfter;
     private int _failures;
     private (string Kind, DateTimeOffset Deadline)? _pending;
+    private (string Kind, DateTimeOffset Deadline)? _shown;
 
     /// <summary>Environment + controller created, navigation completed, and the page's own "ready" message received.</summary>
     public bool Ready { get; private set; }
@@ -80,6 +81,7 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
         {
             Visible = true;
             _pending = null;
+            _shown = (kind, _clock().AddMilliseconds(durationMilliseconds));
             return (kind, durationMilliseconds);
         }
 
@@ -100,6 +102,7 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
         var remaining = pending.Deadline - _clock();
         if (remaining <= TimeSpan.Zero) return null;
         Visible = true;
+        _shown = pending;
         return (pending.Kind, (int)Math.Ceiling(remaining.TotalMilliseconds));
     }
 
@@ -111,8 +114,30 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
     {
         Visible = false;
         _pending = null;
+        _shown = null;
     }
 
     /// <summary>The page signaled its own "done": the controller reports nothing else back -- the queue owns ending the alert (it calls <see cref="Hide"/> itself once it advances).</summary>
-    public void PageDone() => Visible = false;
+    public void PageDone()
+    {
+        Visible = false;
+        _shown = null;
+    }
+
+    /// <summary>
+    /// The controller backing this layer was just torn down (host identity change, lost composition
+    /// surface, or a creation/process/navigation failure) while its replacement is being created: no
+    /// longer ready. If an alert was actually being shown, it is requeued as pending for the
+    /// REMAINING time of its ORIGINAL deadline -- so a later <see cref="ApplyPendingShowIfDue"/> once
+    /// the new controller is ready re-shows it (or drops it if that deadline already passed), instead
+    /// of leaving it stuck "visible" on a controller that no longer exists. Never touches the backoff
+    /// tracked by <see cref="Failed"/> -- that is a separate decision the controller makes for itself.
+    /// </summary>
+    public void ControllerLost()
+    {
+        Ready = false;
+        if (Visible && _shown is { } shown) _pending = shown;
+        Visible = false;
+        _shown = null;
+    }
 }

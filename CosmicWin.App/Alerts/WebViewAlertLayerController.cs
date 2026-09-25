@@ -317,6 +317,7 @@ public sealed class WebViewAlertLayerController : IDisposable
     /// </summary>
     private void TearDown(string reason, bool dropEnvironment = false)
     {
+        _state.ControllerLost();
         ++_epoch;
         _navigationCompleted = false;
         _pageReportedReady = false;
