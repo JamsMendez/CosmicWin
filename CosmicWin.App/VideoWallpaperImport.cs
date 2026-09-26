@@ -1,5 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace CosmicWin.App;
 
@@ -141,6 +142,72 @@ public static class VideoWallpaperImport
 
         return destination;
     }
+
+    /// <summary>
+    /// same-video-noop, S1: true iff <paramref name="pathA"/> and <paramref name="pathB"/> are the
+    /// SAME NTFS file -- same volume serial number and file index
+    /// (<c>GetFileInformationByHandle</c>), not merely equal bytes or equal paths. A hard-linked
+    /// import (see the class remarks above) shares this identity with the source it points at, so
+    /// an HTTP request naming either the caller's original source or CosmicWin's own already-
+    /// imported destination both read as "the same video" -- exactly the case
+    /// <c>odd/tasks/same-video-noop.md</c> needs to detect a repeat request as a no-op.
+    /// </summary>
+    /// <remarks>
+    /// Never throws: a missing file, a locked file, or any other failure to open either path
+    /// counts as "different", the same fail-safe direction <see cref="TryCreateHardLink"/> already
+    /// uses for its own failures -- a false "same" would silently swallow a real switch, while a
+    /// false "different" only costs the reload this predicate exists to avoid.
+    /// </remarks>
+    internal static bool IsSameFile(string pathA, string pathB) =>
+        TryGetFileIdentity(pathA, out var identityA)
+        && TryGetFileIdentity(pathB, out var identityB)
+        && identityA.Equals(identityB);
+
+    /// <summary>
+    /// Opened for read attributes only, sharing read/write/delete with every other handle -- this
+    /// check must never itself block a concurrent import's Stop/copy/move sequence, or hold a
+    /// delete open against a file some other code is about to replace.
+    /// </summary>
+    private static bool TryGetFileIdentity(
+        string path, out (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) identity)
+    {
+        identity = default;
+        try
+        {
+            using var handle = File.OpenHandle(
+                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (!GetFileInformationByHandle(handle, out var info))
+            {
+                return false;
+            }
+
+            identity = (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION
+    {
+        public uint FileAttributes;
+        public long CreationTime;
+        public long LastAccessTime;
+        public long LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 
     private static string NewTempPath(string directory, string extension) =>
         Path.Combine(directory, $"video-wallpaper{extension}.tmp-{Guid.NewGuid():N}");

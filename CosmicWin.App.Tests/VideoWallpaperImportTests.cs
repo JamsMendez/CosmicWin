@@ -334,6 +334,68 @@ public sealed class VideoWallpaperImportTests : IDisposable
         Assert.Equal("swept-payload", File.ReadAllText(destination));
     }
 
+    /// <summary>
+    /// same-video-noop, S1: the identity predicate an HTTP re-request will use to decide whether
+    /// the video it names is the one already playing. Opening the same path twice must read as
+    /// the same file, trivially -- proven here without touching <c>GetFileInformationByHandle</c>
+    /// directly, unlike the helper below, since <see cref="VideoWallpaperImport.IsSameFile"/> is
+    /// itself the thing under test.
+    /// </summary>
+    [Fact]
+    public void IsSameFile_SamePath_ReturnsTrue()
+    {
+        var path = WriteSourceFile("clip.mp4", "same-path-payload");
+
+        Assert.True(VideoWallpaperImport.IsSameFile(path, path));
+    }
+
+    /// <summary>
+    /// A hard-linked import (see <see cref="Import_WhenSourceAndDestinationShareAVolume_LinksInsteadOfCopyingBytes"/>)
+    /// IS the source's own file data reached through a second directory entry -- same volume
+    /// serial and file index -- which is exactly the case the same-video no-op relies on: an HTTP
+    /// request naming either the original source or the already-imported destination must both
+    /// read as "the same video".
+    /// </summary>
+    [Fact]
+    public void IsSameFile_HardLinkedFiles_ReturnsTrue()
+    {
+        var source = WriteSourceFile("clip.mp4", "linked-payload");
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+
+        Assert.True(VideoWallpaperImport.IsSameFile(source, destination));
+    }
+
+    /// <summary>
+    /// The copy fallback (link forced to fail, mirroring
+    /// <see cref="Import_WhenTheLinkFails_FallsBackToCopyingBytes"/>) produces a destination with
+    /// the source's exact bytes but a DIFFERENT file identity -- equal content must not read as
+    /// "the same file", or a genuine different-volume switch would be silently ignored.
+    /// </summary>
+    [Fact]
+    public void IsSameFile_DistinctFilesWithIdenticalBytes_ReturnsFalse()
+    {
+        var source = WriteSourceFile("clip.mp4", "identical-bytes-payload");
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source, (_, _) => false);
+
+        Assert.False(VideoWallpaperImport.IsSameFile(source, destination));
+    }
+
+    /// <summary>
+    /// Any identity failure -- here, a path that does not exist at all -- counts as "different",
+    /// never throws, and never blocks a real switch (the approach's own fail-safe direction:
+    /// "any identity failure ... counts as different and switches as today").
+    /// </summary>
+    [Fact]
+    public void IsSameFile_MissingFile_ReturnsFalse()
+    {
+        var existing = WriteSourceFile("clip.mp4", "existing-payload");
+        var missing = Path.Combine(_sourceDirectory, "does-not-exist.mp4");
+
+        Assert.False(VideoWallpaperImport.IsSameFile(existing, missing));
+        Assert.False(VideoWallpaperImport.IsSameFile(missing, existing));
+        Assert.False(VideoWallpaperImport.IsSameFile(missing, missing));
+    }
+
     private static (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) GetFileIdentity(string path)
     {
         using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
