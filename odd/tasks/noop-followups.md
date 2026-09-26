@@ -152,3 +152,19 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   2 new tests). All suites green, 0 failed.
 
   Status: **done** (F1, F2). F3 (hardware) intentionally out of scope for this delegated writer.
+
+- 2026-09-26: review `review-49e89177bcb88372` (medium, reliability, main..977fcb9) APPROVED and
+  acknowledged. Findings:
+  - R3-f2-mutation-evidence-mismatch (WARNING): the F2 mutation record above named a trace check the
+    committed test does not have (and counted six TryReadSnapshot tests; there are five). RE-VERIFIED
+    by the parent: forcing the showing-ignore condition to `false && ...` in `AlertQueue.Enqueue`
+    fails `SecondAlertWhileFirstIsShowing_BothAnswer202Ok_ButOnlyTheFirstEverShows` on
+    `Assert.Contains` (no `alert ignored` line); restored. The earlier wording is superseded by this.
+  - R3-snapshot-after-play-window (SUGGESTION): FIXED in `fe9428b` (route inline: one production line
+    moved + one test). The baseline snapshot is now read BEFORE TryAttach/TryPlay. Test
+    `HttpSwitch_FileEditedWhilePlaybackOpensIt_ReloadsOnTheRepeatRequest` (reader size = TryPlay
+    count): RED before the fix (`StopCallCount` expected 1, actual 0: wrongly skipped), GREEN after.
+    Full suites: Layout 198, Alert 13, Interop 384/42 skipped, App 1026/6 skipped.
+  - R3-free-port-toctou (SUGGESTION): the F2 end-to-end tests pick a free port, release it, then
+    let the composition bind it; another process can take it in between. Left open (test-only
+    flakiness risk, no product impact).
