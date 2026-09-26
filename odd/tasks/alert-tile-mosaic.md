@@ -162,3 +162,23 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
 T4 (hardware): drive the app with HTTP alerts -- 1 failed; 2 failed; 3 failed; 5 mixed; 8 failed + 1
 warning; a `gap` setting change reflected on the next alert. Manual Edge check available too, e.g.
 `alert-layer.html#tiles=failed,failed,warning&columns=2&rows=2&gap=8&duration=5000`.
+
+- 2026-09-26: review `review-ceb16bfac752e1c3` (medium, reliability, main..d48507b) APPROVED and
+  acknowledged (authority burned). Non-blocking follow-ups:
+  - R3-js-mosaic-behavior-unproved (WARNING): page mosaic math only covered by substring tests;
+    suggests a committed vm-sandbox test of `tileRects()` (N=1, 3x2 with gap).
+  - R3-negative-gap-blocks-alert (WARNING): `Start` throws on `Gap < 0`; clamp at the call site.
+  - R3-hash-tiles-filter-noop (SUGGESTION): hash `tiles=` filter runs after the map; cap at
+    columns*rows.
+- 2026-09-26: T4 on hardware, Release build of d48507b (PID 42316), on a temporary empty virtual
+  desktop (Win+Ctrl+D, closed with Win+Ctrl+F4). HTTP 202 for all; traces:
+  `tiles=failed grid=1x1`, `failed,failed grid=2x1`, `failed x3 grid=2x2`,
+  `failed x3,warning x2 grid=3x2`, `failed x8 grid=4x2` (8 failed + 1 warning: warning dropped), all
+  `gap=8`, done/hide after 4 s each. Screenshots match the grid table, failed-first order, blank
+  empty slot, gap outside and between tiles.
+  FINDINGS: (1) there is NO `gap` key in settings.conf -- `TreeArranger.Gap` is fixed at
+  `DefaultGap` (8) by `AppComposition` (~1756); `gap = 12` in `SettingsTests` is an ignored unknown
+  key. The mosaic uses the same gap as tiled windows, but it is not user-configurable; the
+  "gap change in settings reflected" check cannot run. (2) The layer spans the full monitor bounds,
+  not the work area: with the taskbar on the right, the rightmost column slides partly under it.
+  T4 left open pending the maintainer's decision on both.
