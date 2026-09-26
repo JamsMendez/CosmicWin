@@ -202,3 +202,5 @@ another, so a burst of requests plays a long chain of alerts.
 
   Status: **done** (A4). All tasks A1-A4 complete; A3's covered/waiting case on real hardware
   remains the only acceptance-criteria gap, unchanged from before this task.
+- 2026-09-26: review `review-4c0ef26e22b851af` (medium, reliability, 2421b89..67edcf0, covers A4) APPROVED
+  with no findings, acknowledged (authority burned).
