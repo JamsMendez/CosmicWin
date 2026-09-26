@@ -112,7 +112,12 @@ public sealed class HttpAlertCompositionWiringTests
             alertsEnabled: alertsEnabled,
             createAlertCommandServer: (_, handle, _) => pipe = new FakeServer(handle),
             alertDesktopVisible: () => true,
-            startAlertLayer: (kind, duration) => events.Add($"start:{kind}:{duration}"),
+            // alert-tile-mosaic (2026-09-26): the single-kind "start:{kind}:{duration}" contract was
+            // rewritten, not silently dropped, to AlertShowRequest -- this file only greps for the
+            // "start:{kind}:" prefix its assertions already use, so keeping that exact prefix (with
+            // the grid/gap/duration appended) needs no assertion changes here.
+            startAlertLayer: request => events.Add(
+                $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}"),
             endAlertLayer: () => events.Add("end"),
             alertHttpEnabled: httpEnabled,
             alertHttpPort: httpPort,

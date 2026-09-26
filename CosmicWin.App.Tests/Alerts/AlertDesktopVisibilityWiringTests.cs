@@ -155,7 +155,11 @@ public sealed class AlertDesktopVisibilityWiringTests
             videoWallpaperPlayer: new FakeVideoWallpaperPlayer(),
             videoWallpaperPath: path,
             scheduleVideoWallpaperWork: work => work(),
-            startAlertLayer: (kind, duration) => events.Add($"start:{kind}:{duration}"),
+            // alert-tile-mosaic (2026-09-26): rewritten from the single-kind contract to
+            // AlertShowRequest; every assertion in this file only checks the "start:{kind}:" prefix,
+            // so appending the grid/gap here needs no assertion changes.
+            startAlertLayer: request => events.Add(
+                $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}"),
             endAlertLayer: () => events.Add("end"));
 
         return new Harness(composition, scheduler, server!, events);

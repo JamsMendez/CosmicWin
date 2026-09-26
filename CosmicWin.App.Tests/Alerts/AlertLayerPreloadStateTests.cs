@@ -9,8 +9,17 @@ namespace CosmicWin.App.Tests.Alerts;
 /// hardware-only real-WebView2 concern (<see cref="WebViewAlertLayerController"/>'s own creation
 /// path) never has to be exercised to prove this logic -- same split T3/T6 already established.
 /// </summary>
+/// <remarks>
+/// alert-tile-mosaic (2026-09-26): rewritten from the single-kind contract (<c>RequestShow(string
+/// kind, int durationMilliseconds)</c>) to carry a whole <see cref="AlertShowRequest"/> (tile list,
+/// grid, gap, duration) through unchanged -- the state machine's job stays exactly the same
+/// (readiness/pending/backoff), it just carries a bigger payload now.
+/// </remarks>
 public sealed class AlertLayerPreloadStateTests
 {
+    private static AlertShowRequest Show(string kind, int durationMilliseconds) =>
+        new([kind], 1, 1, 8, durationMilliseconds);
+
     [Fact]
     public void HostChangedReportsTrueOnFirstObservationAndOnAGenerationChangeOnly()
     {
@@ -54,7 +63,7 @@ public sealed class AlertLayerPreloadStateTests
     {
         var state = new AlertLayerPreloadState();
         state.MarkReady();
-        state.RequestShow("warning", 1000);
+        state.RequestShow(Show("warning", 1000));
         Assert.True(state.Ready);
         Assert.True(state.Visible);
 
@@ -69,13 +78,15 @@ public sealed class AlertLayerPreloadStateTests
         var state = new AlertLayerPreloadState();
         state.MarkReady();
 
-        var first = state.RequestShow("warning", 1000);
-        Assert.Equal(("warning", 1000), first);
+        var firstRequest = Show("warning", 1000);
+        var first = state.RequestShow(firstRequest);
+        Assert.Equal(firstRequest, first);
         Assert.True(state.Visible);
 
         // Start while visible re-shows: a second Start must still post, not be swallowed as a no-op.
-        var second = state.RequestShow("failed", 2000);
-        Assert.Equal(("failed", 2000), second);
+        var secondRequest = Show("failed", 2000);
+        var second = state.RequestShow(secondRequest);
+        Assert.Equal(secondRequest, second);
         Assert.True(state.Visible);
     }
 
@@ -83,7 +94,7 @@ public sealed class AlertLayerPreloadStateTests
     public void RequestShowWhileNotReadyStoresAPendingShowAndPostsNothingYet()
     {
         var state = new AlertLayerPreloadState();
-        var posted = state.RequestShow("warning", 1000);
+        var posted = state.RequestShow(Show("warning", 1000));
         Assert.Null(posted);
         Assert.False(state.Visible);
     }
@@ -93,17 +104,35 @@ public sealed class AlertLayerPreloadStateTests
     {
         var now = DateTimeOffset.UtcNow;
         var state = new AlertLayerPreloadState(() => now);
-        state.RequestShow("warning", 1000);
+        state.RequestShow(Show("warning", 1000));
         now = now.AddMilliseconds(400);
 
         state.MarkReady();
         var applied = state.ApplyPendingShowIfDue();
 
         Assert.NotNull(applied);
-        Assert.Equal("warning", applied.Value.Kind);
+        Assert.Equal(new[] { "warning" }, applied!.Tiles);
         // ~600ms left of the original 1000ms -- ceiling-rounded, never the ORIGINAL duration again.
-        Assert.InRange(applied.Value.DurationMilliseconds, 599, 601);
+        Assert.InRange(applied.DurationMilliseconds, 599, 601);
         Assert.True(state.Visible);
+    }
+
+    [Fact]
+    public void PendingShowCarriesTheGridAndGapUnchanged()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = new AlertLayerPreloadState(() => now);
+        state.RequestShow(new AlertShowRequest(["failed", "failed", "warning"], 2, 2, 12, 1000));
+        now = now.AddMilliseconds(400);
+
+        state.MarkReady();
+        var applied = state.ApplyPendingShowIfDue();
+
+        Assert.NotNull(applied);
+        Assert.Equal(new[] { "failed", "failed", "warning" }, applied!.Tiles);
+        Assert.Equal(2, applied.Columns);
+        Assert.Equal(2, applied.Rows);
+        Assert.Equal(12, applied.Gap);
     }
 
     [Fact]
@@ -111,7 +140,7 @@ public sealed class AlertLayerPreloadStateTests
     {
         var now = DateTimeOffset.UtcNow;
         var state = new AlertLayerPreloadState(() => now);
-        state.RequestShow("warning", 1000);
+        state.RequestShow(Show("warning", 1000));
         now = now.AddMilliseconds(1001);
 
         state.MarkReady();
@@ -134,7 +163,7 @@ public sealed class AlertLayerPreloadStateTests
     {
         var state = new AlertLayerPreloadState();
         state.MarkReady();
-        state.RequestShow("warning", 1000);
+        state.RequestShow(Show("warning", 1000));
         Assert.True(state.Visible);
 
         state.Hide();
@@ -150,7 +179,7 @@ public sealed class AlertLayerPreloadStateTests
     {
         var state = new AlertLayerPreloadState();
         state.MarkReady();
-        state.RequestShow("warning", 1000);
+        state.RequestShow(Show("warning", 1000));
 
         state.PageDone();
 
@@ -168,7 +197,7 @@ public sealed class AlertLayerPreloadStateTests
         state.ControllerLost();
         Assert.False(state.Ready, "the replacement controller has not navigated/reported ready yet");
 
-        var posted = state.RequestShow("warning", 1000);
+        var posted = state.RequestShow(Show("warning", 1000));
         Assert.Null(posted);
         now = now.AddMilliseconds(400);
 
@@ -176,8 +205,8 @@ public sealed class AlertLayerPreloadStateTests
         var applied = state.ApplyPendingShowIfDue();
 
         Assert.NotNull(applied);
-        Assert.Equal("warning", applied.Value.Kind);
-        Assert.InRange(applied.Value.DurationMilliseconds, 599, 601);
+        Assert.Equal(new[] { "warning" }, applied!.Tiles);
+        Assert.InRange(applied.DurationMilliseconds, 599, 601);
         Assert.True(state.Visible);
     }
 
@@ -187,7 +216,7 @@ public sealed class AlertLayerPreloadStateTests
         var now = DateTimeOffset.UtcNow;
         var state = new AlertLayerPreloadState(() => now);
         state.MarkReady();
-        state.RequestShow("failed", 5000);
+        state.RequestShow(Show("failed", 5000));
         now = now.AddMilliseconds(2000);
 
         state.ControllerLost();
@@ -200,7 +229,8 @@ public sealed class AlertLayerPreloadStateTests
         var applied = state.ApplyPendingShowIfDue();
 
         Assert.NotNull(applied);
-        Assert.Equal(("failed", 2500), applied);
+        Assert.Equal(new[] { "failed" }, applied!.Tiles);
+        Assert.Equal(2500, applied.DurationMilliseconds);
         Assert.True(state.Visible);
     }
 }

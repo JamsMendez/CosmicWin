@@ -231,7 +231,7 @@ public sealed class AppComposition : IDisposable
         // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
         // test that predates it -- the work area stays what it was at startup, exactly as before.
         Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
-        Action<string, int>? startAlertLayer = null,
+        Action<AlertShowRequest>? startAlertLayer = null,
         Action? endAlertLayer = null,
         Action<TimeSpan>? shakeAlertVideo = null,
         IDisposable? alertLayer = null,
@@ -717,7 +717,17 @@ public sealed class AppComposition : IDisposable
                 // must not count as shown, so the next tick retries it while duration remains.
                 // The alert page itself waits 120ms before revealing, so shaking here ahead of
                 // a not-yet-confirmed start is harmless.
-                startAlertLayer(failed ? "failed" : "warning", Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)));
+                // alert-tile-mosaic: the full ordered tile list/grid (AlertTileLayout) replaces the
+                // single collapsed "failed"/"warning" kind this used to pass -- every per-kind count
+                // the parser already accepted now reaches the layer instead of being thrown away.
+                // Gap is read from TreeArranger.Gap HERE, at show time, so a settings change takes
+                // effect on the next alert without AlertShowRequest/the preload state/the controller
+                // ever having to know about settings.
+                var layout = AlertTileLayout.From(active.Command);
+                var tiles = layout.Tiles.Select(kind => kind == AlertKind.Failed ? "failed" : "warning").ToArray();
+                startAlertLayer(new AlertShowRequest(
+                    tiles, layout.Columns, layout.Rows, TreeArranger.Gap,
+                    Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds))));
             }
             catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
             {

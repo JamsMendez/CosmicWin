@@ -107,9 +107,9 @@ public sealed class WebViewAlertLayerControllerTests
                 using var host = new Win32VideoWallpaperHost();
                 using var layer = new WebViewAlertLayerController(host, trace: line => { lock (traces) traces.Add(line); });
                 layer.Preload();
-                layer.Start("warning", 1000);
+                layer.Start(new AlertShowRequest(["warning"], 1, 1, 8, 1000));
                 layer.End();
-                layer.Start("failed", 500);
+                layer.Start(new AlertShowRequest(["failed", "failed"], 2, 1, 8, 500));
                 layer.End();
             }
             catch (Exception ex) { error = ex; }
@@ -119,8 +119,8 @@ public sealed class WebViewAlertLayerControllerTests
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
         Assert.Null(error);
-        Assert.Contains("alert-layer show kind=warning duration=1000", traces);
-        Assert.Contains("alert-layer show kind=failed duration=500", traces);
+        Assert.Contains("alert-layer show tiles=warning grid=1x1 gap=8 duration=1000", traces);
+        Assert.Contains("alert-layer show tiles=failed,failed grid=2x1 gap=8 duration=500", traces);
         Assert.Equal(2, traces.Count(line => line == "alert-layer hide"));
         Assert.DoesNotContain(traces, line => line.StartsWith("alert-layer close", StringComparison.Ordinal));
     }

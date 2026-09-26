@@ -32,9 +32,18 @@ public sealed class AlertLayerTraceTests
             AlertLayerTrace.NavigationCompleted(false, "ConnectionAborted", 42));
     }
 
+    /// <summary>Columns and rows are deliberately DIFFERENT (4x2, not a symmetric grid) so a columns/rows swap in the format string would fail this.</summary>
     [Fact]
-    public void Show_NamesKindAndDuration() =>
-        Assert.Equal("alert-layer show kind=failed duration=5000", AlertLayerTrace.Show("failed", 5000));
+    public void Show_NamesTilesGridGapAndDuration() =>
+        Assert.Equal(
+            "alert-layer show tiles=failed,failed,warning grid=4x2 gap=8 duration=5000",
+            AlertLayerTrace.Show(new AlertShowRequest(["failed", "failed", "warning"], 4, 2, 8, 5000)));
+
+    [Fact]
+    public void Show_NamesASingleTileWithoutATrailingComma() =>
+        Assert.Equal(
+            "alert-layer show tiles=warning grid=1x1 gap=0 duration=1000",
+            AlertLayerTrace.Show(new AlertShowRequest(["warning"], 1, 1, 0, 1000)));
 
     [Fact]
     public void Hide_IsAFixedLine() => Assert.Equal("alert-layer hide", AlertLayerTrace.Hide());
@@ -42,10 +51,13 @@ public sealed class AlertLayerTraceTests
     [Fact]
     public void PageReady_IsAFixedLine() => Assert.Equal("alert-layer page ready", AlertLayerTrace.PageReady());
 
+    /// <summary>Columns and rows are deliberately DIFFERENT (3x2, not a symmetric grid) so a columns/rows swap in the format string would fail this.</summary>
     [Fact]
-    public void PendingShowApplied_NamesKindAndRemainingDuration() =>
-        Assert.Equal("alert-layer pending show applied kind=failed remaining=17500",
-            AlertLayerTrace.PendingShowApplied("failed", 17500));
+    public void PendingShowApplied_NamesTilesGridGapAndRemainingDuration() =>
+        Assert.Equal(
+            "alert-layer pending show applied tiles=failed,failed,warning,warning,warning grid=3x2 gap=8 remaining=17500",
+            AlertLayerTrace.PendingShowApplied(
+                new AlertShowRequest(["failed", "failed", "warning", "warning", "warning"], 3, 2, 8, 17500)));
 
     [Fact]
     public void Done_IsAFixedLine() => Assert.Equal("alert-layer done", AlertLayerTrace.Done());

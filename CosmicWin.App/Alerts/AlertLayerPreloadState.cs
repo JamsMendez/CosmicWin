@@ -28,8 +28,8 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
     private int _generation;
     private DateTimeOffset _retryAfter;
     private int _failures;
-    private (string Kind, DateTimeOffset Deadline)? _pending;
-    private (string Kind, DateTimeOffset Deadline)? _shown;
+    private (AlertShowRequest Request, DateTimeOffset Deadline)? _pending;
+    private (AlertShowRequest Request, DateTimeOffset Deadline)? _shown;
 
     /// <summary>Environment + controller created, navigation completed, and the page's own "ready" message received.</summary>
     public bool Ready { get; private set; }
@@ -69,32 +69,33 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
     public void MarkReady() => Ready = true;
 
     /// <summary>
-    /// A start was requested. While ready, returns the kind/duration to post RIGHT NOW and marks the
-    /// layer visible -- even if it was already visible (a Start while showing must still re-show, not
-    /// be swallowed as a no-op; the queue, not this class, decides whether that Start was warranted).
+    /// A start was requested. While ready, returns the request to post RIGHT NOW and marks the layer
+    /// visible -- even if it was already visible (a Start while showing must still re-show, not be
+    /// swallowed as a no-op; the queue, not this class, decides whether that Start was warranted).
     /// While not yet ready, remembers it as a pending show with an ABSOLUTE deadline and returns null;
     /// see <see cref="ApplyPendingShowIfDue"/>.
     /// </summary>
-    public (string Kind, int DurationMilliseconds)? RequestShow(string kind, int durationMilliseconds)
+    public AlertShowRequest? RequestShow(AlertShowRequest request)
     {
         if (Ready)
         {
             Visible = true;
             _pending = null;
-            _shown = (kind, _clock().AddMilliseconds(durationMilliseconds));
-            return (kind, durationMilliseconds);
+            _shown = (request, _clock().AddMilliseconds(request.DurationMilliseconds));
+            return request;
         }
 
-        _pending = (kind, _clock().AddMilliseconds(durationMilliseconds));
+        _pending = (request, _clock().AddMilliseconds(request.DurationMilliseconds));
         return null;
     }
 
     /// <summary>
     /// Call once <see cref="MarkReady"/> has just made the page ready: applies a still-pending show
-    /// by returning its REMAINING duration (never the original one), or drops it silently if its
-    /// deadline already passed. Returns null when there was nothing to apply.
+    /// by returning a copy carrying its REMAINING duration (never the original one; every other field
+    /// -- tiles, grid, gap -- passes through unchanged), or drops it silently if its deadline already
+    /// passed. Returns null when there was nothing to apply.
     /// </summary>
-    public (string Kind, int DurationMilliseconds)? ApplyPendingShowIfDue()
+    public AlertShowRequest? ApplyPendingShowIfDue()
     {
         if (_pending is not { } pending) return null;
         _pending = null;
@@ -103,7 +104,7 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
         if (remaining <= TimeSpan.Zero) return null;
         Visible = true;
         _shown = pending;
-        return (pending.Kind, (int)Math.Ceiling(remaining.TotalMilliseconds));
+        return pending.Request with { DurationMilliseconds = (int)Math.Ceiling(remaining.TotalMilliseconds) };
     }
 
     /// <summary>

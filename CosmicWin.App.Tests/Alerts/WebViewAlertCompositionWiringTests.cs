@@ -78,9 +78,20 @@ public sealed class WebViewAlertCompositionWiringTests
         public void Dispose() { }
     }
 
+    /// <summary>
+    /// alert-tile-mosaic (2026-09-26): every fixture in this file used to encode a single-kind
+    /// contract (<c>Action&lt;string, int&gt;</c>, "start:{kind}:{duration}") -- rewritten, not
+    /// silently dropped, to the new <see cref="AlertShowRequest"/> contract. The recorded event
+    /// string keeps the SAME "start:" prefix and kind-name convention every existing assertion below
+    /// already greps for (<c>StartsWith("start:warning:", ...)</c> etc.), with the grid/gap appended,
+    /// so only the assertions that actually care about grid/gap needed new text.
+    /// </summary>
+    private static string DescribeShow(AlertShowRequest request) =>
+        $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}";
+
     private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
-        Host? host = null, Action<string, int>? startAlertLayer = null, Action? preloadAlertLayer = null)
+        Host? host = null, Action<AlertShowRequest>? startAlertLayer = null, Action? preloadAlertLayer = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
@@ -104,7 +115,7 @@ public sealed class WebViewAlertCompositionWiringTests
             videoWallpaperPath: host is null ? null : typeof(WebViewAlertCompositionWiringTests).Assembly.Location,
             scheduleVideoWallpaperWork: work => work(),
             alertRendererReady: ready,
-            startAlertLayer: startAlertLayer ?? ((kind, duration) => events.Add($"start:{kind}:{duration}")),
+            startAlertLayer: startAlertLayer ?? (request => events.Add(DescribeShow(request))),
             endAlertLayer: () => events.Add("end"),
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
             preloadAlertLayer: preloadAlertLayer,
@@ -160,8 +171,9 @@ public sealed class WebViewAlertCompositionWiringTests
             h.Timer.Tick();
             h.Timer.Tick();
             Assert.Equal("shake:120", h.Events[0]);
-            Assert.StartsWith("start:failed:", h.Events[1]);
-            Assert.InRange(int.Parse(h.Events[1]["start:failed:".Length..]), 1, 1000);
+            // 1 failed + 2 warning = 3 tiles -> grid 2x2 (feature doc, decision 2), failed first.
+            Assert.StartsWith("start:failed,warning,warning:2x2:gap=", h.Events[1]);
+            Assert.InRange(int.Parse(h.Events[1][(h.Events[1].LastIndexOf(':') + 1)..]), 1, 1000);
             h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
             h.Timer.Tick();
             Assert.Equal("end", h.Events.Last());
@@ -276,10 +288,10 @@ public sealed class WebViewAlertCompositionWiringTests
     {
         var attempts = 0;
         List<string>? events = null;
-        var h = Create(startAlertLayer: (kind, duration) =>
+        var h = Create(startAlertLayer: request =>
         {
             attempts++;
-            events!.Add($"start:{kind}:{duration}");
+            events!.Add(DescribeShow(request));
             if (attempts == 1) throw new InvalidOperationException("start failed");
         });
         events = h.Events;
@@ -303,6 +315,52 @@ public sealed class WebViewAlertCompositionWiringTests
 
             // The failed-kind shake happens once per alert, not once per retry attempt.
             Assert.Single(h.Events, e => e == "shake:120");
+        }
+    }
+
+    /// <summary>
+    /// alert-tile-mosaic (2026-09-26): the composition layer must thread the FULL ordered tile list
+    /// and grid <see cref="AlertTileLayout"/> computes from a multi-group command, plus <see
+    /// cref="TreeArranger.Gap"/> read at show time -- not just a single collapsed "failed"/"warning"
+    /// kind, which is all this composition used to pass before this feature. <see
+    /// cref="TreeArranger.Gap"/> is a shared mutable static (see its own remarks on why that is
+    /// normally risky); mutating it here is safe only because the whole CosmicWin.App.Tests assembly
+    /// disables test parallelization (<c>TestParallelism.cs</c>), the same reasoning that file
+    /// documents -- the original value is restored in <c>finally</c> so no other test is affected.
+    /// </summary>
+    [Fact]
+    public void MultiGroupCommand_ThreadsTheFullTileListGridAndGapToTheLayer()
+    {
+        var originalGap = TreeArranger.Gap;
+        TreeArranger.Gap = 12;
+        try
+        {
+            var h = Create();
+            using (h.Composition)
+            {
+                Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:3 warning:2 duration:1"));
+                // A failed tile is present, so the video shakes once, ahead of the start event.
+                Assert.Equal("shake:120", h.Events[0]);
+                // 3 failed + 2 warning = 5 tiles -> grid 3x2 (feature doc, decision 2), failed first.
+                Assert.StartsWith("start:failed,failed,failed,warning,warning:3x2:gap=12:", h.Events[1]);
+            }
+        }
+        finally
+        {
+            TreeArranger.Gap = originalGap;
+        }
+    }
+
+    /// <summary>Decision 3 (feature doc): failed tiles always win past the 8-tile cap, even when the command wrote warning first.</summary>
+    [Fact]
+    public void CommandPastTheEightTileCap_DropsWarningAndUsesTheEightPlusGrid()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:3 failed:8 duration:1"));
+            Assert.Equal("shake:120", h.Events[0]);
+            Assert.StartsWith("start:failed,failed,failed,failed,failed,failed,failed,failed:4x2:gap=", h.Events[1]);
         }
     }
 

@@ -104,7 +104,11 @@ public sealed class AlertHttpEndToEndTests
             // Only the pipe is faked -- the HTTP route below uses the real factory.
             createAlertCommandServer: (_, _, _) => new FakePipeServer(),
             alertDesktopVisible: () => true,
-            startAlertLayer: (kind, duration) => events.Add($"start:{kind}:{duration}"),
+            // alert-tile-mosaic (2026-09-26): rewritten from the single-kind contract to
+            // AlertShowRequest; every assertion in this file only checks the "start:{kind}:" prefix,
+            // so appending the grid/gap here needs no assertion changes.
+            startAlertLayer: request => events.Add(
+                $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}"),
             endAlertLayer: () => events.Add("end"),
             alertHttpEnabled: true,
             alertHttpPort: port,
@@ -231,7 +235,9 @@ public sealed class AlertHttpEndToEndTests
 
         Assert.Equal(202, status);
         Assert.Equal("ok", body);
-        Assert.StartsWith("start:warning:", Assert.Single(events));
+        // Two warning tiles, alert-tile-mosaic's own 2x1 grid (feature doc, decision 2) -- this
+        // used to collapse to a single "warning" kind before that feature.
+        Assert.StartsWith("start:warning,warning:2x1:gap=", Assert.Single(events));
         Assert.DoesNotContain(trace.Lines, line => line.Contains("alert ignored", StringComparison.Ordinal));
     }
 

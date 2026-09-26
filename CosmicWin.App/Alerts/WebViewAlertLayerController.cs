@@ -83,22 +83,35 @@ public sealed class WebViewAlertLayerController : IDisposable
         Poll();
     }
 
-    public void Start(string kind, int durationMilliseconds)
+    /// <summary>
+    /// Shows <paramref name="request"/>'s tiles, laid out in its grid with its gap -- or, while the
+    /// page is not yet ready, remembers it as a pending show (see <see
+    /// cref="AlertLayerPreloadState.RequestShow"/>).
+    /// </summary>
+    public void Start(AlertShowRequest request)
     {
         CheckAccess();
         if (SynchronizationContext.Current is not DispatcherSynchronizationContext)
             throw new InvalidOperationException("A pumped WPF UI STA is required to start the alert layer.");
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (kind is not ("warning" or "failed")) throw new ArgumentOutOfRangeException(nameof(kind));
-        if (durationMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(durationMilliseconds));
-        _trace?.Invoke(AlertLayerTrace.Show(kind, durationMilliseconds));
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Tiles.Count == 0)
+            throw new ArgumentException("At least one tile is required.", nameof(request));
+        if (request.Tiles.Any(tile => tile is not ("warning" or "failed")))
+            throw new ArgumentOutOfRangeException(nameof(request), "Every tile must be 'warning' or 'failed'.");
+        if (request.Columns <= 0) throw new ArgumentOutOfRangeException(nameof(request), "Columns must be positive.");
+        if (request.Rows <= 0) throw new ArgumentOutOfRangeException(nameof(request), "Rows must be positive.");
+        if (request.Gap < 0) throw new ArgumentOutOfRangeException(nameof(request), "Gap must not be negative.");
+        if (request.DurationMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(request), "Duration must be positive.");
+        _trace?.Invoke(AlertLayerTrace.Show(request));
         // Safety net: the queue must never lose a Start because production forgot to call Preload
         // first. Calling it here when it was already called is a no-op.
         Preload();
         // Ready while already visible still re-shows (a fresh Start must never be swallowed as a
-        // no-op): AlertLayerPreloadState.RequestShow always returns a tuple while Ready, regardless
+        // no-op): AlertLayerPreloadState.RequestShow always returns a value while Ready, regardless
         // of Visible -- see its own tests.
-        if (_state.RequestShow(kind, durationMilliseconds) is { } show) PostShow(show.Kind, show.DurationMilliseconds);
+        if (_state.RequestShow(request) is { } show) PostShow(show);
     }
 
     public void End() => End("end");
@@ -117,13 +130,15 @@ public sealed class WebViewAlertLayerController : IDisposable
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error($"end-{reason}", ex)); }
     }
 
-    private void PostShow(string kind, int durationMilliseconds)
+    private void PostShow(AlertShowRequest request)
     {
         if (_controller is null) return;
         try
         {
+            var tilesJson = string.Join(",", request.Tiles.Select(tile => $"\"{tile}\""));
             _controller.CoreWebView2.PostWebMessageAsJson(
-                $"{{\"type\":\"show\",\"kind\":\"{kind}\",\"duration\":{durationMilliseconds}}}");
+                $"{{\"type\":\"show\",\"tiles\":[{tilesJson}],\"columns\":{request.Columns},"
+                + $"\"rows\":{request.Rows},\"gap\":{request.Gap},\"duration\":{request.DurationMilliseconds}}}");
             _controller.IsVisible = true;
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-show", ex)); }
@@ -297,8 +312,8 @@ public sealed class WebViewAlertLayerController : IDisposable
         _trace?.Invoke(AlertLayerTrace.PageReady());
         if (_state.ApplyPendingShowIfDue() is { } pending)
         {
-            _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending.Kind, pending.DurationMilliseconds));
-            PostShow(pending.Kind, pending.DurationMilliseconds);
+            _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending));
+            PostShow(pending);
         }
     }
 

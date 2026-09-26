@@ -23,8 +23,9 @@ internal static class AlertLayerTrace
     public static string NavigationCompleted(bool success, object webErrorStatus, long elapsedMilliseconds) =>
         $"alert-layer navigation completed success={success} status={webErrorStatus} {elapsedMilliseconds}ms";
 
-    public static string Show(string kind, int durationMilliseconds) =>
-        $"alert-layer show kind={kind} duration={durationMilliseconds}";
+    public static string Show(AlertShowRequest request) =>
+        $"alert-layer show tiles={string.Join(",", request.Tiles)} grid={request.Columns}x{request.Rows} "
+        + $"gap={request.Gap} duration={request.DurationMilliseconds}";
 
     public static string Hide() => "alert-layer hide";
 
@@ -32,8 +33,9 @@ internal static class AlertLayerTrace
 
     public static string PageReady() => "alert-layer page ready";
 
-    public static string PendingShowApplied(string kind, int remainingMilliseconds) =>
-        $"alert-layer pending show applied kind={kind} remaining={remainingMilliseconds}";
+    public static string PendingShowApplied(AlertShowRequest request) =>
+        $"alert-layer pending show applied tiles={string.Join(",", request.Tiles)} "
+        + $"grid={request.Columns}x{request.Rows} gap={request.Gap} remaining={request.DurationMilliseconds}";
 
     public static string Close(string reason) => $"alert-layer close reason={reason}";
 
