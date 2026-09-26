@@ -62,6 +62,13 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   Serialized with a comment. Alert call site clamps `Gap` to >= 0 (review R3-negative-gap-blocks-alert).
   Route: delegated (writer trigger: Settings + composition + tests). Commit `cbed25d`.
 - [x] T6 Hardware: `gap = 24`, reload, windows and a 2x2 alert both show the wider gap.
+- [x] T7 Mosaic uses the WORK AREA, like tiled windows (maintainer, 2026-09-26): for N > 1 the grid
+  (outer gap included) is laid out inside the monitor's work area, read at show time with
+  `GetMonitorInfo` (never WinForms `Screen.WorkingArea`, see the taskbar-tracking work), expressed
+  relative to the layer surface and sent in the show message. N = 1 stays full display, as decided
+  originally ("funciona como ahora"). Route: delegated.
+- [ ] T8 Hardware: right-side taskbar, 4x2 alert -> last column fully visible, gap to the taskbar
+  edge matches the windows'.
 
 ## Acceptance criteria
 
@@ -321,3 +328,121 @@ maintainer's decision, unrelated to gap.
   settings.conf restored to its original content afterwards, app restarted (default gap 8).
   Still open from T4: the layer spans monitor bounds, the right-side taskbar covers part of the
   last column -- awaiting the maintainer's decision.
+
+- 2026-09-26: T7 implemented (single writer, this session), closing finding (2) above: the N>1
+  mosaic is laid out inside the monitor's work area instead of the whole monitor.
+
+  **How the work area is obtained.** `codegraph_explore` located the existing GetMonitorInfo-backed
+  tracking this task asked to reuse: `Win32DisplayManager`/`Win32Display` (`CosmicWin.Interop/
+  Win32/`) already read `IDisplay.WorkArea` via `GetMonitorInfo`'s `rcWork` and keep it fresh --
+  `AppComposition`'s 400ms watch tick calls `refreshDisplays()` (`Win32DisplayManager.Refresh`)
+  every tick, updating each `IDisplay` object IN PLACE (`Win32Display.Refresh`), exactly the
+  "taskbar moves/auto-hides" case T7 has to handle. No new P/Invoke was added: `UpdateAlertOverlay`
+  reads `treeManager.Primary` (a live handle-keyed lookup, `TreeManager.Primary`) fresh on every
+  show, exactly like it already does for `TreeArranger.Gap` (T2/T5, "read at show time").
+  <br>`Win32VideoWallpaperHost.CreateHostWindow`'s own remarks establish that the host window
+  (the layer's surface) is always created and positioned at exactly the primary monitor's
+  `rcMonitor` -- so the surface's screen rect is already `IDisplay.Bounds`, and no
+  `GetWindowRect`/`GetClientRect` call was needed to get it either.
+
+  **Making it relative.** New pure type `AlertLayerWorkArea` (`CosmicWin.App/Alerts/
+  AlertLayerWorkArea.cs`, record struct `Resolve(Rectangle surfaceBounds, Rectangle workArea)`):
+  intersects the work area with the surface bounds, expresses the result relative to the surface's
+  OWN top-left (so a monitor not at the desktop origin is handled correctly), and collapses to
+  `Unavailable` (`0,0,0,0`) when there is no overlap at all or the surface itself is degenerate --
+  the fallback signal both the page and `WebViewAlertLayerController` already treat as "lay out on
+  the whole canvas", the pre-T7 behaviour. `UpdateAlertOverlay` wraps the read+resolve in a
+  try/catch that also degrades to `Unavailable` and traces `alert-layer-workarea-failed` on any
+  exception (there should never be one against these plain property reads) -- this alert must never
+  fail just because its work area could not be resolved.
+
+  **Threading it through.** `AlertShowRequest` (`CosmicWin.App/Alerts/AlertShowRequest.cs`) gains
+  `WorkAreaLeft/Top/Width/Height` (physical pixels, relative to the surface), all defaulted to 0 --
+  `AlertLayerWorkArea.Unavailable`'s own shape -- so every pre-T7 call site keeps compiling and
+  keeps meaning "whole canvas". `AlertLayerPreloadState`'s pending/shown tracking carries the four
+  fields through unchanged via the existing `with` expression (no production change needed there).
+  `WebViewAlertLayerController.PostShow` adds a `"workArea":{"left":...,"top":...,"width":...,
+  "height":...}` object to the `{type:"show",...}` JSON message, clamping each field to >= 0
+  defensively. `AlertLayerTrace.Show`/`PendingShowApplied` gain a `work=L,T,WxH` segment between
+  `gap=` and `duration=`/`remaining=` (e.g. `work=0,40,1920x1040`).
+
+  **Page (`alert-layer.js`).** New `workAreaLeft/Top/Width/Height` module state (physical pixels) and
+  `gridAreaRect()`: returns the work area converted to CSS pixels with the SAME
+  `canvasScaleX`/`canvasScaleY` devicePixelRatio-derived factors the gap already uses, clamped to the
+  canvas, or the whole canvas when `workAreaWidth`/`Height` is <= 0 (unavailable/degenerate).
+  `tileRects()` (N>1 branch) now lays the outer gap + grid out inside `gridAreaRect()` instead of
+  always the whole canvas; N=1 is untouched (returns the whole canvas before `gridAreaRect` is ever
+  called). `startShowing` gains an optional `workArea` parameter (`{left,top,width,height}` or
+  missing/null, either treated as unavailable); `handleHostMessage` passes `data.workArea` through
+  for the tiles message shape (the old single-kind back-compat shape stays without one -- N=1 always
+  ignores it). Hash API gains `work=L,T,W,H` (comma-separated physical pixels, tiles form only),
+  parsed by a new `parseWorkAreaParam`.
+
+  **Verified without a DOM/canvas harness (stated honestly, per constraints), same split as T3:**
+  (1) `node --check` (syntax only); (2) a throwaway Node `vm`-sandboxed smoke harness (mock
+  document/canvas/window, not part of the repo, not committed) driving `startShowing`/`tileRects`
+  directly through N=1 (work area ignored), N=2 with no work area (matches the exact pre-T7
+  full-canvas rects), N=2 with a work area narrowed on the right by 200px (both tiles land strictly
+  inside `[0,1720)`, proving the taskbar-spill bug this task fixes is actually gone at the
+  arithmetic level), N=2 with a degenerate (zero-width) work area (falls back to the exact
+  no-work-area rects), and the `work=` hash param (matches the message-driven result byte-for-byte)
+  -- all 8 checks passed; (3) the 5 new/rewritten structural presence checks in
+  `AlertLayerWebPageTests.cs`, plus all pre-existing structural checks in that file, still pass.
+
+  **Tests (new/rewritten, C# side).**
+  - `AlertLayerWorkAreaTests.cs` (new): 7 facts on the pure resolver -- no taskbar, right-docked
+    taskbar, a monitor not at the desktop origin (top-docked taskbar), a work area wider than the
+    surface (clamped), a work area entirely outside the surface (falls back to `Unavailable`), a
+    degenerate surface (falls back), and `Unavailable` itself being all-zero.
+  - `AlertLayerTraceTests.cs`: the two `Show` facts and the one `PendingShowApplied` fact rewritten
+    with distinct, asymmetric work-area values (not just the grid/gap already were) so a field-order
+    swap among the four new fields would fail them too, same reasoning T2 already applied to the
+    grid.
+  - `WebViewAlertLayerControllerTests.cs`: the two exact trace-string assertions updated for the new
+    `work=0,0,0x0` segment (both calls use the default, unset work area); new
+    `PostShowIncludesTheWorkAreaInTheShowMessage` (structural, reads `PostShow`'s body).
+  - `AlertLayerPreloadStateTests.cs`: new `PendingShowCarriesTheWorkAreaUnchanged` (passed on first
+    run -- the `with` expression already threads unlisted fields through by construction, same as
+    Gap already does; documented honestly rather than claiming a RED that could not exist).
+  - `WebViewAlertCompositionWiringTests.cs`: `Create()`'s returned tuple now also exposes the fake
+    `Display` (its `WorkArea` is settable, mirroring how the real `Win32Display` updates in place);
+    `DescribeShow` gains the `work=L,T,WxH` segment between `gap=` and the trailing duration, using
+    commas (not colons) inside it so every existing `StartsWith`/`LastIndexOf(':')`-based assertion
+    stays valid unmodified. New `ReadsTheWorkAreaAtShowTimeAndThreadsItRelativeToTheSurface`
+    (mutates `Display.WorkArea` AFTER `Wire` returns but BEFORE sending the command, proving the
+    read is live, not a wire-time snapshot) and
+    `UnresolvableWorkAreaFallsBackToUnavailableRatherThanFailingTheAlert`.
+  - `AlertLayerWebPageTests.cs`: 2 new structural facts on the JS additions above.
+
+  **RED.** `AlertLayerWorkAreaTests.cs` alone: 14 `CS0103`/`CS0246` (type did not exist). Then, with
+  `AlertShowRequest`/`AlertLayerTrace` still unchanged: 3 `AlertLayerTraceTests` failures (no `work=`
+  segment yet), 1 `WebViewAlertLayerControllerTests` failure (`PostShow` had no `workArea` key yet),
+  1 `WebViewAlertCompositionWiringTests` failure
+  (`ReadsTheWorkAreaAtShowTimeAndThreadsItRelativeToTheSurface`, since `UpdateAlertOverlay` had not
+  wired the work area through yet -- its sibling unavailable-fallback fact passed by coincidence,
+  since the pre-T7 code already always sent the all-zero shape), and 2 `AlertLayerWebPageTests`
+  failures (JS additions did not exist yet) -- each observed before writing the matching production
+  code.
+
+  **GREEN.** After each production change above: `CosmicWin.App.Tests` filtered to the touched
+  files, all green. Full solution: `CosmicWin.Layout.Tests` 198/198, `CosmicWinAlert.Tests` 13/13,
+  `CosmicWin.Interop.Tests` 384 passed/42 skipped, `CosmicWin.App.Tests` 1088 passed/6 skipped (was
+  1075/6 at the branch's T6 point; +13 net, matching the 13 new facts listed above).
+
+  **Mutation checks**, each reverted after confirming the expected failure:
+  1. `AlertLayerWorkArea.Resolve`'s left-clamp axis swapped (`surfaceBounds.Left` ->
+     `surfaceBounds.Top`): `MonitorNotAtTheDesktopOrigin_IsExpressedRelativeToTheSurfaceNotTheDesktop`
+     failed as expected, reverted.
+  2. The no-overlap guard loosened (`right > left && bottom > top` -> `right >= left && bottom >=
+     top`): `WorkAreaOutsideTheSurface_FallsBackToUnavailable` failed as expected, reverted.
+  3. `UpdateAlertOverlay`'s `AlertLayerWorkArea.Resolve(alertDisplay.Bounds, alertDisplay.WorkArea)`
+     arguments swapped: caught a REAL gap first -- the original composition-level test used a
+     right-docked, origin-aligned work area, and swapping surface/work-area arguments happens to
+     produce the identical result when both rects share the same top-left corner, so the mutation
+     passed. Strengthened the test to a TOP-docked (asymmetric) work area instead, reran against the
+     same mutation -> failed as expected (`work=0,0,...` instead of `work=0,40,...`), then reverted
+     the production swap and confirmed the strengthened test passes GREEN.
+
+  **Status: done for T7.** T8 (hardware: right-side taskbar, 4x2 alert) is still open -- out of this
+  session's scope (constraints: do not run/kill the Release app already running from `bin\Release`)
+  and needs a supervised run on real hardware with a right-docked taskbar.
