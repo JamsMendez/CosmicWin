@@ -7,7 +7,7 @@ namespace CosmicWin.App.Alerts;
 public sealed record ActiveAlert(AlertCommand Command, DateTimeOffset StartedAt);
 
 /// <summary>
-/// Bounded FIFO of parsed alert commands, deciding which one -- if any -- is on screen right now.
+/// Decides which single parsed alert command -- if any -- is on screen or waiting to be, right now.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,6 +15,20 @@ public sealed record ActiveAlert(AlertCommand Command, DateTimeOffset StartedAt)
 /// caller rather than reading the clock or owning a timer. <see cref="Advance"/> is
 /// meant to be called once per tick, alongside whether the desktop is currently visible, by the
 /// overlay driver T5/T6 add.
+/// </para>
+/// <para>
+/// Busy-ignore, decided by the maintainer 2026-09-26 (alert-busy-ignore feature, superseding the
+/// earlier FIFO-of-many design this class used to document here): at most ONE alert exists at a
+/// time, showing or waiting -- never more. <see cref="Enqueue"/> judges "in progress" against
+/// <paramref name="now"/> at call time, not against state only <see cref="Advance"/> clears: a new
+/// request is ignored (still reported as accepted to the caller, per the maintainer's decision that
+/// the pipe/HTTP reply never reveals the difference) only while an alert is CURRENTLY showing
+/// (<c>now</c> has not yet reached its start plus duration) or CURRENTLY waiting and not expired.
+/// A request arriving once the showing alert's window has elapsed, or once the waiting one has aged
+/// past <see cref="_maxAge"/>, is accepted and queued even though nobody has called
+/// <see cref="Advance"/> to notice that yet -- it shows on the very next <see cref="Advance"/> call.
+/// Every ignore and every drop is reported through <see cref="_onDiagnostic"/> so the caller can log
+/// which happened and why.
 /// </para>
 /// <para>
 /// Queued-while-covered behaviour, decided by the maintainer 2026-09-23 (see the feature's task
@@ -87,13 +101,42 @@ public sealed class AlertQueue
     }
 
     /// <summary>
-    /// Queues <paramref name="command"/> if there is room. When the queue is already at
-    /// <see cref="_capacity"/>, the NEW command is the one rejected -- an older, already-queued
-    /// alert is never silently dropped to make room.
+    /// Queues <paramref name="command"/>, unless an alert is already showing or waiting at
+    /// <paramref name="now"/> (alert-busy-ignore, maintainer decision 2026-09-26), in which case the
+    /// request is IGNORED: reported through <see cref="_onDiagnostic"/> and dropped, but still
+    /// answered as accepted -- the caller (<c>AppComposition.HandleAlertCommand</c>) cannot tell an
+    /// ignored request apart from a queued one, by design, so the pipe/HTTP reply stays identical.
     /// </summary>
-    /// <returns><see langword="true"/> when accepted, <see langword="false"/> when the queue was full.</returns>
+    /// <remarks>
+    /// Drops any already-expired waiting alert first (reusing <see cref="DropExpired"/>, so that drop
+    /// is still reported) before judging whether the queue is busy -- an alert nobody would ever
+    /// start again must not swallow a new request. The capacity check below is kept as a defensive
+    /// invariant guard, not because the composition can still reach it: with at most one alert ever
+    /// queued through this busy-ignore rule, <c>_pending.Count</c> cannot grow past 1, so it can only
+    /// equal <see cref="_capacity"/> when <c>capacity</c> itself is 1 -- a case the busy-ignore check
+    /// above already intercepts first. See the feature's task file for that decision.
+    /// </remarks>
+    /// <returns>
+    /// <see langword="true"/> when accepted -- whether newly queued or ignored because one is already
+    /// in progress -- <see langword="false"/> only if the queue were ever at capacity despite that
+    /// (currently unreachable in practice; see remarks).
+    /// </returns>
     public bool Enqueue(AlertCommand command, DateTimeOffset now)
     {
+        DropExpired(now);
+
+        if (_current is { } active && now < active.StartedAt + active.Command.Duration)
+        {
+            _onDiagnostic("alert ignored: one is already showing");
+            return true;
+        }
+
+        if (_pending.Count > 0)
+        {
+            _onDiagnostic("alert ignored: one is already waiting to show");
+            return true;
+        }
+
         if (_pending.Count >= _capacity)
         {
             _onDiagnostic($"alert rejected: queue is already at capacity ({_capacity})");

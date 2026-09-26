@@ -32,9 +32,11 @@ public sealed class AlertQueueTests
     {
         var queue = new AlertQueue();
         var first = Command();
-        var second = Command();
+        // Busy-ignore (alert-busy-ignore): this second call is ignored, not queued behind the
+        // first -- it exists only to prove the ignored one never displaces the queued one either.
+        var ignored = Command();
         queue.Enqueue(first, Epoch);
-        queue.Enqueue(second, Epoch);
+        queue.Enqueue(ignored, Epoch);
 
         var active = queue.Advance(Epoch, desktopVisible: true);
 
@@ -43,41 +45,63 @@ public sealed class AlertQueueTests
         Assert.Equal(Epoch, active.StartedAt);
     }
 
+    /// <summary>
+    /// Rewritten for alert-busy-ignore (maintainer decision, 2026-09-26): these three tests used to
+    /// prove capacity rejection by enqueuing past a small <c>capacity</c> while nothing was ever
+    /// consumed. That path is no longer reachable through <see cref="AlertQueue.Enqueue"/>: with at
+    /// most one alert ever showing or waiting, a second call while one is already pending is now
+    /// caught by the busy-ignore rule (see <see cref="ASecondRequest_IsIgnoredWhileOneIsWaiting"/>
+    /// and friends below) before the capacity check is ever reached -- with any capacity of 1 or
+    /// more, <c>_pending.Count</c> can never grow past 1 through <c>Enqueue</c> alone, so
+    /// <c>_pending.Count &gt;= _capacity</c> can only be true when <c>capacity</c> is itself 1, which
+    /// the busy-ignore check already intercepts first. The capacity field, its constructor
+    /// validation, and the internal capacity-full branch are kept as a defensive invariant guard
+    /// (see the constructor tests below, still exercised), not removed, per the feature's decision
+    /// that queue-full stays in the code even though the composition can no longer reach it.
+    /// </summary>
     [Fact]
-    public void UpToCapacity_EveryEnqueueSucceeds_AndOneMoreIsRejected()
-    {
-        var queue = new AlertQueue(capacity: 2);
-
-        Assert.True(queue.Enqueue(Command(), Epoch));
-        Assert.True(queue.Enqueue(Command(), Epoch));
-        Assert.False(queue.Enqueue(Command(), Epoch));
-    }
-
-    [Fact]
-    public void ARejectionFromAFullQueue_IsReported()
+    public void ASecondRequest_IsIgnoredWhileOneIsShowing()
     {
         var messages = new List<string>();
-        var queue = new AlertQueue(capacity: 1, onDiagnostic: messages.Add);
-        queue.Enqueue(Command(), Epoch);
+        var queue = new AlertQueue(onDiagnostic: messages.Add);
+        var showing = Command(durationSeconds: 5);
+        queue.Enqueue(showing, Epoch);
+        queue.Advance(Epoch, desktopVisible: true);
 
-        var accepted = queue.Enqueue(Command(), Epoch);
+        var accepted = queue.Enqueue(Command(), Epoch.AddSeconds(2));
 
-        Assert.False(accepted);
-        Assert.Single(messages);
+        Assert.True(accepted);
+        Assert.Single(messages, m => m.StartsWith("alert ignored:", StringComparison.Ordinal) &&
+            m.Contains("showing", StringComparison.Ordinal));
     }
 
-    /// <summary>A full queue rejects the NEW command; it must never evict an older queued one.</summary>
+    /// <summary>
+    /// A request arriving exactly when (or after) the showing alert's window has elapsed is judged
+    /// against <c>now</c>, not against state only <see cref="AlertQueue.Advance"/> clears -- it must
+    /// be accepted and queued even though nobody has called <c>Advance</c> to end the old one yet,
+    /// and it starts on that same next <c>Advance</c> call. Replaces the old
+    /// <c>WhenOneAlertEnds_TheNextEligibleOneStartsOnTheSameAdvanceCall</c>, which enqueued both
+    /// alerts back to back at the SAME instant -- exactly the stacking the new busy-ignore rule
+    /// forbids, since the second would now be ignored rather than queued.
+    /// </summary>
     [Fact]
-    public void ARejectedAlert_NeverDisplacesAnOlderQueuedOne()
+    public void ARequestRightAfterTheWindowEnds_IsAcceptedBeforeAnyAdvanceRuns_AndStartsOnTheNextAdvance()
     {
-        var queue = new AlertQueue(capacity: 1);
-        var kept = Command();
-        queue.Enqueue(kept, Epoch);
-        queue.Enqueue(Command(), Epoch);
+        var queue = new AlertQueue();
+        var first = Command(durationSeconds: 5);
+        var second = Command(durationSeconds: 5);
+        queue.Enqueue(first, Epoch);
+        queue.Advance(Epoch, desktopVisible: true);
 
-        var active = queue.Advance(Epoch, desktopVisible: true);
+        var endTime = Epoch.AddSeconds(5);
+        var accepted = queue.Enqueue(second, endTime);
+        Assert.True(accepted);
 
-        Assert.Same(kept, active!.Command);
+        var active = queue.Advance(endTime, desktopVisible: true);
+
+        Assert.NotNull(active);
+        Assert.Same(second, active!.Command);
+        Assert.Equal(endTime, active.StartedAt);
     }
 
     [Fact]
@@ -135,24 +159,6 @@ public sealed class AlertQueueTests
         Assert.Null(ended);
     }
 
-    [Fact]
-    public void WhenOneAlertEnds_TheNextEligibleOneStartsOnTheSameAdvanceCall()
-    {
-        var queue = new AlertQueue();
-        var first = Command(durationSeconds: 5);
-        var second = Command(durationSeconds: 5);
-        queue.Enqueue(first, Epoch);
-        queue.Enqueue(second, Epoch);
-        queue.Advance(Epoch, desktopVisible: true);
-
-        var endTime = Epoch.AddSeconds(5);
-        var active = queue.Advance(endTime, desktopVisible: true);
-
-        Assert.NotNull(active);
-        Assert.Same(second, active!.Command);
-        Assert.Equal(endTime, active.StartedAt);
-    }
-
     /// <summary>Boundary, decided here: exactly the max age is still eligible; past it is dropped.</summary>
     [Fact]
     public void AnAlertAtExactlyTheMaxAge_IsStillEligible()
@@ -196,6 +202,59 @@ public sealed class AlertQueueTests
 
         Assert.Null(active);
         Assert.Single(messages);
+    }
+
+    /// <summary>
+    /// alert-busy-ignore, maintainer decision 4: a waiting alert (queued while the desktop is
+    /// covered, never yet shown) counts as "in progress" too -- a second request while it is still
+    /// waiting and not expired is ignored, exactly like a second request while one is showing.
+    /// </summary>
+    [Fact]
+    public void ASecondRequest_IsIgnoredWhileOneIsWaiting()
+    {
+        var messages = new List<string>();
+        var queue = new AlertQueue(onDiagnostic: messages.Add);
+        var waiting = Command();
+        queue.Enqueue(waiting, Epoch);
+        queue.Advance(Epoch, desktopVisible: false);
+
+        var accepted = queue.Enqueue(Command(), Epoch.AddSeconds(1));
+
+        Assert.True(accepted);
+        Assert.Single(messages, m => m.StartsWith("alert ignored:", StringComparison.Ordinal) &&
+            m.Contains("waiting", StringComparison.Ordinal));
+
+        // Never shows later: the desktop becoming visible only ever starts the one alert that was
+        // actually queued.
+        var active = queue.Advance(Epoch.AddSeconds(2), desktopVisible: true);
+        Assert.Same(waiting, active!.Command);
+        Assert.Null(queue.Advance(active.StartedAt + waiting.Duration, desktopVisible: true));
+    }
+
+    /// <summary>
+    /// A waiting alert past its max age must not swallow a new request either -- <see
+    /// cref="AlertQueue.Enqueue"/> reuses <c>DropExpired</c> so the drop is still reported, and the
+    /// new request lands in the now-empty queue instead of being ignored.
+    /// </summary>
+    [Fact]
+    public void ARequest_IsAcceptedOnceThePreviouslyWaitingOneHasExpired()
+    {
+        var maxAge = TimeSpan.FromMinutes(1);
+        var messages = new List<string>();
+        var queue = new AlertQueue(maxAge: maxAge, onDiagnostic: messages.Add);
+        var expired = Command();
+        queue.Enqueue(expired, Epoch);
+        queue.Advance(Epoch, desktopVisible: false);
+
+        var replacement = Command();
+        var now = Epoch + maxAge + TimeSpan.FromTicks(1);
+        var accepted = queue.Enqueue(replacement, now);
+
+        Assert.True(accepted);
+        Assert.Single(messages, m => m.StartsWith("alert dropped:", StringComparison.Ordinal));
+
+        var active = queue.Advance(now, desktopVisible: true);
+        Assert.Same(replacement, active!.Command);
     }
 
     /// <summary>Finding R3-queue-ctor-unvalidated: a non-positive capacity can never hold a single
