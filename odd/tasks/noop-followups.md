@@ -179,3 +179,7 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   an edit can only land while playback is stopped, and then the skip is off (not active) or the
   next start snapshots the new file. The snapshot check stays as cheap defense in depth; it also
   carries the throwing-reader fix. Not reverted.
+- 2026-09-26: review `review-d8cdc8b4ddb847c2` (medium, reliability, 977fcb9..169629f) APPROVED and
+  acknowledged. Its one SUGGESTION (R3-reload-completion-unasserted) FIXED in `0e45e06`: the ordering
+  test now also asserts TryPlayCallCount == 2. Mutation (drop ActivateVideoWallpaper after import)
+  FAILS it (expected 2, actual 1); restored. Open: R3-free-port-toctou only.
