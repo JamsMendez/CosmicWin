@@ -191,3 +191,7 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   (port equals the taken one); restored. Suites: Layout 198, Alert 13, Interop 384/42, App 1027/6.
   Not changed: `CosmicWin.Interop.Tests/LocalHttpCommandServerTests.cs` has its own GetFreePort
   with the same release-then-bind gap; out of this finding's scope.
+- 2026-09-26: review `review-220809ffa382eb72` (medium, reliability, main..eddee97) APPROVED and
+  acknowledged. Its one SUGGESTION (R3-proof-queue-eager-port) FIXED in `257d7d0`: the proof test scripts
+  only the taken port and draws later ports lazily via GetFreePort. E2E tests 3/3 green.
+  No review findings remain open across same-video-noop, alert-busy-ignore and noop-followups.
