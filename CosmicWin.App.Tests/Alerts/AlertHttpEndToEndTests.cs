@@ -248,11 +248,13 @@ public sealed class AlertHttpEndToEndTests
         try
         {
             var takenPort = ((IPEndPoint)blocker.LocalEndpoint).Port;
-            var ports = new Queue<int>([takenPort, GetFreePort()]);
+            // Only the taken port is scripted; every later attempt draws a fresh free port at the moment it
+            // binds (R3-proof-queue-eager-port), so no fallback port sits released across a whole attempt.
+            var ports = new Queue<int>([takenPort]);
             var events = new List<string>();
             var trace = new RecordingDesktopTrace();
 
-            var (composition, port) = WireOnFreePort(events, trace, ports.Dequeue);
+            var (composition, port) = WireOnFreePort(events, trace, () => ports.Count > 0 ? ports.Dequeue() : GetFreePort());
             using var _ = composition;
 
             Assert.NotEqual(takenPort, port);
