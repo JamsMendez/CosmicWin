@@ -128,3 +128,5 @@ never the caller's source, so a string comparison cannot detect "same video".
   advances to the IMPORTED destination. Passed on first run (behavior existed), so mutation-checked:
   `Invoke(path, path)` FAILS, `Invoke(activePath, path)` FAILS, `currentVideoWallpaperPath = path`
   FAILS; each restored. Full suites: Layout 198, Alert 13, Interop 387/42 skipped, App 1021/6 skipped.
+- 2026-09-26: review `review-5a1f91129a540b7f` (medium, reliability, cd6b1d0..e4e02c7) APPROVED with no
+  findings, acknowledged (authority burned).
