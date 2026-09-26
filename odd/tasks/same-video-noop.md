@@ -121,4 +121,4 @@ never the caller's source, so a string comparison cannot detect "same video".
   RaphaelLoop -> 202, full switch (`tryPlay=True`); RaphaelLoop again -> `unchanged`; the imported
   destination path itself -> `unchanged`; WordWorldLoop -> full switch back (`tryPlay=True`),
   `fsutil hardlink list` confirms the destination is linked to WordWorldLoop again.
-  The branch build is left running from `CosmicWin.Appin\Release\...`.
+  The branch build is left running from `CosmicWin.App\bin\Release\...`.
