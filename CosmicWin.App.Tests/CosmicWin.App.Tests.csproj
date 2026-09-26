@@ -18,6 +18,15 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <!-- T9 (alert-tile-mosaic): the committed Node vm-sandbox harness proving alert-layer.js's own
+         tile-layout math. AlertLayerLayoutNodeTests shells out to `node` and passes it this file's
+         resolved output path, mirroring how CosmicWin.App's own Content items already copy
+         alert-layer.js next to the test assembly for AlertLayerWebPageTests to read. -->
+    <Content Include="Alerts\Web\alert-layer-layout.tests.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\CosmicWin.App\CosmicWin.App.csproj" />
     <!-- Task 3.22: drives CosmicWin.Launcher.Program.Run directly with a fake IProcessRunner. -->
     <ProjectReference Include="..\CosmicWin.Launcher\CosmicWin.Launcher.csproj" />
