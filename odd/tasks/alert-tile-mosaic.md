@@ -55,7 +55,13 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
 - [x] T3 `alert-layer.js`: per-tile rects with outer/inner gap, draw each tile, hash API. Route:
   delegated. Commit `c106aeb`.
 - [ ] T4 Hardware: HTTP alerts 1 failed; 2 failed; 3 failed; 5 mixed; 8 failed + 1 warning; gap
-  change in settings reflected. Route: inline (drive the app).
+  change in settings reflected. Route: inline (drive the app). Grids verified; gap part moved to T6.
+- [x] T5 New `gap = N` key in `settings.conf` (maintainer, 2026-09-26): whole pixels 0..64, default 8,
+  an unreadable/out-of-range value keeps the default (same rule as the other keys). Drives
+  `TreeArranger.Gap` for windows AND the alert mosaic; applied at startup and on settings reload.
+  Serialized with a comment. Alert call site clamps `Gap` to >= 0 (review R3-negative-gap-blocks-alert).
+  Route: delegated (writer trigger: Settings + composition + tests). Commit `cbed25d`.
+- [ ] T6 Hardware: `gap = 24`, reload, windows and a 2x2 alert both show the wider gap.
 
 ## Acceptance criteria
 
@@ -159,9 +165,13 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
 
 ## Next step
 
-T4 (hardware): drive the app with HTTP alerts -- 1 failed; 2 failed; 3 failed; 5 mixed; 8 failed + 1
-warning; a `gap` setting change reflected on the next alert. Manual Edge check available too, e.g.
-`alert-layer.html#tiles=failed,failed,warning&columns=2&rows=2&gap=8&duration=5000`.
+T6 (hardware): `gap = 24` in `settings.conf`, tray Reload, confirm already-tiled windows AND a 2x2
+alert both show the wider gap. This also closes out T4's second open finding (gap change in
+settings reflected), which was blocked on T5 until now.
+
+T4's other open finding -- the layer spans the full monitor bounds, not the work area, so the
+rightmost column slides partly under a right-docked taskbar -- is still open pending the
+maintainer's decision, unrelated to gap.
 
 - 2026-09-26: review `review-ceb16bfac752e1c3` (medium, reliability, main..d48507b) APPROVED and
   acknowledged (authority burned). Non-blocking follow-ups:
@@ -182,3 +192,119 @@ warning; a `gap` setting change reflected on the next alert. Manual Edge check a
   "gap change in settings reflected" check cannot run. (2) The layer spans the full monitor bounds,
   not the work area: with the taskbar on the right, the rightmost column slides partly under it.
   T4 left open pending the maintainer's decision on both.
+
+- 2026-09-26: T5 implemented by one delegated writer, closing finding (1) above.
+
+  **Premise check before writing anything.** T5's own text says the gap should apply "at startup
+  and on settings reload", and to "follow how other settings like focus-border or tiling are
+  applied on reload". `codegraph_explore` plus a direct read of `CompositionRoot.cs` and
+  `AppComposition.cs` showed that premise does not hold: the tray's WE-3 "Reload" trigger
+  (`CompositionRoot.BuildTrayMenuController`'s `reload` delegate) has only ever re-read
+  `exceptions.conf` (`() => exceptions.Reload(loadExceptions())`) -- `SettingsFile.Load()` is
+  called exactly ONCE, in `WireProduction`, and focus-border/tiling/border-color are never
+  re-read from disk at all; they change only through the tray's own toggle actions, which mutate
+  in-memory state and persist it. There was no "settings reload path" to reuse for those three
+  keys because none exists. Rather than inventing a brand-new mechanism (forbidden by the task) or
+  silently dropping the "applied ... on settings reload" requirement (which T6's hardware check
+  depends on), WE-3's Reload trigger itself was extended to also re-read `gap` -- the smallest
+  change that makes an existing trigger do one more thing, not a second trigger.
+
+  **`CosmicWin.App/Settings.cs`.** `Settings` gains `Gap` (default `TreeArranger.DefaultGap`), a
+  `gap` key constant, `TryReadGap` (0..64, same shape as `TryReadPort`), a `Parse` branch, and a
+  `Serialize` block with a comment in the same voice as the other keys.
+
+  **`CosmicWin.App/CompositionRoot.cs`.** `BuildTrayMenuController` gains an optional
+  `Action? reloadGap = null`, invoked ALONGSIDE (not instead of) the exceptions reload inside the
+  same delegate passed to `TrayMenuController` -- one trigger, two things reloaded. Unset (every
+  caller before this parameter existed) leaves Reload exactly as it was.
+
+  **`CosmicWin.App/AppComposition.cs`.**
+  - `WireProduction`: `SettingsFile.Load()` moved ahead of the `TreeArranger.Gap` assignment (was
+    `TreeArranger.Gap = TreeArranger.DefaultGap;` before `settings` existed), now
+    `TreeArranger.Gap = settings.Gap;`. `Wire(...)` is called with a new
+    `loadGap: () => SettingsFile.Load().Gap` (a FRESH read per Reload, mirroring `loadExceptions`,
+    not the one-time `settings` value).
+  - `Wire`: gains an optional `Func<int>? loadGap = null` parameter. `ResumeTiling`'s inline
+    "walk every display and arrange it" loop was extracted, unchanged, into a new
+    `RearrangeEveryDisplay()` local function -- `ResumeTiling` now calls it instead of repeating the
+    loop. A new `ReloadGap()` local function sets `TreeArranger.Gap = loadGap()` and then calls
+    `RearrangeEveryDisplay()` ONLY when `tiling` is currently on -- mirroring `ToggleTiling`'s OFF
+    branch, which deliberately leaves every window exactly where the layout last put it. `Gap`
+    still updates when tiling is off, so it is there the instant tiling resumes, and the alert
+    mosaic (which reads `TreeArranger.Gap` at show time regardless of the tiling switch) sees it
+    immediately either way. `reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap)` is
+    threaded into the `BuildTrayMenuController` call -- the same `onOwningThread` wrapper
+    `ResumeTiling` already uses when the tray click turns tiling back on, because `ReloadGap` can
+    equally rearrange trees and reach the overlay through `AfterArrange`.
+  - `UpdateAlertOverlay`'s `AlertShowRequest` construction now reads
+    `Math.Max(0, TreeArranger.Gap)` instead of the bare static (review R3-negative-gap-blocks-alert)
+    -- `WebViewAlertLayerController.Start` throws `ArgumentOutOfRangeException` on a negative `Gap`,
+    and nothing stops another caller of the shared static from setting one negative.
+
+  **Tests.**
+  - `SettingsTests.cs`: rewrote `CommentsBlankLinesAndUnknownKeys_AreIgnored` (the `gap = 12`
+    fixture used to assert `gap` was an ignored UNKNOWN key -- now a genuinely unknown
+    `not-a-real-setting = 12`, with a remark explaining why) and added 8 gap facts mirroring the
+    `alert-http-port` section's shape: default, every valid spelling (0/24/64), every invalid one
+    (-1/65/non-numeric/decimal/blank/missing), last-assignment-wins, serialize round-trip (4
+    values), the comment's presence, and independence from neighbouring keys.
+  - `CompositionRootTests.cs`: added `BuildTrayMenuController_Reload_AlsoInvokesInjectedReloadGap`
+    (both the exceptions reload and `reloadGap` fire on one `Reload()` call) and
+    `BuildTrayMenuController_Reload_WithNoGapReloadWired_OnlyReloadsExceptions` (unset `reloadGap`
+    changes nothing about today's behaviour).
+  - `Alerts/WebViewAlertCompositionWiringTests.cs`: added
+    `ANegativeTreeArrangerGap_IsClampedToZeroRatherThanThrowing` (sets the shared static to `-5`,
+    restored in `finally` per this file's own convention, sends an alert, asserts no exception and
+    `gap=0` in the recorded show event).
+  - `GapReloadTests.cs` (new): an `AppComposition.Wire`-level harness mirroring `TilingModeTests`'
+    shape, with three facts -- `Reload_AppliesTheNewGapAndRearrangesTiledWindows` (a filling tile's
+    bounds move from the old gap's inset to the new one, reusing the exact edge/gap arithmetic
+    `TreeArrangerGapTests` already proves), `ReloadWithTilingOff_UpdatesTheGapButLeavesWindowsAlone`,
+    and `GapIsNotReReadOnItsOwn_OnlyOnReload`.
+
+  **RED.** `dotnet build` failed with 10 `CS1739`/`CS1061` errors -- `Settings.Gap` did not exist
+  (8 call sites across `SettingsTests.cs`), `Wire` had no `loadGap` parameter, `BuildTrayMenuController`
+  had no `reloadGap` parameter -- before any production code was written.
+
+  **GREEN.** After implementing the five production changes above: `CosmicWin.App.Tests` filtered
+  to the touched files, 166/166. Full solution: `CosmicWin.Layout.Tests` 198/198, `CosmicWinAlert.Tests`
+  13/13, `CosmicWin.Interop.Tests` 384 passed/42 skipped, `CosmicWin.App.Tests` 1075 passed/6 skipped
+  (was 1050/6 at the branch's T1-T3 point; +25 net from this task).
+
+  **Mutation checks**, each reverted after confirming the expected failure:
+  1. `TryReadGap`'s upper bound `<= 64` -> `<= 65`: 2 tests failed as expected
+     (`AnInvalidGap_KeepsTheDefaultRatherThanGuessing("gap = 65")`,
+     `GapIsReadIndependentlyOfTheOtherSettings`), reverted.
+  2. The `Math.Max(0, ...)` clamp at the alert show site removed: 1 test failed as expected
+     (`ANegativeTreeArrangerGap_IsClampedToZeroRatherThanThrowing`, string became `gap=-5` instead
+     of `gap=0`), reverted.
+  3. `ReloadGap`'s `if (tiling)` guard removed: all 3 `GapReloadTests` still passed -- caught a REAL
+     gap in the first version of `ReloadWithTilingOff_UpdatesTheGapButLeavesWindowsAlone`, which
+     added its window while tiling was ALREADY off, so the window never got a tree leaf at all
+     (`TilingModeTests.WithTilingOff_ANewWindowIsLeftWhereItOpened`'s own fact) and the mutation had
+     nothing to rearrange either way. Rewrote the fact to tile the window first, then turn tiling
+     off (mirroring `WithTilingOff_ADraggedWindowIsNoLongerSnappedBack`), reran against the same
+     mutation -> failed as expected (`SetPositionCallCount` went from 1 to 2), reverted the
+     production guard back.
+  4. `reloadGap?.Invoke()` removed from `CompositionRoot`'s combined reload delegate: 4 tests failed
+     as expected (`BuildTrayMenuController_Reload_AlsoInvokesInjectedReloadGap` plus all 3
+     `GapReloadTests`, since none of them ever saw `TreeArranger.Gap` change), reverted.
+
+  **README.** `settings.conf` keys are documented inline near their feature, not in one table --
+  added `gap` beside the "Tiling" bullet in "What works" (default, range, and that it also drives
+  the alert mosaic), and dropped "and the gap" from "the gap is compile-time" in "What it does not
+  do yet", now false.
+
+  **Reload path (for T6).** Windows: hand-edit `settings.conf`'s `gap` line, then the tray's
+  "Reload" menu item (WE-3) -- the exact same action that already reloads `exceptions.conf`, no
+  new UI, no chord. With tiling on, already-tiled windows are rearranged immediately; with tiling
+  off, the value is stored and takes effect the next time tiling is turned back on. The alert
+  mosaic picks up the new value on its next `warning:`/`failed:` command regardless of the tiling
+  switch (it reads `TreeArranger.Gap` at show time, per T2).
+
+  **Verification.**
+  - `dotnet build CosmicWin.sln`: succeeded, only the known pre-existing warnings (2 CS8604/CS8602
+    in `MultiMonitorWorkspaceAdapter.cs`, 1 CA2022 in `CosmicWinAlert.Tests/ProgramTests.cs:200`).
+  - `dotnet test CosmicWin.sln`: `CosmicWin.Layout.Tests` 198/198; `CosmicWinAlert.Tests` 13/13;
+    `CosmicWin.Interop.Tests` 384 passed/42 skipped; `CosmicWin.App.Tests` 1075 passed/6 skipped.
+  - Status: **done** for T5. Commit: `cbed25d`.
