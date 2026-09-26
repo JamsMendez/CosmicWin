@@ -67,7 +67,7 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   `GetMonitorInfo` (never WinForms `Screen.WorkingArea`, see the taskbar-tracking work), expressed
   relative to the layer surface and sent in the show message. N = 1 stays full display, as decided
   originally ("funciona como ahora"). Route: delegated.
-- [ ] T8 Hardware: right-side taskbar, 4x2 alert -> last column fully visible, gap to the taskbar
+- [x] T8 Hardware: right-side taskbar, 4x2 alert -> last column fully visible, gap to the taskbar
   edge matches the windows'.
 
 ## Acceptance criteria
@@ -446,3 +446,12 @@ maintainer's decision, unrelated to gap.
   **Status: done for T7.** T8 (hardware: right-side taskbar, 4x2 alert) is still open -- out of this
   session's scope (constraints: do not run/kill the Release app already running from `bin\Release`)
   and needs a supervised run on real hardware with a right-docked taskbar.
+
+- 2026-09-26: review `review-8261e7e19627cd5f` (medium, reliability, b5ff1e2..9149d9f) APPROVED and
+  acknowledged. Follow-ups: R3-js-workarea-layout-only-structurally-guarded (WARNING, same class as
+  R3-js-mosaic-behavior-unproved: page layout math only guarded by substring tests -- a committed
+  Node vm test of `tileRects()`/`gridAreaRect()` would close both); R3-workarea-catch-path-unexercised
+  (SUGGESTION: fake display whose WorkArea getter throws, assert trace + Unavailable).
+- 2026-09-26: T8 on hardware, Release build of 9149d9f, right-side taskbar, temporary desktop.
+  `failed:7 warning:1` -> trace `grid=4x2 gap=8 work=0,0,3392x1440` (monitor 3440 wide, taskbar 48).
+  Screenshot: last column fully visible, 8-px gap before the taskbar, warning in the last slot.
