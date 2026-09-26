@@ -61,7 +61,7 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   `TreeArranger.Gap` for windows AND the alert mosaic; applied at startup and on settings reload.
   Serialized with a comment. Alert call site clamps `Gap` to >= 0 (review R3-negative-gap-blocks-alert).
   Route: delegated (writer trigger: Settings + composition + tests). Commit `cbed25d`.
-- [ ] T6 Hardware: `gap = 24`, reload, windows and a 2x2 alert both show the wider gap.
+- [x] T6 Hardware: `gap = 24`, reload, windows and a 2x2 alert both show the wider gap.
 
 ## Acceptance criteria
 
@@ -308,3 +308,16 @@ maintainer's decision, unrelated to gap.
   - `dotnet test CosmicWin.sln`: `CosmicWin.Layout.Tests` 198/198; `CosmicWinAlert.Tests` 13/13;
     `CosmicWin.Interop.Tests` 384 passed/42 skipped; `CosmicWin.App.Tests` 1075 passed/6 skipped.
   - Status: **done** for T5. Commit: `cbed25d`.
+
+- 2026-09-26: review `review-fab54d0470d004ef` (medium, reliability, d48507b..b5ff1e2) APPROVED and
+  acknowledged. Follow-ups: R3-gapreload-static-parallel-race (WARNING) is REFUTED --
+  `CosmicWin.App.Tests/TestParallelism.cs:11` disables parallelization assembly-wide;
+  R3-reload-gap-skipped-on-exception-failure (SUGGESTION: exceptions reload throwing skips the gap
+  reload); R3-immediate-scheduler-never-fires (SUGGESTION: rename/comment the test double).
+- 2026-09-26: T6 on hardware, Release build of b5ff1e2. `gap = 24` appended to settings.conf, app
+  restarted (startup path; tray Reload path covered by `GapReloadTests`). Tiled windows show the
+  wider gap (screenshot); 2x2 alert on a temporary desktop traced
+  `tiles=failed,failed,warning,warning grid=2x2 gap=24` and shows the wider outer/inner gap.
+  settings.conf restored to its original content afterwards, app restarted (default gap 8).
+  Still open from T4: the layer spans monitor bounds, the right-side taskbar covers part of the
+  last column -- awaiting the maintainer's decision.
