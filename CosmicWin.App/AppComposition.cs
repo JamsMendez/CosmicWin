@@ -171,6 +171,11 @@ public sealed class AppComposition : IDisposable
         Action<bool>? persistTiling = null,
         // Optional, same as the persistX delegates above.
         Action<string>? persistVideoWallpaperPath = null,
+        // same-video-noop, S2: the file-identity predicate SwitchVideoWallpaper's http path uses
+        // to decide a repeat request is a no-op. Production wires VideoWallpaperImport.IsSameFile;
+        // null (the default in every test that predates this task) means "never the same file", so
+        // the http path always reloads exactly as it did before this parameter existed.
+        Func<string, string, bool>? isSameVideoFile = null,
         // The T3/T4 collaborators. Both null (the default in every test that predates T6) means
         // "nothing to attach or play" -- construction alone never attaches or plays anything, only
         // TryAttach/TryPlay do, and those only run when a path is ALSO present (see below).
@@ -437,6 +442,15 @@ public sealed class AppComposition : IDisposable
         /// always traces <c>phase=restore</c> regardless of what switched it -- restoring is the
         /// same fallback either way, not a per-caller outcome.
         /// </param>
+        /// <param name="skipIfUnchanged">
+        /// same-video-noop, S2: HTTP only (decision 1 -- a tray re-pick keeps reloading exactly as
+        /// today, so <c>setVideoWallpaperPath</c>'s call site below never passes this). When true
+        /// AND playback is genuinely active AND <paramref name="path"/> is the same file as
+        /// <c>currentVideoWallpaperPath</c> per <c>isSameVideoFile</c>, the whole
+        /// stop/import/persist/(re)activate sequence is skipped -- the request is still accepted
+        /// for dispatch (this method still returns <see langword="true"/>), it just does nothing
+        /// once it runs.
+        /// </param>
         /// <remarks>
         /// Checks its own collaborators the same way <see cref="ActivateVideoWallpaper"/> does,
         /// rather than trusting a caller's earlier check -- redundant for
@@ -444,7 +458,7 @@ public sealed class AppComposition : IDisposable
         /// already checked, the same redundancy the startup activation further down this method
         /// accepts by checking before calling <see cref="ActivateVideoWallpaper"/> itself.
         /// </remarks>
-        bool SwitchVideoWallpaper(string path, string phase = "pick")
+        bool SwitchVideoWallpaper(string path, string phase = "pick", bool skipIfUnchanged = false)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
             {
@@ -460,6 +474,23 @@ public sealed class AppComposition : IDisposable
             // for as long as the copy took.
             onVideoWallpaperThread(() =>
             {
+                // same-video-noop, S2: read and checked HERE, inside the work item, for the same
+                // reason `previous` below is -- work items run in order, so this sees whatever an
+                // earlier queued switch actually landed, not a stale value read before this one was
+                // even posted. Requires playback to be genuinely ACTIVE, not merely configured: a
+                // died playback (attach or play failed last time) must still let a repeat request
+                // revive it, exactly as it does today. Any isSameVideoFile failure, or the null
+                // default this parameter documents, reads as "different" and falls through to the
+                // ordinary switch below.
+                if (skipIfUnchanged
+                    && videoWallpaperActive.Value
+                    && currentVideoWallpaperPath is { } activePath
+                    && (isSameVideoFile?.Invoke(path, activePath) ?? false))
+                {
+                    desktopTrace?.Record($"video-wallpaper phase={phase} unchanged");
+                    return;
+                }
+
                 // Idempotent and never throws, per the interface contract -- releases the fixed
                 // destination file so the import below can overwrite it.
                 videoWallpaperPlayer.Stop();
@@ -542,7 +573,9 @@ public sealed class AppComposition : IDisposable
         /// check -- no new thread is spun up just to make the endpoint technically answer 202.
         /// </remarks>
         bool HandleVideoWallpaperHttpSwitch(string path) =>
-            scheduleVideoWallpaperWork is null ? false : SwitchVideoWallpaper(path, phase: "http");
+            scheduleVideoWallpaperWork is null
+                ? false
+                : SwitchVideoWallpaper(path, phase: "http", skipIfUnchanged: true);
 
         string HandleAlertCommand(string text)
         {
@@ -1719,6 +1752,7 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
+            isSameVideoFile: VideoWallpaperImport.IsSameFile,
             alertsEnabled: settings.AlertsEnabled,
             alertHttpEnabled: settings.AlertHttpEnabled,
             alertHttpPort: settings.AlertHttpPort,

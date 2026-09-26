@@ -181,7 +181,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Action? disposeVideoWallpaper = null,
         Action<string>? persistVideoWallpaperPath = null,
         Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
-        bool videoWallpaperHttpEnabled = false)
+        bool videoWallpaperHttpEnabled = false,
+        Func<string, string, bool>? isSameVideoFile = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -215,6 +216,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             videoWallpaperPath: videoWallpaperPath,
             persistVideoWallpaperPath: persistVideoWallpaperPath,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
+            isSameVideoFile: isSameVideoFile,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, videoSwitch) =>
             {
@@ -936,6 +938,177 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.Contains(trace.Lines, l => l.StartsWith("video-wallpaper phase=http "));
             Assert.DoesNotContain(trace.Lines, l => l.Contains("tray.mp4", StringComparison.Ordinal));
             Assert.DoesNotContain(trace.Lines, l => l.Contains("http.mp4", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// same-video-noop, S2: a repeat HTTP request naming the video that is already playing must be
+    /// a true no-op -- no <c>Stop()</c>, no import, no persist, and no second
+    /// <c>ActivateVideoWallpaper</c> call -- while still answering "accepted" (202 at the protocol
+    /// layer) exactly like any other switch this delegate dispatches. <c>isSameVideoFile</c> is
+    /// stubbed to always agree, so this proves the WIRING (the check runs, and short-circuits
+    /// before <c>Stop()</c>), not the real file-identity comparison <see
+    /// cref="VideoWallpaperImportTests.IsSameFile_HardLinkedFiles_ReturnsTrue"/> already covers.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_SamePathWhileActive_SkipsStopImportAndPersistButStillReturnsTrue()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var imports = new List<string>();
+        var persisted = new List<string>();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: p =>
+            {
+                imports.Add(p);
+                return p;
+            },
+            persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
+            scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => true);
+        using (harness.Composition)
+        {
+            // Startup queued its own activation work item ahead of anything this test posts.
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, player.TryPlayCallCount);
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(path);
+            Assert.True(accepted);
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(0, player.StopCallCount);
+            Assert.Empty(imports);
+            Assert.Empty(persisted);
+            // No second attach/play: TryPlayCallCount is still exactly the one from startup.
+            Assert.Equal(1, player.TryPlayCallCount);
+            Assert.Equal(["video-wallpaper phase=http unchanged"], trace.Lines);
+        }
+    }
+
+    /// <summary>
+    /// The skip above requires playback to actually BE active, not merely configured: when startup
+    /// attached but <see cref="IVideoWallpaperPlayer.TryPlay"/> failed, <c>videoWallpaperActive</c>
+    /// is false, and a repeat request for the very same video must revive it exactly like today --
+    /// the constraint from the approach doc ("if playback died, a repeat request revives it").
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_SamePathWhilePlaybackIsNotActive_ReloadsAnyway()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer { TryPlayReturns = false };
+        var trace = new RecordingDesktopTrace();
+        var imports = new List<string>();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: p =>
+            {
+                imports.Add(p);
+                return p;
+            },
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => true);
+        using (harness.Composition)
+        {
+            // Startup attached but TryPlay failed -- videoWallpaperActive is false.
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, player.TryPlayCallCount);
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(path);
+            Assert.True(accepted);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, player.StopCallCount);
+            Assert.Equal([path], imports);
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// A genuinely different video (<c>isSameVideoFile</c> stubbed to disagree, standing in for two
+    /// distinct file identities) always reloads -- the ordinary switch this whole feature must
+    /// leave untouched.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_DifferentPathWhileActive_Reloads()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var imports = new List<string>();
+        var persisted = new List<string>();
+        var previousPath = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        const string requestedPath = @"C:\Users\me\Videos\different.mp4";
+        const string imported = @"C:\LOCALAPPDATA\CosmicWin\video-wallpaper.mp4";
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: previousPath,
+            importVideoWallpaper: p =>
+            {
+                imports.Add(p);
+                return imported;
+            },
+            persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
+            scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => false);
+        using (harness.Composition)
+        {
+            // Startup queued its own activation work item ahead of anything this test posts.
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(requestedPath);
+            Assert.True(accepted);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, player.StopCallCount);
+            Assert.Equal([requestedPath], imports);
+            Assert.Equal([imported], persisted);
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Decision 1 in <c>odd/tasks/same-video-noop.md</c>: HTTP only. A tray re-pick of the very
+    /// same video must keep reloading exactly as today, even with <c>isSameVideoFile</c> stubbed to
+    /// always agree -- <c>setVideoWallpaperPath</c>'s tray call site never passes
+    /// <c>skipIfUnchanged</c>, so the predicate is never even consulted on that path.
+    /// </summary>
+    [Fact]
+    public void TrayPick_SamePathWhileActive_ReloadsAnyway()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var imports = new List<string>();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: p =>
+            {
+                imports.Add(p);
+                return p;
+            },
+            isSameVideoFile: (_, _) => true);
+        using (harness.Composition)
+        {
+            Assert.Equal(1, player.TryPlayCallCount);
+
+            harness.Tray.SetVideoWallpaperPath(path);
+
+            Assert.Equal(1, player.StopCallCount);
+            Assert.Equal([path], imports);
         }
     }
 }
