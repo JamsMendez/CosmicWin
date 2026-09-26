@@ -110,7 +110,7 @@ never the caller's source, so a string comparison cannot detect "same video".
 - 2026-09-26: review `review-478139c738a9ef4a` (medium, lens reliability, base main..a3576f2) APPROVED
   and acknowledged (authority burned). Three non-blocking findings, left as follow-ups:
   - R3-predicate-args-unproved (WARNING): every wiring test stubs `isSameVideoFile` with a constant,
-    so swapped or wrong operands would go unnoticed. Follow-up: an argument-sensitive predicate test.
+    so swapped or wrong operands would go unnoticed. FIXED in `bf6f433`, see Progress.
   - R3-predicate-throw-not-contained (SUGGESTION): a throwing injected predicate escapes the work
     item; the comment claims "any failure reads as different". Production `IsSameFile` never throws.
   - R3-inplace-edit-hardlink (SUGGESTION): re-encoding the linked source in place keeps its identity,
@@ -122,3 +122,9 @@ never the caller's source, so a string comparison cannot detect "same video".
   destination path itself -> `unchanged`; WordWorldLoop -> full switch back (`tryPlay=True`),
   `fsutil hardlink list` confirms the destination is linked to WordWorldLoop again.
   The branch build is left running from `CosmicWin.App\bin\Release\...`.
+- 2026-09-26: R3-predicate-args-unproved closed (commit `bf6f433`, route inline: one test file).
+  `HttpSwitch_ComparesTheRequestedPathAgainstTheCurrentImportedPath`: the predicate agrees only for
+  (requested, current imported) and records its calls; a first switch proves the current path
+  advances to the IMPORTED destination. Passed on first run (behavior existed), so mutation-checked:
+  `Invoke(path, path)` FAILS, `Invoke(activePath, path)` FAILS, `currentVideoWallpaperPath = path`
+  FAILS; each restored. Full suites: Layout 198, Alert 13, Interop 387/42 skipped, App 1021/6 skipped.
