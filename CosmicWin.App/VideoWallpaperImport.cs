@@ -144,49 +144,68 @@ public static class VideoWallpaperImport
     }
 
     /// <summary>
-    /// same-video-noop, S1: true iff <paramref name="pathA"/> and <paramref name="pathB"/> are the
-    /// SAME NTFS file -- same volume serial number and file index
-    /// (<c>GetFileInformationByHandle</c>), not merely equal bytes or equal paths. A hard-linked
-    /// import (see the class remarks above) shares this identity with the source it points at, so
-    /// an HTTP request naming either the caller's original source or CosmicWin's own already-
-    /// imported destination both read as "the same video" -- exactly the case
-    /// <c>odd/tasks/same-video-noop.md</c> needs to detect a repeat request as a no-op.
+    /// noop-followups, F1: a point-in-time fingerprint of a file's NTFS identity (volume serial
+    /// number plus file index) AND its size and last-write time -- everything
+    /// <c>GetFileInformationByHandle</c> reports that can tell two moments of the SAME file apart.
+    /// Value equality (a <see langword="record struct"/>) is exactly what a same-video comparison
+    /// needs: two snapshots taken of the same on-disk state must compare equal, one taken before
+    /// and one taken after an in-place edit must not.
     /// </summary>
     /// <remarks>
-    /// Never throws: a missing file, a locked file, or any other failure to open either path
-    /// counts as "different", the same fail-safe direction <see cref="TryCreateHardLink"/> already
-    /// uses for its own failures -- a false "same" would silently swallow a real switch, while a
-    /// false "different" only costs the reload this predicate exists to avoid.
+    /// Identity ALONE (what the superseded <c>IsSameFile</c> compared) cannot detect an in-place
+    /// edit -- a video re-encoded or edited without ever being renamed keeps its volume serial and
+    /// file index. Comparing size/last-write of the REQUESTED path against a FRESH read of the
+    /// imported destination cannot detect it either: with a hard-linked import the two names are
+    /// the same file, so a fresh read of either always agrees with a fresh read of the other,
+    /// edited or not -- both readings simply describe whatever the file currently is. Detecting an
+    /// edit requires comparing a fresh read against a STALE snapshot taken before the edit, which
+    /// is why <c>AppComposition</c> caches one of these the moment playback actually starts,
+    /// rather than re-reading the imported path at compare time.
     /// </remarks>
-    internal static bool IsSameFile(string pathA, string pathB) =>
-        TryGetFileIdentity(pathA, out var identityA)
-        && TryGetFileIdentity(pathB, out var identityB)
-        && identityA.Equals(identityB);
+    // `public`, not `internal` like TryReadSnapshot below and the rest of this class: this type
+    // appears in AppComposition.Wire's own public readVideoFileSnapshot parameter (a Func<string,
+    // VideoFileSnapshot?>), and C# requires a public member's signature to expose nothing less
+    // accessible than the member itself. The reader method that PRODUCES one stays internal --
+    // only the shape of the value needs to be visible outside this assembly.
+    public readonly record struct VideoFileSnapshot(
+        uint VolumeSerialNumber, ulong FileIndex, long Size, long LastWriteTime);
 
     /// <summary>
+    /// Reads <paramref name="path"/>'s current <see cref="VideoFileSnapshot"/>, or
+    /// <see langword="null"/> on any failure -- a missing file, a locked file, or anything else
+    /// that keeps <c>GetFileInformationByHandle</c> from answering. Never throws: the caller
+    /// (<c>AppComposition</c>'s <c>SafeReadSnapshot</c>) additionally wraps every call to the
+    /// INJECTED reader in a try/catch of its own, since a test double is free to throw where this
+    /// real implementation never does; either way, a failure here reads as "no snapshot", which
+    /// <c>SwitchVideoWallpaper</c>'s skip check treats the same as "different" -- a false "same"
+    /// would silently swallow a real switch, while a false "different" only costs the reload this
+    /// check exists to avoid.
+    /// </summary>
+    /// <remarks>
     /// Opened for read attributes only, sharing read/write/delete with every other handle -- this
     /// check must never itself block a concurrent import's Stop/copy/move sequence, or hold a
     /// delete open against a file some other code is about to replace.
-    /// </summary>
-    private static bool TryGetFileIdentity(
-        string path, out (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) identity)
+    /// </remarks>
+    internal static VideoFileSnapshot? TryReadSnapshot(string path)
     {
-        identity = default;
         try
         {
             using var handle = File.OpenHandle(
                 path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (!GetFileInformationByHandle(handle, out var info))
             {
-                return false;
+                return null;
             }
 
-            identity = (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow);
-            return true;
+            return new VideoFileSnapshot(
+                info.VolumeSerialNumber,
+                ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow,
+                ((long)info.FileSizeHigh << 32) | info.FileSizeLow,
+                info.LastWriteTime);
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 

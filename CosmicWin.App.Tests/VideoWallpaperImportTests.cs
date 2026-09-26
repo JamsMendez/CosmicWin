@@ -335,34 +335,36 @@ public sealed class VideoWallpaperImportTests : IDisposable
     }
 
     /// <summary>
-    /// same-video-noop, S1: the identity predicate an HTTP re-request will use to decide whether
-    /// the video it names is the one already playing. Opening the same path twice must read as
-    /// the same file, trivially -- proven here without touching <c>GetFileInformationByHandle</c>
-    /// directly, unlike the helper below, since <see cref="VideoWallpaperImport.IsSameFile"/> is
-    /// itself the thing under test.
+    /// noop-followups, F1: replaces the superseded <c>IsSameFile</c> tests below (the whole point
+    /// of this task is that identity alone cannot detect an in-place edit -- see
+    /// <see cref="VideoWallpaperImport.VideoFileSnapshot"/>'s remarks). Opening the same path twice
+    /// must read as an equal snapshot, trivially -- proven here without touching
+    /// <c>GetFileInformationByHandle</c> directly, unlike the helper below, since
+    /// <see cref="VideoWallpaperImport.TryReadSnapshot"/> is itself the thing under test.
     /// </summary>
     [Fact]
-    public void IsSameFile_SamePath_ReturnsTrue()
+    public void TryReadSnapshot_SamePathTwice_ReturnsEqualSnapshots()
     {
         var path = WriteSourceFile("clip.mp4", "same-path-payload");
 
-        Assert.True(VideoWallpaperImport.IsSameFile(path, path));
+        Assert.Equal(VideoWallpaperImport.TryReadSnapshot(path), VideoWallpaperImport.TryReadSnapshot(path));
     }
 
     /// <summary>
     /// A hard-linked import (see <see cref="Import_WhenSourceAndDestinationShareAVolume_LinksInsteadOfCopyingBytes"/>)
     /// IS the source's own file data reached through a second directory entry -- same volume
-    /// serial and file index -- which is exactly the case the same-video no-op relies on: an HTTP
-    /// request naming either the original source or the already-imported destination must both
-    /// read as "the same video".
+    /// serial, file index, size and last-write time -- which is exactly the case the same-video
+    /// no-op relies on: an HTTP request naming either the original source or the already-imported
+    /// destination must both read as "the same video" (before either is edited -- see the
+    /// in-place-edit test below for the case this equality alone cannot cover).
     /// </summary>
     [Fact]
-    public void IsSameFile_HardLinkedFiles_ReturnsTrue()
+    public void TryReadSnapshot_HardLinkedFiles_ReturnsEqualSnapshots()
     {
         var source = WriteSourceFile("clip.mp4", "linked-payload");
         var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
 
-        Assert.True(VideoWallpaperImport.IsSameFile(source, destination));
+        Assert.Equal(VideoWallpaperImport.TryReadSnapshot(source), VideoWallpaperImport.TryReadSnapshot(destination));
     }
 
     /// <summary>
@@ -372,28 +374,55 @@ public sealed class VideoWallpaperImportTests : IDisposable
     /// "the same file", or a genuine different-volume switch would be silently ignored.
     /// </summary>
     [Fact]
-    public void IsSameFile_DistinctFilesWithIdenticalBytes_ReturnsFalse()
+    public void TryReadSnapshot_DistinctFilesWithIdenticalBytes_ReturnsDifferentSnapshots()
     {
         var source = WriteSourceFile("clip.mp4", "identical-bytes-payload");
         var destination = VideoWallpaperImport.Import(_destinationDirectory, source, (_, _) => false);
 
-        Assert.False(VideoWallpaperImport.IsSameFile(source, destination));
+        Assert.NotEqual(VideoWallpaperImport.TryReadSnapshot(source), VideoWallpaperImport.TryReadSnapshot(destination));
     }
 
     /// <summary>
-    /// Any identity failure -- here, a path that does not exist at all -- counts as "different",
-    /// never throws, and never blocks a real switch (the approach's own fail-safe direction:
-    /// "any identity failure ... counts as different and switches as today").
+    /// Any read failure -- here, a path that does not exist at all -- reads as "no snapshot",
+    /// never throws, and never blocks a real switch (the approach's own fail-safe direction: a
+    /// missing snapshot on either side of the comparison falls through to a reload).
     /// </summary>
     [Fact]
-    public void IsSameFile_MissingFile_ReturnsFalse()
+    public void TryReadSnapshot_MissingFile_ReturnsNull()
     {
-        var existing = WriteSourceFile("clip.mp4", "existing-payload");
         var missing = Path.Combine(_sourceDirectory, "does-not-exist.mp4");
 
-        Assert.False(VideoWallpaperImport.IsSameFile(existing, missing));
-        Assert.False(VideoWallpaperImport.IsSameFile(missing, existing));
-        Assert.False(VideoWallpaperImport.IsSameFile(missing, missing));
+        Assert.Null(VideoWallpaperImport.TryReadSnapshot(missing));
+    }
+
+    /// <summary>
+    /// F1 (noop-followups, R3-inplace-edit-hardlink): the case identity-only comparison could never
+    /// catch, and the whole reason this task replaces <c>IsSameFile</c> with a snapshot that also
+    /// carries size and last-write time. Re-encoding (simulated here as an ordinary in-place
+    /// rewrite) keeps the file's NTFS identity -- same volume serial, same file index -- but its
+    /// size and last-write time move, and <see cref="VideoFileSnapshot"/>'s value equality must
+    /// treat the two readings as different.
+    /// </summary>
+    [Fact]
+    public void TryReadSnapshot_FileRewrittenInPlace_DiffersButKeepsTheSameIdentity()
+    {
+        var source = WriteSourceFile("clip.mp4", "original-content");
+        var destination = VideoWallpaperImport.Import(_destinationDirectory, source);
+        var before = VideoWallpaperImport.TryReadSnapshot(destination);
+        Assert.NotNull(before);
+
+        // Writing to the SOURCE, not the destination: the class remarks forbid ever opening the
+        // linked destination for writing, but the source is exactly what a user re-encoding their
+        // own picked video edits -- and since the destination is a hard link, it observes the same
+        // bytes either way.
+        File.WriteAllText(source, "re-encoded-content-of-a-very-different-length");
+
+        var after = VideoWallpaperImport.TryReadSnapshot(destination);
+
+        Assert.NotNull(after);
+        Assert.NotEqual(before, after);
+        Assert.Equal(before!.Value.VolumeSerialNumber, after!.Value.VolumeSerialNumber);
+        Assert.Equal(before.Value.FileIndex, after.Value.FileIndex);
     }
 
     private static (uint VolumeSerialNumber, uint FileIndexHigh, uint FileIndexLow) GetFileIdentity(string path)

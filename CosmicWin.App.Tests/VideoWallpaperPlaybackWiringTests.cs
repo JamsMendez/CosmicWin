@@ -182,7 +182,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Action<string>? persistVideoWallpaperPath = null,
         Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
         bool videoWallpaperHttpEnabled = false,
-        Func<string, string, bool>? isSameVideoFile = null)
+        Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -216,7 +216,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             videoWallpaperPath: videoWallpaperPath,
             persistVideoWallpaperPath: persistVideoWallpaperPath,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
-            isSameVideoFile: isSameVideoFile,
+            readVideoFileSnapshot: readVideoFileSnapshot,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, videoSwitch) =>
             {
@@ -942,13 +942,15 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
-    /// same-video-noop, S2: a repeat HTTP request naming the video that is already playing must be
-    /// a true no-op -- no <c>Stop()</c>, no import, no persist, and no second
-    /// <c>ActivateVideoWallpaper</c> call -- while still answering "accepted" (202 at the protocol
-    /// layer) exactly like any other switch this delegate dispatches. <c>isSameVideoFile</c> is
-    /// stubbed to always agree, so this proves the WIRING (the check runs, and short-circuits
-    /// before <c>Stop()</c>), not the real file-identity comparison <see
-    /// cref="VideoWallpaperImportTests.IsSameFile_HardLinkedFiles_ReturnsTrue"/> already covers.
+    /// same-video-noop, S2 (snapshot seam per noop-followups F1): a repeat HTTP request naming the
+    /// video that is already playing must be a true no-op -- no <c>Stop()</c>, no import, no
+    /// persist, and no second <c>ActivateVideoWallpaper</c> call -- while still answering
+    /// "accepted" (202 at the protocol layer) exactly like any other switch this delegate
+    /// dispatches. <c>readVideoFileSnapshot</c> is stubbed to always return the same constant
+    /// snapshot regardless of path, so this proves the WIRING (the check runs, and short-circuits
+    /// before <c>Stop()</c>), not the real file-reading comparison <see
+    /// cref="VideoWallpaperImportTests.TryReadSnapshot_HardLinkedFiles_ReturnsEqualSnapshots"/>
+    /// already covers.
     /// </summary>
     [Fact]
     public void HttpSwitch_SamePathWhileActive_SkipsStopImportAndPersistButStillReturnsTrue()
@@ -960,6 +962,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var imports = new List<string>();
         var persisted = new List<string>();
         var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        var constantSnapshot = new VideoWallpaperImport.VideoFileSnapshot(1, 1, 1, 1);
 
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
@@ -970,7 +973,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
             scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => true);
+            videoWallpaperHttpEnabled: true, readVideoFileSnapshot: _ => constantSnapshot);
         using (harness.Composition)
         {
             // Startup queued its own activation work item ahead of anything this test posts.
@@ -1016,7 +1019,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 return p;
             },
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => true);
+            videoWallpaperHttpEnabled: true,
+            readVideoFileSnapshot: _ => new VideoWallpaperImport.VideoFileSnapshot(1, 1, 1, 1));
         using (harness.Composition)
         {
             // Startup attached but TryPlay failed -- videoWallpaperActive is false.
@@ -1035,9 +1039,9 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
-    /// A genuinely different video (<c>isSameVideoFile</c> stubbed to disagree, standing in for two
-    /// distinct file identities) always reloads -- the ordinary switch this whole feature must
-    /// leave untouched.
+    /// A genuinely different video (<c>readVideoFileSnapshot</c> stubbed to return no snapshot at
+    /// all, standing in for two distinct files) always reloads -- the ordinary switch this whole
+    /// feature must leave untouched.
     /// </summary>
     [Fact]
     public void HttpSwitch_DifferentPathWhileActive_Reloads()
@@ -1061,7 +1065,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
             scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true, isSameVideoFile: (_, _) => false);
+            videoWallpaperHttpEnabled: true, readVideoFileSnapshot: _ => null);
         using (harness.Composition)
         {
             // Startup queued its own activation work item ahead of anything this test posts.
@@ -1080,13 +1084,16 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
-    /// Review finding R3-predicate-args-unproved: the tests above stub <c>isSameVideoFile</c> with a
-    /// constant, so they would still pass if the skip compared the wrong operands. Here the predicate
-    /// agrees ONLY for (requested source, current IMPORTED path) in that order, so comparing the
-    /// request with itself, swapping the operands, or comparing against the raw source of the
-    /// previous switch instead of what it imported all fall through to a reload and fail. The first
-    /// switch also proves the current path advances to the imported destination -- the trap the
-    /// feature doc names: the caller's source is never what is stored.
+    /// Review finding R3-predicate-args-unproved, adapted to the snapshot seam (noop-followups F1):
+    /// the tests above stub <c>readVideoFileSnapshot</c> with a constant, so they would still pass
+    /// if the skip compared the wrong operands. Here the fake reader is keyed by PATH and returns a
+    /// DIFFERENT snapshot for every distinct path except <c>repeatSource</c>, which is scripted to
+    /// return the SAME snapshot as <c>imported</c> -- standing in for a hard-linked alias of the
+    /// currently playing file. The recorded query order proves the compare fetches a fresh read of
+    /// the REQUESTED path each time (never a cached one), and that the value it is compared AGAINST
+    /// -- <c>currentVideoSnapshot</c> -- was captured from the IMPORTED destination the first switch
+    /// actually activated, never from the raw source the caller passed in: the trap the feature doc
+    /// names, that the caller's source is never what is stored.
     /// </summary>
     [Fact]
     public void HttpSwitch_ComparesTheRequestedPathAgainstTheCurrentImportedPath()
@@ -1096,11 +1103,18 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var player = new FakeVideoWallpaperPlayer();
         var trace = new RecordingDesktopTrace();
         var imports = new List<string>();
-        var comparisons = new List<(string Requested, string Current)>();
+        var queriedPaths = new List<string>();
         var startupPath = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
         const string firstSource = @"C:\Users\me\Videos\first.mp4";
         const string imported = @"C:\LOCALAPPDATA\CosmicWin\video-wallpaper.mp4";
         const string repeatSource = @"C:\Users\me\Videos\first-by-another-name.mp4";
+        var snapshotsByPath = new Dictionary<string, VideoWallpaperImport.VideoFileSnapshot>
+        {
+            [startupPath] = new(1, 1, 1, 1),
+            [firstSource] = new(2, 2, 2, 2),
+            [imported] = new(3, 3, 3, 3),
+            [repeatSource] = new(3, 3, 3, 3), // scripted to match `imported` -- a hard-linked alias.
+        };
 
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: startupPath,
@@ -1111,10 +1125,10 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
             videoWallpaperHttpEnabled: true,
-            isSameVideoFile: (requested, current) =>
+            readVideoFileSnapshot: path =>
             {
-                comparisons.Add((requested, current));
-                return requested == repeatSource && current == imported;
+                queriedPaths.Add(path);
+                return snapshotsByPath.TryGetValue(path, out var snapshot) ? snapshot : null;
             });
         using (harness.Composition)
         {
@@ -1129,7 +1143,11 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.True(harness.HandleVideoWallpaperHttpSwitch!(repeatSource));
             queued.Dequeue().Invoke();
 
-            Assert.Equal([(firstSource, startupPath), (repeatSource, imported)], comparisons);
+            // startup snapshots startupPath; the first switch's skip-check reads firstSource (a
+            // miss against startupPath's snapshot) then, once it actually activates, snapshots
+            // `imported` -- never firstSource itself; the repeat switch's skip-check reads
+            // repeatSource, which matches that cached `imported` snapshot.
+            Assert.Equal([startupPath, firstSource, imported, repeatSource], queriedPaths);
             Assert.Equal(1, player.StopCallCount);
             Assert.Equal([firstSource], imports);
             Assert.Equal(["video-wallpaper phase=http unchanged"], trace.Lines);
@@ -1137,10 +1155,95 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// F1 (noop-followups, R3-inplace-edit-hardlink): the whole reason this task replaces a
+    /// same-file-identity check with a snapshot comparison. The fake reader returns two DIFFERENT
+    /// snapshots in sequence for the SAME path/identity -- the first captured when playback starts
+    /// (via <c>ActivateVideoWallpaper</c>'s own <c>SafeReadSnapshot</c> call), the second read fresh
+    /// when the repeat HTTP request's skip-check runs, standing in for a video re-encoded in place
+    /// between the two moments. A same-identity-but-different-size/last-write pair must never skip.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_FileEditedInPlaceSincePlaybackStarted_Reloads()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        var snapshots = new Queue<VideoWallpaperImport.VideoFileSnapshot?>(
+        [
+            new VideoWallpaperImport.VideoFileSnapshot(1, 1, 100, 100), // captured at playback start.
+            new VideoWallpaperImport.VideoFileSnapshot(1, 1, 999, 100), // same identity, edited size.
+        ]);
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true,
+            readVideoFileSnapshot: _ => snapshots.Count > 0 ? snapshots.Dequeue() : null);
+        using (harness.Composition)
+        {
+            // Startup activation consumes the first queued snapshot.
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(path);
+            Assert.True(accepted);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, player.StopCallCount);
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// F1 (noop-followups, R3-predicate-throw-not-contained): an injected reader that throws must
+    /// never escape the video wallpaper work item -- it reads as "no snapshot", exactly like a real
+    /// <see cref="VideoWallpaperImport.TryReadSnapshot"/> failure, and the switch reloads.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_ThrowingSnapshotReader_ReloadsWithoutTheExceptionEscaping()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        var reads = 0;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true,
+            readVideoFileSnapshot: _ =>
+            {
+                reads++;
+                // The first read (startup) succeeds and becomes the cached snapshot; every read
+                // after that (the repeat request's skip-check) throws.
+                return reads == 1
+                    ? new VideoWallpaperImport.VideoFileSnapshot(1, 1, 1, 1)
+                    : throw new IOException("boom");
+            });
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(path);
+            var thrown = Record.Exception(() => queued.Dequeue().Invoke());
+
+            Assert.True(accepted);
+            Assert.Null(thrown);
+            Assert.Equal(1, player.StopCallCount);
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
     /// Decision 1 in <c>odd/tasks/same-video-noop.md</c>: HTTP only. A tray re-pick of the very
-    /// same video must keep reloading exactly as today, even with <c>isSameVideoFile</c> stubbed to
-    /// always agree -- <c>setVideoWallpaperPath</c>'s tray call site never passes
-    /// <c>skipIfUnchanged</c>, so the predicate is never even consulted on that path.
+    /// same video must keep reloading exactly as today, even with <c>readVideoFileSnapshot</c>
+    /// stubbed to always agree -- <c>setVideoWallpaperPath</c>'s tray call site never passes
+    /// <c>skipIfUnchanged</c>, so the reader is never even consulted on that path.
     /// </summary>
     [Fact]
     public void TrayPick_SamePathWhileActive_ReloadsAnyway()
@@ -1157,7 +1260,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 imports.Add(p);
                 return p;
             },
-            isSameVideoFile: (_, _) => true);
+            readVideoFileSnapshot: _ => new VideoWallpaperImport.VideoFileSnapshot(1, 1, 1, 1));
         using (harness.Composition)
         {
             Assert.Equal(1, player.TryPlayCallCount);

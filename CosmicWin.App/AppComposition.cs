@@ -171,11 +171,16 @@ public sealed class AppComposition : IDisposable
         Action<bool>? persistTiling = null,
         // Optional, same as the persistX delegates above.
         Action<string>? persistVideoWallpaperPath = null,
-        // same-video-noop, S2: the file-identity predicate SwitchVideoWallpaper's http path uses
-        // to decide a repeat request is a no-op. Production wires VideoWallpaperImport.IsSameFile;
-        // null (the default in every test that predates this task) means "never the same file", so
-        // the http path always reloads exactly as it did before this parameter existed.
-        Func<string, string, bool>? isSameVideoFile = null,
+        // noop-followups, F1: reads a point-in-time VideoFileSnapshot (identity + size + last-write)
+        // of the path it is given, or null on any failure. Production wires
+        // VideoWallpaperImport.TryReadSnapshot; null (the default in every test that predates this
+        // parameter, and every test that predated same-video-noop's isSameVideoFile before it)
+        // means "never take a snapshot", so the http path always reloads exactly as it did before
+        // either parameter existed. SwitchVideoWallpaper never calls this directly -- always through
+        // the SafeReadSnapshot wrapper below, which also catches an exception from an INJECTED
+        // reader (a real GetFileInformationByHandle-backed one never throws, but a test double is
+        // free to) and treats it the same way: as "no snapshot".
+        Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null,
         // The T3/T4 collaborators. Both null (the default in every test that predates T6) means
         // "nothing to attach or play" -- construction alone never attaches or plays anything, only
         // TryAttach/TryPlay do, and those only run when a path is ALSO present (see below).
@@ -399,6 +404,33 @@ public sealed class AppComposition : IDisposable
         // set on the UI thread, cleared on the video-wallpaper thread.
         var videoWallpaperKeepAlivePending = new VolatileFlag();
 
+        // noop-followups, F1: the SNAPSHOT of the played file taken the moment playback last
+        // actually started -- read here, on the video wallpaper thread, never re-read at compare
+        // time. Re-reading the imported destination fresh at compare time cannot detect an
+        // in-place edit (see VideoFileSnapshot's remarks: a hard-linked destination and its source
+        // are literally the same file, so a fresh read of either always agrees with a fresh read
+        // of the other, edited or not); only a comparison against a STALE snapshot taken before
+        // the edit can. Cleared to null whenever videoWallpaperActive itself is cleared, so the two
+        // always agree: no snapshot is ever kept around for a video that is not actually playing.
+        VideoWallpaperImport.VideoFileSnapshot? currentVideoSnapshot = null;
+
+        // noop-followups, F1 (R3-predicate-throw-not-contained): every call to the INJECTED
+        // readVideoFileSnapshot delegate goes through here, never direct -- a test double is free
+        // to throw where the real, production TryReadSnapshot never does, and a throw from either
+        // must read as "no snapshot" (same as a null result) rather than escape the video
+        // wallpaper work item and take the whole switch down with it.
+        VideoWallpaperImport.VideoFileSnapshot? SafeReadSnapshot(string path)
+        {
+            try
+            {
+                return readVideoFileSnapshot?.Invoke(path);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         void ActivateVideoWallpaper(string phase, string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
@@ -415,6 +447,13 @@ public sealed class AppComposition : IDisposable
             }
 
             videoWallpaperActive.Value = attached && played == true;
+
+            // F1: snapshot the path that just (re)started -- the IMPORTED destination on every
+            // caller (startup's configured path, a restore's previous import, or a fresh
+            // switch's own import result), never the raw source a caller passed to
+            // SwitchVideoWallpaper. Null whenever playback did not actually come up, matching
+            // videoWallpaperActive itself.
+            currentVideoSnapshot = videoWallpaperActive.Value ? SafeReadSnapshot(path) : null;
 
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
@@ -443,10 +482,11 @@ public sealed class AppComposition : IDisposable
         /// same fallback either way, not a per-caller outcome.
         /// </param>
         /// <param name="skipIfUnchanged">
-        /// same-video-noop, S2: HTTP only (decision 1 -- a tray re-pick keeps reloading exactly as
-        /// today, so <c>setVideoWallpaperPath</c>'s call site below never passes this). When true
-        /// AND playback is genuinely active AND <paramref name="path"/> is the same file as
-        /// <c>currentVideoWallpaperPath</c> per <c>isSameVideoFile</c>, the whole
+        /// same-video-noop, S2 (snapshot comparison per noop-followups F1): HTTP only (decision 1
+        /// -- a tray re-pick keeps reloading exactly as today, so <c>setVideoWallpaperPath</c>'s
+        /// call site below never passes this). When true AND playback is genuinely active AND a
+        /// fresh <c>SafeReadSnapshot</c> of <paramref name="path"/> equals <c>currentVideoSnapshot</c>
+        /// -- the snapshot taken when that playback actually started -- the whole
         /// stop/import/persist/(re)activate sequence is skipped -- the request is still accepted
         /// for dispatch (this method still returns <see langword="true"/>), it just does nothing
         /// once it runs.
@@ -479,13 +519,21 @@ public sealed class AppComposition : IDisposable
                 // earlier queued switch actually landed, not a stale value read before this one was
                 // even posted. Requires playback to be genuinely ACTIVE, not merely configured: a
                 // died playback (attach or play failed last time) must still let a repeat request
-                // revive it, exactly as it does today. Any isSameVideoFile failure, or the null
-                // default this parameter documents, reads as "different" and falls through to the
-                // ordinary switch below.
+                // revive it, exactly as it does today.
+                //
+                // noop-followups, F1 (R3-inplace-edit-hardlink): compares a FRESH read of the
+                // REQUESTED path against the STALE currentVideoSnapshot captured when playback
+                // started -- never a fresh-vs-fresh comparison, which a hard-linked import would
+                // always pass regardless of an in-place edit (see VideoFileSnapshot's remarks). A
+                // missing currentVideoSnapshot, a failed SafeReadSnapshot on the requested path
+                // (missing file, access denied, or an injected reader throwing --
+                // R3-predicate-throw-not-contained), or an unequal snapshot all read as "different"
+                // and fall through to the ordinary switch below.
                 if (skipIfUnchanged
                     && videoWallpaperActive.Value
-                    && currentVideoWallpaperPath is { } activePath
-                    && (isSameVideoFile?.Invoke(path, activePath) ?? false))
+                    && currentVideoSnapshot is { } activeSnapshot
+                    && SafeReadSnapshot(path) is { } requestedSnapshot
+                    && requestedSnapshot.Equals(activeSnapshot))
                 {
                     desktopTrace?.Record($"video-wallpaper phase={phase} unchanged");
                     return;
@@ -502,8 +550,12 @@ public sealed class AppComposition : IDisposable
                 // (ActivateVideoWallpaper, on both the restore and the pick-success branches
                 // further down) overwrites this with the real outcome; only the "import threw
                 // and there is no previous path to restore" branch returns without calling it,
-                // and this is what keeps that branch honest too.
+                // and this is what keeps that branch honest too. currentVideoSnapshot follows the
+                // same rule (F1, noop-followups): no snapshot is ever kept for a video that is not
+                // actually playing, and the same two ActivateVideoWallpaper branches below are what
+                // set it back to a real value.
                 videoWallpaperActive.Value = false;
+                currentVideoSnapshot = null;
 
                 // Read HERE, inside the work item, never on the caller's thread before posting it.
                 // Work items run one at a time in order, so this sees whatever the switch queued
@@ -1749,7 +1801,7 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
             persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
-            isSameVideoFile: VideoWallpaperImport.IsSameFile,
+            readVideoFileSnapshot: VideoWallpaperImport.TryReadSnapshot,
             alertsEnabled: settings.AlertsEnabled,
             alertHttpEnabled: settings.AlertHttpEnabled,
             alertHttpPort: settings.AlertHttpPort,
