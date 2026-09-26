@@ -1,3 +1,4 @@
+using CosmicWin.App.Alerts;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.App.Tests;
@@ -20,10 +21,19 @@ namespace CosmicWin.App.Tests;
 /// <c>Type.GetType("Foo, SomeAssembly")</c> also returns null when <c>SomeAssembly</c> itself fails
 /// to resolve (a typo'd name, a renamed assembly, one not yet loaded), which would make every
 /// "no longer exists" assertion here pass for the wrong reason. <see
-/// cref="Direct2DAlertOverlay_NoLongerExistsInCosmicWinInterop"/> and <see
-/// cref="AlertTileLayout_NoLongerExistsInCosmicWinApp"/>'s sibling positive-control facts prove the
-/// assembly lookup itself still works, so a broken lookup fails loudly instead of reading as
-/// "removed".
+/// cref="Direct2DAlertOverlay_NoLongerExistsInCosmicWinInterop"/>'s sibling positive-control fact
+/// proves the assembly lookup itself still works, so a broken lookup fails loudly instead of reading
+/// as "removed".
+/// <para>
+/// alert-tile-mosaic (2026-09-26) deliberately REINTRODUCES <c>CosmicWin.App.Alerts.AlertTileLayout</c>
+/// under the same name this removed Direct2D tile-grid layout used, for an unrelated, live purpose: a
+/// small pure record (ordered tile kinds + grid) computed from an <see cref="AlertCommand"/>, wired
+/// into <c>AppComposition.UpdateAlertOverlay</c> and unit-tested directly by
+/// <c>AlertTileLayoutTests</c> -- not the removed Direct2D consumer coming back. The old "no longer
+/// exists" assertion for that name was therefore REPLACED with <see
+/// cref="AlertTileLayout_IsTheNewLiveMosaicLayoutNotTheRemovedDirect2DOne"/> below, rather than
+/// silently dropped.
+/// </para>
 /// </remarks>
 public sealed class RemovedDirect2DAlertOverlayTests
 {
@@ -68,10 +78,21 @@ public sealed class RemovedDirect2DAlertOverlayTests
         Assert.Null(InteropAssembly.GetType("CosmicWin.Interop.FrameOverlayTileKind"));
     }
 
+    /// <summary>
+    /// Replaces the old "no longer exists" assertion for this name (see class remarks,
+    /// alert-tile-mosaic 2026-09-26): the name is deliberately back, but as a small, pure, live-wired
+    /// record with a static <c>From</c> factory taking an <see cref="AlertCommand"/> -- not the
+    /// removed Direct2D tile-grid consumer, which had no such factory at all.
+    /// </summary>
     [Fact]
-    public void AlertTileLayout_NoLongerExistsInCosmicWinApp()
+    public void AlertTileLayout_IsTheNewLiveMosaicLayoutNotTheRemovedDirect2DOne()
     {
-        Assert.Null(AppAssembly.GetType("CosmicWin.App.Alerts.AlertTileLayout"));
+        var type = AppAssembly.GetType("CosmicWin.App.Alerts.AlertTileLayout");
+        Assert.NotNull(type);
+
+        var from = type!.GetMethod("From", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(from);
+        Assert.Equal(typeof(AlertCommand), Assert.Single(from!.GetParameters()).ParameterType);
     }
 
     [Fact]
