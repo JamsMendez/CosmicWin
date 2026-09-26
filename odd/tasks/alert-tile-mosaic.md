@@ -54,7 +54,7 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   Commit `1ebf44d`.
 - [x] T3 `alert-layer.js`: per-tile rects with outer/inner gap, draw each tile, hash API. Route:
   delegated. Commit `c106aeb`.
-- [ ] T4 Hardware: HTTP alerts 1 failed; 2 failed; 3 failed; 5 mixed; 8 failed + 1 warning; gap
+- [x] T4 Hardware: HTTP alerts 1 failed; 2 failed; 3 failed; 5 mixed; 8 failed + 1 warning; gap
   change in settings reflected. Route: inline (drive the app). Grids verified; gap part moved to T6.
 - [x] T5 New `gap = N` key in `settings.conf` (maintainer, 2026-09-26): whole pixels 0..64, default 8,
   an unreadable/out-of-range value keeps the default (same rule as the other keys). Drives
