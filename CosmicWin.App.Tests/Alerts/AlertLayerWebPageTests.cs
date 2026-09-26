@@ -174,4 +174,67 @@ public sealed class AlertLayerWebPageTests
         var js = ReadShipped("alert-layer.js");
         Assert.Contains("\"ready\"", js);
     }
+
+    /// <summary>
+    /// alert-tile-mosaic (2026-09-26): structural guards only, matching every other assertion in this
+    /// file -- there is no DOM/canvas test harness in this repo (feature doc, "JS has no test
+    /// harness"), so pixel-accurate rendering stays a hardware check (T4). These at least prove the
+    /// tile-layout arithmetic, the mixed-kind state tracking, and the new message/hash shapes exist
+    /// in the shipped file, catching an accidental deletion or rename a build-output copy check alone
+    /// would miss.
+    /// </summary>
+    [Fact]
+    public void Script_ComputesPerTileRectsWithOuterAndInnerGap()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("function tileRects", js);
+        Assert.Contains("gapPx", js);
+        Assert.Contains("gridColumns", js);
+        Assert.Contains("gridRows", js);
+        // Gap arrives in physical pixels; converted to CSS pixels with the same devicePixelRatio-
+        // derived scale resize() already uses to size the canvas (feature doc, T3 approach).
+        Assert.Contains("gapPx / canvasScaleX", js);
+        Assert.Contains("gapPx / canvasScaleY", js);
+    }
+
+    /// <summary>A single tile must look exactly like the old full-screen layer: no outer gap applied.</summary>
+    [Fact]
+    public void Script_SingleTileSkipsTheOuterGap()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("tiles.length <= 1", js);
+    }
+
+    /// <summary>A mosaic can show failed and warning tiles together, each with its own shake/reveal timing -- tracked per KIND, not per tile-instance.</summary>
+    [Fact]
+    public void Script_TracksShakeAndRevealStatePerKindNotPerTileInstance()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("kindState", js);
+        Assert.Contains("function advanceKindState", js);
+    }
+
+    /// <summary>The host posts the new {type:"show", tiles, columns, rows, gap, duration} shape; the old {kind} shape still works for a manual check.</summary>
+    [Fact]
+    public void Script_HandlesTheTilesGridAndGapMessageFromTheHostAndTheOldKindShape()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("data.tiles", js);
+        Assert.Contains("data.columns", js);
+        Assert.Contains("data.rows", js);
+        Assert.Contains("data.gap", js);
+        Assert.Contains("data.kind", js);
+    }
+
+    /// <summary>The hash API gains tiles=..&amp;columns=..&amp;rows=..&amp;gap=..; the old kind= form still works.</summary>
+    [Fact]
+    public void Script_HashApiAcceptsTilesColumnsRowsAndGap()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("params.has(\"tiles\")", js);
+        Assert.Contains("params.get(\"columns\")", js);
+        Assert.Contains("params.get(\"rows\")", js);
+        Assert.Contains("params.get(\"gap\")", js);
+        Assert.Contains("params.get(\"kind\")", js);
+    }
 }

@@ -13,10 +13,23 @@ var canvas = document.getElementById("alert-layer-canvas");
 var ctx = canvas.getContext("2d", { alpha: true });
 var scheduleFrame = window.requestAnimationFrame.bind(window);
 
+// alert-tile-mosaic (2026-09-26): W/H used to mean "the whole canvas' CSS size" -- every drawing
+// function below (drawFailureOverlay, drawFailureModules, foldingBandGeometry, ...) reads them to
+// size and center its own drawing. They now mean "the CURRENT TILE's CSS size" instead, set by
+// renderTile() right before each tile is drawn -- canvasW/canvasH hold the whole canvas' own CSS
+// size, which N=1 (see tileRects) still maps straight onto W/H, so a single tile looks exactly like
+// the old single-layer page. tileDeviceX/Y/W/H hold the current tile's PHYSICAL-pixel rect within
+// the whole canvas, needed only by drawPixelated's final blit (see its own remarks).
 var W = 0;
 var H = 0;
+var canvasW = 0;
+var canvasH = 0;
 var canvasScaleX = 1;
 var canvasScaleY = 1;
+var tileDeviceX = 0;
+var tileDeviceY = 0;
+var tileDeviceW = 0;
+var tileDeviceH = 0;
 
 function resize() {
   var cssWidth = Math.max(1, window.innerWidth || 1);
@@ -24,6 +37,8 @@ function resize() {
   var dpr = Math.min(window.devicePixelRatio || 1, 2);
   var pixelWidth = Math.round(cssWidth * dpr);
   var pixelHeight = Math.round(cssHeight * dpr);
+  canvasW = cssWidth;
+  canvasH = cssHeight;
   W = cssWidth;
   H = cssHeight;
   canvasScaleX = pixelWidth / cssWidth;
@@ -151,10 +166,13 @@ function failureLayer(slot) {
     var layer = document.createElement("canvas");
     failureLayers[slot] = { canvas: layer, g: layer.getContext("2d") };
   }
+  // Sized to the CURRENT TILE's physical-pixel rect (tileDeviceW/H), not the whole canvas -- for
+  // N=1 tileDeviceW/H equal canvas.width/height exactly (see renderTile), so this is unchanged from
+  // before the mosaic; for N>1 each tile gets its own correctly-sized offscreen buffer.
   var entry = failureLayers[slot];
-  if (entry.canvas.width !== canvas.width || entry.canvas.height !== canvas.height) {
-    entry.canvas.width = canvas.width;
-    entry.canvas.height = canvas.height;
+  if (entry.canvas.width !== tileDeviceW || entry.canvas.height !== tileDeviceH) {
+    entry.canvas.width = tileDeviceW;
+    entry.canvas.height = tileDeviceH;
   }
   entry.g.setTransform(1, 0, 0, 1, 0, 0);
   entry.g.globalCompositeOperation = "source-over";
@@ -319,9 +337,15 @@ function drawFailureOverlay(g, cx, cy, progress, counter, theme) {
 // reveal's own pixelation effect on the overlay itself. Unrelated to (and kept separate from) the
 // source page's BACKDROP pixelation, which is out of scope here: a WebView2 page has no access to
 // the video pixels behind it (see the feature doc's "Not in v1").
+// alert-tile-mosaic: sized/blitted against the CURRENT TILE's physical rect (tileDeviceX/Y/W/H),
+// not the whole canvas -- the final drawImage below runs after ctx.setTransform(1,0,0,1,0,0), which
+// discards both the devicePixelRatio scale AND renderTile's translate, so it must place the tile
+// explicitly rather than relying on the (already-clipped) current transform. For N=1 tileDeviceX/Y
+// are 0 and tileDeviceW/H equal canvas.width/height exactly, so this is byte-for-byte what the
+// single-layer page always did.
 function drawPixelated(source, cell, slot, alpha) {
-  var pixelWidth = Math.max(1, Math.ceil(canvas.width / cell));
-  var pixelHeight = Math.max(1, Math.ceil(canvas.height / cell));
+  var pixelWidth = Math.max(1, Math.ceil(tileDeviceW / cell));
+  var pixelHeight = Math.max(1, Math.ceil(tileDeviceH / cell));
   if (!failureLayers[slot]) {
     var layer = document.createElement("canvas");
     failureLayers[slot] = { canvas: layer, g: layer.getContext("2d") };
@@ -336,17 +360,18 @@ function drawPixelated(source, cell, slot, alpha) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = alpha;
-  ctx.drawImage(pixels.canvas, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(pixels.canvas, tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH);
   ctx.restore();
 }
 
-function drawFailureLayer(cx, cy, progress, ms) {
-  if (failureState === "hidden" || failureState === "shaking") return;
-  var theme = FAILURE_OVERLAY_THEMES[failureKind];
-  var shownMs = Math.max(0, ms - failureStartMs - theme.shakeMs);
+function drawFailureLayer(cx, cy, progress, ms, kind) {
+  var entry = kindState[kind];
+  if (entry.state === "hidden" || entry.state === "shaking") return;
+  var theme = FAILURE_OVERLAY_THEMES[kind];
+  var shownMs = Math.max(0, ms - entry.startMs - theme.shakeMs);
   var counter = Math.floor(shownMs / FAILURE_COUNTER_STEP_MS) % 100;
 
-  if (failureState === "shown") {
+  if (entry.state === "shown") {
     drawFailureOverlay(ctx, cx, cy, progress, counter, theme);
     return;
   }
@@ -379,36 +404,82 @@ function drawFailureLayer(cx, cy, progress, ms) {
 // (webview-alert-layer) makes the run REPEATABLE: the host now preloads this page once and keeps
 // it alive (feature doc, "Idle cost"), driving it with "show"/"hide" messages instead -- see below.
 
-var failureState = "hidden";
-var failureKind = "warning";
-var failureStartMs = null;
+// alert-tile-mosaic (2026-09-26): was a SINGLE state machine (one kind shown at a time). A mosaic
+// can show failed and warning tiles TOGETHER, each with its own shakeMs/revealMs (theme, above), so
+// this is now one small state machine PER KIND instead of per tile-instance -- every tile of the
+// SAME kind started at the same ms and shares the same theme, so they always report the identical
+// state/counter at any given ms; tracking more than one entry per kind would be redundant.
+var kindState = {
+  failed: { state: "hidden", startMs: null },
+  warning: { state: "hidden", startMs: null },
+};
 
-function advanceFailureState(ms) {
-  if (failureStartMs === null) {
-    failureStartMs = ms;
-    failureState = "shaking";
+function advanceKindState(ms, kind) {
+  var entry = kindState[kind];
+  if (entry.startMs === null) {
+    entry.startMs = ms;
+    entry.state = "shaking";
   }
 
-  var theme = FAILURE_OVERLAY_THEMES[failureKind];
+  var theme = FAILURE_OVERLAY_THEMES[kind];
   var shakeMs = theme.shakeMs;
-  if (failureState === "shaking" && ms - failureStartMs >= shakeMs) {
-    failureState = "revealing";
+  if (entry.state === "shaking" && ms - entry.startMs >= shakeMs) {
+    entry.state = "revealing";
   }
-  if (failureState === "revealing" && ms - failureStartMs >= shakeMs + theme.revealMs) {
-    failureState = "shown";
+  if (entry.state === "revealing" && ms - entry.startMs >= shakeMs + theme.revealMs) {
+    entry.state = "shown";
   }
 }
 
-// ---- Message-driven show/hide API (T9b) ---------------------------------------------------------
+// ---- Message-driven show/hide API (T9b, tile grid added by alert-tile-mosaic) --------------------
 // The preloaded host (T9c) drives this page after navigation by posting JSON through the WebView2
-// message bridge: {type:"show", kind, duration} / {type:"hide"}. IDLE means nothing runs at all --
-// canvas cleared, no requestAnimationFrame loop -- so a hidden preloaded layer costs ~0% GPU (the
-// feature doc's Idle cost condition). "show" while already showing restarts from zero with the new
-// kind/duration, same as a fresh "show" on an idle page.
+// message bridge: {type:"show", tiles, columns, rows, gap, duration} / {type:"hide"}. IDLE means
+// nothing runs at all -- canvas cleared, no requestAnimationFrame loop -- so a hidden preloaded
+// layer costs ~0% GPU (the feature doc's Idle cost condition). "show" while already showing restarts
+// from zero with the new tiles/grid/gap/duration, same as a fresh "show" on an idle page.
 
 var animating = false;
 var doneSignaled = false;
 var durationMs = 5000;
+var showStartMs = null;
+
+// ---- Tile layout (alert-tile-mosaic, 2026-09-26) --------------------------------------------------
+// One tile fills the whole canvas exactly as before (tiles.length <= 1): no outer gap applied --
+// "N=1 must look exactly like today" (feature doc, acceptance criteria). N>1 lays tiles out like the
+// tiling engine: outer gap around the whole grid, inner gap between cells, equal cell sizes,
+// row-major fill. The C# side (AlertTileLayout/AppComposition) already drops slots past 8 and orders
+// failed before warning -- this file only draws the list it is given, in that order.
+
+var tiles = ["warning"]; // wire kinds ("failed"/"warning"), one per slot
+var gridColumns = 1;
+var gridRows = 1;
+var gapPx = 0; // PHYSICAL pixels, as posted by the host -- converted to CSS pixels below
+
+// Returns each tile's CSS-pixel rect {x, y, w, h} within the canvas, row-major, in `tiles` order.
+// gapPx arrives in PHYSICAL pixels (the same unit TreeArranger.Gap uses); canvasScaleX/Y are the
+// same devicePixelRatio-derived factors resize() already uses to size the canvas, so dividing by
+// them keeps the gap's CSS size consistent with how everything else on this page is sized.
+function tileRects() {
+  if (tiles.length <= 1) {
+    return [{ x: 0, y: 0, w: canvasW, h: canvasH }];
+  }
+  var gapCssX = gapPx / canvasScaleX;
+  var gapCssY = gapPx / canvasScaleY;
+  var cellW = Math.max(1, (canvasW - gapCssX * (gridColumns + 1)) / gridColumns);
+  var cellH = Math.max(1, (canvasH - gapCssY * (gridRows + 1)) / gridRows);
+  var rects = [];
+  for (var i = 0; i < tiles.length; i++) {
+    var col = i % gridColumns;
+    var row = Math.floor(i / gridColumns);
+    rects.push({
+      x: gapCssX + col * (cellW + gapCssX),
+      y: gapCssY + row * (cellH + gapCssY),
+      w: cellW,
+      h: cellH,
+    });
+  }
+  return rects;
+}
 
 function postToHost(message) {
   // Guarded: this same file also opens in a plain browser tab, where window.chrome.webview does
@@ -431,11 +502,27 @@ function stopAndClear() {
   clearCanvas();
 }
 
-function startShowing(kind, duration) {
-  failureKind = kind === "failed" ? "failed" : "warning";
+function resetKindState() {
+  kindState = {
+    failed: { state: "hidden", startMs: null },
+    warning: { state: "hidden", startMs: null },
+  };
+}
+
+// newTiles/columns/rows/gap: alert-tile-mosaic's grid (see tileRects above). A caller with only a
+// single kind/duration (the old contract, and the hash API's back-compat form) passes a one-tile
+// list with a 1x1 grid and zero gap, which tileRects already renders exactly like the old
+// single-layer page.
+function startShowing(newTiles, columns, rows, gap, duration) {
+  tiles = Array.isArray(newTiles) && newTiles.length > 0
+    ? newTiles.map(function (tile) { return tile === "failed" ? "failed" : "warning"; })
+    : ["warning"];
+  gridColumns = Math.max(1, Math.floor(columns) || 1);
+  gridRows = Math.max(1, Math.floor(rows) || 1);
+  gapPx = Math.max(0, gap || 0);
   durationMs = isFinite(duration) && duration > 0 ? duration : 5000;
-  failureStartMs = null;
-  failureState = "hidden";
+  showStartMs = null;
+  resetKindState();
   doneSignaled = false;
   if (!animating) {
     animating = true;
@@ -445,12 +532,12 @@ function startShowing(kind, duration) {
 
 function hide() {
   stopAndClear();
-  failureStartMs = null;
-  failureState = "hidden";
+  showStartMs = null;
+  resetKindState();
 }
 
 function signalDoneIfElapsed(ms) {
-  if (doneSignaled || failureStartMs === null || ms - failureStartMs < durationMs) {
+  if (doneSignaled || showStartMs === null || ms - showStartMs < durationMs) {
     return false;
   }
 
@@ -459,15 +546,39 @@ function signalDoneIfElapsed(ms) {
   return true;
 }
 
-function render(ms) {
-  if (!animating) return;
-  advanceFailureState(ms);
-  var progress = animationProgress(ms);
+// Draws ONE tile: sets the tile-local W/H (see the remarks above their declaration), clips and
+// translates ctx to the tile's rect so every existing drawing function -- unaware anything changed
+// -- draws exactly as it always did, just inside this tile instead of the whole canvas.
+function renderTile(rect, kind, progress, ms) {
+  W = rect.w;
+  H = rect.h;
+  tileDeviceX = Math.round(rect.x * canvasScaleX);
+  tileDeviceY = Math.round(rect.y * canvasScaleY);
+  tileDeviceW = Math.round(rect.w * canvasScaleX);
+  tileDeviceH = Math.round(rect.h * canvasScaleY);
   var cx = W * 0.5;
   var cy = H * 0.5;
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  ctx.translate(rect.x, rect.y);
+  drawFailureLayer(cx, cy, progress, ms, kind);
+  ctx.restore();
+}
+
+function render(ms) {
+  if (!animating) return;
+  if (showStartMs === null) showStartMs = ms;
+  var rects = tileRects();
+  var progress = animationProgress(ms);
+
   clearCanvas();
-  drawFailureLayer(cx, cy, progress, ms);
+  for (var i = 0; i < tiles.length && i < rects.length; i++) {
+    advanceKindState(ms, tiles[i]);
+    renderTile(rects[i], tiles[i], progress, ms);
+  }
 
   if (signalDoneIfElapsed(ms)) {
     stopAndClear();
@@ -481,7 +592,14 @@ function handleHostMessage(event) {
   var data = event.data;
   if (!data || typeof data !== "object") return;
   if (data.type === "show") {
-    startShowing(data.kind, Number(data.duration));
+    if (Array.isArray(data.tiles)) {
+      startShowing(data.tiles, Number(data.columns), Number(data.rows), Number(data.gap), Number(data.duration));
+    } else {
+      // Back-compat: the old single-kind message shape, {type:"show", kind, duration} -- kept
+      // trivial since production (WebViewAlertLayerController) always sends "tiles" now; this only
+      // matters for a manual check that posts the old shape by hand.
+      startShowing([data.kind === "failed" ? "failed" : "warning"], 1, 1, 0, Number(data.duration));
+    }
   } else if (data.type === "hide") {
     hide();
   }
@@ -491,12 +609,14 @@ if (window.chrome && window.chrome.webview) {
   window.chrome.webview.addEventListener("message", handleHostMessage);
 }
 
-// ---- Hash API: alert-layer.html#kind=failed&duration=5000 --------------------------------------
-// Still supported so this same file keeps working when opened directly in a browser tab for the
-// manual check the feature doc asks for -- reads location.hash, falling back to location.search.
-// A preloaded host page (T9c) navigates with NO hash/query at all, so this must NOT auto-show:
-// only an EXPLICIT kind or duration param starts the layer; otherwise the page stays idle until a
-// "show" message arrives, exactly like a freshly preloaded page must.
+// ---- Hash API ------------------------------------------------------------------------------------
+// alert-tile-mosaic: alert-layer.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
+// Old single-tile form, still supported: alert-layer.html#kind=failed&duration=5000
+// Either form keeps this file working when opened directly in a browser tab for the manual check the
+// feature doc asks for -- reads location.hash, falling back to location.search. A preloaded host
+// page (T9c) navigates with NO hash/query at all, so this must NOT auto-show: only an EXPLICIT
+// tiles/kind/duration param starts the layer; otherwise the page stays idle until a "show" message
+// arrives, exactly like a freshly preloaded page must.
 
 function parseParams() {
   var raw = (location.hash || location.search || "").replace(/^[#?]/, "");
@@ -504,14 +624,26 @@ function parseParams() {
 }
 
 var params = parseParams();
-var hasExplicitParams = params.has("kind") || params.has("duration");
+var hasExplicitParams = params.has("kind") || params.has("duration") || params.has("tiles");
 
 // Tells the host a live, running script exists on the other end of the bridge -- not just that
 // navigation completed -- before it trusts a pending "show" was actually received (T9c).
 postToHost("ready");
 
 if (hasExplicitParams) {
-  var requestedKind = params.get("kind") === "failed" ? "failed" : "warning";
   var requestedDuration = Number(params.get("duration"));
-  startShowing(requestedKind, requestedDuration);
+  if (params.has("tiles")) {
+    var requestedTiles = params.get("tiles").split(",")
+      .map(function (tile) { return tile.trim() === "failed" ? "failed" : "warning"; })
+      .filter(function (tile) { return tile.length > 0; });
+    startShowing(
+      requestedTiles,
+      Number(params.get("columns")) || 1,
+      Number(params.get("rows")) || 1,
+      Number(params.get("gap")) || 0,
+      requestedDuration);
+  } else {
+    var requestedKind = params.get("kind") === "failed" ? "failed" : "warning";
+    startShowing([requestedKind], 1, 1, 0, requestedDuration);
+  }
 }
