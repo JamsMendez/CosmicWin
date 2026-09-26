@@ -1229,6 +1229,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
             queued.Dequeue().Invoke();
 
             Assert.Equal(1, player.StopCallCount);
+            // R3-reload-completion-unasserted: the reload actually played again, not only skipped the skip.
+            Assert.Equal(2, player.TryPlayCallCount);
             Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
         }
     }
