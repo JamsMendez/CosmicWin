@@ -129,6 +129,43 @@ public sealed class AlertHttpEndToEndTests
         }
     }
 
+    /// <summary>
+    /// Review finding R3-free-port-toctou: <see cref="GetFreePort"/> releases its port before the
+    /// composition's real <see cref="LocalHttpCommandServer"/> binds it, so another process can take
+    /// it in between. <see cref="LocalHttpCommandServer.Start"/> never throws on a bind failure: its
+    /// LAST attempt (127.0.0.1 only) reports <c>alert http: failed to start listening on port N
+    /// (127.0.0.1)</c> and the server stays inert. That line is the retry signal: dispose, pick the
+    /// next port, try again. After <paramref name="attempts"/> losses the test fails with the trace
+    /// that explains why, never with a bare connection refusal from the first POST.
+    /// </summary>
+    private static (AppComposition Composition, int Port) WireOnFreePort(
+        List<string> events, RecordingDesktopTrace trace, Func<int>? nextPort = null, int attempts = 5)
+    {
+        nextPort ??= GetFreePort;
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            var port = nextPort();
+            var composition = Wire(port, events, trace);
+            if (!trace.Lines.Any(line => IsFinalBindFailure(line, port)))
+            {
+                return (composition, port);
+            }
+
+            composition.Dispose();
+            if (attempt < attempts)
+            {
+                trace.Lines.Clear();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"could not bind the real HTTP server after {attempts} free-port attempts; last trace: " +
+            string.Join(" | ", trace.Lines));
+    }
+
+    private static bool IsFinalBindFailure(string line, int port) =>
+        line.StartsWith($"alert http: failed to start listening on port {port} (127.0.0.1)", StringComparison.Ordinal);
+
     private static HttpClient NewClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
@@ -156,11 +193,11 @@ public sealed class AlertHttpEndToEndTests
     [Fact]
     public async Task SecondAlertWhileFirstIsShowing_BothAnswer202Ok_ButOnlyTheFirstEverShows()
     {
-        var port = GetFreePort();
         var events = new List<string>();
         var trace = new RecordingDesktopTrace();
 
-        using var composition = Wire(port, events, trace);
+        var (composition, port) = WireOnFreePort(events, trace);
+        using var _ = composition;
 
         var (firstStatus, firstBody) = await PostAlertAsync(port, "{\"warning\":1,\"duration\":5}");
         var (secondStatus, secondBody) = await PostAlertAsync(port, "{\"failed\":1,\"duration\":5}");
@@ -184,11 +221,11 @@ public sealed class AlertHttpEndToEndTests
     [Fact]
     public async Task SingleAlert_Answers202OkAndShows()
     {
-        var port = GetFreePort();
         var events = new List<string>();
         var trace = new RecordingDesktopTrace();
 
-        using var composition = Wire(port, events, trace);
+        var (composition, port) = WireOnFreePort(events, trace);
+        using var _ = composition;
 
         var (status, body) = await PostAlertAsync(port, "{\"warning\":2,\"duration\":5}");
 
@@ -196,5 +233,36 @@ public sealed class AlertHttpEndToEndTests
         Assert.Equal("ok", body);
         Assert.StartsWith("start:warning:", Assert.Single(events));
         Assert.DoesNotContain(trace.Lines, line => line.Contains("alert ignored", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Proves the retry above: the first port handed out is already held by another listener, so the
+    /// composition's server cannot bind it and must move on to the next free port -- where a real
+    /// POST then answers 202.
+    /// </summary>
+    [Fact]
+    public async Task WireOnFreePort_FirstPortTaken_RetriesOnTheNextOne()
+    {
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        try
+        {
+            var takenPort = ((IPEndPoint)blocker.LocalEndpoint).Port;
+            var ports = new Queue<int>([takenPort, GetFreePort()]);
+            var events = new List<string>();
+            var trace = new RecordingDesktopTrace();
+
+            var (composition, port) = WireOnFreePort(events, trace, ports.Dequeue);
+            using var _ = composition;
+
+            Assert.NotEqual(takenPort, port);
+            var (status, body) = await PostAlertAsync(port, "{\"warning\":1,\"duration\":5}");
+            Assert.Equal(202, status);
+            Assert.Equal("ok", body);
+        }
+        finally
+        {
+            blocker.Stop();
+        }
     }
 }
