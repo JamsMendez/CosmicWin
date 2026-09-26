@@ -42,6 +42,12 @@ namespace CosmicWin.App;
 /// second server. Off by default, for the same reason <see cref="AlertHttpEnabled"/> is: a settings
 /// file that has never been written must not open a network-facing route nobody asked for.
 /// </param>
+/// <param name="Gap">
+/// Whole pixels of space CosmicWin draws around and between tiled windows, and around and between an
+/// alert's tiles -- the SAME value drives both (<c>TreeArranger.Gap</c>). Whole pixels 0-64;
+/// defaults to <see cref="TreeArranger.DefaultGap"/>, the value <c>TreeArranger.Gap</c> was hard-set
+/// to before this was a settings key at all.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -61,7 +67,8 @@ namespace CosmicWin.App;
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
-    int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false)
+    int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
+    int Gap = TreeArranger.DefaultGap)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -87,6 +94,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string VideoWallpaperHttpEnabledKey = "video-wallpaper-http";
 
+    private const string GapKey = "gap";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -108,6 +117,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var alertHttpEnabled = Default.AlertHttpEnabled;
         var alertHttpPort = Default.AlertHttpPort;
         var videoWallpaperHttpEnabled = Default.VideoWallpaperHttpEnabled;
+        var gap = Default.Gap;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -172,10 +182,15 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 videoWallpaperHttpEnabled = videoWallpaperHttpFlag;
             }
+            else if (key.Equals(GapKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadGap(value, out var gapValue))
+            {
+                gap = gapValue;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
-            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled);
+            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -212,6 +227,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates -- the same port and
          # the same alert-http.token bearer token file, off to leave that route closed.
          {VideoWallpaperHttpEnabledKey} = {(VideoWallpaperHttpEnabled ? "on" : "off")}
+
+         # {GapKey}: whole pixels of space around and between tiled windows, and around and between
+         # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
+         {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;
 
@@ -288,6 +307,23 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         }
 
         port = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a whole-pixel gap, 0-64. Same rule as every other key: anything outside that range, or
+    /// not a whole number at all, keeps the default rather than drawing a gap nobody asked for.
+    /// </summary>
+    private static bool TryReadGap(string value, out int gap)
+    {
+        if (int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out gap)
+            && gap is >= 0 and <= 64)
+        {
+            return true;
+        }
+
+        gap = 0;
         return false;
     }
 

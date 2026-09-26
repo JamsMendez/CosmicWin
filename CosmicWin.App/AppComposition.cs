@@ -169,6 +169,11 @@ public sealed class AppComposition : IDisposable
         Action<uint?>? persistBorderColor = null,
         bool tilingEnabled = true,
         Action<bool>? persistTiling = null,
+        // T5 (alert-tile-mosaic): mirrors loadExceptions -- a fresh read of settings.conf's `gap`
+        // key, invoked from ReloadGap (below) on the SAME WE-3 "Reload" trigger the exception list
+        // already uses. Unset -- as in every test that predates this parameter -- Reload never
+        // touches TreeArranger.Gap, exactly the exceptions-only behaviour this project has always had.
+        Func<int>? loadGap = null,
         // Optional, same as the persistX delegates above.
         Action<string>? persistVideoWallpaperPath = null,
         // noop-followups, F1: reads a point-in-time VideoFileSnapshot (identity + size + last-write)
@@ -725,8 +730,13 @@ public sealed class AppComposition : IDisposable
                 // ever having to know about settings.
                 var layout = AlertTileLayout.From(active.Command);
                 var tiles = layout.Tiles.Select(kind => kind == AlertKind.Failed ? "failed" : "warning").ToArray();
+                // R3-negative-gap-blocks-alert: TreeArranger.Gap is a shared mutable static nothing
+                // stops another caller from setting negative (T5's settings.conf `gap` key itself
+                // rejects anything outside 0-64, but that guard lives in Settings.Parse, not on the
+                // static field) -- WebViewAlertLayerController.Start throws on a negative Gap, so
+                // clamped here rather than letting a stray negative value take the whole alert down.
                 startAlertLayer(new AlertShowRequest(
-                    tiles, layout.Columns, layout.Rows, TreeArranger.Gap,
+                    tiles, layout.Columns, layout.Rows, Math.Max(0, TreeArranger.Gap),
                     Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds))));
             }
             catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
@@ -979,6 +989,14 @@ public sealed class AppComposition : IDisposable
             // user was free to drag and resize with the mouse, and switching it back on is a request
             // to put the layout back -- which for a display where nothing opened or closed is a
             // request nothing else in this composition would ever make.
+            RearrangeEveryDisplay();
+        }
+
+        // Extracted from the loop ResumeTiling used to run inline, so a live settings-reload gap
+        // change (ReloadGap, below) can put the new spacing on screen through the SAME "walk every
+        // display and arrange it" step, rather than a second copy of this loop (T5, alert-tile-mosaic).
+        void RearrangeEveryDisplay()
+        {
             foreach (var display in treeManager.Displays)
             {
                 if (treeManager.TryGetTree(display, out var tree) && tree is not null)
@@ -986,6 +1004,31 @@ public sealed class AppComposition : IDisposable
                     TreeArranger.ArrangeAndPosition(
                         tree, registry, WorkAreaResolver.Resolve(display), AfterArrange);
                 }
+            }
+        }
+
+        // T5 (alert-tile-mosaic): WE-3's "Reload" trigger re-reads settings.conf's `gap` key here
+        // and puts it into effect. TreeArranger.Gap is the one shared static both the tiling engine
+        // and the alert mosaic read, so this is the one place a live gap change has to land. Unset
+        // loadGap (every composition that predates this parameter) means this never runs, matching
+        // the exceptions-only Reload this project has always had.
+        void ReloadGap()
+        {
+            if (loadGap is null)
+            {
+                return;
+            }
+
+            TreeArranger.Gap = loadGap();
+
+            // Mirrors ToggleTiling's OFF branch, just below: while tiling is off, every window is
+            // deliberately left exactly where the layout last put it, and a live gap change must not
+            // reach in and move windows a mode promised not to touch. The new value still lands in
+            // TreeArranger.Gap, so it is there the moment tiling resumes, and it already reaches the
+            // alert mosaic (read at show time, above) regardless of the tiling switch.
+            if (tiling)
+            {
+                RearrangeEveryDisplay();
             }
         }
 
@@ -1068,7 +1111,11 @@ public sealed class AppComposition : IDisposable
             {
                 disableTaskTrigger();
                 shutdown();
-            });
+            },
+            // On the owning thread, the same one ResumeTiling's onOwningThread(ResumeTiling) uses a
+            // few lines above -- this arrives from a tray click too, and ReloadGap can rearrange
+            // trees and reach the overlay through AfterArrange (T5, alert-tile-mosaic).
+            reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap));
         // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
         // flip. Everything that makes the switch honest -- persisting it, and putting the layout
         // back when it comes on -- lives in the setTiling closure above, and a chord reaching past
@@ -1750,16 +1797,21 @@ public sealed class AppComposition : IDisposable
         var exceptionStore = new ExceptionListStore(ExceptionListFile.Load());
         var workspace = new Win32Workspace();
 
-        // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
-        // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
-        // the knob in one visible place instead of baked into TreeArranger's default.
-        TreeArranger.Gap = TreeArranger.DefaultGap;
-
         var desktops = new Win32VirtualDesktopService();
 
         // Read ONCE here rather than inside Wire, so every test drives the same composition with the
-        // value stated explicitly instead of whatever this machine's file happens to say.
+        // value stated explicitly instead of whatever this machine's file happens to say. Moved
+        // ahead of the gap assignment below (T5, alert-tile-mosaic) so TreeArranger.Gap can start
+        // from the settings file's own gap key instead of always starting from the compiled-in
+        // default and waiting for a Reload to correct it.
         var settings = SettingsFile.Load();
+
+        // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
+        // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
+        // the knob in one visible place instead of baked into TreeArranger's default. T5
+        // (alert-tile-mosaic): now the settings file's own value, which itself defaults to
+        // TreeArranger.DefaultGap when the `gap` key is absent or unreadable (Settings.Parse).
+        TreeArranger.Gap = settings.Gap;
 
         // The file carries MORE THAN ONE setting now, so each save has to start from the whole
         // record. Rebuilding it from the one value that changed -- which is what
@@ -1797,6 +1849,10 @@ public sealed class AppComposition : IDisposable
             scheduleReconcile: ScheduleOnUiThread,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
+            // T5 (alert-tile-mosaic): mirrors loadExceptions -- a FRESH read on every Reload, not
+            // the one-time `settings` value captured above, so hand-editing settings.conf's `gap`
+            // key and clicking Reload behaves exactly the way editing exceptions.conf already does.
+            loadGap: () => SettingsFile.Load().Gap,
             shutdown: shutdown,
             buildTray: controller => new TrayIconHost(controller),
             importVideoWallpaper: VideoWallpaperImport.Import,

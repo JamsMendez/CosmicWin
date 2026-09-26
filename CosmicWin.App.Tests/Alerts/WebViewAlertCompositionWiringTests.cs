@@ -351,6 +351,39 @@ public sealed class WebViewAlertCompositionWiringTests
         }
     }
 
+    /// <summary>
+    /// Review finding R3-negative-gap-blocks-alert: <see cref="WebViewAlertLayerController.Start"/>
+    /// throws <see cref="ArgumentOutOfRangeException"/> on a negative <see
+    /// cref="AlertShowRequest.Gap"/> -- and <c>TreeArranger.Gap</c> is a shared mutable static
+    /// nothing stops another caller from setting negative, T5's new <c>gap</c> settings key rejects
+    /// anything outside 0-64 but that guard lives in <c>Settings.Parse</c>, not on the static field
+    /// itself. <c>AppComposition.UpdateAlertOverlay</c> must clamp at the read site, so a negative
+    /// <c>TreeArranger.Gap</c> costs the alert nothing instead of taking the whole show down with an
+    /// unhandled exception on the reconciliation tick.
+    /// </summary>
+    [Fact]
+    public void ANegativeTreeArrangerGap_IsClampedToZeroRatherThanThrowing()
+    {
+        var originalGap = TreeArranger.Gap;
+        TreeArranger.Gap = -5;
+        try
+        {
+            var h = Create();
+            using (h.Composition)
+            {
+                var thrown = Record.Exception(
+                    () => h.Server.Send("warning:1 duration:1"));
+
+                Assert.Null(thrown);
+                Assert.StartsWith("start:warning:1x1:gap=0:", Assert.Single(h.Events));
+            }
+        }
+        finally
+        {
+            TreeArranger.Gap = originalGap;
+        }
+    }
+
     /// <summary>Decision 3 (feature doc): failed tiles always win past the 8-tile cap, even when the command wrote warning first.</summary>
     [Fact]
     public void CommandPastTheEightTileCap_DropsWarningAndUsesTheEightPlusGrid()

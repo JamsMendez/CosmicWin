@@ -9,7 +9,9 @@ and Windows' own virtual desktops are driven from the keyboard.
 
 ## What works
 
-- **Tiling** — every window gets a share of the work area, with a configurable uniform gap.
+- **Tiling** — every window gets a share of the work area, with a configurable uniform gap
+  (`gap` in `settings.conf`, default 8, 0–64 pixels). The same gap draws around and between an
+  alert's tiles too.
 - **Focus** — move between windows by direction.
 - **Movement** — move a window through the layout. The walk climbs the tree, so a window leaves its
   group when it runs out of room rather than dead-ending, and the walk is reversible.
@@ -33,7 +35,7 @@ and Windows' own virtual desktops are driven from the keyboard.
 - **One monitor.** The layout engine is monitor-aware and multi-monitor requirements exist, but
   nothing beyond a single display is exercised or claimed.
 - **An emptied virtual desktop is not removed.** Deliberate — see the notes.
-- **No configuration file.** Keybindings and the gap are compile-time.
+- **No configuration file.** Keybindings are compile-time.
 
 ## Requirements
 

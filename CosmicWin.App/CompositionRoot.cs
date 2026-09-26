@@ -109,19 +109,28 @@ public static class CompositionRoot
     /// and the cost of dropping them is higher still: the controller answers "tiling is on" when it
     /// is not wired, so a silent omission would leave the user with a menu item that ticks itself
     /// back on and a window manager that never stopped tiling.
+    /// <paramref name="reloadGap"/> is T5's (alert-tile-mosaic) settings-reload hook: invoked
+    /// ALONGSIDE the exception-list reload above, on the SAME WE-3 trigger -- there is no second
+    /// menu item, "Reload" reloads everything settings.conf carries. Optional, and unset (every
+    /// caller before this parameter existed) leaves Reload doing exactly what it always did:
+    /// exceptions only.
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
         Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit,
         Func<bool> getTiling, Action<bool> setTiling,
         Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
-        Action<string>? setVideoWallpaperPath = null) =>
+        Action<string>? setVideoWallpaperPath = null, Action? reloadGap = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
             getFocusBorder,
             setFocusBorder,
-            () => exceptions.Reload(loadExceptions()),
+            () =>
+            {
+                exceptions.Reload(loadExceptions());
+                reloadGap?.Invoke();
+            },
             exit,
             getBorderColor,
             setBorderColor,

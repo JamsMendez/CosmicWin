@@ -308,6 +308,63 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
+    /// T5 (alert-tile-mosaic): the optional <c>reloadGap</c> parameter runs ALONGSIDE the exception
+    /// reload above, on the exact same WE-3 trigger -- not instead of it, and not on a second menu
+    /// item. Proven with a recording exception source too, so a regression that made <c>reloadGap</c>
+    /// swallow or replace the exceptions reload would fail this fact as well as the one above.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_AlsoInvokesInjectedReloadGap()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var exceptionsReloadCount = 0;
+        var gapReloadCount = 0;
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore,
+            () =>
+            {
+                exceptionsReloadCount++;
+                return ExceptionList.Empty;
+            },
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { },
+            reloadGap: () => gapReloadCount++);
+
+        controller.Reload();
+
+        Assert.Equal(1, exceptionsReloadCount);
+        Assert.Equal(1, gapReloadCount);
+    }
+
+    /// <summary>
+    /// Unset -- as every caller before T5 (alert-tile-mosaic) added <c>reloadGap</c> -- Reload must
+    /// keep doing exactly what it always did: reload the exception list and nothing else. A default
+    /// that silently required the new parameter would break every existing tray composition.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_WithNoGapReloadWired_OnlyReloadsExceptions()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var exceptionsReloadCount = 0;
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore,
+            () =>
+            {
+                exceptionsReloadCount++;
+                return ExceptionList.Empty;
+            },
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { });
+
+        var thrown = Record.Exception(() => controller.Reload());
+
+        Assert.Null(thrown);
+        Assert.Equal(1, exceptionsReloadCount);
+    }
+
+    /// <summary>
     /// Closes 's mutation-surviving gap where deleting the <c>isPaused</c>
     /// argument from <c>App.xaml.cs</c>'s <see cref="CompositionRoot.BuildSessionAdapter"/> call
     /// compiled cleanly (the parameter is optional, defaulting to never-paused) and left the whole

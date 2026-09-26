@@ -58,6 +58,12 @@ public sealed class SettingsTests
         Assert.True(Settings.Parse(line).FocusBorder);
     }
 
+    /// <summary>
+    /// <c>gap</c> USED to be the unknown key this fact exercised, before T5 (alert-tile-mosaic) gave
+    /// it a real meaning -- rewritten to a key nothing will ever recognise, so this still proves
+    /// what it always proved (an unknown key costs nothing, the known one beside it still lands)
+    /// instead of quietly becoming a second <c>gap</c> test.
+    /// </summary>
     [Fact]
     public void CommentsBlankLinesAndUnknownKeys_AreIgnored()
     {
@@ -65,7 +71,7 @@ public sealed class SettingsTests
             """
             # CosmicWin settings
 
-            gap = 12
+            not-a-real-setting = 12
             focus-border = off
             """);
 
@@ -540,5 +546,86 @@ public sealed class SettingsTests
         Assert.False(settings.FocusBorder);
         Assert.True(settings.VideoWallpaperHttpEnabled);
         Assert.False(settings.AlertHttpEnabled);
+    }
+
+    /// <summary>
+    /// T5 (alert-tile-mosaic, maintainer decision 2026-09-26): <see cref="TreeArranger.DefaultGap"/>
+    /// unless the file says otherwise, the exact value <c>TreeArranger.Gap</c> was hard-set to before
+    /// this key existed -- a settings file that has never been written must draw the same gap it
+    /// always did.
+    /// </summary>
+    [Fact]
+    public void GapDefaultsToTheTilingEnginesOwnDefault()
+    {
+        Assert.Equal(TreeArranger.DefaultGap, Settings.Default.Gap);
+        Assert.Equal(TreeArranger.DefaultGap, Settings.Parse(string.Empty).Gap);
+    }
+
+    [Theory]
+    [InlineData("gap = 0")]
+    [InlineData("gap=0")]
+    [InlineData("  GAP   =   0  ")]
+    [InlineData("gap = 24")]
+    [InlineData("gap = 64")]
+    public void GapIsRead_HoweverTheLineIsSpelled(string line)
+    {
+        var expected = int.Parse(line.Split('=')[1].Trim());
+
+        Assert.Equal(expected, Settings.Parse(line).Gap);
+    }
+
+    /// <summary>
+    /// Same rule as every other key: a value outside 0-64, or not a whole number at all, keeps the
+    /// default rather than drawing a gap nobody asked for.
+    /// </summary>
+    [Theory]
+    [InlineData("gap = -1")]
+    [InlineData("gap = 65")]
+    [InlineData("gap = abc")]
+    [InlineData("gap = 12.5")]
+    [InlineData("gap =")]
+    [InlineData("gap")]
+    public void AnInvalidGap_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(TreeArranger.DefaultGap, Settings.Parse(line).Gap);
+    }
+
+    /// <summary>The last word wins here too, the same rule <see cref="TheLastAssignmentWins"/> proves for the border.</summary>
+    [Fact]
+    public void TheLastGapAssignmentWins()
+    {
+        Assert.Equal(24, Settings.Parse("gap = 8\ngap = 24").Gap);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(8)]
+    [InlineData(24)]
+    [InlineData(64)]
+    public void SerializeThenParse_RoundTripsTheGap(int gap)
+    {
+        var original = new Settings(FocusBorder: true, Gap: gap);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheGapAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, Gap: 24).Serialize();
+
+        Assert.Contains("# gap:", serialized, StringComparison.Ordinal);
+        Assert.Contains("gap = 24", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void GapIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\ngap = 65\ntiling = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.Equal(TreeArranger.DefaultGap, settings.Gap);
+        Assert.False(settings.Tiling);
     }
 }
