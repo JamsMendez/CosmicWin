@@ -40,7 +40,7 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   Commit `0d20ae6`.
 - [x] F2 HTTP-level test for an ignored alert (202 `ok`, trace `alert ignored`, never shown).
   Commit `f199ae5`.
-- [ ] F3 Hardware: rewrite the playing video in place (touch last-write) and resend -> reload;
+- [x] F3 (NOT REPRODUCIBLE, see Progress) Hardware: rewrite the playing video in place (touch last-write) and resend -> reload;
   resend without change -> `unchanged`. Out of scope for this delegated writer.
 
 ## Progress
@@ -168,3 +168,14 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   - R3-free-port-toctou (SUGGESTION): the F2 end-to-end tests pick a free port, release it, then
     let the composition bind it; another process can take it in between. Left open (test-only
     flakiness risk, no product impact).
+- 2026-09-26: F3 on hardware, Release build of fe9428b (PID 26740, replacing 34172), WordWorldLoop
+  playing (hard-linked import). Unchanged resend -> 202, `phase=http unchanged` (correct).
+  Setting LastWriteTimeUtc on `WordWorldLoop.mp4` FAILED: "being used by another process" --
+  Media Foundation holds the playing file open without write sharing, so neither content nor
+  timestamps can change while it plays (SetFileTime needs FILE_WRITE_ATTRIBUTES, which that
+  sharing mode denies). Both later resends stayed `unchanged`, correctly: the file did not change.
+  The timestamp was re-read afterwards and is still the original 2026-09-25T06:16:32.3769422Z.
+  Consequence: the in-place-edit case (R3-inplace-edit-hardlink) cannot occur while a video plays;
+  an edit can only land while playback is stopped, and then the skip is off (not active) or the
+  next start snapshots the new file. The snapshot check stays as cheap defense in depth; it also
+  carries the throwing-reader fix. Not reverted.
