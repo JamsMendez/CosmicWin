@@ -1137,7 +1137,10 @@ public sealed class AppComposition : IDisposable
             // On the owning thread, the same one ResumeTiling's onOwningThread(ResumeTiling) uses a
             // few lines above -- this arrives from a tray click too, and ReloadGap can rearrange
             // trees and reach the overlay through AfterArrange (T5, alert-tile-mosaic).
-            reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap));
+            reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap),
+            // T11 (alert-tile-mosaic): so a throwing half of Reload is reported the same way every
+            // other recoverable per-tick failure in this file already is, instead of vanishing.
+            desktopTrace: desktopTrace);
         // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
         // flip. Everything that makes the switch honest -- persisting it, and putting the layout
         // back when it comes on -- lives in the setTiling closure above, and a chord reaching past

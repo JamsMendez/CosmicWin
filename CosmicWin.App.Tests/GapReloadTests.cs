@@ -21,15 +21,18 @@ namespace CosmicWin.App.Tests;
 /// </remarks>
 public sealed class GapReloadTests
 {
-    private sealed class ImmediateScheduler
+    /// <summary>
+    /// T11 (alert-tile-mosaic, review R3-immediate-scheduler-never-fires): renamed from
+    /// "ImmediateScheduler" -- that name promised the reconcile callback fired right away, but it was
+    /// only ever stored and discarded, never invoked. Every fact in this file drives everything
+    /// through explicit calls (<see cref="Tray"/>'s own methods, <c>Workspace.RaiseWindowAdded</c>),
+    /// never through the periodic reconcile tick, so this exists only to satisfy
+    /// <c>AppComposition.Wire</c>'s <c>scheduleReconcile</c> parameter with a disposable that does
+    /// nothing.
+    /// </summary>
+    private sealed class NeverFiringReconcileScheduler
     {
-        private Action? _callback;
-
-        public IDisposable Schedule(TimeSpan interval, Action callback)
-        {
-            _callback = callback;
-            return new NullDisposable();
-        }
+        public IDisposable Schedule(TimeSpan interval, Action callback) => new NullDisposable();
     }
 
     private sealed class NullDisposable : IDisposable
@@ -60,7 +63,7 @@ public sealed class GapReloadTests
             workspace, treeManager, registry, new Foreground(), new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
             disableTaskTrigger: () => { },
-            scheduleReconcile: new ImmediateScheduler().Schedule,
+            scheduleReconcile: new NeverFiringReconcileScheduler().Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(
                 writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,

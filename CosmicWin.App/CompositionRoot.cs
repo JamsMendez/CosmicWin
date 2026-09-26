@@ -1,3 +1,4 @@
+using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tray;
 using CosmicWin.Interop;
@@ -113,28 +114,67 @@ public static class CompositionRoot
     /// ALONGSIDE the exception-list reload above, on the SAME WE-3 trigger -- there is no second
     /// menu item, "Reload" reloads everything settings.conf carries. Optional, and unset (every
     /// caller before this parameter existed) leaves Reload doing exactly what it always did:
-    /// exceptions only.
+    /// exceptions only. <paramref name="desktopTrace"/> is where a failing half of Reload is
+    /// reported (T11, alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure) --
+    /// optional, same as every other trace sink in this codebase, so a caller without one loses
+    /// nothing but the trace line itself.
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
         Func<bool> getFocusBorder, Action<bool> setFocusBorder, Action exit,
         Func<bool> getTiling, Action<bool> setTiling,
         Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
-        Action<string>? setVideoWallpaperPath = null, Action? reloadGap = null) =>
+        Action<string>? setVideoWallpaperPath = null, Action? reloadGap = null,
+        IDesktopTrace? desktopTrace = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
             getFocusBorder,
             setFocusBorder,
-            () =>
-            {
-                exceptions.Reload(loadExceptions());
-                reloadGap?.Invoke();
-            },
+            () => Reload(exceptions, loadExceptions, reloadGap, desktopTrace),
             exit,
             getBorderColor,
             setBorderColor,
             getTiling,
             setTiling,
             setVideoWallpaperPath);
+
+    /// <summary>
+    /// T11 (alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure): the exception-list
+    /// reload and the gap reload are two independent things that happen to share one tray trigger --
+    /// before this, they were two statements in a row, so a throwing <paramref name="loadExceptions"/>
+    /// propagated straight out and <paramref name="reloadGap"/> never ran (and the reverse: a
+    /// throwing <paramref name="reloadGap"/> would have looked identical from the caller's side, since
+    /// by then the exceptions reload had already succeeded, but nothing recorded WHICH half failed).
+    /// Each half now runs in its OWN try/catch, so one failing half costs only itself, and each
+    /// failure is traced (never silently swallowed) the same way
+    /// <c>AppComposition.UpdateAlertOverlay</c> already reports its own recoverable per-tick
+    /// failures.
+    /// </summary>
+    private static void Reload(
+        ExceptionListStore exceptions, Func<ExceptionList> loadExceptions, Action? reloadGap,
+        IDesktopTrace? desktopTrace)
+    {
+        try
+        {
+            exceptions.Reload(loadExceptions());
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            desktopTrace?.Record($"reload-exceptions-failed {ex.GetType().Name}: {ex.Message}");
+        }
+
+        try
+        {
+            reloadGap?.Invoke();
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            desktopTrace?.Record($"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Same corruption-class exclusion as <c>AppComposition</c>'s own <c>IsRecoverableAlertLayerFailure</c> -- see its remarks.</summary>
+    private static bool IsRecoverable(Exception exception) =>
+        exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 }

@@ -1,4 +1,5 @@
 ﻿using System.Threading.Channels;
+using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.Interop;
@@ -362,6 +363,70 @@ public sealed class CompositionRootTests
 
         Assert.Null(thrown);
         Assert.Equal(1, exceptionsReloadCount);
+    }
+
+    /// <summary>Mirrors every other private recording trace fake in this test project (e.g. <c>WebViewAlertCompositionWiringTests.RecordingDesktopTrace</c>).</summary>
+    private sealed class RecordingDesktopTrace : IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
+    /// <summary>
+    /// T11 (alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure): before this, the
+    /// composed Reload delegate ran <c>exceptions.Reload(loadExceptions())</c> then
+    /// <c>reloadGap?.Invoke()</c> as two statements in a row -- a throwing <c>loadExceptions</c>
+    /// propagated straight out of Reload and <c>reloadGap</c> never ran at all. Each half now costs
+    /// only itself.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_AThrowingExceptionsReloadStillRunsTheGapReload()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var gapReloadCount = 0;
+        var trace = new RecordingDesktopTrace();
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore,
+            () => throw new InvalidOperationException("exceptions.conf unreadable"),
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { },
+            reloadGap: () => gapReloadCount++,
+            desktopTrace: trace);
+
+        var thrown = Record.Exception(() => controller.Reload());
+
+        Assert.Null(thrown);
+        Assert.Equal(1, gapReloadCount);
+        Assert.Contains(trace.Lines, line => line.Contains("reload-exceptions-failed", StringComparison.Ordinal));
+    }
+
+    /// <summary>The other direction: a throwing <c>reloadGap</c> must not cost the exceptions reload its turn, and must be traced too.</summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_AThrowingGapReloadStillRunsTheExceptionsReload()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var exceptionsReloadCount = 0;
+        var trace = new RecordingDesktopTrace();
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore,
+            () =>
+            {
+                exceptionsReloadCount++;
+                return ExceptionList.Empty;
+            },
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { },
+            reloadGap: () => throw new InvalidOperationException("settings.conf unreadable"),
+            desktopTrace: trace);
+
+        var thrown = Record.Exception(() => controller.Reload());
+
+        Assert.Null(thrown);
+        Assert.Equal(1, exceptionsReloadCount);
+        Assert.Contains(trace.Lines, line => line.Contains("reload-gap-failed", StringComparison.Ordinal));
     }
 
     /// <summary>
