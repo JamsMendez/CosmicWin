@@ -83,6 +83,28 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.True(debugWriteLineSites >= 8, $"Expected at least 8 Debug.WriteLine sites, found {debugWriteLineSites}.");
     }
 
+    /// <summary>
+    /// T7 (alert-tile-mosaic, 2026-09-26): the "show" message must also carry the work area
+    /// (<see cref="AlertShowRequest.WorkAreaLeft"/> etc.) so the page can lay an N&gt;1 mosaic out
+    /// inside it -- <c>PostShow</c>'s real WebView2 call stays a hardware-only concern (see the class
+    /// remarks), so this is a structural guard on the JSON literal, matching every other assertion in
+    /// this file that reads the source directly.
+    /// </summary>
+    [Fact]
+    public void PostShowIncludesTheWorkAreaInTheShowMessage()
+    {
+        var source = ReadControllerSource();
+        var start = source.IndexOf("private void PostShow(AlertShowRequest request)", StringComparison.Ordinal);
+        Assert.True(start >= 0, "expected a private void PostShow(AlertShowRequest request) method");
+        var next = source.IndexOf("\n    private", start + 1, StringComparison.Ordinal);
+        var body = source[start..(next > 0 ? next : source.Length)];
+        Assert.Contains("workArea", body);
+        Assert.Contains("request.WorkAreaLeft", body);
+        Assert.Contains("request.WorkAreaTop", body);
+        Assert.Contains("request.WorkAreaWidth", body);
+        Assert.Contains("request.WorkAreaHeight", body);
+    }
+
     private static string ReadControllerSource([CallerFilePath] string testFilePath = "") =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFilePath)!,
             "..", "..", "CosmicWin.App", "Alerts", "WebViewAlertLayerController.cs")));
@@ -119,8 +141,8 @@ public sealed class WebViewAlertLayerControllerTests
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
         Assert.Null(error);
-        Assert.Contains("alert-layer show tiles=warning grid=1x1 gap=8 duration=1000", traces);
-        Assert.Contains("alert-layer show tiles=failed,failed grid=2x1 gap=8 duration=500", traces);
+        Assert.Contains("alert-layer show tiles=warning grid=1x1 gap=8 work=0,0,0x0 duration=1000", traces);
+        Assert.Contains("alert-layer show tiles=failed,failed grid=2x1 gap=8 work=0,0,0x0 duration=500", traces);
         Assert.Equal(2, traces.Count(line => line == "alert-layer hide"));
         Assert.DoesNotContain(traces, line => line.StartsWith("alert-layer close", StringComparison.Ordinal));
     }

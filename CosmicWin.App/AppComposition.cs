@@ -730,6 +730,27 @@ public sealed class AppComposition : IDisposable
                 // ever having to know about settings.
                 var layout = AlertTileLayout.From(active.Command);
                 var tiles = layout.Tiles.Select(kind => kind == AlertKind.Failed ? "failed" : "warning").ToArray();
+                // T7 (alert-tile-mosaic, 2026-09-26): the work area is read HERE, at show time, same
+                // reason as Gap just below -- the taskbar can move/auto-hide between wiring and an
+                // alert firing. treeManager.Primary is a live lookup (TreeManager.Primary), and the
+                // IDisplay object it returns updates itself IN PLACE on every watch tick's
+                // refreshDisplays() call (Win32Display.Refresh), so this always sees the latest known
+                // reading without a fresh GetMonitorInfo call of its own -- exactly the "existing
+                // work-area tracking code" the task asks to reuse. Never allowed to fail the alert:
+                // any exception here (there should never be one against these plain property reads)
+                // degrades to AlertLayerWorkArea.Unavailable, which the page already treats as "lay
+                // out on the whole canvas", the pre-T7 behaviour.
+                AlertLayerWorkArea workArea;
+                try
+                {
+                    var alertDisplay = treeManager.Primary;
+                    workArea = AlertLayerWorkArea.Resolve(alertDisplay.Bounds, alertDisplay.WorkArea);
+                }
+                catch (Exception ex)
+                {
+                    desktopTrace?.Record($"alert-layer-workarea-failed {ex.GetType().Name}: {ex.Message}");
+                    workArea = AlertLayerWorkArea.Unavailable;
+                }
                 // R3-negative-gap-blocks-alert: TreeArranger.Gap is a shared mutable static nothing
                 // stops another caller from setting negative (T5's settings.conf `gap` key itself
                 // rejects anything outside 0-64, but that guard lives in Settings.Parse, not on the
@@ -737,7 +758,8 @@ public sealed class AppComposition : IDisposable
                 // clamped here rather than letting a stray negative value take the whole alert down.
                 startAlertLayer(new AlertShowRequest(
                     tiles, layout.Columns, layout.Rows, Math.Max(0, TreeArranger.Gap),
-                    Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds))));
+                    Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)),
+                    workArea.Left, workArea.Top, workArea.Width, workArea.Height));
             }
             catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
             {

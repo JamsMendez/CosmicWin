@@ -32,17 +32,24 @@ public sealed class AlertLayerTraceTests
             AlertLayerTrace.NavigationCompleted(false, "ConnectionAborted", 42));
     }
 
-    /// <summary>Columns and rows are deliberately DIFFERENT (4x2, not a symmetric grid) so a columns/rows swap in the format string would fail this.</summary>
+    /// <summary>
+    /// Columns and rows are deliberately DIFFERENT (4x2, not a symmetric grid) so a columns/rows swap
+    /// in the format string would fail this; the work area's four fields are all different from each
+    /// other too (T7), so a field-order swap among them would fail it the same way.
+    /// </summary>
     [Fact]
-    public void Show_NamesTilesGridGapAndDuration() =>
+    public void Show_NamesTilesGridGapWorkAreaAndDuration() =>
         Assert.Equal(
-            "alert-layer show tiles=failed,failed,warning grid=4x2 gap=8 duration=5000",
-            AlertLayerTrace.Show(new AlertShowRequest(["failed", "failed", "warning"], 4, 2, 8, 5000)));
+            "alert-layer show tiles=failed,failed,warning grid=4x2 gap=8 work=100,20,1720x1000 duration=5000",
+            AlertLayerTrace.Show(new AlertShowRequest(
+                ["failed", "failed", "warning"], 4, 2, 8, 5000,
+                WorkAreaLeft: 100, WorkAreaTop: 20, WorkAreaWidth: 1720, WorkAreaHeight: 1000)));
 
+    /// <summary>The default (unset) work area is T7's own <c>AlertLayerWorkArea.Unavailable</c> shape -- all zero.</summary>
     [Fact]
-    public void Show_NamesASingleTileWithoutATrailingComma() =>
+    public void Show_NamesASingleTileWithoutATrailingCommaAndAnUnavailableWorkAreaAsAllZero() =>
         Assert.Equal(
-            "alert-layer show tiles=warning grid=1x1 gap=0 duration=1000",
+            "alert-layer show tiles=warning grid=1x1 gap=0 work=0,0,0x0 duration=1000",
             AlertLayerTrace.Show(new AlertShowRequest(["warning"], 1, 1, 0, 1000)));
 
     [Fact]
@@ -51,13 +58,19 @@ public sealed class AlertLayerTraceTests
     [Fact]
     public void PageReady_IsAFixedLine() => Assert.Equal("alert-layer page ready", AlertLayerTrace.PageReady());
 
-    /// <summary>Columns and rows are deliberately DIFFERENT (3x2, not a symmetric grid) so a columns/rows swap in the format string would fail this.</summary>
+    /// <summary>
+    /// Columns and rows are deliberately DIFFERENT (3x2, not a symmetric grid) so a columns/rows swap
+    /// in the format string would fail this; the work area's fields are likewise all different (T7).
+    /// </summary>
     [Fact]
-    public void PendingShowApplied_NamesTilesGridGapAndRemainingDuration() =>
+    public void PendingShowApplied_NamesTilesGridGapWorkAreaAndRemainingDuration() =>
         Assert.Equal(
-            "alert-layer pending show applied tiles=failed,failed,warning,warning,warning grid=3x2 gap=8 remaining=17500",
+            "alert-layer pending show applied tiles=failed,failed,warning,warning,warning grid=3x2 gap=8 "
+            + "work=0,40,1920x1040 remaining=17500",
             AlertLayerTrace.PendingShowApplied(
-                new AlertShowRequest(["failed", "failed", "warning", "warning", "warning"], 3, 2, 8, 17500)));
+                new AlertShowRequest(
+                    ["failed", "failed", "warning", "warning", "warning"], 3, 2, 8, 17500,
+                    WorkAreaLeft: 0, WorkAreaTop: 40, WorkAreaWidth: 1920, WorkAreaHeight: 1040)));
 
     [Fact]
     public void Done_IsAFixedLine() => Assert.Equal("alert-layer done", AlertLayerTrace.Done());

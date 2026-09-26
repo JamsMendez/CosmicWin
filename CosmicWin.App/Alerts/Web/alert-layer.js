@@ -455,25 +455,53 @@ var gridColumns = 1;
 var gridRows = 1;
 var gapPx = 0; // PHYSICAL pixels, as posted by the host -- converted to CSS pixels below
 
+// T7 (alert-tile-mosaic, 2026-09-26): the monitor's work area, PHYSICAL pixels, RELATIVE to this
+// page's own surface (the whole canvas at devicePixelRatio) -- posted by the host alongside gap
+// (AlertLayerWorkArea/AppComposition, read at show time so a moved/auto-hidden taskbar is picked up
+// on the NEXT alert). workAreaWidth/Height <= 0 means "could not be read, or does not fit the
+// surface" (AlertLayerWorkArea.Unavailable's own shape) -- gridAreaRect() below then falls back to
+// the whole canvas, exactly the pre-T7 behaviour for N>1.
+var workAreaLeft = 0;
+var workAreaTop = 0;
+var workAreaWidth = 0;
+var workAreaHeight = 0;
+
+// The rect (CSS pixels) the N>1 grid is laid out inside: the work area, converted with the same
+// devicePixelRatio-derived scale resize() already uses, and clamped to the canvas -- or the whole
+// canvas when the work area is absent/degenerate. N=1 never calls this (tileRects returns early).
+function gridAreaRect() {
+  if (workAreaWidth <= 0 || workAreaHeight <= 0) {
+    return { x: 0, y: 0, w: canvasW, h: canvasH };
+  }
+  var x = Math.max(0, Math.min(canvasW, workAreaLeft / canvasScaleX));
+  var y = Math.max(0, Math.min(canvasH, workAreaTop / canvasScaleY));
+  var w = Math.max(1, Math.min(canvasW - x, workAreaWidth / canvasScaleX));
+  var h = Math.max(1, Math.min(canvasH - y, workAreaHeight / canvasScaleY));
+  return { x: x, y: y, w: w, h: h };
+}
+
 // Returns each tile's CSS-pixel rect {x, y, w, h} within the canvas, row-major, in `tiles` order.
 // gapPx arrives in PHYSICAL pixels (the same unit TreeArranger.Gap uses); canvasScaleX/Y are the
 // same devicePixelRatio-derived factors resize() already uses to size the canvas, so dividing by
-// them keeps the gap's CSS size consistent with how everything else on this page is sized.
+// them keeps the gap's CSS size consistent with how everything else on this page is sized. N>1 lays
+// the outer gap + grid out inside gridAreaRect() (T7: the work area, or the whole canvas as a
+// fallback) instead of always the whole canvas.
 function tileRects() {
   if (tiles.length <= 1) {
     return [{ x: 0, y: 0, w: canvasW, h: canvasH }];
   }
+  var area = gridAreaRect();
   var gapCssX = gapPx / canvasScaleX;
   var gapCssY = gapPx / canvasScaleY;
-  var cellW = Math.max(1, (canvasW - gapCssX * (gridColumns + 1)) / gridColumns);
-  var cellH = Math.max(1, (canvasH - gapCssY * (gridRows + 1)) / gridRows);
+  var cellW = Math.max(1, (area.w - gapCssX * (gridColumns + 1)) / gridColumns);
+  var cellH = Math.max(1, (area.h - gapCssY * (gridRows + 1)) / gridRows);
   var rects = [];
   for (var i = 0; i < tiles.length; i++) {
     var col = i % gridColumns;
     var row = Math.floor(i / gridColumns);
     rects.push({
-      x: gapCssX + col * (cellW + gapCssX),
-      y: gapCssY + row * (cellH + gapCssY),
+      x: area.x + gapCssX + col * (cellW + gapCssX),
+      y: area.y + gapCssY + row * (cellH + gapCssY),
       w: cellW,
       h: cellH,
     });
@@ -512,14 +540,27 @@ function resetKindState() {
 // newTiles/columns/rows/gap: alert-tile-mosaic's grid (see tileRects above). A caller with only a
 // single kind/duration (the old contract, and the hash API's back-compat form) passes a one-tile
 // list with a 1x1 grid and zero gap, which tileRects already renders exactly like the old
-// single-layer page.
-function startShowing(newTiles, columns, rows, gap, duration) {
+// single-layer page. workArea (T7): {left, top, width, height} in PHYSICAL pixels, or missing/null --
+// treated the same as an unresolved work area (gridAreaRect falls back to the whole canvas).
+function startShowing(newTiles, columns, rows, gap, duration, workArea) {
   tiles = Array.isArray(newTiles) && newTiles.length > 0
     ? newTiles.map(function (tile) { return tile === "failed" ? "failed" : "warning"; })
     : ["warning"];
   gridColumns = Math.max(1, Math.floor(columns) || 1);
   gridRows = Math.max(1, Math.floor(rows) || 1);
   gapPx = Math.max(0, gap || 0);
+  if (workArea && isFinite(workArea.width) && isFinite(workArea.height)
+    && workArea.width > 0 && workArea.height > 0) {
+    workAreaLeft = Math.max(0, Number(workArea.left) || 0);
+    workAreaTop = Math.max(0, Number(workArea.top) || 0);
+    workAreaWidth = Math.max(0, Number(workArea.width) || 0);
+    workAreaHeight = Math.max(0, Number(workArea.height) || 0);
+  } else {
+    workAreaLeft = 0;
+    workAreaTop = 0;
+    workAreaWidth = 0;
+    workAreaHeight = 0;
+  }
   durationMs = isFinite(duration) && duration > 0 ? duration : 5000;
   showStartMs = null;
   resetKindState();
@@ -593,11 +634,14 @@ function handleHostMessage(event) {
   if (!data || typeof data !== "object") return;
   if (data.type === "show") {
     if (Array.isArray(data.tiles)) {
-      startShowing(data.tiles, Number(data.columns), Number(data.rows), Number(data.gap), Number(data.duration));
+      startShowing(
+        data.tiles, Number(data.columns), Number(data.rows), Number(data.gap), Number(data.duration),
+        data.workArea);
     } else {
       // Back-compat: the old single-kind message shape, {type:"show", kind, duration} -- kept
       // trivial since production (WebViewAlertLayerController) always sends "tiles" now; this only
-      // matters for a manual check that posts the old shape by hand.
+      // matters for a manual check that posts the old shape by hand. No work area either -- N=1
+      // ignores it anyway (tileRects returns early).
       startShowing([data.kind === "failed" ? "failed" : "warning"], 1, 1, 0, Number(data.duration));
     }
   } else if (data.type === "hide") {
@@ -612,6 +656,10 @@ if (window.chrome && window.chrome.webview) {
 // ---- Hash API ------------------------------------------------------------------------------------
 // alert-tile-mosaic: alert-layer.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
 // Old single-tile form, still supported: alert-layer.html#kind=failed&duration=5000
+// T7: optional work area param, tiles form only -- alert-layer.html#tiles=...&work=L,T,W,H (physical
+// pixels, comma-separated -- distinct from the trace's "work=L,T,WxH" wording, chosen so this reads
+// as an ordinary flat hash param like every other one here). Omitted or malformed falls back to the
+// whole canvas, same as when the host never posts one.
 // Either form keeps this file working when opened directly in a browser tab for the manual check the
 // feature doc asks for -- reads location.hash, falling back to location.search. A preloaded host
 // page (T9c) navigates with NO hash/query at all, so this must NOT auto-show: only an EXPLICIT
@@ -621,6 +669,16 @@ if (window.chrome && window.chrome.webview) {
 function parseParams() {
   var raw = (location.hash || location.search || "").replace(/^[#?]/, "");
   return new URLSearchParams(raw);
+}
+
+// Parses the "work=L,T,W,H" hash param into the same {left, top, width, height} shape startShowing
+// already accepts from the host message; returns undefined (treated as "no work area") when the
+// param is missing or not exactly four finite numbers.
+function parseWorkAreaParam(params) {
+  if (!params.has("work")) return undefined;
+  var parts = params.get("work").split(",").map(Number);
+  if (parts.length !== 4 || parts.some(function (n) { return !isFinite(n); })) return undefined;
+  return { left: parts[0], top: parts[1], width: parts[2], height: parts[3] };
 }
 
 var params = parseParams();
@@ -641,7 +699,8 @@ if (hasExplicitParams) {
       Number(params.get("columns")) || 1,
       Number(params.get("rows")) || 1,
       Number(params.get("gap")) || 0,
-      requestedDuration);
+      requestedDuration,
+      parseWorkAreaParam(params));
   } else {
     var requestedKind = params.get("kind") === "failed" ? "failed" : "warning";
     startShowing([requestedKind], 1, 1, 0, requestedDuration);

@@ -135,6 +135,27 @@ public sealed class AlertLayerPreloadStateTests
         Assert.Equal(12, applied.Gap);
     }
 
+    /// <summary>T7 (alert-tile-mosaic): the work area rides through the pending/shown tracking unchanged, same as the grid and gap above.</summary>
+    [Fact]
+    public void PendingShowCarriesTheWorkAreaUnchanged()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = new AlertLayerPreloadState(() => now);
+        state.RequestShow(new AlertShowRequest(
+            ["warning"], 1, 1, 8, 1000,
+            WorkAreaLeft: 10, WorkAreaTop: 20, WorkAreaWidth: 1700, WorkAreaHeight: 1000));
+        now = now.AddMilliseconds(400);
+
+        state.MarkReady();
+        var applied = state.ApplyPendingShowIfDue();
+
+        Assert.NotNull(applied);
+        Assert.Equal(10, applied.WorkAreaLeft);
+        Assert.Equal(20, applied.WorkAreaTop);
+        Assert.Equal(1700, applied.WorkAreaWidth);
+        Assert.Equal(1000, applied.WorkAreaHeight);
+    }
+
     [Fact]
     public void PendingShowIsDroppedWhenItsDeadlineAlreadyPassedBeforeBecomingReady()
     {

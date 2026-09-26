@@ -136,9 +136,18 @@ public sealed class WebViewAlertLayerController : IDisposable
         try
         {
             var tilesJson = string.Join(",", request.Tiles.Select(tile => $"\"{tile}\""));
+            // T7 (alert-tile-mosaic): workArea is physical pixels, RELATIVE to the layer surface (see
+            // AlertLayerWorkArea) -- all zero when it could not be read, which the page already
+            // treats as "lay out on the whole canvas instead". Clamped defensively to >= 0 here too:
+            // this alert must never fail just because a caller handed it a bad rect.
+            var workAreaJson = "{\"left\":" + Math.Max(0, request.WorkAreaLeft)
+                + ",\"top\":" + Math.Max(0, request.WorkAreaTop)
+                + ",\"width\":" + Math.Max(0, request.WorkAreaWidth)
+                + ",\"height\":" + Math.Max(0, request.WorkAreaHeight) + "}";
             _controller.CoreWebView2.PostWebMessageAsJson(
                 $"{{\"type\":\"show\",\"tiles\":[{tilesJson}],\"columns\":{request.Columns},"
-                + $"\"rows\":{request.Rows},\"gap\":{request.Gap},\"duration\":{request.DurationMilliseconds}}}");
+                + $"\"rows\":{request.Rows},\"gap\":{request.Gap},\"workArea\":{workAreaJson},"
+                + $"\"duration\":{request.DurationMilliseconds}}}");
             _controller.IsVisible = true;
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-show", ex)); }

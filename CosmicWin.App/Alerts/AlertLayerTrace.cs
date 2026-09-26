@@ -25,7 +25,7 @@ internal static class AlertLayerTrace
 
     public static string Show(AlertShowRequest request) =>
         $"alert-layer show tiles={string.Join(",", request.Tiles)} grid={request.Columns}x{request.Rows} "
-        + $"gap={request.Gap} duration={request.DurationMilliseconds}";
+        + $"gap={request.Gap} work={WorkArea(request)} duration={request.DurationMilliseconds}";
 
     public static string Hide() => "alert-layer hide";
 
@@ -35,7 +35,12 @@ internal static class AlertLayerTrace
 
     public static string PendingShowApplied(AlertShowRequest request) =>
         $"alert-layer pending show applied tiles={string.Join(",", request.Tiles)} "
-        + $"grid={request.Columns}x{request.Rows} gap={request.Gap} remaining={request.DurationMilliseconds}";
+        + $"grid={request.Columns}x{request.Rows} gap={request.Gap} work={WorkArea(request)} "
+        + $"remaining={request.DurationMilliseconds}";
+
+    /// <summary>T7 (alert-tile-mosaic): the work area segment shared by <see cref="Show"/> and <see cref="PendingShowApplied"/> -- "L,T,WxH", all zero when <see cref="AlertLayerWorkArea.Unavailable"/> (could not be read; the mosaic falls back to the whole canvas).</summary>
+    private static string WorkArea(AlertShowRequest request) =>
+        $"{request.WorkAreaLeft},{request.WorkAreaTop},{request.WorkAreaWidth}x{request.WorkAreaHeight}";
 
     public static string Close(string reason) => $"alert-layer close reason={reason}";
 

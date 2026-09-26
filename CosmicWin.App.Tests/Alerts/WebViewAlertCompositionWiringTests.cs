@@ -85,11 +85,20 @@ public sealed class WebViewAlertCompositionWiringTests
     /// string keeps the SAME "start:" prefix and kind-name convention every existing assertion below
     /// already greps for (<c>StartsWith("start:warning:", ...)</c> etc.), with the grid/gap appended,
     /// so only the assertions that actually care about grid/gap needed new text.
+    /// <para>
+    /// T7: the work area segment ("work=L,T,WxH") is inserted between <c>gap=</c> and the trailing
+    /// duration, using commas (never a colon) inside it -- every existing assertion below either
+    /// checks a PREFIX ending at "gap=...:" (unaffected) or parses the duration from the string's
+    /// LAST colon (<c>LastIndexOf(':')</c>), which still lands correctly since nothing after the work
+    /// segment contains another colon.
+    /// </para>
     /// </summary>
     private static string DescribeShow(AlertShowRequest request) =>
-        $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}";
+        $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:" +
+        $"work={request.WorkAreaLeft},{request.WorkAreaTop},{request.WorkAreaWidth}x{request.WorkAreaHeight}:" +
+        $"{request.DurationMilliseconds}";
 
-    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace) Create(
+    private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace, FakeDisplay Display) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
         Host? host = null, Action<AlertShowRequest>? startAlertLayer = null, Action? preloadAlertLayer = null)
     {
@@ -120,7 +129,7 @@ public sealed class WebViewAlertCompositionWiringTests
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
             preloadAlertLayer: preloadAlertLayer,
             timeProvider: clock);
-        return (composition, timer, server!, events, clock, trace);
+        return (composition, timer, server!, events, clock, trace, display);
     }
 
     /// <summary>
@@ -381,6 +390,54 @@ public sealed class WebViewAlertCompositionWiringTests
         finally
         {
             TreeArranger.Gap = originalGap;
+        }
+    }
+
+    /// <summary>
+    /// T7 (alert-tile-mosaic, 2026-09-26): <c>UpdateAlertOverlay</c> must read <c>treeManager.
+    /// Primary</c>'s work area AT SHOW TIME, not once at wire time -- the taskbar can move/auto-hide
+    /// between wiring and an alert firing (feature doc). The composition's own fake display starts
+    /// with no taskbar (work area == bounds, 1920x1080); this test narrows the work area (taskbar
+    /// docked on TOP, 40px -- deliberately asymmetric: a Left/Top or Bounds/WorkArea argument swap in
+    /// the wiring would produce (0,0,1920,1040) here instead of the correct (0,40,1920,1040), since a
+    /// right-docked/origin-aligned work area used in an earlier version of this test could not tell
+    /// the two apart) AFTER wiring but BEFORE sending the command, then proves the threaded
+    /// <see cref="AlertShowRequest"/> carries the NEW, narrower rect, expressed relative to the
+    /// display's own bounds (0,0 origin here since the fake display already starts at the desktop
+    /// origin -- <see cref="AlertLayerWorkAreaTests"/> covers a non-origin monitor directly).
+    /// </summary>
+    [Fact]
+    public void ReadsTheWorkAreaAtShowTimeAndThreadsItRelativeToTheSurface()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            h.Display.WorkArea = Rectangle.FromSize(0, 40, 1920, 1040);
+
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:1 warning:1 duration:1"));
+
+            Assert.Equal("shake:120", h.Events[0]);
+            Assert.Contains(":work=0,40,1920x1040:", h.Events[1]);
+        }
+    }
+
+    /// <summary>
+    /// T7: a work area that cannot be resolved (here, a degenerate/zero-size fake work area) must
+    /// never fail the alert -- it falls back to <see cref="AlertLayerWorkArea.Unavailable"/> (all
+    /// zero), which the page already treats as "lay out on the whole canvas", exactly pre-T7 behavior.
+    /// </summary>
+    [Fact]
+    public void UnresolvableWorkAreaFallsBackToUnavailableRatherThanFailingTheAlert()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            h.Display.WorkArea = Rectangle.FromSize(5000, 5000, 100, 100); // Nowhere near the surface.
+
+            var thrown = Record.Exception(() => h.Server.Send("warning:1 duration:1"));
+
+            Assert.Null(thrown);
+            Assert.Contains(":work=0,0,0x0:", Assert.Single(h.Events));
         }
     }
 

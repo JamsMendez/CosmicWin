@@ -237,4 +237,38 @@ public sealed class AlertLayerWebPageTests
         Assert.Contains("params.get(\"gap\")", js);
         Assert.Contains("params.get(\"kind\")", js);
     }
+
+    /// <summary>
+    /// T7 (alert-tile-mosaic, 2026-09-26): "lay the N&gt;1 mosaic out inside the work area" -- the
+    /// host posts a work area (physical pixels, relative to the layer surface) in the "show" message;
+    /// the page converts it to CSS pixels with the same devicePixelRatio-derived scale it already
+    /// uses for the gap, and falls back to the whole canvas when it is missing or degenerate (zero or
+    /// negative width/height), exactly the pre-T7 full-canvas behaviour. N=1 stays untouched --
+    /// <see cref="Script_SingleTileSkipsTheOuterGap"/> already proves that branch is unchanged.
+    /// Structural guards only, matching every other assertion in this file (no DOM/canvas harness).
+    /// </summary>
+    [Fact]
+    public void Script_LaysTheGridOutInsideTheWorkAreaWithFallbackToTheFullCanvas()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("function gridAreaRect", js);
+        Assert.Contains("workAreaWidth", js);
+        Assert.Contains("workAreaHeight", js);
+        Assert.Contains("workAreaLeft", js);
+        Assert.Contains("workAreaTop", js);
+        // Converted with the SAME devicePixelRatio-derived scale the gap already uses.
+        Assert.Contains("workAreaLeft / canvasScaleX", js);
+        Assert.Contains("workAreaTop / canvasScaleY", js);
+        Assert.Contains("workAreaWidth / canvasScaleX", js);
+        Assert.Contains("workAreaHeight / canvasScaleY", js);
+    }
+
+    /// <summary>The host's "show" message and the hash API both gain the work area (T7).</summary>
+    [Fact]
+    public void Script_HandlesTheWorkAreaFromTheHostMessageAndTheHashApi()
+    {
+        var js = ReadShipped("alert-layer.js");
+        Assert.Contains("data.workArea", js);
+        Assert.Contains("params.get(\"work\")", js);
+    }
 }
