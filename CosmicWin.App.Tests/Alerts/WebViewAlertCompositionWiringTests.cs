@@ -168,8 +168,16 @@ public sealed class WebViewAlertCompositionWiringTests
         }
     }
 
+    /// <summary>
+    /// Rewritten for alert-busy-ignore (maintainer decision, 2026-09-26): this used to prove TWO
+    /// alerts queued while covered would both eventually show, one after another -- exactly the
+    /// stacking the new busy-ignore rule forbids. The second command sent here now finds the first
+    /// alert already WAITING (queued while covered, not yet shown) and is ignored instead of queued:
+    /// it must still answer ok, the trace must record the ignore, and only the first alert is ever
+    /// shown, even after it ends.
+    /// </summary>
     [Fact]
-    public void CoveredQueueWaitsAndNextAlertStartsAfterPreviousEnds()
+    public void ASecondCommandWhileCoveredAndWaiting_IsIgnored_AndOnlyTheFirstEverShows()
     {
         var visible = false;
         var h = Create(() => visible);
@@ -177,19 +185,47 @@ public sealed class WebViewAlertCompositionWiringTests
         {
             Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:1 duration:1"));
             Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:1 duration:1"));
+            Assert.Contains(h.Trace.Lines, line => line.Contains("alert ignored", StringComparison.Ordinal));
+
             h.Timer.Tick();
             Assert.Empty(h.Events);
+
             visible = true;
             h.Timer.Tick();
             Assert.StartsWith("start:warning:", Assert.Single(h.Events));
+
             h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
             h.Timer.Tick();
-            Assert.Equal(4, h.Events.Count);
+            Assert.Equal(2, h.Events.Count);
             Assert.StartsWith("start:warning:", h.Events[0]);
             Assert.Equal("end", h.Events[1]);
-            Assert.Equal("shake:120", h.Events[2]);
-            Assert.StartsWith("start:failed:", h.Events[3]);
-            Assert.InRange(int.Parse(h.Events[3]["start:failed:".Length..]), 1, 1000);
+        }
+    }
+
+    /// <summary>
+    /// A2 (alert-busy-ignore): the same <c>HandleAlertCommand</c> entry both the pipe and the HTTP
+    /// route reach through -- proven here via the pipe's <c>Server.Send</c>, see the feature's task
+    /// file for why no separate HTTP-level test is needed -- must answer ok for a second command
+    /// while the first is still SHOWING, exactly as for a queued one, and the desktop trace must
+    /// record the ignore. Only the first alert's start event is ever seen.
+    /// </summary>
+    [Fact]
+    public void ASecondCommandWhileShowing_StillRepliesOk_ButIsIgnored()
+    {
+        var h = Create();
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:1 duration:1"));
+            Assert.StartsWith("start:warning:", Assert.Single(h.Events));
+
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("failed:1 duration:1"));
+            Assert.Contains(h.Trace.Lines, line => line.Contains("alert ignored", StringComparison.Ordinal));
+            Assert.DoesNotContain(h.Events, e => e.StartsWith("start:failed:", StringComparison.Ordinal));
+
+            h.Clock.Advance(TimeSpan.FromMilliseconds(1100));
+            h.Timer.Tick();
+
+            Assert.DoesNotContain(h.Events, e => e.StartsWith("start:failed:", StringComparison.Ordinal));
         }
     }
 
