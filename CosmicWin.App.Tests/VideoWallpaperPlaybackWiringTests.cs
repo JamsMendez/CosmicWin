@@ -1080,6 +1080,63 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// Review finding R3-predicate-args-unproved: the tests above stub <c>isSameVideoFile</c> with a
+    /// constant, so they would still pass if the skip compared the wrong operands. Here the predicate
+    /// agrees ONLY for (requested source, current IMPORTED path) in that order, so comparing the
+    /// request with itself, swapping the operands, or comparing against the raw source of the
+    /// previous switch instead of what it imported all fall through to a reload and fail. The first
+    /// switch also proves the current path advances to the imported destination -- the trap the
+    /// feature doc names: the caller's source is never what is stored.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_ComparesTheRequestedPathAgainstTheCurrentImportedPath()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var imports = new List<string>();
+        var comparisons = new List<(string Requested, string Current)>();
+        var startupPath = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+        const string firstSource = @"C:\Users\me\Videos\first.mp4";
+        const string imported = @"C:\LOCALAPPDATA\CosmicWin\video-wallpaper.mp4";
+        const string repeatSource = @"C:\Users\me\Videos\first-by-another-name.mp4";
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: startupPath,
+            importVideoWallpaper: p =>
+            {
+                imports.Add(p);
+                return imported;
+            },
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true,
+            isSameVideoFile: (requested, current) =>
+            {
+                comparisons.Add((requested, current));
+                return requested == repeatSource && current == imported;
+            });
+        using (harness.Composition)
+        {
+            // Startup queued its own activation work item ahead of anything this test posts.
+            queued.Dequeue().Invoke();
+
+            Assert.True(harness.HandleVideoWallpaperHttpSwitch!(firstSource));
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, player.StopCallCount);
+            trace.Lines.Clear();
+
+            Assert.True(harness.HandleVideoWallpaperHttpSwitch!(repeatSource));
+            queued.Dequeue().Invoke();
+
+            Assert.Equal([(firstSource, startupPath), (repeatSource, imported)], comparisons);
+            Assert.Equal(1, player.StopCallCount);
+            Assert.Equal([firstSource], imports);
+            Assert.Equal(["video-wallpaper phase=http unchanged"], trace.Lines);
+        }
+    }
+
+    /// <summary>
     /// Decision 1 in <c>odd/tasks/same-video-noop.md</c>: HTTP only. A tray re-pick of the very
     /// same video must keep reloading exactly as today, even with <c>isSameVideoFile</c> stubbed to
     /// always agree -- <c>setVideoWallpaperPath</c>'s tray call site never passes
