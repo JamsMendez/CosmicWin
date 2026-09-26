@@ -10,7 +10,7 @@ namespace CosmicWin.App.Tests.Alerts;
 /// <remarks>
 /// Pure and time-free, exactly like <see cref="AlertQueue"/> itself: every test drives
 /// <see cref="AlertQueue.Advance"/> with an explicit <see cref="DateTimeOffset"/> rather than a
-/// real clock, and small capacities/max ages rather than the production defaults.
+/// real clock, and small max ages rather than the production default.
 /// </remarks>
 public sealed class AlertQueueTests
 {
@@ -51,13 +51,9 @@ public sealed class AlertQueueTests
     /// consumed. That path is no longer reachable through <see cref="AlertQueue.Enqueue"/>: with at
     /// most one alert ever showing or waiting, a second call while one is already pending is now
     /// caught by the busy-ignore rule (see <see cref="ASecondRequest_IsIgnoredWhileOneIsWaiting"/>
-    /// and friends below) before the capacity check is ever reached -- with any capacity of 1 or
-    /// more, <c>_pending.Count</c> can never grow past 1 through <c>Enqueue</c> alone, so
-    /// <c>_pending.Count &gt;= _capacity</c> can only be true when <c>capacity</c> is itself 1, which
-    /// the busy-ignore check already intercepts first. The capacity field, its constructor
-    /// validation, and the internal capacity-full branch are kept as a defensive invariant guard
-    /// (see the constructor tests below, still exercised), not removed, per the feature's decision
-    /// that queue-full stays in the code even though the composition can no longer reach it.
+    /// and friends below) before a capacity check could ever run. Task A4 (2026-09-26, review finding
+    /// R3-capacity-false-path-unreachable-untested) later removed the capacity parameter, field, and
+    /// branch entirely, since the busy-ignore rule made them permanently dead.
     /// </summary>
     [Fact]
     public void ASecondRequest_IsIgnoredWhileOneIsShowing()
@@ -68,9 +64,8 @@ public sealed class AlertQueueTests
         queue.Enqueue(showing, Epoch);
         queue.Advance(Epoch, desktopVisible: true);
 
-        var accepted = queue.Enqueue(Command(), Epoch.AddSeconds(2));
+        queue.Enqueue(Command(), Epoch.AddSeconds(2));
 
-        Assert.True(accepted);
         Assert.Single(messages, m => m.StartsWith("alert ignored:", StringComparison.Ordinal) &&
             m.Contains("showing", StringComparison.Ordinal));
     }
@@ -94,8 +89,7 @@ public sealed class AlertQueueTests
         queue.Advance(Epoch, desktopVisible: true);
 
         var endTime = Epoch.AddSeconds(5);
-        var accepted = queue.Enqueue(second, endTime);
-        Assert.True(accepted);
+        queue.Enqueue(second, endTime);
 
         var active = queue.Advance(endTime, desktopVisible: true);
 
@@ -218,9 +212,8 @@ public sealed class AlertQueueTests
         queue.Enqueue(waiting, Epoch);
         queue.Advance(Epoch, desktopVisible: false);
 
-        var accepted = queue.Enqueue(Command(), Epoch.AddSeconds(1));
+        queue.Enqueue(Command(), Epoch.AddSeconds(1));
 
-        Assert.True(accepted);
         Assert.Single(messages, m => m.StartsWith("alert ignored:", StringComparison.Ordinal) &&
             m.Contains("waiting", StringComparison.Ordinal));
 
@@ -248,22 +241,13 @@ public sealed class AlertQueueTests
 
         var replacement = Command();
         var now = Epoch + maxAge + TimeSpan.FromTicks(1);
-        var accepted = queue.Enqueue(replacement, now);
+        queue.Enqueue(replacement, now);
 
-        Assert.True(accepted);
         Assert.Single(messages, m => m.StartsWith("alert dropped:", StringComparison.Ordinal));
 
         var active = queue.Advance(now, desktopVisible: true);
         Assert.Same(replacement, active!.Command);
     }
-
-    /// <summary>Finding R3-queue-ctor-unvalidated: a non-positive capacity can never hold a single
-    /// alert, so it is a construction error rather than a queue that silently rejects everything.</summary>
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Constructor_NonPositiveCapacity_Throws(int capacity) =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => new AlertQueue(capacity: capacity));
 
     /// <summary>Finding R3-queue-ctor-unvalidated: a negative max age can never be "waited longer
     /// than", which would make every enqueue immediately eligible for drop AND for a bogus negative

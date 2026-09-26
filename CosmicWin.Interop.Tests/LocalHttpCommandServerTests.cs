@@ -438,18 +438,6 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task HandlerReplyQueueFull_PassesThroughAs429()
-    {
-        var port = GetFreePort();
-        using var server = Start(port, _ => AlertPipeProtocol.QueueFullReply);
-
-        var (status, body) = await PostAsync(port, "{\"warning\":1}");
-
-        Assert.Equal(429, status);
-        Assert.Equal(AlertPipeProtocol.QueueFullReply, body);
-    }
-
-    [Fact]
     public async Task HandlerReplyAlertsDisabled_PassesThroughAs503()
     {
         var port = GetFreePort();

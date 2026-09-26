@@ -98,13 +98,12 @@ public static class AlertHttpProtocol
     }
 
     /// <summary>
-    /// The status code for a reply from the shared alert command handler: 202 accepted, 429 queue
-    /// full, 503 alerts disabled, 400 any other rejected command, 500 anything unrecognised.
+    /// The status code for a reply from the shared alert command handler: 202 accepted, 503 alerts
+    /// disabled, 400 any other rejected command, 500 anything unrecognised.
     /// </summary>
     public static int StatusCodeFor(string reply) => reply switch
     {
         AlertPipeProtocol.OkReply => 202,
-        AlertPipeProtocol.QueueFullReply => 429,
         _ when reply == AlertPipeProtocol.FormatError("alerts are disabled") => 503,
         _ when reply == AlertPipeProtocol.FormatError("internal error") => 500,
         _ when reply.StartsWith(AlertPipeProtocol.FormatError(string.Empty), StringComparison.Ordinal) => 400,

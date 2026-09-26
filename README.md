@@ -149,7 +149,6 @@ pipe.
 | 404 / 405 | An unknown path, a route that is turned off, or any method other than `POST` |
 | 413 | Body larger than 1 KB |
 | 415 | `Content-Type` is not `application/json` |
-| 429 | The alert queue is full |
 | 503 | Alerts are turned off |
 
 The endpoint listens on `127.0.0.1` and `localhost` only. It refuses connections from other

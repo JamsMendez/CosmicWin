@@ -594,10 +594,7 @@ public sealed class AppComposition : IDisposable
                     return AlertPipeProtocol.FormatError("alerts are disabled");
                 }
 
-                if (!alertQueue.Enqueue(parsed.Command, alertClock.GetUtcNow()))
-                {
-                    return AlertPipeProtocol.QueueFullReply;
-                }
+                alertQueue.Enqueue(parsed.Command, alertClock.GetUtcNow());
             }
 
             // T9d (webview-alert-layer): HandleAlertCommand runs on the pipe server thread -- do not

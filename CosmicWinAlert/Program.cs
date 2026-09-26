@@ -32,7 +32,7 @@ public static class Program
     /// <summary>The server accepted the command.</summary>
     public const int ExitOk = 0;
 
-    /// <summary>The server replied with an error line (printed to stderr): a malformed command, "busy", or "queue full".</summary>
+    /// <summary>The server replied with an error line (printed to stderr): a malformed command, or "busy".</summary>
     public const int ExitServerError = 1;
 
     /// <summary>No CosmicWin instance is listening -- connect timed out, or the server did not reply in time.</summary>

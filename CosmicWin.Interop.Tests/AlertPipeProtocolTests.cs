@@ -75,7 +75,4 @@ public sealed class AlertPipeProtocolTests
 
     [Fact]
     public void BusyReply_IsAWellFormedErrorLine() => Assert.Equal("error: busy", AlertPipeProtocol.BusyReply);
-
-    [Fact]
-    public void QueueFullReply_IsAWellFormedErrorLine() => Assert.Equal("error: queue full", AlertPipeProtocol.QueueFullReply);
 }

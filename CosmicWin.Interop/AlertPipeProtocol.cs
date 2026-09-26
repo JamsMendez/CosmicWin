@@ -39,9 +39,6 @@ public static class AlertPipeProtocol
     /// <summary>The reply line for a command rejected only because another client already has the server busy.</summary>
     public const string BusyReply = "error: busy";
 
-    /// <summary>The reply line for a command rejected only because the alert queue is already full.</summary>
-    public const string QueueFullReply = "error: queue full";
-
     private const string ErrorPrefix = "error: ";
 
     /// <summary>Builds an <c>"error: &lt;reason&gt;"</c> reply line from a short, human-readable reason.</summary>

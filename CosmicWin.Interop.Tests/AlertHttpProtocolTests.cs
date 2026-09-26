@@ -72,7 +72,6 @@ public sealed class AlertHttpProtocolTests
 
     [Theory]
     [InlineData(AlertPipeProtocol.OkReply, 202)]
-    [InlineData(AlertPipeProtocol.QueueFullReply, 429)]
     [InlineData("error: alerts are disabled", 503)]
     [InlineData("error: 'warning:0' must be 1..16", 400)]
     [InlineData("error: internal error", 500)]
