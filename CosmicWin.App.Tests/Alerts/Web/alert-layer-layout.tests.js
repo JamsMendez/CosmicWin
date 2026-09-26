@@ -218,6 +218,19 @@ test("hash API: the old single-kind #kind= form still maps to one full-canvas ti
   assert.deepStrictEqual(plain(page.sandbox.tileRects()), [{ x: 0, y: 0, w: 640, h: 480 }]);
 });
 
+// T12 (alert-tile-mosaic, review follow-up R3-hash-tiles-filter-noop): tiles= used to .map() every
+// comma-separated entry (including "" and an unrecognised word) STRAIGHT to "failed"/"warning"
+// before filtering, so the filter (checking tile.length > 0 on the already-mapped word) never
+// actually dropped anything -- an empty or bogus entry silently became an extra "warning" tile
+// instead of being ignored, and nothing capped the result at the grid's own capacity. Fixed: filter
+// to exactly "failed"/"warning" BEFORE mapping, then cap at columns*rows.
+test("hash API: tiles= drops empty/unknown entries before mapping, then caps at columns*rows (T12)", function () {
+  var page = loadPage({
+    hash: "#tiles=failed,,bogus,warning,failed&columns=2&rows=1&gap=0&duration=1000",
+  });
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

@@ -691,13 +691,21 @@ postToHost("ready");
 if (hasExplicitParams) {
   var requestedDuration = Number(params.get("duration"));
   if (params.has("tiles")) {
+    // T12 (alert-tile-mosaic, review R3-hash-tiles-filter-noop): filter to exactly "failed"/
+    // "warning" BEFORE mapping -- an empty or unrecognised entry used to be mapped straight to
+    // "warning" first, so the old post-map length>0 filter never actually dropped anything, and an
+    // extra unwanted tile appeared. Capped at columns*rows (the grid's own slot count) so a hand-
+    // written hash cannot ask for more tiles than the grid it also names has room for.
+    var requestedColumns = Number(params.get("columns")) || 1;
+    var requestedRows = Number(params.get("rows")) || 1;
     var requestedTiles = params.get("tiles").split(",")
-      .map(function (tile) { return tile.trim() === "failed" ? "failed" : "warning"; })
-      .filter(function (tile) { return tile.length > 0; });
+      .map(function (tile) { return tile.trim(); })
+      .filter(function (tile) { return tile === "failed" || tile === "warning"; })
+      .slice(0, requestedColumns * requestedRows);
     startShowing(
       requestedTiles,
-      Number(params.get("columns")) || 1,
-      Number(params.get("rows")) || 1,
+      requestedColumns,
+      requestedRows,
       Number(params.get("gap")) || 0,
       requestedDuration,
       parseWorkAreaParam(params));
