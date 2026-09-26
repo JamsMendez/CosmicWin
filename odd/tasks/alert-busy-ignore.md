@@ -44,7 +44,7 @@ another, so a burst of requests plays a long chain of alerts.
   Update existing tests that relied on stacking.
 - [x] A2 Composition/protocol check: pipe and HTTP both answer `ok`/202 for an ignored request and
   the trace records it (wiring test through `HandleAlertCommand`).
-- [ ] A3 Hardware: two HTTP alerts back to back -> 202 both, only the first shows, trace shows the
+- [x] A3 Hardware: two HTTP alerts back to back -> 202 both, only the first shows, trace shows the
   ignore; a request after the first ends shows normally.
 
 ## Acceptance criteria
@@ -124,3 +124,16 @@ another, so a burst of requests plays a long chain of alerts.
     removed). All suites green, 0 failed.
 
   Status: **done** (A1, A2). A3 (hardware) intentionally out of scope for this writer.
+
+- 2026-09-26: review `review-6da54c7583a74229` (medium, reliability, main..2421b89) APPROVED and
+  acknowledged (authority burned). Two non-blocking SUGGESTIONs, left as follow-ups:
+  - R3-capacity-false-path-unreachable-untested: `Enqueue` can no longer return false for any valid
+    capacity; the guard and the caller's `QueueFullReply` path are dead and untested. Remove, or add
+    a seam that proves it.
+  - R3-http-202-claim-unproved: the ignored-request 202 is proven through the shared handler (pipe
+    `Server.Send`), not by an HTTP-level test.
+- 2026-09-26: A3 on hardware, Release build of 2421b89 (PID 34172, replacing 26960), `alert-http = on`.
+  18:53:49 `{"warning":2,"duration":8}` -> 202 ok, `alert-layer show kind=warning duration=8000`.
+  18:53:51 `{"failed":1,"duration":5}` -> 202 ok, trace `alert ignored: one is already showing`, never shown.
+  18:53:57 warning done/hide. 18:54:00 `{"failed":1,"duration":3}` -> 202, shown, done/hide at 18:54:03.
+  The covered/waiting case was NOT exercised on hardware (unit + wiring tests only).
