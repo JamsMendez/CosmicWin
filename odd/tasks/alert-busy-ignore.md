@@ -47,6 +47,11 @@ another, so a burst of requests plays a long chain of alerts.
 - [x] A3 Hardware: two HTTP alerts back to back -> 202 both, only the first shows, trace shows the
   ignore; a request after the first ends shows normally.
 
+- [ ] A4 Remove the now-dead queue-full path (maintainer, 2026-09-26, after review finding
+  R3-capacity-false-path-unreachable-untested): `AlertQueue` capacity parameter/field/guard/
+  `DefaultCapacity`, `Enqueue`'s false return, `HandleAlertCommand`'s `QueueFullReply` branch,
+  `AlertPipeProtocol.QueueFullReply`, the 429 mapping, their tests, README row, client comment.
+
 ## Acceptance criteria
 
 - A request during a showing or waiting alert: `ok`/202, never shown, trace `alert ignored`.
