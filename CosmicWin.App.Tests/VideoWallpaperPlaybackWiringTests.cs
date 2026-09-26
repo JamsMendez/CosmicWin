@@ -1197,6 +1197,43 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// Review finding R3-snapshot-after-play-window: the baseline snapshot must be read BEFORE the
+    /// player opens the file. The fake reader reports a size equal to how many times TryPlay has
+    /// run, standing in for an in-place edit that lands while the player is opening the file. Read
+    /// after TryPlay, that edit becomes the baseline and the repeat request is wrongly skipped as
+    /// unchanged; read before, the baseline predates the edit and the repeat request reloads -- the
+    /// fail-safe direction.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_FileEditedWhilePlaybackOpensIt_ReloadsOnTheRepeatRequest()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            videoWallpaperHttpEnabled: true,
+            readVideoFileSnapshot: _ => new VideoWallpaperImport.VideoFileSnapshot(1, 1, player.TryPlayCallCount, 100));
+        using (harness.Composition)
+        {
+            // Startup activation: the only TryPlay so far.
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, player.TryPlayCallCount);
+            trace.Lines.Clear();
+
+            Assert.True(harness.HandleVideoWallpaperHttpSwitch!(path));
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, player.StopCallCount);
+            Assert.DoesNotContain(trace.Lines, l => l.Contains("unchanged", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
     /// F1 (noop-followups, R3-predicate-throw-not-contained): an injected reader that throws must
     /// never escape the video wallpaper work item -- it reads as "no snapshot", exactly like a real
     /// <see cref="VideoWallpaperImport.TryReadSnapshot"/> failure, and the switch reloads.

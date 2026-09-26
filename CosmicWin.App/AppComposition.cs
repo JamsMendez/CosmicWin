@@ -439,6 +439,16 @@ public sealed class AppComposition : IDisposable
             }
 
             var pathExists = File.Exists(path);
+
+            // F1: snapshot the path about to (re)start -- the IMPORTED destination on every
+            // caller (startup's configured path, a restore's previous import, or a fresh
+            // switch's own import result), never the raw source a caller passed to
+            // SwitchVideoWallpaper. Read BEFORE TryPlay opens the file (R3-snapshot-after-play-window):
+            // an in-place edit landing while the player opens it then differs from this baseline
+            // and the next repeat request reloads, instead of becoming the baseline and being
+            // skipped as unchanged. Kept only when playback actually comes up, matching
+            // videoWallpaperActive itself.
+            var snapshotBeforePlay = SafeReadSnapshot(path);
             var attached = videoWallpaperHost.TryAttach();
             bool? played = null;
             if (attached)
@@ -447,13 +457,7 @@ public sealed class AppComposition : IDisposable
             }
 
             videoWallpaperActive.Value = attached && played == true;
-
-            // F1: snapshot the path that just (re)started -- the IMPORTED destination on every
-            // caller (startup's configured path, a restore's previous import, or a fresh
-            // switch's own import result), never the raw source a caller passed to
-            // SwitchVideoWallpaper. Null whenever playback did not actually come up, matching
-            // videoWallpaperActive itself.
-            currentVideoSnapshot = videoWallpaperActive.Value ? SafeReadSnapshot(path) : null;
+            currentVideoSnapshot = videoWallpaperActive.Value ? snapshotBeforePlay : null;
 
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
