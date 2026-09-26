@@ -98,9 +98,45 @@ public sealed class WebViewAlertCompositionWiringTests
         $"work={request.WorkAreaLeft},{request.WorkAreaTop},{request.WorkAreaWidth}x{request.WorkAreaHeight}:" +
         $"{request.DurationMilliseconds}";
 
+    /// <summary>
+    /// T10 (alert-tile-mosaic, review follow-up R3-workarea-catch-path-unexercised): a display whose
+    /// <see cref="WorkArea"/> getter throws, proving <c>UpdateAlertOverlay</c>'s try/catch around
+    /// <c>AlertLayerWorkArea.Resolve</c> (<c>AppComposition.cs</c> ~744) actually degrades to
+    /// <see cref="AlertLayerWorkArea.Unavailable"/> and traces <c>alert-layer-workarea-failed</c>,
+    /// instead of being an untested catch block that could silently stop catching anything.
+    /// </summary>
+    /// <remarks>
+    /// Throws from the SECOND read onward, not the first: <c>AppComposition.Wire</c> itself already
+    /// reads the primary display's <c>WorkArea</c> once, eagerly, at wiring time
+    /// (<c>WorkAreaResolver.Resolve</c>, <c>AppComposition.cs</c> ~278, for the initial tiling
+    /// layout) -- a display that throws unconditionally breaks composition before an alert is ever
+    /// sent, proving nothing about the alert's OWN try/catch. <see cref="Bounds"/> stays an ordinary
+    /// rect throughout: <c>AlertLayerWorkArea.Resolve</c>'s caller reads it as the surface argument
+    /// alongside <see cref="WorkArea"/>, and only the work-area read needs to fail here.
+    /// </remarks>
+    private sealed class ThrowingWorkAreaDisplay : IDisplay
+    {
+        private int _reads;
+
+        public IntPtr Handle => (IntPtr)2;
+        public Rectangle Bounds { get; } = Rectangle.FromSize(0, 0, 1920, 1080);
+
+        public Rectangle WorkArea =>
+            ++_reads == 1
+                ? Bounds
+                : throw new InvalidOperationException("work area unavailable");
+
+        public double Scaling => 1.0;
+        public bool IsPrimary => true;
+        public bool Equals(IDisplay? other) => other is not null && Handle == other.Handle;
+        public override bool Equals(object? obj) => obj is IDisplay other && Equals(other);
+        public override int GetHashCode() => Handle.GetHashCode();
+    }
+
     private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace, FakeDisplay Display) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
-        Host? host = null, Action<AlertShowRequest>? startAlertLayer = null, Action? preloadAlertLayer = null)
+        Host? host = null, Action<AlertShowRequest>? startAlertLayer = null, Action? preloadAlertLayer = null,
+        IDisplay? primaryDisplay = null)
     {
         var events = new List<string>();
         var timer = new Scheduler();
@@ -109,8 +145,12 @@ public sealed class WebViewAlertCompositionWiringTests
         Server? server = null;
         var display = new FakeDisplay((nint)1, Rectangle.FromSize(0, 0, 1920, 1080),
             Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
+        // T10: swaps in a throwing display for the wired primary while the tuple's own `Display`
+        // field keeps returning the safe FakeDisplay above -- no existing fixture that mutates
+        // `h.Display.WorkArea` after wiring is affected, since none of them pass primaryDisplay.
+        var effectivePrimary = primaryDisplay ?? display;
         var composition = AppComposition.Wire(new FakeWorkspace(),
-            new TreeManager([display], display, new WindowRegistry()), new WindowRegistry(),
+            new TreeManager([effectivePrimary], effectivePrimary, new WindowRegistry()), new WindowRegistry(),
             new Foreground(), new ExceptionListStore(ExceptionList.Empty), new RecordingFocusTrace(),
             () => { }, timer.Schedule,
             writer => new LowLevelKeyboardHook(writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),
@@ -437,6 +477,32 @@ public sealed class WebViewAlertCompositionWiringTests
             var thrown = Record.Exception(() => h.Server.Send("warning:1 duration:1"));
 
             Assert.Null(thrown);
+            Assert.Contains(":work=0,0,0x0:", Assert.Single(h.Events));
+        }
+    }
+
+    /// <summary>
+    /// T10 (alert-tile-mosaic, review follow-up R3-workarea-catch-path-unexercised): the previous
+    /// fact proves the FALLBACK (a work area that resolves to nothing); this one proves the actual
+    /// CATCH -- a display whose <c>WorkArea</c> getter throws must still degrade to <see
+    /// cref="AlertLayerWorkArea.Unavailable"/>, trace <c>alert-layer-workarea-failed</c> with the real
+    /// exception's type and message, and let the alert start anyway. Before this fact, the try/catch
+    /// around <c>AlertLayerWorkArea.Resolve</c> in <c>AppComposition.UpdateAlertOverlay</c> had never
+    /// actually been exercised by anything throwing.
+    /// </summary>
+    [Fact]
+    public void AWorkAreaReadThatThrows_DegradesToUnavailableTracesAndStillShowsTheAlert()
+    {
+        var h = Create(primaryDisplay: new ThrowingWorkAreaDisplay());
+        using (h.Composition)
+        {
+            var thrown = Record.Exception(() => h.Server.Send("warning:1 duration:1"));
+
+            Assert.Null(thrown);
+            Assert.Contains(
+                h.Trace.Lines,
+                line => line.Contains("alert-layer-workarea-failed", StringComparison.Ordinal)
+                    && line.Contains("InvalidOperationException", StringComparison.Ordinal));
             Assert.Contains(":work=0,0,0x0:", Assert.Single(h.Events));
         }
     }
