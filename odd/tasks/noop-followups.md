@@ -183,3 +183,11 @@ Close the three open review findings left by `same-video-noop.md` and `alert-bus
   acknowledged. Its one SUGGESTION (R3-reload-completion-unasserted) FIXED in `0e45e06`: the ordering
   test now also asserts TryPlayCallCount == 2. Mutation (drop ActivateVideoWallpaper after import)
   FAILS it (expected 2, actual 1); restored. Open: R3-free-port-toctou only.
+- 2026-09-26: R3-free-port-toctou FIXED in `0c18d4e` (branch `fix/alert-http-test-port`, route inline: one test
+  file). `WireOnFreePort` retries up to 5 ports when the server's final bind attempt traces
+  `alert http: failed to start listening on port N (127.0.0.1)`, and fails with the trace otherwise.
+  Proof test `WireOnFreePort_FirstPortTaken_RetriesOnTheNextOne` holds a TcpListener on the first
+  port: passes (moves to the next port, POST 202). Mutation (detection always false) FAILS it
+  (port equals the taken one); restored. Suites: Layout 198, Alert 13, Interop 384/42, App 1027/6.
+  Not changed: `CosmicWin.Interop.Tests/LocalHttpCommandServerTests.cs` has its own GetFreePort
+  with the same release-then-bind gap; out of this finding's scope.
