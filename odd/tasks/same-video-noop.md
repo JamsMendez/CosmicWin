@@ -45,8 +45,8 @@ never the caller's source, so a string comparison cannot detect "same video".
   with wiring tests: same+active skips (no Stop, no import, no persist, trace `unchanged`, still
   accepted), same+inactive reloads, different reloads, tray pick of the same video reloads.
   Commit `68f919d`.
-- [ ] S3 Hardware check on the running build: two identical requests -> one `unchanged` trace, video
-  does not restart; a different video still switches.
+- [x] S3 Hardware check on the running build: two identical requests -> one `unchanged` trace, video
+  does not restart; a different video still switches. Done 2026-09-26, see Progress.
 
 ## Acceptance criteria
 
@@ -106,3 +106,19 @@ never the caller's source, so a string comparison cannot detect "same video".
   read).
 
   S3 (hardware check) not started -- out of scope for this delegated writer per the task brief.
+
+- 2026-09-26: review `review-478139c738a9ef4a` (medium, lens reliability, base main..a3576f2) APPROVED
+  and acknowledged (authority burned). Three non-blocking findings, left as follow-ups:
+  - R3-predicate-args-unproved (WARNING): every wiring test stubs `isSameVideoFile` with a constant,
+    so swapped or wrong operands would go unnoticed. Follow-up: an argument-sensitive predicate test.
+  - R3-predicate-throw-not-contained (SUGGESTION): a throwing injected predicate escapes the work
+    item; the comment claims "any failure reads as different". Production `IsSameFile` never throws.
+  - R3-inplace-edit-hardlink (SUGGESTION): re-encoding the linked source in place keeps its identity,
+    so a repeat request no longer reloads it. Not documented before this note.
+- 2026-09-26: S3 on hardware, Release build of a3576f2 (PID 26960) replacing main's (PID 19216),
+  `video-wallpaper-http = on`, WordWorldLoop playing from startup (hard-linked import).
+  WordWorldLoop x2 -> 202, 202, traces `phase=http unchanged` x2 (no Stop/TryPlay line).
+  RaphaelLoop -> 202, full switch (`tryPlay=True`); RaphaelLoop again -> `unchanged`; the imported
+  destination path itself -> `unchanged`; WordWorldLoop -> full switch back (`tryPlay=True`),
+  `fsutil hardlink list` confirms the destination is linked to WordWorldLoop again.
+  The branch build is left running from `CosmicWin.Appin\Release\...`.
