@@ -47,7 +47,7 @@ another, so a burst of requests plays a long chain of alerts.
 - [x] A3 Hardware: two HTTP alerts back to back -> 202 both, only the first shows, trace shows the
   ignore; a request after the first ends shows normally.
 
-- [ ] A4 Remove the now-dead queue-full path (maintainer, 2026-09-26, after review finding
+- [x] A4 Remove the now-dead queue-full path (maintainer, 2026-09-26, after review finding
   R3-capacity-false-path-unreachable-untested): `AlertQueue` capacity parameter/field/guard/
   `DefaultCapacity`, `Enqueue`'s false return, `HandleAlertCommand`'s `QueueFullReply` branch,
   `AlertPipeProtocol.QueueFullReply`, the 429 mapping, their tests, README row, client comment.
@@ -142,3 +142,63 @@ another, so a burst of requests plays a long chain of alerts.
   18:53:51 `{"failed":1,"duration":5}` -> 202 ok, trace `alert ignored: one is already showing`, never shown.
   18:53:57 warning done/hide. 18:54:00 `{"failed":1,"duration":3}` -> 202, shown, done/hide at 18:54:03.
   The covered/waiting case was NOT exercised on hardware (unit + wiring tests only).
+
+- 2026-09-26: A4 done, one writer, deletion refactor (no RED needed, no new behavior). Commit
+  `79c3028` -- `refactor(app): remove the unreachable alert queue-full path`.
+
+  Removed from `CosmicWin.App/Alerts/AlertQueue.cs`: `DefaultCapacity` const, the `_capacity` field,
+  the `capacity` constructor parameter and its `ArgumentOutOfRangeException` validation, the
+  capacity-full branch in `Enqueue` (`if (_pending.Count >= _capacity) { ...; return false; }`).
+  `Enqueue` now returns `void` instead of `bool` (it always accepts, by queueing or by ignoring).
+  Class remarks and `Enqueue`'s XML doc rewritten to describe the removal instead of the old
+  "defensive invariant guard, not removed" language; no more capacity/FIFO/bounded-queue framing.
+
+  `CosmicWin.App/AppComposition.cs` (~590-600): `HandleAlertCommand`'s
+  `if (!alertQueue.Enqueue(...)) return AlertPipeProtocol.QueueFullReply;` collapsed to a plain
+  `alertQueue.Enqueue(...)` call, falling through to `OkReply` as before. The `new AlertQueue(...)`
+  call site (~317) uses a named `onDiagnostic:` argument and needed no change.
+
+  `CosmicWin.Interop/AlertPipeProtocol.cs:43`: `QueueFullReply` constant and its doc removed.
+  `CosmicWin.Interop/AlertHttpProtocol.cs` (~101-107): the `QueueFullReply => 429` mapping arm and
+  its doc mention removed. `README.md:152`: the `429 | The alert queue is full` row removed (no
+  other README mention of capacity/queue-full/FIFO stacking was found). `CosmicWinAlert/Program.cs:35`:
+  comment updated to drop "or 'queue full'".
+
+  Tests removed (existed only to prove the now-deleted path):
+  - `CosmicWin.Interop.Tests/AlertHttpProtocolTests.cs:75`: the
+    `[InlineData(AlertPipeProtocol.QueueFullReply, 429)]` theory row.
+  - `CosmicWin.Interop.Tests/AlertPipeProtocolTests.cs`: `QueueFullReply_IsAWellFormedErrorLine`.
+  - `CosmicWin.Interop.Tests/LocalHttpCommandServerTests.cs`: `HandlerReplyQueueFull_PassesThroughAs429`.
+  - `CosmicWin.App.Tests/Alerts/AlertQueueTests.cs`: `Constructor_NonPositiveCapacity_Throws`
+    (`[Theory]` with 2 cases, `capacity: 0` and `capacity: -1` -- the constructor no longer takes a
+    `capacity` argument to validate).
+
+  Tests adapted (kept, since they prove real busy-ignore behavior, just no longer assert a `bool`
+  return from `Enqueue`): `ASecondRequest_IsIgnoredWhileOneIsShowing`,
+  `ARequestRightAfterTheWindowEnds_IsAcceptedBeforeAnyAdvanceRuns_AndStartsOnTheNextAdvance`,
+  `ASecondRequest_IsIgnoredWhileOneIsWaiting`, `ARequest_IsAcceptedOnceThePreviouslyWaitingOneHasExpired`
+  -- each dropped its `var accepted = queue.Enqueue(...); Assert.True(accepted);` pair for a plain
+  `queue.Enqueue(...)` call, keeping the rest of the assertion (the diagnostic message / resulting
+  `Advance` behavior). The doc comment above `ASecondRequest_IsIgnoredWhileOneIsShowing` (explaining
+  why the old capacity-rejection tests were rewritten) updated to note A4 removed the capacity path
+  entirely rather than keeping it as a dead defensive guard. The class-level remark's "small
+  capacities/max ages" updated to "small max ages" (no more capacity parameter to vary).
+
+  `rg -n "QueueFullReply|queue full|DefaultCapacity|_capacity"` (repo-wide, `.cs`/`.md`): only the
+  unrelated chord-queue lines (`AppComposition.cs:1524` and `DroppedChordWiringTests.cs`, "chord
+  dropped -- queue full", a different queue) and historical `odd/tasks/http-alert-endpoint.md` /
+  this file's own earlier task description remain. No production or test code left.
+
+  Verification:
+  - `dotnet build CosmicWin.sln` (clean, `--no-incremental`): succeeded, 3 warnings -- the 2
+    pre-existing `MultiMonitorWorkspaceAdapter.cs` CS8604/CS8602 (baseline, untouched by this
+    change) plus 1 pre-existing `CosmicWinAlert.Tests/ProgramTests.cs:200` CA2022 (a file this
+    change never touched; not newly introduced here). No new warning from this change.
+  - `dotnet test CosmicWin.sln`: `CosmicWin.Layout.Tests` 198/198 (matches baseline).
+    `CosmicWinAlert.Tests` 13/13 (matches baseline). `CosmicWin.Interop.Tests` 384 passed/42 skipped,
+    426 total (baseline 387/42, 429 total; -3 = the 3 removed queue-full tests). `CosmicWin.App.Tests`
+    1020 passed/6 skipped, 1026 total (baseline 1022/6, 1028 total; -2 = the removed
+    `Constructor_NonPositiveCapacity_Throws` theory's 2 cases). All suites green, 0 failed.
+
+  Status: **done** (A4). All tasks A1-A4 complete; A3's covered/waiting case on real hardware
+  remains the only acceptance-criteria gap, unchanged from before this task.
