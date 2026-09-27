@@ -1044,6 +1044,182 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
         Assert.Equal(ExistingVideo, receivedVideoPath);
     }
 
+    // ---- S2: /v1/wallpaper/scene, behind the same gates ----
+
+    [Fact]
+    public async Task SceneRoute_ValidRequest_CallsSwitchDelegateWithTheCanonicalName_Returns202()
+    {
+        var port = GetFreePort();
+        string? received = null;
+        using var server = StartSceneOnly(port, name => { received = name; return true; });
+
+        var (status, body) = await PostSceneAsync(port, SceneBody("Idle"));
+
+        Assert.Equal(202, status);
+        Assert.Equal("ok", body);
+        Assert.Equal("idle", received);
+    }
+
+    [Fact]
+    public async Task SceneRoute_MissingAuthorization_Returns401WithWwwAuthenticate()
+    {
+        var port = GetFreePort();
+        using var server = StartSceneOnly(port, _ => true);
+
+        using var client = NewClientWithoutAuth();
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{WallpaperSceneHttpProtocol.ScenePath}", SceneJsonContent(SceneBody("idle")));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains(response.Headers.WwwAuthenticate, v => v.Scheme == "Bearer");
+    }
+
+    [Fact]
+    public async Task SceneRoute_WrongMethod_Returns405WithAllowHeader()
+    {
+        var port = GetFreePort();
+        using var server = StartSceneOnly(port, _ => true);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, $"http://127.0.0.1:{port}{WallpaperSceneHttpProtocol.ScenePath}");
+        using var client = NewClient();
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        Assert.Contains("POST", response.Content.Headers.Allow);
+    }
+
+    [Fact]
+    public async Task SceneRoute_BodyOverTheSceneCap_Returns413()
+    {
+        var port = GetFreePort();
+        var switchCalls = 0;
+        using var server = StartSceneOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; });
+
+        var oversized = "{\"scene\":\"" + new string('a', WallpaperSceneHttpProtocol.MaxBodyBytes) + "\"}";
+        Assert.True(Encoding.UTF8.GetByteCount(oversized) > WallpaperSceneHttpProtocol.MaxBodyBytes);
+
+        var (status, _) = await PostSceneAsync(port, oversized);
+
+        Assert.Equal(413, status);
+        Assert.Equal(0, switchCalls);
+    }
+
+    [Fact]
+    public async Task SceneRoute_MalformedBody_Returns400WithItsOwnMessage()
+    {
+        var port = GetFreePort();
+        using var server = StartSceneOnly(port, _ => true);
+
+        var (status, body) = await PostSceneAsync(port, "not-json");
+
+        Assert.Equal(400, status);
+        Assert.Equal(AlertPipeProtocol.FormatError("body is not valid JSON"), body);
+    }
+
+    [Fact]
+    public async Task SceneRoute_UnknownSceneName_Returns400WithItsOwnMessage()
+    {
+        var port = GetFreePort();
+        using var server = StartSceneOnly(port, _ => true);
+
+        var (status, body) = await PostSceneAsync(port, SceneBody("video"));
+
+        Assert.Equal(400, status);
+        Assert.Equal(
+            AlertPipeProtocol.FormatError("field 'scene' must be one of: processing, explorer, idle, raphael"),
+            body);
+    }
+
+    [Fact]
+    public async Task SceneRoute_SwitchDelegateReturnsFalse_Returns503WithNotAvailableError()
+    {
+        var port = GetFreePort();
+        using var server = StartSceneOnly(port, _ => false);
+
+        var (status, body) = await PostSceneAsync(port, SceneBody("idle"));
+
+        Assert.Equal(WallpaperSceneHttpProtocol.NotAvailableStatusCode, status);
+        Assert.Equal(AlertPipeProtocol.FormatError(WallpaperSceneHttpProtocol.NotAvailableError), body);
+    }
+
+    [Fact]
+    public async Task SceneRoute_SwitchDelegateThrows_Returns500AndTheLoopKeepsServing()
+    {
+        var port = GetFreePort();
+        var diagnostics = new List<string>();
+        var first = true;
+        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+            handleWallpaperSceneSwitch: _ =>
+            {
+                if (first)
+                {
+                    first = false;
+                    throw new InvalidOperationException("boom");
+                }
+
+                return true;
+            });
+        server.Start();
+
+        var (firstStatus, firstBody) = await PostSceneAsync(port, SceneBody("idle"));
+        Assert.Equal(500, firstStatus);
+        Assert.Equal(AlertPipeProtocol.FormatError("internal error"), firstBody);
+        Assert.NotEmpty(diagnostics);
+
+        var (secondStatus, secondBody) = await PostSceneAsync(port, SceneBody("idle"));
+        Assert.Equal(202, secondStatus);
+        Assert.Equal("ok", secondBody);
+    }
+
+    [Fact]
+    public async Task SceneRouteDisabled_AnswersExactlyLikeAnUnknownPath()
+    {
+        var port = GetFreePort();
+        using var server = Start(port, _ => "ok"); // alert route only; handleWallpaperSceneSwitch left null
+
+        using var client = NewClient();
+        var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
+        using var sceneResponse = await client.PostAsync(
+            $"http://127.0.0.1:{port}{WallpaperSceneHttpProtocol.ScenePath}", SceneJsonContent(SceneBody("idle")));
+
+        Assert.Equal((HttpStatusCode)unknownStatus, sceneResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, sceneResponse.StatusCode);
+        Assert.Equal(unknownBody, await sceneResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task AllThreeRoutesEnabled_WorkIndependentlyOnOneServer()
+    {
+        var port = GetFreePort();
+        string? receivedCommand = null;
+        string? receivedVideoPath = null;
+        string? receivedScene = null;
+        using var server = new LocalHttpCommandServer(port, Token,
+            handleCommand: text => { receivedCommand = text; return "ok"; },
+            onDiagnostic: msg => output.WriteLine(msg),
+            handleVideoWallpaperSwitch: path => { receivedVideoPath = path; return true; },
+            videoWallpaperProbes: FakeVideoProbes(exists: true),
+            handleWallpaperSceneSwitch: name => { receivedScene = name; return true; });
+        server.Start();
+
+        var (alertStatus, alertBody) = await PostAsync(port, "{\"warning\":2}");
+        var (videoStatus, videoBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
+        var (sceneStatus, sceneBody) = await PostSceneAsync(port, SceneBody("raphael"));
+
+        Assert.Equal(202, alertStatus);
+        Assert.Equal("ok", alertBody);
+        Assert.Equal("warning:2", receivedCommand);
+
+        Assert.Equal(202, videoStatus);
+        Assert.Equal("ok", videoBody);
+        Assert.Equal(ExistingVideo, receivedVideoPath);
+
+        Assert.Equal(202, sceneStatus);
+        Assert.Equal("ok", sceneBody);
+        Assert.Equal("raphael", receivedScene);
+    }
+
     // ---- helpers ----
 
     private const string ExistingVideo = @"C:\videos\x.mp4";
@@ -1074,6 +1250,27 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
             handleVideoWallpaperSwitch, probes);
         server.Start();
         return server;
+    }
+
+    private LocalHttpCommandServer StartSceneOnly(int port, Func<string, bool> handleWallpaperSceneSwitch)
+    {
+        var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
+            handleWallpaperSceneSwitch: handleWallpaperSceneSwitch);
+        server.Start();
+        return server;
+    }
+
+    private static string SceneBody(string scene) => System.Text.Json.JsonSerializer.Serialize(new { scene });
+
+    private static StringContent SceneJsonContent(string body) => new(body, Encoding.UTF8, "application/json");
+
+    private static async Task<(int Status, string Body)> PostSceneAsync(int port, string jsonBody)
+    {
+        using var client = NewClient();
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{port}{WallpaperSceneHttpProtocol.ScenePath}", SceneJsonContent(jsonBody));
+        var text = await response.Content.ReadAsStringAsync();
+        return ((int)response.StatusCode, text);
     }
 
     private static VideoWallpaperFileProbes FakeVideoProbes(bool exists) => new(

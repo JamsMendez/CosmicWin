@@ -97,6 +97,7 @@ public sealed class LocalHttpCommandServer : IAlertCommandServer
     private readonly Func<string, string>? _handleCommand;
     private readonly Func<string, bool>? _handleVideoWallpaperSwitch;
     private readonly VideoWallpaperFileProbes? _videoWallpaperProbes;
+    private readonly Func<string, bool>? _handleWallpaperSceneSwitch;
     private readonly Action<string> _onDiagnostic;
     private readonly IReadOnlyList<Route> _routes;
     private readonly CancellationTokenSource _stopping = new();
@@ -138,13 +139,28 @@ public sealed class LocalHttpCommandServer : IAlertCommandServer
     /// make the video route deterministic without touching disk. <see langword="null"/> (the
     /// default) uses the real filesystem.
     /// </param>
+    /// <param name="handleWallpaperSceneSwitch">
+    /// S2 (wallpaper-scene-http-endpoint): called with the already-validated, canonical lowercase
+    /// scene name once a <see cref="WallpaperSceneHttpProtocol.ScenePath"/> body passes
+    /// <see cref="WallpaperSceneHttpProtocol.TryValidate"/>. Returns whether the switch was accepted
+    /// for dispatch; <see langword="false"/> answers <see
+    /// cref="WallpaperSceneHttpProtocol.NotAvailableStatusCode"/>. Same non-blocking contract as
+    /// <paramref name="handleVideoWallpaperSwitch"/>: it is called on this server's single
+    /// request-handling thread and may only post work elsewhere, never wait for the switch to
+    /// finish. A throw from it is caught and reported the same way a throw from <paramref
+    /// name="handleCommand"/>/<paramref name="handleVideoWallpaperSwitch"/> is. <see
+    /// langword="null"/> (the default) means the scene route is off: it answers exactly like an
+    /// unknown path. Trailing, to keep every existing positional call site of this constructor
+    /// unchanged.
+    /// </param>
     public LocalHttpCommandServer(
         int port,
         string token,
         Func<string, string>? handleCommand,
         Action<string>? onDiagnostic = null,
         Func<string, bool>? handleVideoWallpaperSwitch = null,
-        VideoWallpaperFileProbes? videoWallpaperProbes = null)
+        VideoWallpaperFileProbes? videoWallpaperProbes = null,
+        Func<string, bool>? handleWallpaperSceneSwitch = null)
     {
         if (port is < 1 or > 65535)
         {
@@ -159,6 +175,7 @@ public sealed class LocalHttpCommandServer : IAlertCommandServer
         _handleCommand = handleCommand;
         _handleVideoWallpaperSwitch = handleVideoWallpaperSwitch;
         _videoWallpaperProbes = videoWallpaperProbes;
+        _handleWallpaperSceneSwitch = handleWallpaperSceneSwitch;
         _onDiagnostic = onDiagnostic ?? (_ => { });
         _routes = BuildRoutes();
     }
@@ -179,6 +196,11 @@ public sealed class LocalHttpCommandServer : IAlertCommandServer
         if (_handleVideoWallpaperSwitch is not null)
         {
             routes.Add(new Route(VideoWallpaperHttpProtocol.VideoPath, VideoWallpaperHttpProtocol.MaxBodyBytes, HandleVideoWallpaperBody));
+        }
+
+        if (_handleWallpaperSceneSwitch is not null)
+        {
+            routes.Add(new Route(WallpaperSceneHttpProtocol.ScenePath, WallpaperSceneHttpProtocol.MaxBodyBytes, HandleWallpaperSceneBody));
         }
 
         return routes;
@@ -454,6 +476,44 @@ public sealed class LocalHttpCommandServer : IAlertCommandServer
             // Same "error: ..." body format every other rejection on this server uses (Reject),
             // even though this one comes after a successful validation, not a gate failure.
             Reject(response, VideoWallpaperHttpProtocol.NotAvailableStatusCode, VideoWallpaperHttpProtocol.NotAvailableError);
+            return;
+        }
+
+        WriteReply(response, 202, AlertPipeProtocol.OkReply);
+    }
+
+    /// <summary>
+    /// Finishes gate 10/11 for <see cref="WallpaperSceneHttpProtocol.ScenePath"/> (S2,
+    /// wallpaper-scene-http-endpoint). Same "error: ..." response shape and non-blocking-delegate
+    /// contract as <see cref="HandleVideoWallpaperBody"/> -- see its own remarks.
+    /// </summary>
+    private void HandleWallpaperSceneBody(string body, HttpListenerResponse response)
+    {
+        var outcome = WallpaperSceneHttpProtocol.TryValidate(body, out var scene, out var error);
+        if (outcome != WallpaperSceneRequestOutcome.Accepted)
+        {
+            Reject(response, WallpaperSceneHttpProtocol.StatusCodeFor(outcome), error!);
+            return;
+        }
+
+        // The delegate is documented (constructor) as non-blocking: it only posts the switch
+        // elsewhere and reports back whether that dispatch was accepted, never waits for the switch
+        // itself to finish.
+        bool accepted;
+        try
+        {
+            accepted = _handleWallpaperSceneSwitch!(scene!);
+        }
+        catch (Exception handlerError)
+        {
+            _onDiagnostic($"alert http: the wallpaper scene switch handler threw {handlerError.GetType().Name}");
+            WriteReply(response, 500, AlertPipeProtocol.FormatError("internal error"));
+            return;
+        }
+
+        if (!accepted)
+        {
+            Reject(response, WallpaperSceneHttpProtocol.NotAvailableStatusCode, WallpaperSceneHttpProtocol.NotAvailableError);
             return;
         }
 

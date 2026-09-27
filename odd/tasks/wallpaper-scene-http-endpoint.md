@@ -51,7 +51,7 @@ split into work-unit commits per task below.
 ## Tasks
 
 - [x] S1 - `WallpaperSceneHttpProtocol` + tests (pure validation). Route: delegated writer.
-- [ ] S2 - `LocalHttpCommandServer` scene route + wire-level tests. Route: delegated writer.
+- [x] S2 - `LocalHttpCommandServer` scene route + wire-level tests. Route: delegated writer.
 - [ ] S3 - `WebViewAlertLayerController.SwitchScene` + current-scene on recreate + tests.
       Route: delegated writer.
 - [ ] S4 - Settings key `wallpaper-scene-http`, AppComposition handler (UI thread, html guard,
@@ -76,6 +76,12 @@ implementation touches 2+ non-trivial files per task (writer trigger).
 - 2026-09-27: S1 done. `WallpaperSceneHttpProtocol` (32 tests, all green) validates the scene body
   against the closed allow-list, case-insensitively, with no filesystem I/O and a 256-byte cap.
 
+- 2026-09-27: S2 done. `LocalHttpCommandServer` gained a trailing optional
+  `handleWallpaperSceneSwitch` delegate and its own route, gated the same way the video route is
+  (null delegate -> 404 like an unknown path). 10 new scene-route facts added; all 76
+  CosmicWin.Interop.Tests green (happy path, bad scene, 503, 500-with-loop-continues, token/method
+  gates, disabled-route-is-404, and three-routes-on-one-server).
+
 ## Next step
 
-S2.
+S3.
