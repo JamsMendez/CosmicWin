@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -61,6 +61,13 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 - [x] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
 - [x] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
 - [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
+      Sliced 2026-09-26 (each ~2000 lines of ported scene code):
+  - [ ] D6a - Extract the alert overlay into a shared module with a per-scene "see-through" hook
+        (processing keeps its bands, suites stay green) + explorer scene (rising sparks).
+        Route: delegated writer.
+  - [ ] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
+  - [ ] D6c - idle scene (first-ring constellations).
+  - [ ] D6d - Scene selection wiring + hardware check of all four.
 
 ## Open questions
 
@@ -185,4 +192,4 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 
 ## Next step
 
-Maintainer decides: D6 (explorer, raphael, idle), and/or a cost lever from D4.
+D6a. Open product question for D6d: how a scene is selected.
