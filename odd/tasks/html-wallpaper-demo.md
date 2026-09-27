@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`; D6b -> `demo/html-wallpaper-d6b-raphael`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`; D6b -> `demo/html-wallpaper-d6b-raphael`; D6c -> `demo/html-wallpaper-d6c-idle`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -65,7 +65,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   - [x] D6a - Extract the alert overlay into a shared module with a per-scene "see-through" hook
         (processing keeps its bands, suites stay green) + explorer scene (rising sparks).
         Route: delegated writer.
-  - [ ] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
+  - [x] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
   - [ ] D6c - idle scene (first-ring constellations).
   - [ ] D6d - Scene selection wiring + fps cap + hardware check of all four. DECIDED by the
         maintainer 2026-09-26: settings.conf, not the tray -- `wallpaper-scene = processing |
@@ -228,6 +228,33 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   mapping checked only by source text, no page-load smoke test, RunNode duplicated in 3 runners.
   `dotnet test CosmicWin.App.Tests`: 1122 passed / 6 skipped / 0 failed.
 
+- 2026-09-27: D6b done on `demo/html-wallpaper-d6b-raphael` (delegated writer).
+  - e3d28b4 + 99c6053 chore(wallpaper): import the raphael scene sources (1504 + 1970 lines,
+    split for the reviewer budget). Verbatim except config.js, which drops the single-overlay
+    FAILURE_* state/constants (the shared overlay declares the same const names) and hardcodes
+    viewZoom = 1 -- stated in the commit message; parent re-diffed every file.
+    Left out: failure-overlay.js, invariants.js, test/, README, Google Fonts links.
+  - 78da9ac feat(wallpaper): add the raphael scene page (771 authored). Seam in the copied
+    layers.js: `goldGlyphRingDrawParams(progress)` (the real ring paints pre-baked sprites onto the
+    global ctx, so the hook redraws with context-parameterized `drawGlyphRing`). RED first (page
+    missing), GREEN 6/6, mutation checks on rotation speed, annulus, extra ring, rethrow, and the
+    alert clock outside its try.
+  `dotnet test CosmicWin.App.Tests`: 1123 passed / 6 skipped / 0 failed. Parent spot check:
+  RaphaelSceneNodeTests passed.
+  Reviews (one per commit, from temporary worktrees, removed): review-a59fc3b45536395a,
+  review-0b030828d1fed2e9, review-acc4407391c8f2b2 -- all APPROVED + acknowledged.
+  Open, non-blocking, worth a look on hardware (D6d):
+  - WARNING R2-gold-ring-params-parallel-geometry + R3-rotation-parity-proved-against-hardcoded-
+    replica: `goldGlyphRingDrawParams` keeps a second copy of the gold ring math instead of
+    `drawGlyphRings` using it; if either changes, the see-through ring silently drifts. Fix idea:
+    make the copied drawGlyphRings read the same params.
+  - Writer-noted: the see-through glyphs are plain strokes, the on-screen ring uses a 3-pass
+    outline font, so the silhouettes differ slightly.
+  - WARNING R3-count-size-linewidth-center-unasserted; SUGGESTIONs: center fractions duplicated
+    in hook and main.js, tile offset asserted with some(), harness script order hardcoded.
+  - Copy-level: R3-untested-port / R3-untested-pure-geometry, header seam wording in the import
+    commit, coreRadius discontinuity on tiny viewports, counter/glyph-pool guards.
+
 ## Next step
 
-D6b (raphael), D6c (idle), D6d (settings + fps + hardware).
+D6c (idle), then D6d (settings + fps + hardware).
