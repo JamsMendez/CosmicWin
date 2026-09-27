@@ -222,4 +222,57 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.DoesNotContain("TearDown(\"host-changed\", dropEnvironment: true)", source);
     }
 
+    /// <summary>
+    /// D3 (html-wallpaper-demo, demo/html-wallpaper-d3-switch): a controller built in html wallpaper
+    /// mode must map and navigate to the processing SCENE page (D2, shipped by the csproj's own
+    /// <c>Wallpaper\Web\**</c> Content item) instead of the alert-only page, under its own reserved
+    /// example domain -- the video-mode literals proven by
+    /// <see cref="VirtualHostUsesAReservedExampleDomainNotDotLocal"/> and
+    /// <see cref="PreloadNavigatesTheBarePageWithNoKindOrDurationHash"/> above must still be present
+    /// UNCHANGED, since video mode must behave exactly as it did before D3.
+    /// </summary>
+    [Fact]
+    public void HtmlWallpaperMode_MapsAndNavigatesToTheProcessingScenePageUnderItsOwnDomain()
+    {
+        var source = ReadControllerSource();
+
+        // Video mode, untouched.
+        Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-alert.example\"", source);
+        Assert.Contains("Navigate(\"https://cosmicwin-alert.example/alert-layer.html\")", source);
+
+        // Html wallpaper mode, new.
+        Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-scene.example\"", source);
+        Assert.Contains("Navigate(\"https://cosmicwin-scene.example/index.html\")", source);
+        Assert.Contains("\"Wallpaper\", \"Web\", \"processing\"", source);
+        Assert.DoesNotContain(".local\"", source);
+        Assert.DoesNotContain(".local/", source);
+    }
+
+    /// <summary>
+    /// D3: the visibility decisions in <c>TryMarkReady</c>, <c>End</c>, and the page's "done" message
+    /// must be driven by <see cref="WebViewAlertLayerVisibility"/>, not an inline mode check -- proven
+    /// structurally here, the same way every other WebView2-only behaviour in this class is (see the
+    /// class remarks).
+    /// </summary>
+    [Fact]
+    public void VisibilityDecisions_GoThroughTheSharedPolicyClass()
+    {
+        var source = ReadControllerSource();
+
+        Assert.Contains("WebViewAlertLayerVisibility.ShowOnReady(", source);
+        Assert.Contains("WebViewAlertLayerVisibility.HideOnEndOrDone(", source);
+
+        var endStart = source.IndexOf("private void End(string reason)", StringComparison.Ordinal);
+        Assert.True(endStart >= 0);
+        var endNext = new[]
+            {
+                source.IndexOf("\n    private", endStart + 1, StringComparison.Ordinal),
+                source.IndexOf("\n    public", endStart + 1, StringComparison.Ordinal),
+            }
+            .Where(i => i > 0).DefaultIfEmpty(source.Length).Min();
+        var endBody = source[endStart..endNext];
+        Assert.Contains("WebViewAlertLayerVisibility.HideOnEndOrDone(", endBody);
+        // Still present -- the guard wraps it, it does not replace it (video mode is unchanged).
+        Assert.Contains("IsVisible = false", endBody);
+    }
 }

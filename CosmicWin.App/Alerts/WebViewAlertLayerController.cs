@@ -38,6 +38,10 @@ public sealed class WebViewAlertLayerController : IDisposable
     private readonly DispatcherTimer _poll;
     private readonly Action<string>? _trace;
     private readonly AlertLayerPreloadState _state;
+    // D3 (html-wallpaper-demo): true only for the demo's html wallpaper mode -- see
+    // WebViewAlertLayerVisibility and the mode branches in CreateAsync/TryMarkReady/End/OnMessage.
+    // False (the default) reproduces exactly what this class did before D3.
+    private readonly bool _htmlWallpaperMode;
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
@@ -54,12 +58,14 @@ public sealed class WebViewAlertLayerController : IDisposable
     // separately-traced timings).
     private Stopwatch? _navigateStopwatch;
 
-    public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null, Func<DateTimeOffset>? clock = null)
+    public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null,
+        Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("A WPF UI STA is required.");
         _host = host;
         _trace = trace;
+        _htmlWallpaperMode = htmlWallpaperMode;
         _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
         _poll = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
@@ -125,7 +131,13 @@ public sealed class WebViewAlertLayerController : IDisposable
         try
         {
             _controller.CoreWebView2.PostWebMessageAsJson("{\"type\":\"hide\"}");
-            _controller.IsVisible = false;
+            // D3: in html wallpaper mode the page IS the wallpaper and must stay visible permanently
+            // once ready -- End() still tells the page to hide its own alert overlay above, it just
+            // never hides the WebView2 layer itself. Video mode is unchanged.
+            if (WebViewAlertLayerVisibility.HideOnEndOrDone(_htmlWallpaperMode))
+            {
+                _controller.IsVisible = false;
+            }
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error($"end-{reason}", ex)); }
     }
@@ -217,8 +229,22 @@ public sealed class WebViewAlertLayerController : IDisposable
             if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.RootVisualTarget = visual;
             _host.CommitComposition();
-            candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.example",
-                Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
+            // D3 (html-wallpaper-demo): html wallpaper mode maps and later navigates to the
+            // processing SCENE page (D2) under its OWN reserved example domain, never
+            // cosmicwin-alert.example -- kept as two separate literal branches, not a shared
+            // variable, so video mode's own literals stay byte-for-byte what they were before D3 (see
+            // WebViewAlertLayerControllerTests).
+            if (_htmlWallpaperMode)
+            {
+                candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-scene.example",
+                    Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web", "processing"),
+                    CoreWebView2HostResourceAccessKind.DenyCors);
+            }
+            else
+            {
+                candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.example",
+                    Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
+            }
             candidate.CoreWebView2.WebMessageReceived += OnMessage;
             candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
             candidate.CoreWebView2.ProcessFailed += OnProcessFailed;
@@ -235,7 +261,14 @@ public sealed class WebViewAlertLayerController : IDisposable
             _navigateStopwatch = Stopwatch.StartNew();
             // No kind/duration hash any more (T9b): the page loads idle and is driven by show/hide
             // messages once it is ready.
-            _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
+            if (_htmlWallpaperMode)
+            {
+                _controller.CoreWebView2.Navigate("https://cosmicwin-scene.example/index.html");
+            }
+            else
+            {
+                _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
+            }
         }
         catch (Exception ex)
         {
@@ -307,7 +340,12 @@ public sealed class WebViewAlertLayerController : IDisposable
                 // The page reports nothing else: the QUEUE owns ending the alert (AppComposition
                 // calls End() itself once it advances) -- this only reflects the page's own state.
                 _state.PageDone();
-                if (_controller is not null) _controller.IsVisible = false;
+                // D3: in html wallpaper mode the page's own "done" must never hide the WebView2 layer
+                // either -- it is the wallpaper, not a one-off alert. Video mode is unchanged.
+                if (WebViewAlertLayerVisibility.HideOnEndOrDone(_htmlWallpaperMode) && _controller is not null)
+                {
+                    _controller.IsVisible = false;
+                }
             }
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("message", ex)); }
@@ -319,6 +357,14 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (!_navigationCompleted || !_pageReportedReady) return;
         _state.MarkReady();
         _trace?.Invoke(AlertLayerTrace.PageReady());
+        // D3: in html wallpaper mode becoming ready shows the layer on its own, with no Start ever
+        // required -- the page IS the wallpaper. Runs again after every recreation (Explorer restart,
+        // process failure), so the layer becomes visible again once the new controller is ready.
+        // Video mode is unchanged: the layer stays hidden until an alert actually starts it.
+        if (WebViewAlertLayerVisibility.ShowOnReady(_htmlWallpaperMode) && _controller is not null)
+        {
+            _controller.IsVisible = true;
+        }
         if (_state.ApplyPendingShowIfDue() is { } pending)
         {
             _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending));
