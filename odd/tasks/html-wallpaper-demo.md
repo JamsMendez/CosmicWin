@@ -50,7 +50,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 
 - [x] D1 - SPIKE: can the wallpaper host exist and show the WebView2 overlay visual with NO video
       playing? Answer from code first, then on hardware. Decides how D3 is wired.
-- [ ] D2 - processing scene page in the app (scene + alert in one loop, real bands), driven by the
+- [x] D2 - processing scene page in the app (scene + alert in one loop, real bands), driven by the
       existing hash/postMessage alert API.
 - [ ] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
       permanently, alerts only toggle the overlay; shake moves into the canvas.
@@ -89,6 +89,28 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   video wallpaper thread without `TryPlay`; keep the controller visible permanently. Hardware
   confirmation of "no video" folds into D3/D5.
 
+- 2026-09-26: D2 done on `demo/html-wallpaper-d2-processing-page` (delegated writer, route:
+  writer trigger, many non-trivial files). Commits 0f77d90 (verbatim scene sources, 1851 lines,
+  parent-checked: only a header comment differs from docs/great-sage) and 6ad4606 (page, alert
+  overlay with the alert-layer.js contract, csproj Content, node harness + runner; 1408 lines).
+  Page: `CosmicWin.App/Wallpaper/Web/processing/`. invariants.js dropped (it inspects source text
+  the tile rewrite changes). Canvas shake restored (FAILURE_SHAKE_MS 230).
+  TDD DEVIATION (honest): tests were written after the implementation, so no RED was observed
+  before code. Compensated by a mutation check per test: all 6 went RED on a targeted break and
+  GREEN on revert. `dotnet build`: 0 errors. `dotnet test CosmicWin.App.Tests`: 1095 passed,
+  6 skipped, 0 failed. Parent spot check: ProcessingSceneNodeTests re-run, passed.
+  Review: assess high (process boundary in the node runner), consent granted, 4 lenses, APPROVED
+  and acknowledged (review-e05452a05004ec76, authority burned). Non-blocking findings:
+  - WARNING R4-render-loop-no-fault-isolation: one throwing frame stops scheduleFrame -> the whole
+    wallpaper freezes for good. Matters for D3 (the page IS the wallpaper).
+  - WARNING R3-host-message-path-unproved: the harness never delivers a WebView2 message, so the
+    show/hide message contract D3 relies on is untested.
+  - WARNING R4-stale-shake-transform-on-reshow; SUGGESTION R3-shake-outlives-done (shake cleanup).
+  - WARNING R3-band-scale-test-vacuous (band test uses one full-screen tile only).
+  - WARNING R2-misleading-scene-center-param; R2-stale-tuning-comments (ported config comments).
+  - SUGGESTION R3-message-tiles-not-capped; R2-dead-invariant-helpers; R2-dangling-check-reference.
+
 ## Next step
 
-D2 (processing scene page), then D3.
+Maintainer decides: fix the two D3-relevant WARNINGs (render loop isolation, message contract
+test) as D2b before D3, or go straight to D3.
