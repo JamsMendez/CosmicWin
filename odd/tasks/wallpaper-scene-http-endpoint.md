@@ -82,6 +82,13 @@ implementation touches 2+ non-trivial files per task (writer trigger).
       serialized (with its comments); an existing file is never touched. Also default
       `alert-http = on` (maintainer: "alertas tambien debe estar prendidas"); `alerts-enabled`
       is already on; `video-wallpaper-http` stays off. Route: delegated writer.
+- [ ] S10 - Follow-ups (maintainer 2026-09-27: "Dale a esos pendientes chicos"), on branch
+      fix/settings-and-trace-followups: (a) `http-server start` trace line reports the scene route;
+      (b) a test proves WireProduction reads settings through LoadOrCreate
+      (R3-production-loadorcreate-wiring-untested); (c) a failed settings write (first run or any
+      Save) leaves a trace line (R3-first-run-write-failure-silent); (d) pin SynchronizedSettingsStore
+      save-failure semantics with a test (R3-settings-store-save-failure-semantics-unproved).
+      Route: delegated writer.
 ## Acceptance criteria
 
 - `POST /v1/wallpaper/scene {"scene":"idle"}` with the token, in html mode -> 202 and the wallpaper
@@ -303,6 +310,9 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   - SUGGESTION R3-production-loadorcreate-wiring-untested: nothing proves WireProduction calls
     LoadOrCreate rather than Load.
   - SUGGESTION R3-first-run-write-failure-silent: a failed first-run write leaves no trace.
+
+- 2026-09-27: Maintainer confirmed on screen: the scenes really change live over HTTP, and alerts
+  work in html mode. Closes the "visual change not eyeballed" gap from S5.
 
 ## Next step
 
