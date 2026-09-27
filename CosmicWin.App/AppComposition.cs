@@ -713,6 +713,18 @@ public sealed class AppComposition : IDisposable
         /// own dispatcher). Non-blocking, same contract as the video route: this returns whether the
         /// switch was accepted for dispatch, not its eventual outcome.
         /// </remarks>
+        /// <remarks>
+        /// S6 (wallpaper-scene-http-endpoint, R3-owning-thread-work-unguarded): the posted work runs
+        /// AFTER the HTTP 202 reply already went out, so a throw here has nowhere left to go but the
+        /// owning dispatcher -- guarded exactly like <see cref="SwitchVideoWallpaper"/>'s own posted
+        /// work item guards <c>importVideoWallpaper</c>: caught, reported through
+        /// <c>desktopTrace</c> by exception TYPE NAME ONLY (never <c>Message</c>, the same rule
+        /// <c>SwitchVideoWallpaper</c>'s own <c>import-failed</c> line follows), and never rethrown.
+        /// The switch and the persist are guarded SEPARATELY, each with its own trace tag, so a
+        /// persist failure (the switch itself succeeded) never reads as a switch failure. A throwing
+        /// switch returns early -- exactly like not calling <c>persistWallpaperScene</c> when the
+        /// switch reports <see langword="false"/> above, nothing to persist means nothing runs.
+        /// </remarks>
         bool HandleWallpaperSceneHttpSwitch(string name)
         {
             if (wallpaperMode != WallpaperMode.Html || switchHtmlWallpaperScene is null)
@@ -727,9 +739,31 @@ public sealed class AppComposition : IDisposable
 
             onOwningThread(() =>
             {
-                if (switchHtmlWallpaperScene(scene))
+                bool switched;
+                try
+                {
+                    switched = switchHtmlWallpaperScene(scene);
+                }
+                catch (Exception error)
+                {
+                    desktopTrace?.Record(
+                        $"wallpaper-scene-http switch-failed error={error.GetType().Name}");
+                    return;
+                }
+
+                if (!switched)
+                {
+                    return;
+                }
+
+                try
                 {
                     persistWallpaperScene?.Invoke(scene);
+                }
+                catch (Exception error)
+                {
+                    desktopTrace?.Record(
+                        $"wallpaper-scene-http persist-failed error={error.GetType().Name}");
                 }
             });
 
@@ -2018,7 +2052,16 @@ public sealed class AppComposition : IDisposable
         // record. Rebuilding it from the one value that changed -- which is what
         // `new Settings(FocusBorder: enabled)` did -- would write the colour back to the accent
         // every time somebody toggled the border, and vice versa.
-        var stored = settings;
+        //
+        // S6 (wallpaper-scene-http-endpoint, R3-persist-shared-stored-capture): this used to be a
+        // bare mutable local, and every persistXyz closure below did its own unsynchronized
+        // `SettingsFile.Save(stored = stored with { ... })`. Focus-border/border-colour/tiling/scene
+        // run on the UI STA thread; the video path persists from the video-wallpaper MTA thread
+        // (`SwitchVideoWallpaper`'s posted work item) -- two of those closures firing concurrently
+        // could both read the SAME pre-update snapshot and race their `with`, one silently clobbering
+        // the other's field. SynchronizedSettingsStore.Update wraps the whole read-modify-write-and-
+        // save in one lock, so every persist below is now serialized against every other one.
+        var settingsStore = new SynchronizedSettingsStore(settings, SettingsFile.Save);
 
         // ONE hoisted instance for the life of the process, read once per untiled focus chord --
         // not reconstructed per chord, which would pay Win32NativeWindowSource's own construction
@@ -2073,12 +2116,12 @@ public sealed class AppComposition : IDisposable
             focusBorder: new FocusBorderOverlay(),
             scheduleOnOwningThread: RunOnUiThread,
             focusBorderEnabled: settings.FocusBorder,
-            persistFocusBorder: enabled => SettingsFile.Save(stored = stored with { FocusBorder = enabled }),
+            persistFocusBorder: enabled => settingsStore.Update(s => s with { FocusBorder = enabled }),
             focusBorderColor: settings.BorderColor,
-            persistBorderColor: rgb => SettingsFile.Save(stored = stored with { BorderColor = rgb }),
+            persistBorderColor: rgb => settingsStore.Update(s => s with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
-            persistTiling: enabled => SettingsFile.Save(stored = stored with { Tiling = enabled }),
-            persistVideoWallpaperPath: path => SettingsFile.Save(stored = stored with { VideoWallpaperPath = path }),
+            persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
+            persistVideoWallpaperPath: path => settingsStore.Update(s => s with { VideoWallpaperPath = path }),
             readVideoFileSnapshot: VideoWallpaperImport.TryReadSnapshot,
             alertsEnabled: settings.AlertsEnabled,
             alertHttpEnabled: settings.AlertHttpEnabled,
@@ -2089,7 +2132,7 @@ public sealed class AppComposition : IDisposable
             // already use for the SAME alertLayer collaborator.
             wallpaperSceneHttpEnabled: settings.WallpaperSceneHttpEnabled,
             switchHtmlWallpaperScene: alertLayer is null ? null : alertLayer.SwitchScene,
-            persistWallpaperScene: scene => SettingsFile.Save(stored = stored with { WallpaperScene = scene }),
+            persistWallpaperScene: scene => settingsStore.Update(s => s with { WallpaperScene = scene }),
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),

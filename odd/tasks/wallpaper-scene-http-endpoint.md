@@ -56,7 +56,16 @@ split into work-unit commits per task below.
       Route: delegated writer.
 - [x] S4 - Settings key `wallpaper-scene-http`, AppComposition handler (UI thread, html guard,
       persist), WireProduction wiring + wiring tests. Route: delegated writer.
-- [ ] S5 - README section + hardware check (switch all four scenes live over HTTP).
+- [x] S6 - Review follow-ups (accepted by the maintainer 2026-09-27): guard the posted scene work
+      (R3-owning-thread-work-unguarded: catch, report via diagnostics, never crash the dispatcher),
+      serialize the settings read-modify-write shared by scene and video persist
+      (R3-persist-shared-stored-capture), and move the orphaned summary back
+      (R3-orphaned-doc-summary). Route: delegated writer.
+- [ ] S7 - Guard `/v1/wallpaper/video` in html mode: answer 503 instead of starting a player
+      (closes html-wallpaper-demo WARNING R3-html-mode-video-switch-not-guarded for HTTP).
+      Tray pick scope: to confirm with the maintainer. Route: delegated writer.
+- [ ] S5 - README section + hardware check (switch all four scenes live over HTTP; video route
+      answers 503 in html mode).
 
 Route evidence: understanding needed 6+ files (mapping trigger fired, delegated mapper done);
 implementation touches 2+ non-trivial files per task (writer trigger).
@@ -117,6 +126,25 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   - SUGGESTION R3-orphaned-doc-summary: WebViewAlertLayerControllerTests has a summary block moved
     off VisibilityDecisions_GoThroughTheSharedPolicyClass onto the SceneUrl theory.
 
+- 2026-09-27: S6 done. `HandleWallpaperSceneHttpSwitch`'s posted `onOwningThread` work now guards
+  `switchHtmlWallpaperScene` and `persistWallpaperScene` in SEPARATE try/catch blocks: a throwing
+  switch never persists and never escapes onto the dispatcher, a throwing persist never escapes
+  either, and each is reported through `desktopTrace` by exception type name only (never the
+  message), mirroring `SwitchVideoWallpaper`'s own `import-failed` line. `WireProduction`'s bare
+  mutable `stored` local -- read-modify-written by five unsynchronized closures (focus border,
+  border colour, tiling, video path, scene) from two different threads (UI STA, video MTA) -- is
+  replaced by the new internal `SynchronizedSettingsStore`, which wraps every read-modify-write-and-
+  save in one lock; all five `persistXyz` closures now call `settingsStore.Update(...)`. The orphaned
+  `/// <summary>` block above `WebViewAlertLayerControllerTests`'s `SceneUrl` theory (belonging to
+  `VisibilityDecisions_GoThroughTheSharedPolicyClass`) moved back above its own test. TDD: RED
+  observed for both guard tests (real `Assert.Null()` failures showing the uncaught
+  `InvalidOperationException`/`IOException` from the posted work) and for
+  `SynchronizedSettingsStoreTests` (real `Assert.False()` failure -- a naive unlocked stub lost one
+  of two concurrent field updates); all three GREEN after the fix, the concurrency test re-run 5x
+  clean. Full non-desktop suite green: 198 Layout + 13 Alert + 425 Interop (422 passed, 3 skipped) +
+  1196 App = 1832 passed, 3 skipped, 0 failed; `dotnet build CosmicWin.sln` 0 errors. Committed in
+  the same commit as this Progress entry.
+
 ## Next step
 
-S5 (README + hardware check) -- parent's job, not this writer's.
+S7 or S5 (README + hardware check) -- parent's job, not this writer's.

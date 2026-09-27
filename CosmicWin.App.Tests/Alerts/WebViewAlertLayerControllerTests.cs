@@ -286,12 +286,6 @@ public sealed class WebViewAlertLayerControllerTests
     }
 
     /// <summary>
-    /// D3: the visibility decisions in <c>TryMarkReady</c>, <c>End</c>, and the page's "done" message
-    /// must be driven by <see cref="WebViewAlertLayerVisibility"/>, not an inline mode check -- proven
-    /// structurally here, the same way every other WebView2-only behaviour in this class is (see the
-    /// class remarks).
-    /// </summary>
-    /// <summary>
     /// S3 (wallpaper-scene-http-endpoint): the exact URL a preload OR a live <see
     /// cref="WebViewAlertLayerController.SwitchScene"/> navigates to for a scene -- pulled out as a
     /// pure, directly-testable function (unlike the rest of this class's WebView2-only behaviour, see
@@ -417,6 +411,12 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.DoesNotContain("_currentScene", body);
     }
 
+    /// <summary>
+    /// D3: the visibility decisions in <c>TryMarkReady</c>, <c>End</c>, and the page's "done" message
+    /// must be driven by <see cref="WebViewAlertLayerVisibility"/>, not an inline mode check -- proven
+    /// structurally here, the same way every other WebView2-only behaviour in this class is (see the
+    /// class remarks).
+    /// </summary>
     [Fact]
     public void VisibilityDecisions_GoThroughTheSharedPolicyClass()
     {

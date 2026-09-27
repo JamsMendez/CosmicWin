@@ -1099,6 +1099,83 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     /// <summary>
+    /// S6 (wallpaper-scene-http-endpoint, R3-owning-thread-work-unguarded): before this fix, the
+    /// posted work item called <c>switchHtmlWallpaperScene</c> and <c>persistWallpaperScene</c> with
+    /// no exception guard at all, AFTER the HTTP 202 reply already went out -- a throw here had
+    /// nowhere left to go but the owning dispatcher. This proves a throwing switch (1) never escapes
+    /// the posted work, (2) never persists (there is nothing successful to remember), and (3) is
+    /// reported through <c>desktopTrace</c> with the SAME type-name-only shape <see
+    /// cref="HttpSwitch_WhenImportThrows_TracesPhaseHttpAndRestoresThePreviousVideoWithoutPersisting"/>
+    /// already proves for the video route's own import failure -- never the exception message.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_WhenSwitchThrows_ReportsAndDoesNotPersist()
+    {
+        var posted = new List<Action>();
+        var trace = new RecordingDesktopTrace();
+        var persistCalls = 0;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            desktopTrace: trace,
+            switchHtmlWallpaperScene: _ => throw new InvalidOperationException("boom"),
+            persistWallpaperScene: _ => persistCalls++);
+        using (harness.Composition)
+        {
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("idle");
+            Assert.True(accepted);
+            Assert.Equal(before + 1, posted.Count);
+
+            var exception = Record.Exception(() => posted[^1]());
+
+            Assert.Null(exception);
+            Assert.Equal(0, persistCalls);
+            Assert.Contains(
+                "wallpaper-scene-http switch-failed error=InvalidOperationException", trace.Lines);
+        }
+    }
+
+    /// <summary>
+    /// S6 (wallpaper-scene-http-endpoint, R3-owning-thread-work-unguarded): the OTHER half of the
+    /// same posted work item -- the switch itself succeeds, but <c>persistWallpaperScene</c> throws.
+    /// That must not escape either, and is reported under its own distinct trace shape so it never
+    /// reads as a switch failure when it was the settings write that actually failed.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_WhenPersistThrows_DoesNotPropagate()
+    {
+        var posted = new List<Action>();
+        var trace = new RecordingDesktopTrace();
+        WallpaperScene? switched = null;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            desktopTrace: trace,
+            switchHtmlWallpaperScene: scene => { switched = scene; return true; },
+            persistWallpaperScene: _ => throw new IOException("disk full"));
+        using (harness.Composition)
+        {
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("raphael");
+            Assert.True(accepted);
+            Assert.Equal(before + 1, posted.Count);
+
+            var exception = Record.Exception(() => posted[^1]());
+
+            Assert.Null(exception);
+            Assert.Equal(WallpaperScene.Raphael, switched);
+            Assert.Contains("wallpaper-scene-http persist-failed error=IOException", trace.Lines);
+        }
+    }
+
+    /// <summary>
     /// With a dedicated video-wallpaper thread wired (the shape every real composition uses, per
     /// <c>AppComposition.WireProduction</c>), the delegate returns <see langword="true"/> the
     /// instant the work is QUEUED -- before the scheduler ever runs it -- and the switch that
