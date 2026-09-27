@@ -65,7 +65,7 @@ split into work-unit commits per task below.
       (closes html-wallpaper-demo WARNING R3-html-mode-video-switch-not-guarded). Tray pick
       INCLUDED (maintainer 2026-09-27: "Tambien html"): in html mode the tray video pick does
       nothing and records a trace line. Route: delegated writer.
-- [ ] S5 - README section + hardware check (switch all four scenes live over HTTP; video route
+- [x] S5 - README section + hardware check (switch all four scenes live over HTTP; video route
       answers 503 in html mode).
 
 Route evidence: understanding needed 6+ files (mapping trigger fired, delegated mapper done);
@@ -184,6 +184,25 @@ implementation touches 2+ non-trivial files per task (writer trigger).
     _current before save; a throwing save leaves memory ahead of disk until the next successful
     Update writes it. Accepted as eventually convergent; not pinned by a test.
 
+- 2026-09-27: S5 done. README section "Wallpaper scene over HTTP" + html-mode note on the video
+  route (ee7f93f). Hardware check, driven by the parent (elevated shell, run.ps1 copy, port 47811
+  free), measured from desktop-trace.log and HTTP replies:
+  - html mode: processing, explorer, raphael, idle -> 202 ok each, each followed by
+    `alert-layer navigation completed success=True` + `page ready` (138-295 ms);
+    settings.conf `wallpaper-scene` followed every switch.
+  - same scene (`IDLE`, upper case) -> 202, NO navigation line (no re-navigate).
+  - unknown scene -> 400; extra field -> 400 `unknown field`; 300-byte body -> 413.
+  - video mode restart -> scene route 503 `wallpaper scene switching is not available`.
+  - html mode: an external client already POSTing /v1/wallpaper/video once a second now gets 503
+    with `video-wallpaper phase=http skipped reason=html-mode` (S7 confirmed live).
+  - NOT verified: the scene visibly changing on screen (desktop covered by windows in the
+    screenshots) -- left for the maintainer's eyes.
+  - Follow-up: the `http-server start requested ... alerts-route=True video-route=True` trace line
+    does not report the scene route.
+  Maintainer settings restored from backup, plus `wallpaper-scene-http = on`; app left running in
+  html mode (idle scene).
+
 ## Next step
 
-S5 (README + hardware check).
+Maintainer: eyeball a live scene switch; decide on merging into main. Follow-ups: scene-route
+trace line, R3-settings-store-save-failure-semantics-unproved.
