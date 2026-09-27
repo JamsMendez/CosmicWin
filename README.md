@@ -205,7 +205,56 @@ previous video keeps playing. The outcome is written to the desktop trace, never
 | 404 | The file does not exist, or the route is turned off (the body tells which) |
 | 413 | Body larger than 4 KB |
 | 415 | The file is not an `.mp4`, or `Content-Type` is not `application/json` (the body tells which) |
-| 503 | This CosmicWin has no video wallpaper to switch |
+| 503 | This CosmicWin has no video wallpaper to switch, or `wallpaper-mode = html` is on |
+
+In html mode (`wallpaper-mode = html`) the video route answers 503 and never starts a video, and
+the tray menu's video pick does nothing. Both write a `skipped reason=html-mode` line to the
+desktop trace.
+
+## Wallpaper scene over HTTP
+
+In html mode the wallpaper is an animated scene, chosen by `wallpaper-scene` in `settings.conf`.
+Another program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
+The route is **off by default** and independent of the other two routes. Turn it on in
+`settings.conf` and restart CosmicWin:
+
+```ini
+wallpaper-scene-http = on
+```
+
+It shares the server, port (`alert-http-port`) and token file (`alert-http.token`) with the alert
+endpoint, and the same localhost-only rules apply.
+
+```powershell
+$token = Get-Content "$env:LOCALAPPDATA\CosmicWin\alert-http.token"
+$body = @{ scene = 'idle' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:47811/v1/wallpaper/scene `
+  -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body
+```
+
+```sh
+curl -X POST http://127.0.0.1:47811/v1/wallpaper/scene \
+  -H "Authorization: Bearer $(cat "$LOCALAPPDATA/CosmicWin/alert-http.token")" \
+  -H "Content-Type: application/json" \
+  -d '{"scene":"idle"}'
+```
+
+The body is a JSON object with one field, `scene`: one of `processing`, `explorer`, `idle` or
+`raphael`, in any letter case. The request is answered as soon as the name is checked; the switch
+then runs on the UI thread and the new scene is saved to `wallpaper-scene` in `settings.conf`, so it
+survives a restart. Asking for the scene already showing is accepted and changes nothing. If the
+switch fails, the current scene stays and nothing is saved; the failure is written to the desktop
+trace.
+
+| Status | Meaning |
+|---|---|
+| 202 | Accepted; the switch runs on the UI thread. Body `ok` |
+| 400 | Bad JSON, unknown field, or a scene name that is not one of the four |
+| 401 / 403 / 405 | As for alerts |
+| 404 | The route is turned off |
+| 413 | Body larger than 256 bytes |
+| 415 | `Content-Type` is not `application/json` |
+| 503 | Not in html mode (`wallpaper-mode = video`), or this CosmicWin has no scene page to switch |
 
 ## Keybindings
 
