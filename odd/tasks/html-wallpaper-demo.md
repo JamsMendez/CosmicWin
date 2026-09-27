@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`; D6b -> `demo/html-wallpaper-d6b-raphael`; D6c -> `demo/html-wallpaper-d6c-idle`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`; D6b -> `demo/html-wallpaper-d6b-raphael`; D6c -> `demo/html-wallpaper-d6c-idle`; D6d -> `demo/html-wallpaper-d6d-settings`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -66,7 +66,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
         (processing keeps its bands, suites stay green) + explorer scene (rising sparks).
         Route: delegated writer.
   - [x] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
-  - [ ] D6c - idle scene (first-ring constellations).
+  - [x] D6c - idle scene (first-ring constellations).
   - [ ] D6d - Scene selection wiring + fps cap + hardware check of all four. DECIDED by the
         maintainer 2026-09-26: settings.conf, not the tray -- `wallpaper-scene = processing |
         explorer | idle | raphael` and `wallpaper-fps = 30 | 60` for the html wallpaper (the fps
@@ -255,6 +255,26 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   - Copy-level: R3-untested-port / R3-untested-pure-geometry, header seam wording in the import
     commit, coreRadius discontinuity on tiny viewports, counter/glyph-pool guards.
 
+- 2026-09-27: D6c done on `demo/html-wallpaper-d6c-idle` (delegated writer).
+  - 07b8494 + f753385 chore(wallpaper): import the idle scene sources (1076 + 1235 lines,
+    verbatim; parent re-diffed every js file: nothing lost).
+  - 341be41 feat(wallpaper): add the idle scene page (+746/-106). Seam: the scene's ring loop
+    records `constellationRingStamp = {cache, cx, cy, angle}` right after stamping the constellation
+    ring (found by name, `CONSTELLATION_RING_INDEX`); the hook re-stamps that exact object -- one
+    geometry calculation per frame, no parallel copy (the D6b lesson). RED first (page missing),
+    GREEN 5/5; mutation checks: wrong ring index, hardcoded angle, recomputed center, extra ring (a
+    first weak partition let it pass; the test was fixed to spy per tile and then caught it),
+    alert clock outside its try, rethrow.
+  `dotnet test CosmicWin.App.Tests`: 1124 passed / 6 skipped / 0 failed. Parent spot check:
+  IdleSceneNodeTests passed (27 s).
+  Reviews (one per commit, temporary worktrees, removed): review-aa128b6be346d24c,
+  review-f1f0e418bdda4bd3, review-b5bdfd651a3cecc2 -- all APPROVED + acknowledged. Several copy
+  WARNINGs are artifacts of per-commit slicing (missing script deps, loop not guarded yet) and are
+  resolved by the page commit. Open, non-blocking: WARNING R2-constellation-index-silent-miss (a
+  renamed ring would make the see-through vanish with no log; add a load-time assert), WARNING
+  R3-canvasScale-untested (fractional DPR), earth.js copy notes (disc off-center by a texel,
+  per-pixel allocation), stale stamp after a failed frame, harness timeouts near 90 s budget.
+
 ## Next step
 
-D6c (idle), then D6d (settings + fps + hardware).
+D6d: `wallpaper-scene` + `wallpaper-fps` settings, wiring, hardware check of all four scenes.
