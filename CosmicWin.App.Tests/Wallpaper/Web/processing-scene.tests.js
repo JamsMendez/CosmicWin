@@ -86,6 +86,20 @@ function loadPage(options) {
   var sceneCanvas = makeCanvasElement(ctx2d);
   var nebulaCanvasElement = makeCanvasElement(ctx2d);
   var postedMessages = [];
+  // D2b (R4-render-loop-no-fault-isolation): records every scheduleFrame(render) call, so a test can
+  // prove the loop keeps scheduling frames across a throw instead of dying on the spot.
+  var requestAnimationFrameCalls = [];
+  // D2b (R4-render-loop-no-fault-isolation): the sandbox has no `console` global unless provided here
+  // (unlike Math/JSON/Date, `console` is a Node/browser host object, not part of the JS realm) -- a
+  // throwing frame's console.error report would otherwise itself throw a ReferenceError inside the
+  // sandbox. Recorded instead of forwarded to the real console, so a deliberately-thrown test error
+  // does not spam this harness's own stdout.
+  var consoleErrorCalls = [];
+  var consoleMock = {
+    error: function () { consoleErrorCalls.push(Array.prototype.slice.call(arguments)); },
+    log: function () { /* no-op: unused by the scene */ },
+    warn: function () { /* no-op: unused by the scene */ },
+  };
 
   var windowMock = {
     innerWidth: options.innerWidth || 1000,
@@ -94,7 +108,7 @@ function loadPage(options) {
     // No WebGLRenderingContext global -- initializeNebulaRenderer (nebula.js) bails out before ever
     // touching a 'webgl' context, exactly like a browser with WebGL disabled would.
     WebGLRenderingContext: undefined,
-    requestAnimationFrame: function () { },
+    requestAnimationFrame: function (callback) { requestAnimationFrameCalls.push(callback); },
     addEventListener: function () { /* "resize" only; never fired here */ },
     chrome: options.withWebview
       ? {
@@ -127,6 +141,7 @@ function loadPage(options) {
     document: documentMock,
     location: locationMock,
     URLSearchParams: URLSearchParams,
+    console: consoleMock,
   };
   vm.createContext(sandbox);
   for (var i = 0; i < SCRIPT_FILES.length; i++) {
@@ -135,7 +150,20 @@ function loadPage(options) {
     vm.runInContext(source, sandbox, { filename: filePath });
   }
 
-  return { sandbox: sandbox, postedMessages: postedMessages, fillStyleHistory: ctx2d.__fillStyleHistory };
+  return {
+    sandbox: sandbox,
+    postedMessages: postedMessages,
+    fillStyleHistory: ctx2d.__fillStyleHistory,
+    requestAnimationFrameCalls: requestAnimationFrameCalls,
+    consoleErrorCalls: consoleErrorCalls,
+    // config.js declares `ctx`/`canvas` with `const`, so -- unlike the `var`/`function` top-level
+    // declarations the rest of this harness already reaches via page.sandbox.* -- they never become
+    // properties of the vm context's global object (a top-level `const` in a classic, non-module
+    // script stays in its own lexical environment record, same as in a real browser <script> tag).
+    // Returned directly from this closure instead, since it already holds the exact same references.
+    ctx: ctx2d,
+    canvas: sceneCanvas,
+  };
 }
 
 // ---- Tiny test runner -------------------------------------------------------------------------
@@ -229,6 +257,72 @@ test("2x1 grid: outer + inner gap, equal cells, row-major (same math as alert-la
     { x: 20, y: 20, w: 470, h: 360 },
     { x: 510, y: 20, w: 470, h: 360 },
   ]);
+});
+
+// ---- Case 6: render loop fault isolation (D2b, R4-render-loop-no-fault-isolation) -----------------
+// Before this fix, scheduleFrame(render) was render()'s LAST statement -- a throwing frame never
+// reached it, and the wallpaper's loop (this page IS the wallpaper) stopped for good. These monkey-
+// patch one scene layer to throw and prove the loop, and the alert overlay, both survive it.
+
+test("a throwing scene layer does not stop the render loop from scheduling the next frame", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  var original = page.sandbox.drawSoftOvalFields;
+  var thrown = 0;
+  page.sandbox.drawSoftOvalFields = function () {
+    thrown++;
+    if (thrown === 1) throw new Error("D2b-fault-isolation-scene");
+    return original.apply(this, arguments);
+  };
+
+  var before = page.requestAnimationFrameCalls.length;
+  page.sandbox.render(0); // this frame throws inside drawSoftOvalFields
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 1,
+    "expected scheduleFrame(render) to still run once even though this frame threw");
+
+  page.sandbox.render(16); // the loop must keep going, not just survive the one throwing frame
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 2,
+    "expected the loop to keep scheduling frames after recovering from a throw");
+});
+
+test("a throwing scene layer does not stop the alert overlay from running the same frame", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  page.sandbox.startShowing(["warning"], 1, 1, 0, 5000);
+  page.sandbox.drawSoftOvalFields = function () { throw new Error("D2b-fault-isolation-scene"); };
+
+  // warning has shakeMs 0 and FAILURE_REVEAL_MS 700 -- shown well before 950ms.
+  page.sandbox.render(0);
+  page.sandbox.render(300);
+  page.sandbox.render(950);
+  assert.strictEqual(page.sandbox.kindState.warning.state, "shown",
+    "expected the alert overlay to keep advancing even while the scene layer above it keeps throwing");
+});
+
+test("a throwing frame is reported once via console.error, not flooded on every repeat", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  page.sandbox.drawSoftOvalFields = function () { throw new Error("D2b-fault-isolation-repeat"); };
+
+  page.sandbox.render(0);
+  page.sandbox.render(16);
+  page.sandbox.render(32);
+  assert.ok(page.consoleErrorCalls.length >= 1, "expected at least one console.error report");
+  assert.strictEqual(page.consoleErrorCalls.length, 1,
+    "expected the SAME repeating error to be reported once, not once per frame");
+});
+
+test("a throwing scene layer does not leak canvas state (alpha/composite/shake) into later frames", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  page.ctx.globalAlpha = 0.33;
+  page.ctx.globalCompositeOperation = "difference";
+  page.canvas.style.transform = "translate(999px, 999px)"; // stale shake, as if mid-throw
+  page.sandbox.drawSoftOvalFields = function () { throw new Error("D2b-fault-isolation-leak"); };
+
+  page.sandbox.render(0);
+
+  assert.strictEqual(page.ctx.globalAlpha, 1, "expected globalAlpha reset after a throwing frame");
+  assert.strictEqual(page.ctx.globalCompositeOperation, "source-over",
+    "expected the composite mode reset after a throwing frame");
+  assert.strictEqual(page.canvas.style.transform, "",
+    "expected the stale shake transform cleared after a throwing frame");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
