@@ -67,6 +67,21 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   `GetMonitorInfo` (never WinForms `Screen.WorkingArea`, see the taskbar-tracking work), expressed
   relative to the layer surface and sent in the show message. N = 1 stays full display, as decided
   originally ("funciona como ahora"). Route: delegated.
+- [x] T9 Behavioral test of `alert-layer.js` layout (reviews R3-js-mosaic-behavior-unproved,
+  R3-js-workarea-layout-only-structurally-guarded): a committed Node script that loads the real
+  page file in a `vm` sandbox with a mock canvas and asserts `tileRects()`/`gridAreaRect()` output
+  (N=1 full canvas; 2x1, 3x2 with gap; work area offset + clamp; degenerate work area = full canvas;
+  dpr scaling; `work=` hash param), run from `dotnet test` via an xUnit fact (skipped with a reason
+  when `node` is not on PATH). Route: delegated (T9-T12 one writer). Commit `9a6c7fb`.
+- [x] T10 Test the work-area catch path (R3-workarea-catch-path-unexercised): a display whose
+  WorkArea/Bounds getter throws -> trace `alert-layer-workarea-failed`, all-zero work area, alert shown.
+  Commit `a9f53a2`.
+- [x] T11 Isolate the gap reload from the exceptions reload (R3-reload-gap-skipped-on-exception-failure):
+  a throwing exceptions reload must not skip the gap reload (and vice versa), each failure traced;
+  also rename/comment the never-firing `ImmediateScheduler` test double (R3-immediate-scheduler-never-fires).
+  Commit `b652f95`.
+- [x] T12 Hash API `tiles=` (R3-hash-tiles-filter-noop): filter empty/unknown entries BEFORE mapping,
+  cap tiles at columns*rows. Covered by T9's harness. Commit `5a4dced`.
 - [x] T8 Hardware: right-side taskbar, 4x2 alert -> last column fully visible, gap to the taskbar
   edge matches the windows'.
 
@@ -455,3 +470,102 @@ maintainer's decision, unrelated to gap.
 - 2026-09-26: T8 on hardware, Release build of 9149d9f, right-side taskbar, temporary desktop.
   `failed:7 warning:1` -> trace `grid=4x2 gap=8 work=0,0,3392x1440` (monitor 3440 wide, taskbar 48).
   Screenshot: last column fully visible, 8-px gap before the taskbar, warning in the last slot.
+
+- 2026-09-26: T9-T12 implemented by one delegated writer (this session), closing all four review
+  follow-ups from the two most recent reviews. Node `v24.19.0` on PATH throughout.
+
+  **T9 -- Node vm-sandbox harness for `alert-layer.js`.** New
+  `CosmicWin.App.Tests/Alerts/Web/alert-layer-layout.tests.js`: loads the REAL shipped page (the
+  same `AppContext.BaseDirectory`-resolved copy `AlertLayerWebPageTests` already reads) into a
+  `vm.createContext` sandbox with a minimal DOM/canvas/host mock (a Proxy-backed 2D context whose
+  every method/property is a no-op/slot, `document.getElementById`/`createElement`, `window` sizing
+  + `devicePixelRatio` + an optional `chrome.webview`, and `location.hash`), then asserts
+  `tileRects()`/`gridAreaRect()`/the hash-parsed module state directly -- top-level `function`/`var`
+  declarations in a `vm.runInContext` script already become sandbox properties, confirmed BEFORE
+  writing anything, so no export/module system was added to `alert-layer.js`. 12 cases: N=1 (full
+  canvas, gap+work area ignored), 2x1 and 3x2 grids with gap (row-major, equal cells), work-area
+  offset, work-area clamp to canvas, no-work-area fallback, degenerate (zero-width) work-area
+  fallback, `devicePixelRatio=1.5` converting both gap and work area, `tiles=`/`columns=`/`rows=`/
+  `gap=`/`duration=` hash parsing, `work=` hash parsing, a malformed (3-element) `work=` being
+  ignored, and the old `#kind=` single-tile form. A 13th case (T12, below) followed.
+  <br>Discovered mid-write: `assert.deepStrictEqual` reports "same structure but are not
+  reference-equal" for a structurally-identical object/array returned FROM the vm sandbox compared
+  against an outer-realm literal -- cross-realm `Object`/`Array` prototype identity, not a real
+  content difference. Fixed with a `plain(value)` helper (`JSON.parse(JSON.stringify(value))`)
+  wrapping every sandbox-origin value before comparison; every value here is a plain number/string,
+  so the round-trip is safe.
+  <br>Wired into `dotnet test` via new `CosmicWin.App.Tests/Alerts/AlertLayerLayoutNodeTests.cs`
+  (shells out to `node <harness> <alert-layer.js path>`, asserts exit code 0, surfaces stdout/stderr
+  on failure) and `NodeAvailability`/`RequiresNodeFactAttribute` (new), mirroring
+  `DesktopFactAttributes`' constructor-time `Skip` shape -- skips with a clear reason when `node`
+  cannot be run, never fakes it. The harness script ships via a new `Content` item
+  (`CopyToOutputDirectory`) in `CosmicWin.App.Tests.csproj`, the same mechanism `CosmicWin.App.csproj`
+  already uses for `alert-layer.js` itself.
+  <br>**RED/GREEN:** not applicable in the usual sense -- T9 is a pure test addition over EXISTING
+  (T3/T7) production behavior, so the harness passed 12/12 on its first real run. Mutation-checked
+  per the task's own instruction: (1) dropped `area.x` from `tileRects`' per-tile `x` -- the
+  dpr/work-area-offset case (the only one with a non-zero `area.x`) failed as expected, reverted;
+  (2) swapped `w`/`h` in the pushed rect -- the 2x1, 3x2 and dpr cases (3/12) failed as expected,
+  reverted; (3) loosened `gridAreaRect`'s degenerate guard (`<= 0` -> `< 0`) -- the 2x1, 3x2, and both
+  no-work-area/degenerate-fallback cases (4/12) failed as expected, reverted. Full `dotnet test` on
+  `CosmicWin.App.Tests` after: 1089/1095 passed, 6 skipped (was 1088/6 at the branch's T7+T8 point;
+  +1, the one new xUnit fact -- the JS harness's 12 internal cases are not separate .NET tests).
+  Commit `9a6c7fb`.
+
+  **T12 -- hash `tiles=` filter (covered by T9's harness).** Added a 13th case to the same harness
+  file BEFORE fixing anything: `#tiles=failed,,bogus,warning,failed&columns=2&rows=1` asserting the
+  parsed tile list equals `["failed","warning"]`. **RED** confirmed against the still-unfixed
+  production file: 12/13 passed, the new case failed with
+  `["failed","warning","warning","warning","failed"]` (5 tiles, no cap) -- the old code `.map()`ped
+  every entry (including `""` and `"bogus"`) straight to `"failed"`/`"warning"` BEFORE its own
+  `.filter(tile.length > 0)`, so the filter never dropped anything. Fixed in `alert-layer.js`: filter
+  to exactly `"failed"`/`"warning"` BEFORE mapping, then `.slice(0, columns*rows)`. **GREEN**: 13/13.
+  Full solution unaffected otherwise (T12 added no new .NET test, only a JS-level case inside T9's
+  existing fact). Commit `5a4dced`.
+
+  **T10 -- work-area catch-path test.** `AppComposition.UpdateAlertOverlay`'s try/catch around
+  `AlertLayerWorkArea.Resolve` (~line 744, degrading to `Unavailable` and tracing
+  `alert-layer-workarea-failed`) already existed from T7 but had never been exercised by anything
+  actually throwing. New `ThrowingWorkAreaDisplay` (`WebViewAlertCompositionWiringTests.cs`) and a
+  new optional `primaryDisplay` parameter on that file's `Create()` harness (defaults to the existing
+  `FakeDisplay`, so every other fixture is unaffected). First attempt made `WorkArea` throw
+  unconditionally -- this broke `AppComposition.Wire` itself, which reads the primary display's
+  `WorkArea` ONCE, eagerly, at wiring time (`WorkAreaResolver.Resolve`, `AppComposition.cs` ~278, for
+  the initial tiling layout) -- a real gap in the plan caught by actually running the test, not by
+  inspection. Fixed by throwing from the SECOND read onward only (first call returns `Bounds`).
+  <br>**RED/GREEN:** passed on first run (the catch already existed). Mutation-checked: changed the
+  catch's trace message to a literal `"MUTATED ..."` -- the new fact failed as expected
+  (`alert-layer-workarea-failed` no longer present), reverted. Commit `a9f53a2`.
+
+  **T11 -- isolate the gap reload from the exceptions reload.** Premise held: `CompositionRoot.
+  BuildTrayMenuController`'s Reload delegate ran `exceptions.Reload(loadExceptions())` then
+  `reloadGap?.Invoke()` as two statements in a row, so a throwing `loadExceptions()` propagated
+  straight out and `reloadGap` never ran. Extracted a private `Reload(exceptions, loadExceptions,
+  reloadGap, desktopTrace)` helper: each half now runs in its own try/catch (excluding
+  `OutOfMemoryException`/`StackOverflowException`/`AccessViolationException`, the same corruption-
+  class exclusion `AppComposition.IsRecoverableAlertLayerFailure` already uses), tracing
+  `reload-exceptions-failed`/`reload-gap-failed` on failure. `BuildTrayMenuController` gained an
+  optional `IDesktopTrace? desktopTrace` parameter, wired from `AppComposition.Wire`'s existing trace
+  sink at its `CompositionRoot.BuildTrayMenuController` call site.
+  <br>Also renamed `GapReloadTests`' `ImmediateScheduler` test double to
+  `NeverFiringReconcileScheduler` (with a remark explaining why: its stored `_callback` was NEVER
+  invoked, only ever discarded -- the old name promised behavior it did not have) and dropped the
+  now-pointless field.
+  <br>**RED**, confirmed by TEMPORARILY reverting the Reload delegate to the old two-statement form
+  and re-running the two new facts (`BuildTrayMenuController_Reload_AThrowingExceptionsReloadStillRunsTheGapReload`,
+  `..._AThrowingGapReloadStillRunsTheExceptionsReload`): both failed with the injected exception
+  escaping `Reload()` uncaught, exactly the bug the review named. Restored the fix, reran: **GREEN**.
+  `CompositionRootTests`+`GapReloadTests` filtered: 17/17. Commit `b652f95`.
+
+  **Final verification (whole solution), this session:**
+  - `node --version`: `v24.19.0`.
+  - `dotnet build CosmicWin.sln`: succeeded, only the same three known pre-existing warnings (2
+    CS8604/CS8602 in `MultiMonitorWorkspaceAdapter.cs`, 1 CA2022 in
+    `CosmicWinAlert.Tests/ProgramTests.cs:200`).
+  - `dotnet test CosmicWin.sln`: `CosmicWin.Layout.Tests` 198/198; `CosmicWinAlert.Tests` 13/13;
+    `CosmicWin.Interop.Tests` 384 passed/42 skipped; `CosmicWin.App.Tests` 1092 passed/6 skipped (was
+    1088/6 at the branch's T7+T8 point; +4 -- T9's one Node-harness fact, T10's one throwing-display
+    fact, T11's two Reload-independence facts; T12 added no new .NET fact). The Node harness fact
+    ACTUALLY RAN (not skipped) under `dotnet test`, both before T12's fix (observed RED: 12/13) and
+    after (observed GREEN: 13/13).
+  - Status: **done** for T9, T10, T11, T12.
