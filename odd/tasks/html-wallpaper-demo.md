@@ -275,6 +275,30 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   R3-canvasScale-untested (fractional DPR), earth.js copy notes (disc off-center by a texel,
   per-pixel allocation), stale stamp after a failed frame, harness timeouts near 90 s budget.
 
+- 2026-09-27: D6d code done on `demo/html-wallpaper-d6d-settings` (delegated writer, two rounds).
+  - 2d34e61 feat(settings): add the demo wallpaper-scene and wallpaper-fps settings (386 lines).
+    `wallpaper-scene = processing|explorer|idle|raphael` (default processing),
+    `wallpaper-fps = 30|60` (default 60; anything else keeps 60). Only `SceneFolderName(enum)` turns
+    the setting into a folder literal; URL `https://cosmicwin-scene.example/<scene>/index.html?fps=N`.
+    TDD DEVIATION (honest): the C# RED was retroactive (implemented first, then stashed to watch the
+    tests fail against the original code). The JS side was RED first.
+  - dc47db5 feat(wallpaper): cap the html wallpaper frame rate (271 lines): `scheduleFrame` moved
+    into shared/js/render-loop.js for all four scenes; skipped frames reschedule and never invoke
+    the callback.
+  - Review review-73b3de6c7d02dce5 APPROVED + acknowledged, but three lenses flagged the 1-of-N
+    pacing and the false "60 = today's uncapped behaviour" comments. Parent measured the display:
+    RTX 4060 Ti at 3440x1440, 164 Hz -> so D4's html numbers were UNCAPPED at 164 fps, and the
+    1-of-N cap gave ~54.7 fps for 60 and ~27.3 for 30.
+  - a02140a fix(wallpaper): pace the html wallpaper to its fps on any refresh rate (target-time
+    scheduler with resync after a full-interval lag). RED first: 5/33 (164 Hz 60 -> 274/300,
+    75 Hz 60 -> 188/300, ...), GREEN 33/33, mutation-checked resync and interval. Review
+    review-f00dbe7a07a144eb APPROVED + acknowledged; open: the epsilon constant's comment still describes the
+    old rule (WARNING R2-001), resync comment understates the slow-display path, no test for a
+    display slower than the cap.
+  `dotnet build`: 0 errors. App 1163 passed / 6 skipped / 0 failed; Interop 384 / 42 / 0.
+  Parent spot checks: 190 focused tests passed; processing harness re-run passed.
+
 ## Next step
 
-D6d: `wallpaper-scene` + `wallpaper-fps` settings, wiring, hardware check of all four scenes.
+D6d hardware: all four scenes via `wallpaper-scene`, alerts over each, and re-measure the cost at
+`wallpaper-fps = 60` and `30` (D4 was uncapped 164 fps).
