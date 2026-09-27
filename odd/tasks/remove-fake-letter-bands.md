@@ -38,7 +38,7 @@ tint (a Direct2D pass on the video back buffer) is parked and out of scope.
 - [x] B1 - RED: node harness test that renders a `shown` tile of each kind and fails if the
       intersection color is ever painted. Then GREEN: remove the bands and the dead parameters.
       Route: delegated direct (writer trigger: 2 non-trivial files, the harness and the page).
-- [ ] B2 - Hardware check: failed, warning and a mixed mosaic show no bands; everything else looks
+- [x] B2 - Hardware check: failed, warning and a mixed mosaic show no bands; everything else looks
       as before.
 
 ## Acceptance criteria
@@ -65,6 +65,13 @@ tint (a Direct2D pass on the video back buffer) is parked and out of scope.
   - R3-mosaic-not-covered: no mixed failed+warning mosaic case in the harness; B2 covers it on
     hardware.
 
+- 2026-09-26: B2 done. Release build of 4e27243 launched from bin\Release (PID 33116, elevated
+  shell; the shipped alert-layer.js is byte-identical to the source). Sent via CosmicWinAlert.exe:
+  `failed:1 duration:6`, `warning:1 duration:6`, `failed:2 warning:2 duration:8`. Trace: grids
+  1x1, 1x1, 2x2 with the expected tiles, each `done` on time, no `alert-layer error`. The
+  maintainer watched all three and confirmed: no bands, everything else unchanged.
+
 ## Next step
 
-B2 hardware check.
+Feature complete. Merge into local main is the maintainer's call. Optional follow-ups: the two
+review SUGGESTIONs above.
