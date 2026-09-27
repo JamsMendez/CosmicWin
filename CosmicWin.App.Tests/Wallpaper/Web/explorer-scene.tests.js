@@ -321,12 +321,14 @@ test("the see-through hook draws rising sparks with the scene's own timeSeconds,
 test("a throwing scene layer does not stop the render loop, nor the alert overlay running the same frame", function () {
   var page = loadPage({ innerWidth: 1000, innerHeight: 500 });
   page.sandbox.startShowing(["warning"], 1, 1, 0, 5000);
-  var original = page.sandbox.drawStarfield;
   var thrown = 0;
+  // D6a review (R3-fault-isolation-test-overclaims / R2-fault-isolation-test-misleading-claims):
+  // throwing on every frame -- not just the first -- is what actually proves the per-stage dedup (one
+  // console.error for N throws) and that the overlay keeps advancing while the scene keeps failing on
+  // every single frame, matching what the assertions below claim.
   page.sandbox.drawStarfield = function () {
     thrown++;
-    if (thrown === 1) throw new Error("D6a-fault-isolation-scene");
-    return original.apply(this, arguments);
+    throw new Error("D6a-fault-isolation-scene");
   };
 
   var before = page.requestAnimationFrameCalls.length;
@@ -337,11 +339,97 @@ test("a throwing scene layer does not stop the render loop, nor the alert overla
   page.sandbox.renderFrame(300);
   page.sandbox.renderFrame(750); // warning: shown well before 750ms
   assert.strictEqual(page.requestAnimationFrameCalls.length, before + 3,
-    "expected the loop to keep scheduling frames after recovering from a throw");
+    "expected the loop to keep scheduling frames while the scene layer keeps throwing every frame");
+  assert.strictEqual(thrown, 3, "test setup sanity: drawStarfield should have thrown on all 3 frames");
   assert.strictEqual(page.sandbox.kindState.warning.state, "shown",
-    "expected the alert overlay to keep advancing even while the scene layer above it keeps throwing");
+    "expected the alert overlay to keep advancing even while the scene layer above it keeps throwing every frame");
   assert.strictEqual(page.consoleErrorCalls.length, 1,
-    "expected the repeating error to be reported once, not once per frame");
+    "expected the repeating error (thrown on every frame) to be reported once, not once per frame");
+});
+
+// ---- Case 7: the alert clock itself (alertSceneMs) must not be able to freeze the loop (D6a review
+// R4-alertSceneMs-outside-fault-isolation / R3-alertSceneMs-outside-try) -- unlike drawStarfield (Case
+// 6, a call made INSIDE the scene's own try/catch), alertSceneMs used to run BEFORE and OUTSIDE both
+// try/catch blocks, so a throw here used to skip scheduleFrame(renderFrame) entirely and freeze the
+// wallpaper for good, instead of only failing this one frame's "scene" stage like Case 6 does.
+
+test("a throwing alert clock (alertSceneMs) does not freeze the render loop, and the scene renders again once it recovers", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var originalAlertSceneMs = page.sandbox.alertSceneMs;
+  var originalDrawStarfield = page.sandbox.drawStarfield;
+  var sceneDrawCalls = 0;
+  page.sandbox.drawStarfield = function () {
+    sceneDrawCalls++;
+    return originalDrawStarfield.apply(this, arguments);
+  };
+  page.sandbox.alertSceneMs = function () {
+    throw new Error("D6a-alert-clock-throws");
+  };
+
+  var before = page.requestAnimationFrameCalls.length;
+  page.sandbox.renderFrame(0); // alertSceneMs throws before the scene draws anything this frame
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 1,
+    "expected scheduleFrame(renderFrame) to still run even though alertSceneMs threw");
+  assert.strictEqual(sceneDrawCalls, 0,
+    "test setup sanity: the scene must not have drawn anything on the frame the clock threw");
+
+  page.sandbox.renderFrame(16);
+  page.sandbox.renderFrame(32);
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 3,
+    "expected the loop to keep scheduling frames while the alert clock keeps throwing every frame");
+  assert.strictEqual(page.consoleErrorCalls.length, 1,
+    "expected the repeating alert-clock error to be reported once, not once per frame");
+
+  page.sandbox.alertSceneMs = originalAlertSceneMs;
+  page.sandbox.renderFrame(48);
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 4,
+    "expected the loop to keep scheduling frames after the alert clock recovers");
+  assert.strictEqual(sceneDrawCalls, 1,
+    "expected the scene to render again once the alert clock stopped throwing");
+});
+
+// ---- Case 8: the shared overlay's own see-through hook call must not leave the offscreen
+// "intersections" context with an unbalanced save()/restore() when the hook throws (D6a review
+// R3-hook-throw-leaves-offscreen-save, shared/js/alert-overlay.js's drawSeeThroughIntersections).
+// Exercised directly (not through the full render loop) with a small dedicated spy context, since the
+// scene-wide mock above shares ONE 2D-context mock across every canvas/offscreen layer, which would
+// confound a save()/restore() count with every OTHER draw call in the same frame.
+
+test("drawSeeThroughIntersections balances its own save/restore even when the hook throws", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500 });
+
+  function makeSpyContext() {
+    var counts = { save: 0, restore: 0 };
+    return {
+      width: 10, height: 10, counts: counts,
+      save: function () { counts.save++; },
+      restore: function () { counts.restore++; },
+      translate: function () {},
+      setTransform: function () {},
+      fillRect: function () {},
+      drawImage: function () {},
+    };
+  }
+
+  // A throwing hook: drawSeeThroughIntersections must still leave its OWN save()/restore() pair around
+  // the hook balanced, even though the error must still propagate to the caller (the scene's own
+  // "alert-overlay" render stage is what actually reports it -- see animate.js/main.js).
+  page.sandbox.sceneSeeThroughLayer = function () { throw new Error("R3-hook-throws"); };
+  var throwingG = makeSpyContext();
+  assert.throws(function () {
+    page.sandbox.drawSeeThroughIntersections(throwingG, { width: 10, height: 10 }, 0, 0, 1000, 500, 0, "rgb(0,0,0)");
+  }, /R3-hook-throws/);
+  assert.strictEqual(throwingG.counts.save, throwingG.counts.restore,
+    "expected the hook's own save()/restore() to stay balanced even though the hook threw, saw " +
+    JSON.stringify(throwingG.counts));
+
+  // A later, non-throwing call (a fresh offscreen context, as failureLayer() always hands out a reset
+  // backing size/transform, never the same throwingG above) still balances normally.
+  page.sandbox.sceneSeeThroughLayer = function () { /* no-op: only the save/restore balance matters here */ };
+  var normalG = makeSpyContext();
+  page.sandbox.drawSeeThroughIntersections(normalG, { width: 10, height: 10 }, 0, 0, 1000, 500, 0, "rgb(0,0,0)");
+  assert.strictEqual(normalG.counts.save, normalG.counts.restore,
+    "expected a normal (non-throwing) call to also balance save()/restore(), saw " + JSON.stringify(normalG.counts));
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

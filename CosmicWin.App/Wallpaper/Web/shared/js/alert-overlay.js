@@ -210,12 +210,17 @@ function drawSeeThroughIntersections(g, letters, tileOffsetX, tileOffsetY, scene
   var tileW = W, tileH = H;
   W = sceneW;
   H = sceneH;
+  // D6a fix (R3-hook-throw-leaves-offscreen-save): g.restore() used to be the LAST statement inside
+  // the try block, so a throwing hook skipped it, leaving this save() unbalanced on `g`'s own state
+  // stack. It now runs in the finally, alongside the W/H restore, so it always pairs with the save()
+  // above regardless of whether the hook throws -- the throw itself still propagates to the caller
+  // (the scene's own "alert-overlay" render stage is what actually reports it).
+  g.save();
   try {
-    g.save();
     g.translate(tileOffsetX, tileOffsetY);
     sceneSeeThroughLayer(g, sceneW, sceneH, sceneTime);
-    g.restore();
   } finally {
+    g.restore();
     W = tileW;
     H = tileH;
   }

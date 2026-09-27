@@ -479,15 +479,25 @@ let animationStartMs = null;
 const reportRenderError = createRenderStageReporter("[explorer-scene]");
 
 function renderFrame(nowMs) {
-  // alertSceneMs (shared/js/alert-overlay.js) freezes this scene's own clock while a FAILED tile is
-  // shaking (same effect CosmicWin.App/Wallpaper/Web/processing/js/main.js's render() gets from it)
-  // and drives that tile's per-frame shake wobble; it returns `nowMs` unchanged whenever no kind is
-  // currently shaking (including whenever no alert is showing at all), so this is a no-op then.
-  const sceneMs = alertSceneMs(nowMs);
-  if (animationStartMs === null) animationStartMs = sceneMs;
-  const timeSeconds = (sceneMs - animationStartMs) / 1000;
+  // `timeSeconds` is a safe, cheap default for the value the alert overlay call needs below: if
+  // alertSceneMs() itself throws (see the try block below), the overlay must still receive SOMETHING
+  // rather than a ReferenceError from a half-initialized variable -- same reasoning as processing's own
+  // `p = 0` default (CosmicWin.App/Wallpaper/Web/processing/js/main.js's render()).
+  let timeSeconds = 0;
 
   try {
+    // alertSceneMs (shared/js/alert-overlay.js) freezes this scene's own clock while a FAILED tile is
+    // shaking (same effect CosmicWin.App/Wallpaper/Web/processing/js/main.js's render() gets from it)
+    // and drives that tile's per-frame shake wobble; it returns `nowMs` unchanged whenever no kind is
+    // currently shaking (including whenever no alert is showing at all), so this is a no-op then.
+    // D6a fix (R4-alertSceneMs-outside-fault-isolation / R3-alertSceneMs-outside-try): this call used
+    // to run BEFORE and OUTSIDE both try/catch blocks below -- a throw here skipped
+    // scheduleFrame(renderFrame) entirely and froze the wallpaper for good. It now shares the scene's
+    // own try/catch, exactly like processing's render() already does.
+    const sceneMs = alertSceneMs(nowMs);
+    if (animationStartMs === null) animationStartMs = sceneMs;
+    timeSeconds = (sceneMs - animationStartMs) / 1000;
+
     const cx = W * CENTER_X_FRACTION;
     const cy = H * CENTER_Y_FRACTION;
     const earthCx = W * EARTH_CENTER_X_FRACTION;
