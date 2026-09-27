@@ -57,6 +57,13 @@ tint (a Direct2D pass on the video back buffer) is parked and out of scope.
   passed, 6 skipped (pre-existing hardware-gated), 0 failed. Parent spot check: node harness
   re-run, 2/2 passed. Slot numbers 0/2/3 kept (slot 1 documented as unused).
   Review assess (base d8094d9, committed-only): medium, `under_budget`.
+- 2026-09-26: review run anyway (maintainer wants every change reviewed) on d8094d9..4b91744:
+  consent granted, one lens (reliability), APPROVED and acknowledged (lineage
+  review-80d7c2a5e0920cb1, authority burned). Two non-blocking SUGGESTION follow-ups:
+  - R3-no-positive-paint-control: the band tests only assert a color is absent; add a positive
+    control (letters/wash color present) so a no-paint regression cannot pass them.
+  - R3-mosaic-not-covered: no mixed failed+warning mosaic case in the harness; B2 covers it on
+    hardware.
 
 ## Next step
 
