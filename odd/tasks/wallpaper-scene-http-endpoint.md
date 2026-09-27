@@ -70,6 +70,11 @@ split into work-unit commits per task below.
 
 Route evidence: understanding needed 6+ files (mapping trigger fired, delegated mapper done);
 implementation touches 2+ non-trivial files per task (writer trigger).
+- [x] S8 - Html wallpaper graduates from demo to feature (maintainer 2026-09-27: "Ya no es demo va
+      quedar como feat"): default `wallpaper-mode = html` and `wallpaper-scene-http = on`; drop the
+      DEMO ONLY labels (code, settings.conf template, README). Accepted consequence: a fresh
+      install opens the loopback HTTP port for the scene route. Branch feat/html-wallpaper-default.
+      Route: delegated writer.
 
 ## Acceptance criteria
 
@@ -202,7 +207,48 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   Maintainer settings restored from backup, plus `wallpaper-scene-http = on`; app left running in
   html mode (idle scene).
 
+- 2026-09-27: S8 done, on `feat/html-wallpaper-default` (off main 8d3bcea). `Settings`'s record
+  defaults flipped: `WallpaperMode = WallpaperMode.Html`, `WallpaperSceneHttpEnabled = true` (both
+  `alert-http`/`video-wallpaper-http` and the scene/fps defaults themselves untouched). `Parse`'s
+  fallback-to-default behaviour needed no code change -- it already reads its initial locals from
+  `Settings.Default`, so an empty/invalid `wallpaper-mode` or `wallpaper-scene-http` line now falls
+  back to Html/on for free. `Serialize`'s template comment for `wallpaper-mode` now reads "`html`
+  (default) shows an animated HTML scene ... `video` plays the configured video instead"; the
+  `wallpaper-scene-http` comment says "on (default)". Removed every `DEMO ONLY`/`DEMO-ONLY`/"not a
+  supported feature" label from `Settings.cs` (11 sites: both enum docs, four param docs, three
+  private-const summaries, three `Serialize`/`TryRead*` comments) and `AppComposition.cs` (4 sites:
+  the `wallpaperMode` parameter doc, `AttachHtmlWallpaper`'s doc, and the two
+  `WebViewAlertLayerController` construction-site comments), rewriting each as a description of a
+  supported feature while keeping the D3/D6d/S4/S8 task-ID provenance. `AppComposition.Wire`'s own
+  `wallpaperMode = WallpaperMode.Video` parameter default was deliberately LEFT as Video and
+  annotated why: it is a test seam (every video-playback wiring test in `AppCompositionTests`/
+  `VideoWallpaperPlaybackWiringTests` calls `Wire()` without naming `wallpaperMode`, relying on this
+  default); production never reads it -- `WireProduction` always passes
+  `wallpaperMode: settings.WallpaperMode`, whose own default is now Html.
+  TDD: RED observed first for 11 failing assertions across
+  `WallpaperModeDefaultsToHtml`/`AnUnreadableWallpaperMode_KeepsTheDefaultRatherThanGuessing`(x3)/
+  `WallpaperSceneHttpIsOn_UnlessTheFileSaysOtherwise`/
+  `AnUnreadableWallpaperSceneHttpValue_KeepsTheDefaultRatherThanGuessing`(x3)/
+  `Serialize_IncludesTheWallpaperModeAndDescribesEachValue`/
+  `Serialize_IncludesTheWallpaperSceneAndDescribesEachValue`/
+  `Serialize_IncludesTheWallpaperFpsAndDescribesEachValue` (real `Assert.Equal`/`Assert.True`/
+  `Assert.Contains` failures against the pre-change code, e.g. `WallpaperModeDefaultsToHtml`: Expected
+  Html, Actual Video), all GREEN after the defaults/label changes. README's "Wallpaper scene over
+  HTTP" section rewritten: states `wallpaper-mode = html` is the default, and the scene route is **on
+  by default** (fresh install opens the loopback port), with `wallpaper-scene-http = off` shown as the
+  opt-out; the "Video wallpaper over HTTP" 503 row/paragraph now note html mode is the default.
+  `WireProductionHtmlWallpaperSettingsWiringTests.cs`'s doc comment dropped "demo-only setting"
+  (provenance-only prose, no assertion change). Full non-desktop suite green: 198 Layout + 13 Alert +
+  425 Interop (422 passed, 3 skipped) + 1198 App = 1834 passed, 3 skipped, 0 failed (same totals as
+  S7 -- no tests added or removed, only reassigned expectations); `dotnet build CosmicWin.sln` 0
+  errors. Remaining `rg -i demo` hits outside `Web/`/`odd/`: all provenance-only task-ID references
+  (`D3 (html-wallpaper-demo)`, `D6d (html-wallpaper-demo)`, etc.) in `AppComposition.cs`,
+  `WebViewAlertLayerController.cs`, `WebViewAlertLayerVisibility.cs`, and their test files -- none
+  claim the feature is unsupported, so left as historical identifiers per the task's own instruction;
+  the false-positive "demonstrate(d)" hits in layout files are unrelated. Committed in the same commit
+  as this Progress entry.
+
 ## Next step
 
-Maintainer: eyeball a live scene switch; decide on merging into main. Follow-ups: scene-route
+Maintainer: decide on merging `feat/html-wallpaper-default` into main. Follow-ups: scene-route
 trace line, R3-settings-store-save-failure-semantics-unproved.

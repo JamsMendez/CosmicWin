@@ -205,21 +205,25 @@ previous video keeps playing. The outcome is written to the desktop trace, never
 | 404 | The file does not exist, or the route is turned off (the body tells which) |
 | 413 | Body larger than 4 KB |
 | 415 | The file is not an `.mp4`, or `Content-Type` is not `application/json` (the body tells which) |
-| 503 | This CosmicWin has no video wallpaper to switch, or `wallpaper-mode = html` is on |
+| 503 | This CosmicWin has no video wallpaper to switch, or `wallpaper-mode = html` is on (the default) |
 
-In html mode (`wallpaper-mode = html`) the video route answers 503 and never starts a video, and
-the tray menu's video pick does nothing. Both write a `skipped reason=html-mode` line to the
-desktop trace.
+In html mode (`wallpaper-mode = html`, the default) the video route answers 503 and never starts a
+video, and the tray menu's video pick does nothing. Both write a `skipped reason=html-mode` line to
+the desktop trace.
 
 ## Wallpaper scene over HTTP
 
-In html mode the wallpaper is an animated scene, chosen by `wallpaper-scene` in `settings.conf`.
-Another program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
-The route is **off by default** and independent of the other two routes. Turn it on in
-`settings.conf` and restart CosmicWin:
+CosmicWin's desktop wallpaper is the html scene by default (`wallpaper-mode = html`); set
+`wallpaper-mode = video` in `settings.conf` to loop a video wallpaper instead (see above). In html
+mode the wallpaper is an animated scene, chosen by `wallpaper-scene` in `settings.conf`. Another
+program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
+
+The route is **on by default**, independent of the other two routes: since the html wallpaper is
+CosmicWin's default renderer, a fresh install already accepts scene switches on this loopback-only
+port. Turn it off in `settings.conf` and restart CosmicWin:
 
 ```ini
-wallpaper-scene-http = on
+wallpaper-scene-http = off
 ```
 
 It shares the server, port (`alert-http-port`) and token file (`alert-http.token`) with the alert

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace CosmicWin.App.Tests.Alerts;
 
 /// <summary>
-/// D6d (html-wallpaper-demo, demo-only setting, 2026-09-27): <c>AppComposition.WireProduction</c>
+/// D6d (html-wallpaper-demo, 2026-09-27): <c>AppComposition.WireProduction</c>
 /// must forward <c>settings.WallpaperScene</c>/<c>settings.WallpaperFps</c> into the
 /// <c>WebViewAlertLayerController</c> it constructs, the same way it already forwards
 /// <c>settings.WallpaperMode</c> (D3) as <c>htmlWallpaperMode</c>.

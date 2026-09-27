@@ -630,15 +630,16 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// D3 (html-wallpaper-demo, demo-only switch, 2026-09-26): <see cref="WallpaperMode.Video"/>
-    /// unless the file says otherwise -- a settings file that has never been written must not switch
-    /// the desktop wallpaper away from the video it always played.
+    /// S8 (wallpaper-scene-http-endpoint, 2026-09-27): <see cref="WallpaperMode.Html"/> unless the
+    /// file says otherwise -- the html wallpaper (built as D3's demo, html-wallpaper-demo) graduated
+    /// to CosmicWin's default renderer. <see cref="WallpaperMode.Video"/> remains fully supported for
+    /// anyone who sets `wallpaper-mode = video`.
     /// </summary>
     [Fact]
-    public void WallpaperModeDefaultsToVideo()
+    public void WallpaperModeDefaultsToHtml()
     {
-        Assert.Equal(WallpaperMode.Video, Settings.Default.WallpaperMode);
-        Assert.Equal(WallpaperMode.Video, Settings.Parse(string.Empty).WallpaperMode);
+        Assert.Equal(WallpaperMode.Html, Settings.Default.WallpaperMode);
+        Assert.Equal(WallpaperMode.Html, Settings.Parse(string.Empty).WallpaperMode);
     }
 
     [Theory]
@@ -666,7 +667,7 @@ public sealed class SettingsTests
     [InlineData("wallpaper-mode")]
     public void AnUnreadableWallpaperMode_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.Equal(WallpaperMode.Video, Settings.Parse(line).WallpaperMode);
+        Assert.Equal(WallpaperMode.Html, Settings.Parse(line).WallpaperMode);
     }
 
     [Theory]
@@ -679,15 +680,16 @@ public sealed class SettingsTests
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
 
-    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    /// <summary>The written file's comment names the default and describes the alternative, not a demo disclaimer.</summary>
     [Fact]
-    public void Serialize_IncludesTheWallpaperModeAndMarksItAsADemo()
+    public void Serialize_IncludesTheWallpaperModeAndDescribesEachValue()
     {
         var serialized = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.Html).Serialize();
 
         Assert.Contains("# wallpaper-mode:", serialized, StringComparison.Ordinal);
-        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("html` (default)", serialized, StringComparison.Ordinal);
         Assert.Contains("wallpaper-mode = html", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
     }
 
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
@@ -702,10 +704,9 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// D6d (html-wallpaper-demo, demo-only setting, 2026-09-27): <see
-    /// cref="WallpaperScene.Processing"/> unless the file says otherwise -- a settings file that has
-    /// never been written must not switch the html wallpaper away from the one scene that shipped
-    /// before D6d.
+    /// D6d (html-wallpaper-demo, 2026-09-27): <see cref="WallpaperScene.Processing"/> unless the file
+    /// says otherwise -- a settings file that has never been written must not switch the html
+    /// wallpaper away from the one scene that shipped before D6d.
     /// </summary>
     [Fact]
     public void WallpaperSceneDefaultsToProcessing()
@@ -752,15 +753,16 @@ public sealed class SettingsTests
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
 
-    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    /// <summary>The written file's comment names the default scene and lists the other three, not a demo disclaimer.</summary>
     [Fact]
-    public void Serialize_IncludesTheWallpaperSceneAndMarksItAsADemo()
+    public void Serialize_IncludesTheWallpaperSceneAndDescribesEachValue()
     {
         var serialized = new Settings(FocusBorder: true, WallpaperScene: WallpaperScene.Raphael).Serialize();
 
         Assert.Contains("# wallpaper-scene:", serialized, StringComparison.Ordinal);
-        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("processing` (default)", serialized, StringComparison.Ordinal);
         Assert.Contains("wallpaper-scene = raphael", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -808,15 +810,16 @@ public sealed class SettingsTests
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
 
-    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    /// <summary>The written file's comment names the default frame rate and the other fixed value, not a demo disclaimer.</summary>
     [Fact]
-    public void Serialize_IncludesTheWallpaperFpsAndMarksItAsADemo()
+    public void Serialize_IncludesTheWallpaperFpsAndDescribesEachValue()
     {
         var serialized = new Settings(FocusBorder: true, WallpaperFps: 30).Serialize();
 
         Assert.Contains("# wallpaper-fps:", serialized, StringComparison.Ordinal);
-        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("60` (default)", serialized, StringComparison.Ordinal);
         Assert.Contains("wallpaper-fps = 30", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
     }
 
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
@@ -833,16 +836,16 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// S4 (wallpaper-scene-http-endpoint): off unless the file says otherwise, for the same reason
-    /// <see cref="Settings.VideoWallpaperHttpEnabled"/> is -- a settings file that has never been
-    /// written must not open a route nobody asked for. Its own key, independent of both
-    /// <c>alert-http</c> and <c>video-wallpaper-http</c>.
+    /// S8 (wallpaper-scene-http-endpoint, 2026-09-27): on unless the file says otherwise -- the html
+    /// wallpaper is now CosmicWin's default renderer and this route is its live scene control, so a
+    /// fresh install opens this loopback-only port. Its own key, independent of both
+    /// <c>alert-http</c> and <c>video-wallpaper-http</c>, which stay off by default.
     /// </summary>
     [Fact]
-    public void WallpaperSceneHttpIsOff_UnlessTheFileSaysOtherwise()
+    public void WallpaperSceneHttpIsOn_UnlessTheFileSaysOtherwise()
     {
-        Assert.False(Settings.Default.WallpaperSceneHttpEnabled);
-        Assert.False(Settings.Parse(string.Empty).WallpaperSceneHttpEnabled);
+        Assert.True(Settings.Default.WallpaperSceneHttpEnabled);
+        Assert.True(Settings.Parse(string.Empty).WallpaperSceneHttpEnabled);
     }
 
     [Theory]
@@ -871,7 +874,7 @@ public sealed class SettingsTests
     [InlineData("wallpaper-scene-http")]
     public void AnUnreadableWallpaperSceneHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.False(Settings.Parse(line).WallpaperSceneHttpEnabled);
+        Assert.True(Settings.Parse(line).WallpaperSceneHttpEnabled);
     }
 
     [Theory]

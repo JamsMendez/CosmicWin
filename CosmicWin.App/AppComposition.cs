@@ -227,11 +227,20 @@ public sealed class AppComposition : IDisposable
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
-        // D3 (html-wallpaper-demo, DEMO-ONLY switch): Video is the only real, supported behaviour --
-        // startup attaches AND plays videoWallpaperPath exactly as before this parameter existed. Html
-        // is the demo: startup attaches the SAME host with no player involved at all (see
-        // AttachHtmlWallpaper below), regardless of whether a path happens to be configured, because
-        // an animated HTML scene page is the wallpaper instead. See odd/tasks/html-wallpaper-demo.md.
+        // D3 (html-wallpaper-demo): both modes are real, supported behaviour. Video: startup attaches
+        // AND plays videoWallpaperPath exactly as before this parameter existed. Html (CosmicWin's
+        // default renderer since S8, wallpaper-scene-http-endpoint): startup attaches the SAME host
+        // with no player involved at all (see AttachHtmlWallpaper below), regardless of whether a path
+        // happens to be configured, because an animated HTML scene page is the wallpaper instead. See
+        // odd/tasks/html-wallpaper-demo.md.
+        //
+        // This default stays Video: it is a TEST SEAM, not the product default (production always
+        // passes wallpaperMode: settings.WallpaperMode from WireProduction, whose own default is now
+        // Html -- see Settings.WallpaperMode). Every video-playback wiring test in
+        // AppCompositionTests/VideoWallpaperPlaybackWiringTests calls Wire() without naming
+        // wallpaperMode at all, relying on this parameter default to stay Video; flipping it to Html
+        // would silently turn every one of those into an html-mode test instead of what it actually
+        // exercises.
         WallpaperMode wallpaperMode = WallpaperMode.Video,
         // S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own enable switch,
         // independent of alertHttpEnabled/videoWallpaperHttpEnabled -- see
@@ -511,7 +520,7 @@ public sealed class AppComposition : IDisposable
         }
 
         /// <summary>
-        /// D3 (html-wallpaper-demo, DEMO-ONLY): the html-mode startup activation -- attaches the SAME
+        /// D3 (html-wallpaper-demo): the html-mode startup activation -- attaches the SAME
         /// <paramref name="videoWallpaperHost"/> a video path would use, with NO player involved at
         /// all: D1 proved TryAttach alone builds the composition swapchain (D3D device + one
         /// black test-pattern Present), which is all the WebView2 overlay above it needs to render
@@ -2112,11 +2121,11 @@ public sealed class AppComposition : IDisposable
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
         var alertLayer = settings.AlertsEnabled
             ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
-                // D3 (html-wallpaper-demo, DEMO-ONLY): navigates to the configured scene page and
-                // stays visible permanently once ready, instead of the ordinary alert-only page.
+                // D3 (html-wallpaper-demo): navigates to the configured scene page and stays visible
+                // permanently once ready, instead of the ordinary alert-only page.
                 htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html,
-                // D6d (html-wallpaper-demo, DEMO-ONLY): which scene and frame-rate cap -- irrelevant
-                // in video mode, where the controller never reads either field.
+                // D6d (html-wallpaper-demo): which scene and frame-rate cap -- irrelevant in video
+                // mode, where the controller never reads either field.
                 htmlWallpaperScene: settings.WallpaperScene,
                 htmlWallpaperFps: settings.WallpaperFps)
             : null;

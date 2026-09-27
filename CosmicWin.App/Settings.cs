@@ -3,12 +3,14 @@ using CosmicWin.Interop;
 namespace CosmicWin.App;
 
 /// <summary>
-/// D3 (html-wallpaper-demo, demo-only switch, 2026-09-26): which renderer draws the desktop
-/// wallpaper. <see cref="Video"/> is CosmicWin's only real, supported behaviour -- the looped MP4 at
-/// <see cref="Settings.VideoWallpaperPath"/>. <see cref="Html"/> is the demo: no video ever plays,
-/// and the wallpaper host is attached (see <c>AppComposition.Wire</c>'s <c>AttachHtmlWallpaper</c>)
-/// purely so an animated HTML scene page can be composited over it, driven by the same alert
-/// commands the video layer answers. See <c>odd/tasks/html-wallpaper-demo.md</c>.
+/// Which renderer draws the desktop wallpaper. <see cref="Video"/> loops the MP4 at
+/// <see cref="Settings.VideoWallpaperPath"/>, exactly as CosmicWin always has. <see cref="Html"/>
+/// attaches the same wallpaper host (see <c>AppComposition.Wire</c>'s <c>AttachHtmlWallpaper</c>)
+/// with no video ever playing, purely so an animated HTML scene page can be composited over it,
+/// driven by the same alert commands the video layer answers -- CosmicWin's default renderer since
+/// S8 (wallpaper-scene-http-endpoint, 2026-09-27), after it first shipped as D3's demo. See
+/// <c>odd/tasks/html-wallpaper-demo.md</c> for how it was built and
+/// <c>odd/tasks/wallpaper-scene-http-endpoint.md</c> for S8's graduation decision.
 /// </summary>
 public enum WallpaperMode
 {
@@ -17,7 +19,7 @@ public enum WallpaperMode
 }
 
 /// <summary>
-/// D6d (html-wallpaper-demo, demo-only setting, 2026-09-27): which of the four ported scenes the
+/// D6d (html-wallpaper-demo, 2026-09-27): which of the four ported scenes the
 /// html wallpaper (<see cref="WallpaperMode.Html"/>) shows. Each member maps to exactly one fixed
 /// folder name under <c>CosmicWin.App/Wallpaper/Web/</c> (see
 /// <c>WebViewAlertLayerController.SceneFolderName</c>) -- a closed, compile-time-fixed set, so no
@@ -80,21 +82,21 @@ public enum WallpaperScene
 /// to before this was a settings key at all.
 /// </param>
 /// <param name="WallpaperMode">
-/// DEMO ONLY (D3, html-wallpaper-demo, 2026-09-26): <see cref="CosmicWin.App.WallpaperMode.Video"/>
-/// unless the file says otherwise -- a settings file that has never been written must not switch the
-/// wallpaper away from the video it always played.
+/// S8 (wallpaper-scene-http-endpoint, 2026-09-27): <see cref="CosmicWin.App.WallpaperMode.Html"/>
+/// unless the file says otherwise -- the html wallpaper (first built as D3's demo, html-wallpaper-
+/// demo) graduated to CosmicWin's default renderer. <see cref="CosmicWin.App.WallpaperMode.Video"/>
+/// remains fully supported for anyone who sets <c>wallpaper-mode = video</c>.
 /// </param>
 /// <param name="WallpaperScene">
-/// DEMO ONLY (D6d, html-wallpaper-demo, 2026-09-27): which scene the html wallpaper shows, one of the
-/// four fixed <see cref="CosmicWin.App.WallpaperScene"/> members. Defaults to <see
+/// D6d (html-wallpaper-demo, 2026-09-27): which scene the html wallpaper shows, one of the four
+/// fixed <see cref="CosmicWin.App.WallpaperScene"/> members. Defaults to <see
 /// cref="CosmicWin.App.WallpaperScene.Processing"/> -- the only scene that shipped before D6d.
 /// </param>
 /// <param name="WallpaperFps">
-/// DEMO ONLY (D6d, html-wallpaper-demo, 2026-09-27): caps how many times per second the html
-/// wallpaper's scene and alert overlay draw, 30 or 60. Defaults to 60. Before D6d the scene had no
-/// cap at all and drew on every real animation frame -- i.e. at the display's own refresh rate (over
-/// 60fps on any display faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a
-/// no-op default.
+/// D6d (html-wallpaper-demo, 2026-09-27): caps how many times per second the html wallpaper's scene
+/// and alert overlay draw, 30 or 60. Defaults to 60. Before D6d the scene had no cap at all and drew
+/// on every real animation frame -- i.e. at the display's own refresh rate (over 60fps on any display
+/// faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a no-op default.
 /// </param>
 /// <param name="WallpaperSceneHttpEnabled">
 /// S4 (wallpaper-scene-http-endpoint): whether a request to switch the html wallpaper's SCENE is also
@@ -102,9 +104,11 @@ public enum WallpaperScene
 /// same port and the same bearer token file, no second server. Its own key, independent of both
 /// <see cref="AlertHttpEnabled"/> and <see cref="VideoWallpaperHttpEnabled"/> (a route whose own
 /// switch is off answers 404, as if it did not exist -- the same decision <see
-/// cref="VideoWallpaperHttpEnabled"/> itself follows). Off by default, for the same reason every
-/// other HTTP-route switch is: a settings file that has never been written must not open a
-/// network-facing route nobody asked for.
+/// cref="VideoWallpaperHttpEnabled"/> itself follows). ON by default since S8
+/// (wallpaper-scene-http-endpoint, 2026-09-27): the html wallpaper is now CosmicWin's default
+/// renderer and this route is its live scene control, so a fresh install opens this loopback-only
+/// port -- an accepted consequence, unlike <see cref="AlertHttpEnabled"/> and
+/// <see cref="VideoWallpaperHttpEnabled"/>, which stay off until the maintainer opts in.
 /// </param>
 /// <remarks>
 /// <para>
@@ -126,9 +130,9 @@ public enum WallpaperScene
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
-    int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Video,
+    int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    bool WallpaperSceneHttpEnabled = false)
+    bool WallpaperSceneHttpEnabled = true)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -156,14 +160,14 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string GapKey = "gap";
 
-    /// <summary>DEMO ONLY (D3, html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperMode"/>.</summary>
+    /// <summary>D3 (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperMode"/>.</summary>
     private const string WallpaperModeKey = "wallpaper-mode";
 
     private const string WallpaperModeVideoValue = "video";
 
     private const string WallpaperModeHtmlValue = "html";
 
-    /// <summary>DEMO ONLY (D6d, html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
+    /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
     private const string WallpaperSceneKey = "wallpaper-scene";
 
     private const string WallpaperSceneProcessingValue = "processing";
@@ -174,7 +178,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string WallpaperSceneRaphaelValue = "raphael";
 
-    /// <summary>DEMO ONLY (D6d, html-wallpaper-demo): caps the html wallpaper's own frame rate.</summary>
+    /// <summary>D6d (html-wallpaper-demo): caps the html wallpaper's own frame rate.</summary>
     private const string WallpaperFpsKey = "wallpaper-fps";
 
     private const string WallpaperFps30Value = "30";
@@ -345,24 +349,25 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {WallpaperModeKey}: DEMO ONLY, not a supported feature. `{WallpaperModeVideoValue}` (default)
-         # plays the configured video as today; `{WallpaperModeHtmlValue}` shows an animated HTML scene
-         # instead, with no video ever playing underneath it.
+         # {WallpaperModeKey}: `{WallpaperModeHtmlValue}` (default) shows an animated HTML scene as the
+         # desktop wallpaper; `{WallpaperModeVideoValue}` plays the configured video instead, with no
+         # HTML scene involved.
          {WallpaperModeKey} = {(WallpaperMode == WallpaperMode.Html ? WallpaperModeHtmlValue : WallpaperModeVideoValue)}
 
-         # {WallpaperSceneKey}: DEMO ONLY, not a supported feature. Which scene the html wallpaper
-         # ({WallpaperModeKey} = {WallpaperModeHtmlValue}) shows: `{WallpaperSceneProcessingValue}` (default),
-         # `{WallpaperSceneExplorerValue}`, `{WallpaperSceneIdleValue}`, or `{WallpaperSceneRaphaelValue}`.
+         # {WallpaperSceneKey}: which scene the html wallpaper ({WallpaperModeKey} = {WallpaperModeHtmlValue})
+         # shows: `{WallpaperSceneProcessingValue}` (default), `{WallpaperSceneExplorerValue}`,
+         # `{WallpaperSceneIdleValue}`, or `{WallpaperSceneRaphaelValue}`.
          {WallpaperSceneKey} = {WallpaperSceneValue(WallpaperScene)}
 
-         # {WallpaperFpsKey}: DEMO ONLY, not a supported feature. Caps the html wallpaper's own frame
-         # rate: `{WallpaperFps30Value}` or `{WallpaperFps60Value}` (default). Before this setting
-         # existed the scene drew uncapped, at the display's own refresh rate.
+         # {WallpaperFpsKey}: caps the html wallpaper's own frame rate: `{WallpaperFps30Value}` or
+         # `{WallpaperFps60Value}` (default). Before this setting existed the scene drew uncapped, at
+         # the display's own refresh rate.
          {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {WallpaperSceneHttpEnabledKey}: on to also accept a request to switch the html wallpaper's
-         # SCENE over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates -- the same
-         # port and the same alert-http.token bearer token file, off to leave that route closed.
+         # {WallpaperSceneHttpEnabledKey}: on (default) to also accept a request to switch the html
+         # wallpaper's SCENE over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates --
+         # the same port and the same alert-http.token bearer token file, off to leave that route
+         # closed.
          {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
 
          """;
@@ -470,8 +475,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// DEMO ONLY (D3, html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively.
-    /// Same rule as every other key: anything else keeps the default rather than guessing.
+    /// D3 (html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively. Same rule as
+    /// every other key: anything else keeps the default rather than guessing.
     /// </summary>
     private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
     {
@@ -490,10 +495,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// DEMO ONLY (D6d, html-wallpaper-demo): reads one of the four fixed scene names, case-
-    /// insensitively. Same rule as every other key: anything else keeps the default rather than
-    /// guessing -- and, since <see cref="WallpaperScene"/> is a closed enum, this is also the ONLY
-    /// place raw settings text ever turns into a scene value at all.
+    /// D6d (html-wallpaper-demo): reads one of the four fixed scene names, case-insensitively. Same
+    /// rule as every other key: anything else keeps the default rather than guessing -- and, since
+    /// <see cref="WallpaperScene"/> is a closed enum, this is also the ONLY place raw settings text
+    /// ever turns into a scene value at all.
     /// </summary>
     private static bool TryReadWallpaperScene(string value, out WallpaperScene scene)
     {
@@ -518,10 +523,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// DEMO ONLY (D6d, html-wallpaper-demo): reads exactly <c>30</c> or <c>60</c>. Same rule as every
-    /// other key: anything else -- including a number that merely isn't one of those two -- keeps the
-    /// default (60) rather than guessing. 60 is a CAP, not the historical behaviour: before this
-    /// setting existed the scene drew uncapped, at the display's own refresh rate.
+    /// D6d (html-wallpaper-demo): reads exactly <c>30</c> or <c>60</c>. Same rule as every other key:
+    /// anything else -- including a number that merely isn't one of those two -- keeps the default
+    /// (60) rather than guessing. 60 is a CAP, not the historical behaviour: before this setting
+    /// existed the scene drew uncapped, at the display's own refresh rate.
     /// </summary>
     private static bool TryReadWallpaperFps(string value, out int fps)
     {
