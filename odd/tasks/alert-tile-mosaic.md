@@ -82,6 +82,17 @@ The per-kind counts the parser already accepts (`AlertGroup.Count`) are thrown a
   Commit `b652f95`.
 - [x] T12 Hash API `tiles=` (R3-hash-tiles-filter-noop): filter empty/unknown entries BEFORE mapping,
   cap tiles at columns*rows. Covered by T9's harness. Commit `5a4dced`.
+- [x] T13 Trace every swallowed reload failure (R4-reload-swallow-without-trace): the isolated
+  exceptions/gap reloads in CompositionRoot record each failure through the existing trace
+  path; tests assert the trace for both directions. Route: delegated (T13-T15 one writer).
+  Commit `013ced2`.
+- [x] T14 Bound the Node processes (R3/R4-node-harness-no-timeout, R3-node-probe-leaks-on-timeout,
+  R2-node-probe-catch-comment-misleading): read stdout/stderr concurrently, bounded wait that kills
+  the process tree and fails (harness) / reports unavailable (probe) on timeout; fix the probe comment.
+  Commit `d48abab`.
+- [x] T15 Make the T12 case discriminating (R3-t12-filter-fix-not-discriminated): a hash input
+  whose result differs between filter-before-map and the old map-then-filter; prove it by
+  temporarily restoring the old order (RED) before reverting. Commit `b3acf9a`.
 - [x] T8 Hardware: right-side taskbar, 4x2 alert -> last column fully visible, gap to the taskbar
   edge matches the windows'.
 
@@ -584,3 +595,116 @@ maintainer's decision, unrelated to gap.
   - SUGGESTION R3-hash-tiles-empty-or-negative-grid-unproved, R4-hash-tiles-empty-list,
     R2-hash-tiles-cap-order-vs-failed-priority (`alert-layer.js:699-704`, manual hash API only).
   - SUGGESTION R2-hardcoded-line-anchors-in-doc-comments, R2-t10-doc-says-bounds-throws.
+
+- 2026-09-26: T13-T15 implemented by one delegated writer (this session), closing the three
+  correctness/reliability follow-ups from `review-bd6d059ce4a7b711` (R4-reload-swallow-without-trace,
+  R3/R4-node-harness-no-timeout, R3-node-probe-leaks-on-timeout, R2-node-probe-catch-comment-
+  misleading, R3-t12-filter-fix-not-discriminated). Node `v24.19.0` on PATH throughout.
+
+  **T13 -- trace the gap-reload failure that async scheduling was hiding from every test.**
+  Reading `CompositionRoot.cs:154-175` first showed BOTH `desktopTrace?.Record(...)` calls (T11,
+  commit `b652f95`) already in place, and `CompositionRootTests.cs` already asserting on both trace
+  lines -- the review's line numbers pointed at code that looked done. Tracing the actual call graph
+  (`codegraph_explore`) instead of trusting that reading found the real bug one level down:
+  `AppComposition.Wire`'s `reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap)` wires
+  `ReloadGap` through `onOwningThread`, which in PRODUCTION is `RunOnUiThread` --
+  `Dispatcher.BeginInvoke`, fire-and-forget. `BeginInvoke` returns the instant the work is QUEUED,
+  before `ReloadGap`'s body ever runs -- so `CompositionRoot.Reload`'s own try/catch around
+  `reloadGap?.Invoke()` only ever sees the enqueue succeed, never a failure `ReloadGap` raises once it
+  actually executes. Every existing test (`GapReloadTests`, `CompositionRootTests`) passed anyway
+  because `AppComposition.Wire`'s DEFAULT `scheduleOnOwningThread` (used by every test that does not
+  override it) is synchronous (`work => work()`), which happens to run `ReloadGap` inline, on the same
+  call stack the outer catch was already watching -- a green suite hiding a real production-only bug,
+  exactly the kind memory's own "verify before repeating a claim" note warns about.
+  <br>Fixed at the source: `ReloadGap` (`AppComposition.cs` ~1037) now wraps its own body in a
+  try/catch using the same `IsRecoverableAlertLayerFailure` corruption-class exclusion the file
+  already uses elsewhere, tracing `reload-gap-failed` from wherever it actually runs -- sync or
+  deferred -- instead of relying on a caller that may have already returned.
+  <br>**RED**: `GapReloadTests.Reload_WithDeferredSchedulingLikeTheRealDispatcher_StillTracesAGapReloadFailure`
+  (new) wires a `scheduleOnOwningThread` that STORES the queued action instead of running it
+  (mirroring `Dispatcher.BeginInvoke`'s real fire-and-forget shape), makes `loadGap` throw, calls
+  `Tray.Reload()` (returns cleanly, action deferred), then invokes the deferred action directly.
+  Against the pre-fix code this threw `InvalidOperationException` uncaught out of the deferred call --
+  confirmed failing exactly there. **GREEN** after the fix: the deferred invocation returns cleanly and
+  `reload-gap-failed` is recorded. `GapReloadTests` + `CompositionRootTests` filtered: 18/18 (all
+  pre-existing facts unaffected -- the synchronous-scheduler tests still exercise the same code path,
+  just no longer relying on the caller's catch to observe it). Commit `013ced2`.
+
+  **T14 -- bound the Node process management in both the harness and the probe.**
+  `AlertLayerLayoutNodeTests.RunNode` read `StandardOutput` then `StandardError` SEQUENTIALLY via
+  blocking `ReadToEnd()`, then called unbounded `WaitForExit()` -- a script that fills one pipe's OS
+  buffer while the other is still being drained deadlocks the CHILD forever, and nothing here would
+  ever notice; a genuinely hung `node` would hang the whole `dotnet test` run with no diagnostic.
+  Rewrote to start both `ReadToEndAsync()` tasks BEFORE waiting, then `WaitForExit(30_000)` (a 30s
+  bound, generous for a ~13-case harness that normally finishes in well under a second); on timeout,
+  `process.Kill(entireProcessTree: true)` (node can spawn children of its own) and the fact fails with
+  whatever stdout/stderr was captured, instead of hanging.
+  <br>Proved the timeout path cheaply, per the task's own suggestion: a new fact
+  (`RunNode_AProcessThatNeverExits_IsKilledAndReportedAsTimedOut`) runs
+  `node -e "setInterval(() => {}, 1000)"` (never exits on its own, no `unref`) against a 200ms bound
+  and asserts BOTH that it is reported as timed out AND that the process is actually gone afterward
+  (`Process.GetProcessById` throwing `ArgumentException`), not just abandoned in the background.
+  <br>**RED** (mutation: the `Kill`/second-`WaitForExit` call removed from the timeout branch, leaving
+  `TimedOut: true` but no kill): the new fact failed exactly as expected -- "Expected the timed-out
+  node process to actually be killed, not just reported" -- while the harness fact still passed
+  (unaffected). Confirmed the leaked process was real (`node -e "setInterval(...)"`, found via
+  `Get-CimInstance Win32_Process`) and killed it manually before reverting the mutation. **GREEN**
+  after restoring the kill: 2/2, and the run returned in ~300ms (no leaked process afterward, verified
+  by process count before/after).
+  <br>`NodeAvailability.TryRunNodeVersion` had the same shape of bug in miniature: it called
+  `process.WaitForExit(5000)` but ignored the returned `bool` and read `ExitCode` unconditionally, so
+  a hung `node --version` was both left running AND only reported "unavailable" by an
+  `InvalidOperationException` accessing `ExitCode` on a still-running process -- an ACCIDENT of that
+  exception being in the catch filter, not a deliberate check. The catch's own comment documented only
+  the "node missing from PATH surfaces as Win32Exception" case and never mentioned this was the actual
+  reason every timeout landed there (the misleading part). Fixed to match the harness: concurrent
+  reads (defensive; `--version`'s tiny output was never actually at deadlock risk), `WaitForExit`'s
+  result checked explicitly, `Kill(entireProcessTree: true)` on timeout, return before ever touching
+  `ExitCode`. Comment rewritten to name both real reasons the catch fires now (genuine start failure,
+  or the process handle turning invalid between the checks) and to say explicitly that a timeout no
+  longer relies on that exception. Not independently proven by a dedicated timeout test -- stated
+  honestly: `TryRunNodeVersion` is `private` with no injectable executable/timeout seam, and building
+  one for a probe that reuses the exact already-proven `RunNode` technique was judged disproportionate
+  to this task's scope. It IS exercised on every normal (non-hung) run: every `RequiresNodeFact`-gated
+  test in this session's runs called through the modified concurrent-read/success path via the
+  attribute's constructor, and none were skipped, confirming that path works against the real
+  environment.
+  <br>Full solution after both fixes: `dotnet build` unchanged (3 known pre-existing warnings),
+  `dotnet test`: Layout 198/198, CosmicWinAlert 13/13, Interop 384/42 skipped, App.Tests 1094/6
+  skipped (+2 from this task's two new facts). Commit `d48abab`.
+
+  **T15 -- make the T12 hash-tiles case actually discriminate.** T12's original case
+  (`"failed,,bogus,warning,failed"`, capped at 2) does not tell the fix apart from the bug: under the
+  OLD map-then-filter order the junk entries still default-map to `"warning"`, and the cap still keeps
+  only the first two RESULTS of that mapping -- which for this specific input happen to start
+  `"failed"` (the raw `"failed"` first entry) then `"warning"` (the raw `""` second entry, defaulted),
+  matching the correct answer BY COINCIDENCE. A regression back to the old order would pass this test
+  silently.
+  <br>Changed the input to put the junk FIRST: `"bogus,,bogus,failed,warning"`. Filtering before
+  mapping drops the three junk entries and the two real tiles survive the cap unchanged
+  (`["failed","warning"]`); mapping before filtering turns all three junk entries into extra
+  `"warning"` tiles that fill the 2-slot cap and push BOTH real tiles out
+  (`["warning","warning"]`) -- the two orders now genuinely diverge.
+  <br>**RED** (temporarily restored the pre-T12 map-then-filter order in `alert-layer.js`: mapped
+  every raw entry to `"failed"`/`"warning"` first via `tile === "failed" ? "failed" : "warning"`, kept
+  the length-based filter as a no-op, kept the cap): ran the harness through `dotnet test` --
+  12/13 passed, this exact case failed with `["warning","warning"]` instead of `["failed","warning"]`,
+  confirming the new input discriminates where the old one did not. **GREEN** after reverting
+  `alert-layer.js` byte-for-byte (`git diff` showed no change to that file): 2/2. No production change
+  in this task -- test-only, as the task itself expected. Commit `b3acf9a`.
+
+  **Final verification (whole solution), this session:**
+  - `node --version`: `v24.19.0`.
+  - `dotnet build CosmicWin.sln` (`--no-incremental`): succeeded, exactly the 3 known pre-existing
+    warnings (2 CS8604/CS8602 in `MultiMonitorWorkspaceAdapter.cs`, 1 CA2022 in
+    `CosmicWinAlert.Tests/ProgramTests.cs:200`) -- no new ones.
+  - `dotnet test CosmicWin.sln`: `CosmicWin.Layout.Tests` 198/198; `CosmicWinAlert.Tests` 13/13;
+    `CosmicWin.Interop.Tests` 384 passed/42 skipped; `CosmicWin.App.Tests` 1094 passed/6 skipped (was
+    1092/6 at the branch's T9-T12 point; +2 -- T13's deferred-scheduling fact, T14's timed-out-process
+    fact; T15 changed an existing fact, adding none). The Node harness fact ACTUALLY RAN (not skipped)
+    in every run this session.
+  - Process hygiene checked explicitly (T14's own concern): node process count before/after every RED
+    and GREEN run was compared via `Get-CimInstance Win32_Process`/`tasklist`; the one process
+    deliberately leaked for T14's RED evidence was found, confirmed, and killed before continuing, and
+    no run after the fix left anything behind.
+  - Status: **done** for T13, T14, T15.
