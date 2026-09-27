@@ -37,8 +37,12 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   test project). Mutation-check any test that passes on its first run. Spikes are exploratory and
   are not committed as production code.
 - Everything stays local: no push, no PR.
-- Delivery strategy: ask-on-risk. Forecast: well over 400 authored lines (4 scene ports) -> ask for
-  the chain strategy before the budget is crossed.
+- Delivery strategy: ask-on-risk. Forecast: well over 400 authored lines (4 scene ports).
+  Chain strategy chosen by the maintainer 2026-09-26: `feature-branch-chain`. Tracker branch =
+  `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
+  child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
+  tracker when done. Local only: no PRs, no push.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
