@@ -569,3 +569,18 @@ maintainer's decision, unrelated to gap.
     ACTUALLY RAN (not skipped) under `dotnet test`, both before T12's fix (observed RED: 12/13) and
     after (observed GREEN: 13/13).
   - Status: **done** for T9, T10, T11, T12.
+
+- 2026-09-26: review `review-bd6d059ce4a7b711` (HIGH, 4 lenses, 9149d9f..a3f3b3b) APPROVED and
+  acknowledged. 11 non-blocking follow-ups, none opened a correction:
+  - WARNING R4-reload-swallow-without-trace (`CompositionRoot.cs:162-173`): T11's isolation swallows
+    a reload failure without recording it.
+  - WARNING R3-t12-filter-fix-not-discriminated (`alert-layer-layout.tests.js:227-232`): the T12 case
+    does not tell the filter-before-map fix apart from the old behavior.
+  - WARNING R2-node-probe-catch-comment-misleading + SUGGESTION R3-node-probe-leaks-on-timeout
+    (`NodeAvailability.cs:42-49`): the catch really guards `ExitCode` after a timed-out wait; a hung
+    probe is never killed.
+  - SUGGESTION R3/R4-node-harness-no-timeout (`AlertLayerLayoutNodeTests.cs:66-69`): sequential
+    stdout/stderr reads + unbounded `WaitForExit()` can hang the test run.
+  - SUGGESTION R3-hash-tiles-empty-or-negative-grid-unproved, R4-hash-tiles-empty-list,
+    R2-hash-tiles-cap-order-vs-failed-priority (`alert-layer.js:699-704`, manual hash API only).
+  - SUGGESTION R2-hardcoded-line-anchors-in-doc-comments, R2-t10-doc-says-bounds-throws.
