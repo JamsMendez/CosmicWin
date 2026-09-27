@@ -368,6 +368,35 @@ function drawGlyphRingDelimiters(cx, cy, annuli) {
   ctx.restore();
 }
 
+// html-wallpaper-demo D6b seam: drawGlyphRings/drawOutlineGlyphRing below draw the gold ring through
+// pre-baked sprite bitmaps (js/sprites.js's buildOutlineRingSprites/stampSprite), stamped straight
+// onto the module-global `ctx` -- there is no way to redirect that path into an arbitrary offscreen
+// context, so it cannot be reused by the shared alert overlay's see-through hook, which must draw
+// into the tile-local context the overlay hands it (CosmicWin.App/Wallpaper/Web/shared/js/
+// alert-overlay.js's drawSeeThroughIntersections), never the scene's own canvas. This factors out
+// ONLY the gold ring's own draw parameters -- the exact same radius/rotation/count values
+// drawGlyphRings computes just below, from the same pure, already-tested geometry (coreRadius,
+// js/hexadecagon.js; glyphRingAnnuli/glyphRingCountForRing/glyphRingGlyphBounds, js/glyph-rings.js)
+// and the same RING_GLYPH_POOL (js/glyphs.js) the real sprite bake reads -- so
+// js/see-through-hook.js can redraw the identical ring, at the identical position, through
+// glyphs.js's own context-parameterized drawGlyphRing, without touching drawGlyphRings/
+// drawOutlineGlyphRing above or duplicating any of their geometry.
+function goldGlyphRingDrawParams(progress) {
+  const r = coreRadius(Math.min(W, H));
+  const annuli = glyphRingAnnuli(r);
+  const gold = annuli[1];
+  const targetWidth = (gold.outerRadius - gold.innerRadius) * GLYPH_RING_GOLD_BASE_SIZE_FRACTION;
+  const bounds = glyphRingGlyphBounds(gold, GLYPH_RING_GOLD_BASE_SIZE_FRACTION);
+  return {
+    radius: (gold.innerRadius + gold.outerRadius) / 2,
+    count: glyphRingCountForRing(gold, targetWidth, GLYPH_RING_GAP_PX),
+    rotation: progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED,
+    pool: RING_GLYPH_POOL,
+    glyphSize: bounds.size,
+    lineWidth: Math.max(GLYPH_RING_BODY_WIDTH_FLOOR_PX, targetWidth * GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD),
+  };
+}
+
 function drawGlyphRings(cx, cy, progress) {
   const r = coreRadius(Math.min(W, H));
   const annuli = glyphRingAnnuli(r);
