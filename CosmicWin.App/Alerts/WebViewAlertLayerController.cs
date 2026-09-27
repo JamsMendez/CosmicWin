@@ -42,6 +42,12 @@ public sealed class WebViewAlertLayerController : IDisposable
     // WebViewAlertLayerVisibility and the mode branches in CreateAsync/TryMarkReady/End/OnMessage.
     // False (the default) reproduces exactly what this class did before D3.
     private readonly bool _htmlWallpaperMode;
+    // D6a (html-wallpaper-demo): the SINGLE place the active html-wallpaper scene folder name lives
+    // -- every scene page now shares one virtual host mapping (see the CoreWebView2.
+    // SetVirtualHostNameToFolderMapping/Navigate calls below), so only this constant, not a mapping
+    // root or a URL, needs to change to switch scenes. A literal for now; D6d turns it into a real
+    // setting without touching any other line in this class.
+    private const string HtmlWallpaperSceneName = "processing";
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
@@ -229,15 +235,18 @@ public sealed class WebViewAlertLayerController : IDisposable
             if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.RootVisualTarget = visual;
             _host.CommitComposition();
-            // D3 (html-wallpaper-demo): html wallpaper mode maps and later navigates to the
-            // processing SCENE page (D2) under its OWN reserved example domain, never
-            // cosmicwin-alert.example -- kept as two separate literal branches, not a shared
-            // variable, so video mode's own literals stay byte-for-byte what they were before D3 (see
-            // WebViewAlertLayerControllerTests).
+            // D3 (html-wallpaper-demo): html wallpaper mode maps and later navigates to the active
+            // SCENE page under its OWN reserved example domain, never cosmicwin-alert.example --
+            // kept as two separate literal branches, not a shared variable, so video mode's own
+            // literals stay byte-for-byte what they were before D3 (see
+            // WebViewAlertLayerControllerTests). D6a: the mapping now covers the WHOLE Wallpaper\Web
+            // folder (not just one scene's own subfolder), since every scene page now loads
+            // Wallpaper\Web\shared\... siblings (the shared alert overlay) -- HtmlWallpaperSceneName
+            // is the single place the active scene folder name lives (see its own remarks above).
             if (_htmlWallpaperMode)
             {
                 candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-scene.example",
-                    Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web", "processing"),
+                    Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web"),
                     CoreWebView2HostResourceAccessKind.DenyCors);
             }
             else
@@ -263,7 +272,7 @@ public sealed class WebViewAlertLayerController : IDisposable
             // messages once it is ready.
             if (_htmlWallpaperMode)
             {
-                _controller.CoreWebView2.Navigate("https://cosmicwin-scene.example/index.html");
+                _controller.CoreWebView2.Navigate($"https://cosmicwin-scene.example/{HtmlWallpaperSceneName}/index.html");
             }
             else
             {

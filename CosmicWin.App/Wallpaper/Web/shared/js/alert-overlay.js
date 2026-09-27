@@ -1,34 +1,88 @@
 "use strict";
 
-// html-wallpaper-demo D2: the alert layer, ported from
-// docs/great-sage/backgroud-processing/js/failure-overlay.js (reference-only, excluded from git --
-// see the feature doc, "Source material") and re-driven by the SAME external contract
+// html-wallpaper-demo D6a: the alert layer, extracted here from
+// CosmicWin.App/Wallpaper/Web/processing/js/alert-overlay.js (D2/D2b) so every scene page can share
+// ONE implementation instead of forking it per scene. Re-driven by the SAME external contract
 // CosmicWin.App/Alerts/Web/alert-layer.js exposes to WebViewAlertLayerController.cs: the same hash
 // parameters (tiles=/columns=/rows=/gap=/duration=/work=, and the old kind=/duration= form) and the
 // same two web messages ({type:"show",...}/{type:"hide"} in, "ready"/"done" out).
 //
 // Unlike alert-layer.js (a separate, transparent WebView2 page composited ABOVE the video, which can
-// only draw a COPY of the band geometry), this file draws directly into the SAME canvas/ctx the scene
-// itself uses, from inside the SAME render loop (js/main.js's render(ms) calls renderAlertOverlay()
-// last, right after the scene's own drawAtomicOrbits call) -- so drawFailureBandIntersections below
-// calls the scene's own foldingBandParameters/foldingBandGeometry (js/layers.js) with the exact same
-// progress `p` the scene used THIS frame. What shows through the FAILED/WARNING letters is the real
-// animation, not a copy.
+// only draw a COPY of the band geometry), every scene page loading this file draws directly into the
+// SAME canvas/ctx the scene itself uses, from inside the SAME render loop (each scene's own render
+// loop calls renderAlertOverlay() last every frame) -- so what shows through the FAILED/WARNING
+// letters is that scene's own real animation, not a copy.
+//
+// The ONE scene-specific piece -- "what draws behind the letters" -- is a HOOK: each scene defines
+// its own `sceneSeeThroughLayer(g, sceneW, sceneH, sceneTime)` function (see e.g.
+// CosmicWin.App/Wallpaper/Web/processing/js/see-through-hook.js and
+// CosmicWin.App/Wallpaper/Web/explorer/js/see-through-hook.js), loaded before this file, which draws
+// whatever the scene wants seen through the letters for ONE tile into the offscreen context `g` this
+// file passes in: `g` is already translated so the scene's own (0,0) origin lands at that tile's own
+// position, and the scene's own W/H globals are ALREADY set to sceneW/sceneH for the duration of the
+// call (see drawSeeThroughIntersections below) -- the hook only needs to draw in ordinary scene
+// coordinates, exactly as the scene's own render loop would. The hook does not need to pick a color:
+// this file recolors whatever opaque shape the hook drew to the alert's own color (blue failed
+// rgb(0,160,196), violet warning rgb(88,40,196)) via a 'source-in' composite (preserves the hook's
+// own alpha shape, replaces its RGB), THEN clips it to the letters via 'destination-in' -- see
+// drawSeeThroughIntersections.
 //
 // Mosaic tiles still size their own wash/letters/modules against THEIR OWN width/height, exactly like
-// alert-layer.js's renderTile does (temporarily repurposing the shared W/H globals) -- but the band
-// intersections must NOT use tile-local W/H: foldingBandParameters/foldingBandGeometry derive their
-// radii and segment count from the SCENE's own minD, so band geometry stays correctly scaled to the
-// real, full-screen bands. drawFailureBandIntersections restores the scene's W/H just for that one
-// call (see the sceneW/sceneH save/restore below) and positions the scene's own center relative to
-// each tile's own origin -- since the bands are centered on the whole screen, a tile only shows
-// whichever bands actually cross it, exactly as the feature doc's "Coverage caveat" describes.
+// alert-layer.js's renderTile does (temporarily repurposing the shared W/H globals) -- but the
+// see-through hook must NOT use tile-local W/H for anything meant to stay scaled to the whole scene
+// (processing's hook restores the scene's true W/H before computing its own band geometry, for
+// exactly this reason -- see that file's own remarks). drawSeeThroughIntersections restores the
+// scene's W/H just for the hook's own call (see the sceneW/sceneH save/restore below) and translates
+// by this tile's own origin offset -- since a scene-wide effect (processing's bands, explorer's
+// sparks) is centered/positioned on the whole screen, a tile only shows whichever part of it actually
+// crosses that tile, exactly as the feature doc's "Coverage caveat" describes.
+//
+// FAILURE_SHAKE_MS/FAILURE_REVEAL_MS/FAILURE_OVERLAY_THEMES/etc. below moved here from
+// CosmicWin.App/Wallpaper/Web/processing/js/config.js (D6a): they are alert-overlay tuning, not
+// processing scene tuning, and D6a's own decisions ("The alert layer on explorer must use the same
+// shake/reveal/modules/wash as processing") mean every scene must share the exact same values, not a
+// per-scene copy -- also a JS-syntax requirement, since two scripts in the same page cannot both
+// declare the same top-level `const` name.
 
 var FAILURE_TITLE_FONT = '"Archivo Black", "Arial Black", "Helvetica Neue", sans-serif';
 // Fetch the title face up front; the canvas falls back to Arial Black until it arrives.
 if (typeof document !== "undefined" && document.fonts && document.fonts.load) {
   document.fonts.load("400 64px " + FAILURE_TITLE_FONT).catch(function () {});
 }
+
+const FAILURE_SHAKE_MS = 230;
+const FAILURE_REVEAL_MS = 700;
+const FAILURE_REVEAL_MAX_CELL = 48; // largest pixel block (device px) at the start of the reveal
+const FAILURE_COUNTER_STEP_MS = 100; // module counter ticks 0..99, then wraps
+const FAILURE_REVEAL_LINE_SHARE = 0.25; // first part of the reveal: the horizontal line spreads across the width
+const FAILURE_BACKDROP_CELL = 2.5; // CSS px: slight pixelation of everything seen behind the failed layer
+
+const FAILURE_OVERLAY_BITS = '0100010101010010010100100100111101010010'; // FAILED
+const WARNING_OVERLAY_BITS = '01010111010000010101001001001110010010010100111001000111'; // WARNING
+
+// Failed (mosaic "failed" tiles) and warning (mosaic "warning" tiles) share one layer design; only
+// these values differ. The warning skips the freeze/shake and never pixelates the animation behind it.
+const FAILURE_OVERLAY_THEMES = {
+  failed: {
+    title: 'FAILED',
+    bits: FAILURE_OVERLAY_BITS,
+    wash: 'rgba(196,12,30,0.52)',
+    letters: 'rgb(112,0,16)',
+    intersections: 'rgb(0,160,196)',
+    shakeMs: FAILURE_SHAKE_MS,
+    pixelateBackdrop: true,
+  },
+  warning: {
+    title: 'WARNING',
+    bits: WARNING_OVERLAY_BITS,
+    wash: 'rgba(255,200,20,0.58)',
+    letters: 'rgb(150,96,0)',
+    // Violet is the complement of the amber wash, so the bands stay readable through it.
+    intersections: 'rgb(88,40,196)',
+    shakeMs: 0,
+    pixelateBackdrop: false,
+  },
+};
 
 // Offscreen layers, tile-sized (device pixels) except 'backdrop' which is captured ONCE per frame at
 // the FULL canvas size (see captureBackdropIfNeeded) -- source's slot numbering (0 letters,
@@ -143,26 +197,23 @@ function drawFailureModules(g, frame, counter, overlayBits) {
   }
 }
 
-// ---- Band intersections: SCENE coordinates, not tile-local (html-wallpaper-demo D2) -------------
-// tileCx/tileCy are the scene's own center, expressed relative to the CURRENT TILE's own origin
-// (sceneCx - tile.x, sceneCy - tile.y); sceneW/sceneH are the scene's true CSS size, saved by the
-// caller (renderAlertTile) BEFORE it repurposed W/H for this tile's own title/wash/modules layout.
-function drawFailureBandIntersections(g, letters, tileCx, tileCy, sceneW, sceneH, progress, color) {
+// ---- See-through layer: SCENE coordinates, not tile-local (html-wallpaper-demo D2, generalized
+// D6a) -- tileOffsetX/tileOffsetY is where the scene's own (0,0) origin lands within the CURRENT
+// TILE's own device-pixel buffer (== -tile.x, -tile.y in CSS px); sceneW/sceneH are the scene's true
+// CSS size, saved by the caller (renderAlertTile) BEFORE it repurposed W/H for this tile's own
+// title/wash/modules layout. Delegates the actual drawing to the scene's own
+// `sceneSeeThroughLayer(g, sceneW, sceneH, sceneTime)` hook (see this file's own header remarks),
+// then recolors whatever opaque shape it drew to `color` via 'source-in' (preserves the hook's own
+// alpha shape, replaces its RGB -- the hook does not need to pick a color) and clips the result to
+// the letters via 'destination-in'.
+function drawSeeThroughIntersections(g, letters, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, color) {
   var tileW = W, tileH = H;
   W = sceneW;
   H = sceneH;
   try {
     g.save();
-    g.translate(tileCx, tileCy);
-    g.scale(viewZoom, viewZoom);
-    var bands = foldingBandParameters(progress);
-    for (var i = 0; i < bands.length; i++) {
-      var rx = bands[i][0], ry = bands[i][1], rot = bands[i][2], width = bands[i][3], foldPhase = bands[i][4];
-      g.save();
-      g.rotate(rot);
-      fillFoldingBandGeometry(g, foldingBandGeometry(rx, ry, width, foldPhase), color);
-      g.restore();
-    }
+    g.translate(tileOffsetX, tileOffsetY);
+    sceneSeeThroughLayer(g, sceneW, sceneH, sceneTime);
     g.restore();
   } finally {
     W = tileW;
@@ -170,12 +221,15 @@ function drawFailureBandIntersections(g, letters, tileCx, tileCy, sceneW, sceneH
   }
   g.save();
   g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = color;
+  g.fillRect(0, 0, letters.width, letters.height);
   g.globalCompositeOperation = "destination-in";
   g.drawImage(letters, 0, 0);
   g.restore();
 }
 
-function drawFailureOverlay(g, tileCx, tileCy, sceneW, sceneH, progress, counter, theme, tileDeviceW, tileDeviceH) {
+function drawFailureOverlay(g, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, counter, theme, tileDeviceW, tileDeviceH) {
   var minD = Math.min(W, H);
   var frame = { x: W * 0.038, y: H * 0.064 };
   frame.w = W - frame.x * 2;
@@ -206,7 +260,7 @@ function drawFailureOverlay(g, tileCx, tileCy, sceneW, sceneH, progress, counter
   g.restore();
 
   var intersections = failureLayer("intersections", tileDeviceW, tileDeviceH);
-  drawFailureBandIntersections(intersections, letters.canvas, tileCx, tileCy, sceneW, sceneH, progress, theme.intersections);
+  drawSeeThroughIntersections(intersections, letters.canvas, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, theme.intersections);
   g.globalAlpha = 0.95;
   g.drawImage(intersections.canvas, 0, 0, W, H);
   g.globalAlpha = 1;
@@ -221,7 +275,9 @@ function drawFailureOverlay(g, tileCx, tileCy, sceneW, sceneH, progress, counter
 // Aggressive, decaying shake of the whole canvas -- ported unchanged from the source overlay. This
 // wallpaper has no separate video layer to shake (unlike alert-layer.js, which dropped the shake
 // entirely because T4 shook the video natively): the canvas IS the wallpaper, so a FAILED alert
-// shakes it directly, same as the source page always did.
+// shakes it directly, same as the source page always did. `nebulaCanvas` is optional (D6a): only the
+// processing scene declares that global (its own WebGL background layer, config.js); every other
+// scene simply has nothing else to shake alongside the main canvas.
 function applyFailureShake(elapsed) {
   var transform = "";
   if (elapsed !== null) {
@@ -234,7 +290,7 @@ function applyFailureShake(elapsed) {
     transform = "translate(" + dx.toFixed(2) + "px, " + dy.toFixed(2) + "px) rotate(" + angle.toFixed(3) + "deg) scale(1.18)";
   }
   canvas.style.transform = transform;
-  if (nebulaCanvas) nebulaCanvas.style.transform = transform;
+  if (typeof nebulaCanvas !== "undefined" && nebulaCanvas) nebulaCanvas.style.transform = transform;
 }
 
 // Downscale `source`'s (sourceX, sourceY, sourceW, sourceH) device-pixel region by `cell` and draw it
@@ -293,11 +349,11 @@ function advanceKindState(ms, kind) {
   }
 }
 
-// Called FIRST, before the scene renders this frame (js/main.js's render()) -- mirrors the source
-// overlay's advanceFailureState: while a FAILED tile is shaking, the scene's own clock (and the
-// nebula/animation progress derived from it) freezes, and the canvas visibly shakes. Only 'failed'
-// ever has a non-zero shakeMs (see FAILURE_OVERLAY_THEMES), so at most one kind actually shakes/pauses
-// at a time -- same assumption the source's single-overlay design made.
+// Called FIRST, before the scene renders this frame (each scene's own render loop) -- mirrors the
+// source overlay's advanceFailureState: while a FAILED tile is shaking, the scene's own clock (and
+// any animation progress derived from it) freezes, and the canvas visibly shakes. Only 'failed' ever
+// has a non-zero shakeMs (see FAILURE_OVERLAY_THEMES), so at most one kind actually shakes/pauses at
+// a time -- same assumption the source's single-overlay design made.
 function alertSceneMs(ms) {
   if (kindState.failed.startMs !== null) advanceKindState(ms, "failed");
   if (kindState.warning.startMs !== null) advanceKindState(ms, "warning");
@@ -326,9 +382,10 @@ var workAreaWidth = 0;
 var workAreaHeight = 0;
 
 // The rect (CSS pixels) the N>1 grid is laid out inside: the work area, converted with the same
-// devicePixelRatio-derived scale resize() already uses, and clamped to the canvas -- or the whole
-// canvas when the work area is absent/degenerate. Reads W/H/canvasScaleX/Y at call time, which is
-// always the TRUE scene size: renderAlertOverlay always calls this BEFORE repurposing W/H per tile.
+// devicePixelRatio-derived scale each scene's own resize() already uses, and clamped to the canvas
+// -- or the whole canvas when the work area is absent/degenerate. Reads W/H/canvasScaleX/Y at call
+// time, which is always the TRUE scene size: renderAlertOverlay always calls this BEFORE repurposing
+// W/H per tile.
 function gridAreaRect() {
   if (workAreaWidth <= 0 || workAreaHeight <= 0) {
     return { x: 0, y: 0, w: W, h: H };
@@ -373,7 +430,7 @@ function postToHost(message) {
 
 // Unlike alert-layer.js's stopAndClear (which owns a transparent, alert-only canvas and clears it),
 // this page's canvas is shared with the scene: stopping the overlay must never clear the canvas --
-// the scene's own render() already clears/redraws it every frame regardless of alert state.
+// the scene's own render loop already clears/redraws it every frame regardless of alert state.
 function stopOverlay() {
   animating = false;
   applyFailureShake(null);
@@ -417,9 +474,9 @@ function startShowing(newTiles, columns, rows, gap, duration, workArea) {
   showStartMs = null;
   resetKindState();
   doneSignaled = false;
-  // No separate render loop to (re)start (unlike alert-layer.js): the scene's own js/main.js
-  // render() loop is already running continuously, and picks up renderAlertOverlay() on the next
-  // frame purely because `animating` is now true.
+  // No separate render loop to (re)start (unlike alert-layer.js): the scene's own render loop is
+  // already running continuously, and picks up renderAlertOverlay() on the next frame purely because
+  // `animating` is now true.
   animating = true;
 }
 
@@ -443,7 +500,7 @@ if (window.chrome && window.chrome.webview) {
   window.chrome.webview.addEventListener("message", handleHostMessage);
 }
 
-// ---- Rendering: called once per animation frame from js/main.js's render(), AFTER the scene -----
+// ---- Rendering: called once per animation frame from each scene's own render loop, AFTER the scene
 
 // Whole-canvas backdrop snapshot, captured at most once per frame, only when at least one visible
 // tile's theme actually pixelates it (only 'failed' does, see FAILURE_OVERLAY_THEMES) -- mirrors the
@@ -464,11 +521,13 @@ function captureBackdropIfNeeded() {
   return backdrop;
 }
 
-// Tile-scoped replacement for the source overlay's drawFailureLayer: `sceneCx`/`sceneCy`/`sceneW`/
-// `sceneH` are the scene's own center/size (untouched by any tile), `tileDeviceX/Y/W/H` are this
-// tile's own device-pixel rect within the whole canvas (needed only by drawTilePixelated's backdrop
-// crop), and W/H are ALREADY this tile's own CSS size (set by the caller, renderAlertTile).
-function drawFailureLayer(ms, kind, sceneCx, sceneCy, sceneW, sceneH, progress, tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH, backdrop) {
+// Tile-scoped replacement for the source overlay's drawFailureLayer: `tileOffsetX`/`tileOffsetY` is
+// where the scene's own (0,0) origin lands within this TILE's own device-pixel rect (see
+// drawSeeThroughIntersections above), `sceneW`/`sceneH` are the scene's own true size (untouched by
+// any tile), `tileDeviceX/Y/W/H` are this tile's own device-pixel rect within the whole canvas
+// (needed only by drawTilePixelated's backdrop crop), and W/H are ALREADY this tile's own CSS size
+// (set by the caller, renderAlertTile).
+function drawFailureLayer(ms, kind, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH, backdrop) {
   var entry = kindState[kind];
   if (entry.state === "hidden" || entry.state === "shaking") return;
   var theme = FAILURE_OVERLAY_THEMES[kind];
@@ -481,7 +540,7 @@ function drawFailureLayer(ms, kind, sceneCx, sceneCy, sceneW, sceneH, progress, 
       drawTilePixelated(backdrop.canvas, tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH,
         backdropCell, "backdropPixels", 1, tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH);
     }
-    drawFailureOverlay(ctx, sceneCx, sceneCy, sceneW, sceneH, progress, counter, theme, tileDeviceW, tileDeviceH);
+    drawFailureOverlay(ctx, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, counter, theme, tileDeviceW, tileDeviceH);
     return;
   }
 
@@ -491,7 +550,7 @@ function drawFailureLayer(ms, kind, sceneCx, sceneCy, sceneW, sceneH, progress, 
   var openT = Math.max(0, (t - FAILURE_REVEAL_LINE_SHARE) / (1 - FAILURE_REVEAL_LINE_SHARE));
   var cell = Math.max(1, Math.round(FAILURE_REVEAL_MAX_CELL * Math.pow(1 - eased, 1.4)));
   var overlay = failureLayer("overlay:" + kind, tileDeviceW, tileDeviceH);
-  drawFailureOverlay(overlay, sceneCx, sceneCy, sceneW, sceneH, progress, counter, theme, tileDeviceW, tileDeviceH);
+  drawFailureOverlay(overlay, tileOffsetX, tileOffsetY, sceneW, sceneH, sceneTime, counter, theme, tileDeviceW, tileDeviceH);
 
   var revealW = W * (1 - Math.pow(1 - lineT, 2));
   var revealH = Math.max(H * 0.04, H * (1 - Math.pow(1 - openT, 3)));
@@ -511,8 +570,13 @@ function drawFailureLayer(ms, kind, sceneCx, sceneCy, sceneW, sceneH, progress, 
 // Draws ONE tile: repurposes the shared W/H to this tile's own CSS size (same technique
 // alert-layer.js's renderTile uses), clips/translates ctx to the tile's rect so drawFailureOverlay's
 // title/wash/modules draw exactly as if this tile were the whole canvas -- then restores W/H so the
-// NEXT tile (or the next frame's scene render) sees the true scene size again.
-function renderAlertTile(rect, kind, ms, sceneCx, sceneCy, sceneW, sceneH, progress, backdrop) {
+// NEXT tile (or the next frame's scene render) sees the true scene size again. `tileOffsetX`/
+// `tileOffsetY` (== -rect.x, -rect.y) is where the scene's own (0,0) origin lands within this tile's
+// own device-pixel buffer -- computed here, once, since every downstream consumer only ever needs
+// this offset, never rect.x/rect.y themselves (D6a: previously this file's own caller passed a
+// scene-CENTER-relative offset; the center itself is now the processing scene's own hook's concern,
+// see js/see-through-hook.js).
+function renderAlertTile(rect, kind, ms, sceneW, sceneH, sceneTime, backdrop) {
   var tileW = W, tileH = H;
   W = rect.w;
   H = rect.h;
@@ -526,7 +590,7 @@ function renderAlertTile(rect, kind, ms, sceneCx, sceneCy, sceneW, sceneH, progr
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
   ctx.translate(rect.x, rect.y);
-  drawFailureLayer(ms, kind, sceneCx - rect.x, sceneCy - rect.y, sceneW, sceneH, progress,
+  drawFailureLayer(ms, kind, -rect.x, -rect.y, sceneW, sceneH, sceneTime,
     tileDeviceX, tileDeviceY, tileDeviceW, tileDeviceH, backdrop);
   ctx.restore();
 
@@ -534,9 +598,13 @@ function renderAlertTile(rect, kind, ms, sceneCx, sceneCy, sceneW, sceneH, progr
   H = tileH;
 }
 
-// Called once per animation frame from js/main.js's render(), with the SAME sceneCx/sceneCy/progress
-// the scene's own drawAtomicOrbits call used this frame -- see this file's header remarks.
-function renderAlertOverlay(ms, sceneCx, sceneCy, sceneW, sceneH, progress) {
+// Called once per animation frame from each scene's own render loop, with the SAME sceneTime value
+// (progress, elapsed seconds, ...) the scene used to draw itself this frame -- see this file's own
+// header remarks and each scene's own js/see-through-hook.js. D6a: dropped the scene-center
+// (sceneCx/sceneCy) parameters this file used to take -- only a scene's own hook needs a center
+// concept (if any), and it can compute one itself from sceneW/sceneH exactly as its own scene render
+// loop always did.
+function renderAlertOverlay(ms, sceneW, sceneH, sceneTime) {
   if (!animating) return;
   if (showStartMs === null) showStartMs = ms;
   var rects = tileRects();
@@ -544,7 +612,7 @@ function renderAlertOverlay(ms, sceneCx, sceneCy, sceneW, sceneH, progress) {
 
   for (var i = 0; i < tiles.length && i < rects.length; i++) {
     advanceKindState(ms, tiles[i]);
-    renderAlertTile(rects[i], tiles[i], ms, sceneCx, sceneCy, sceneW, sceneH, progress, backdrop);
+    renderAlertTile(rects[i], tiles[i], ms, sceneW, sceneH, sceneTime, backdrop);
   }
 
   if (signalDoneIfElapsed(ms)) {
@@ -553,8 +621,8 @@ function renderAlertOverlay(ms, sceneCx, sceneCy, sceneW, sceneH, progress) {
 }
 
 // ---- Hash API (manual check, same shape as alert-layer.js) ---------------------------------------
-// processing/index.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
-// Old single-tile form, still supported: processing/index.html#kind=failed&duration=5000
+// <scene>/index.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
+// Old single-tile form, still supported: <scene>/index.html#kind=failed&duration=5000
 // Optional work area (tiles form only): #tiles=...&work=L,T,W,H (physical pixels).
 // A preloaded host page (T9c-equivalent, see WebViewAlertLayerController) navigates with NO
 // hash/query at all, so this must NOT auto-show: only an explicit tiles/kind/duration param starts

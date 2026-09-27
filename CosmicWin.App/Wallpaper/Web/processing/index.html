@@ -1,15 +1,16 @@
 <!DOCTYPE html>
 <!--
   html-wallpaper-demo D2: the processing scene as the wallpaper page itself, with the alert overlay
-  drawn into the SAME canvas/loop (see js/alert-overlay.js's header remarks) -- adapted from
+  drawn into the SAME canvas/loop (see ../shared/js/alert-overlay.js's header remarks) -- adapted from
   docs/great-sage/backgroud-processing/index.html (reference-only, excluded from git; see the feature
   doc, "Source material"). Loaded directly by WebViewAlertLayerController.cs (D3) through a virtual
-  host folder mapping, same technique as CosmicWin.App/Alerts/Web/alert-layer.html.
+  host folder mapping (D6a: the mapping now covers the whole Wallpaper/Web folder, not just this
+  directory, since this page now loads ../shared/... siblings).
 
   Driven by the same hash/postMessage alert API as alert-layer.html, e.g.:
       index.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
       index.html#kind=failed&duration=5000
-  Starts idle (scene only) when no hash param is present -- see js/alert-overlay.js.
+  Starts idle (scene only) when no hash param is present -- see ../shared/js/alert-overlay.js.
 -->
 <html lang="en">
 <head>
@@ -28,7 +29,9 @@
 <script src="js/scene-data.js"></script>
 <script src="js/sprites.js"></script>
 <script src="js/layers.js"></script>
-<script src="js/alert-overlay.js"></script>
+<script src="js/see-through-hook.js"></script>
+<script src="../shared/js/alert-overlay.js"></script>
+<script src="../shared/js/render-loop.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

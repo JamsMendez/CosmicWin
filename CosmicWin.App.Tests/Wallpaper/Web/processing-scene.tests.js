@@ -1,7 +1,7 @@
 "use strict";
 
-// html-wallpaper-demo D2: a committed vm-sandbox harness proving js/alert-overlay.js's own contract
-// against the REAL shipped processing-scene page -- modelled on
+// html-wallpaper-demo D2: a committed vm-sandbox harness proving the shared alert-overlay.js's own
+// contract against the REAL shipped processing-scene page -- modelled on
 // CosmicWin.App.Tests/Alerts/Web/alert-layer-layout.tests.js (that file's own remarks explain why a
 // Node subprocess exists at all: no .NET JS engine or headless browser exists in this repo). Run via
 // CosmicWin.App.Tests/Wallpaper/ProcessingSceneNodeTests.cs:
@@ -13,6 +13,11 @@
 // populates one shared global object. Top-level `function`/`var`/`const` declarations in each script
 // become properties of that one sandbox object (same technique alert-layer-layout.tests.js already
 // uses), so nothing here needed a module/export system added to be reachable.
+//
+// D6a: js/alert-overlay.js moved out of this directory into ../shared/js/ (shared by every scene) --
+// this harness resolves that sibling directory from sceneDir itself (`Wallpaper/Web/<scene>` and
+// `Wallpaper/Web/shared` are always siblings, see CosmicWin.App/Wallpaper/Web/), rather than taking a
+// second command-line argument.
 
 const vm = require("vm");
 const fs = require("fs");
@@ -26,7 +31,10 @@ if (!sceneDir) {
   process.exit(2);
 }
 
+const sharedDir = path.join(sceneDir, "..", "shared");
+
 // Exact order index.html loads these in -- see CosmicWin.App/Wallpaper/Web/processing/index.html.
+// Entries starting with "shared:" resolve against sharedDir instead of sceneDir.
 const SCRIPT_FILES = [
   "js/config.js",
   "js/math.js",
@@ -35,7 +43,9 @@ const SCRIPT_FILES = [
   "js/scene-data.js",
   "js/sprites.js",
   "js/layers.js",
-  "js/alert-overlay.js",
+  "js/see-through-hook.js",
+  "shared:js/alert-overlay.js",
+  "shared:js/render-loop.js",
   "js/main.js",
 ];
 
@@ -153,7 +163,9 @@ function loadPage(options) {
   };
   vm.createContext(sandbox);
   for (var i = 0; i < SCRIPT_FILES.length; i++) {
-    var filePath = path.join(sceneDir, SCRIPT_FILES[i]);
+    var entry = SCRIPT_FILES[i];
+    var isShared = entry.indexOf("shared:") === 0;
+    var filePath = path.join(isShared ? sharedDir : sceneDir, isShared ? entry.slice("shared:".length) : entry);
     var source = fs.readFileSync(filePath, "utf8");
     vm.runInContext(source, sandbox, { filename: filePath });
   }

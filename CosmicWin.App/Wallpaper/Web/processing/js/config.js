@@ -2,10 +2,14 @@
 // is reference-only, excluded from git -- see the feature doc, "Source material"). The scene
 // bootstrap and every tuning constant below are an intact port; only the SINGLE-overlay runtime
 // state (failureState/failureKind/failureToggleRequested/failureStartMs/scenePausedMs) and the user
-// zoom level are dropped here -- js/alert-overlay.js owns a per-KIND, tile-driven state machine
-// instead (the same external contract CosmicWin.App/Alerts/Web/alert-layer.js exposes), and this
-// wallpaper has no zoom UI to drive viewZoom away from 1 (see "Drop what a wallpaper does not need").
+// zoom level are dropped here -- CosmicWin.App/Wallpaper/Web/shared/js/alert-overlay.js owns a
+// per-KIND, tile-driven state machine instead (the same external contract
+// CosmicWin.App/Alerts/Web/alert-layer.js exposes), and this wallpaper has no zoom UI to drive
+// viewZoom away from 1 (see "Drop what a wallpaper does not need").
 //
+// D6a: FAILURE_SHAKE_MS/FAILURE_REVEAL_MS/FAILURE_OVERLAY_THEMES/etc. (added here by D2) moved to
+// the shared alert-overlay.js -- they are alert-overlay tuning, shared by every scene now, not
+// processing scene tuning (see that file's own header remarks).
 // config.js — canvas/DOM bootstrap, mutable scene state, and every user-tunable constant.
 // Loads first: every other file reads names defined here. Depends on nothing.
 const canvas = document.getElementById('scene');
@@ -24,45 +28,6 @@ let sprites = null;
 // layers.js/sprites.js still read it by name (visibleCanvasBounds, perspectiveRayEndpoint, the
 // scene's own render() zoom transform, drawFailureBandIntersections' band scale).
 const viewZoom = 1;
-
-// FAILURE_SHAKE_MS/FAILURE_REVEAL_MS/... and FAILURE_OVERLAY_THEMES are still the SOURCE overlay's
-// own tuning (docs/great-sage/backgroud-processing/js/config.js) -- js/alert-overlay.js is a new,
-// tile-driven, per-kind state machine, but it draws with these exact themes/timings/colors. Only the
-// theme key 'error' -> 'failed' is renamed, to match AlertShowRequest's tile kind strings (see
-// CosmicWin.App/Alerts/AlertShowRequest.cs and alert-layer.js's own 'failed' hash/message kind).
-const FAILURE_SHAKE_MS = 230;
-const FAILURE_REVEAL_MS = 700;
-const FAILURE_REVEAL_MAX_CELL = 48; // largest pixel block (device px) at the start of the reveal
-const FAILURE_COUNTER_STEP_MS = 100; // module counter ticks 0..99, then wraps
-const FAILURE_REVEAL_LINE_SHARE = 0.25; // first part of the reveal: the horizontal line spreads across the width
-const FAILURE_BACKDROP_CELL = 2.5; // CSS px: slight pixelation of everything seen behind the failed layer
-
-const FAILURE_OVERLAY_BITS = '0100010101010010010100100100111101010010'; // FAILED
-const WARNING_OVERLAY_BITS = '01010111010000010101001001001110010010010100111001000111'; // WARNING
-
-// Failed (mosaic "failed" tiles) and warning (mosaic "warning" tiles) share one layer design; only
-// these values differ. The warning skips the freeze/shake and never pixelates the animation behind it.
-const FAILURE_OVERLAY_THEMES = {
-  failed: {
-    title: 'FAILED',
-    bits: FAILURE_OVERLAY_BITS,
-    wash: 'rgba(196,12,30,0.52)',
-    letters: 'rgb(112,0,16)',
-    intersections: 'rgb(0,160,196)',
-    shakeMs: FAILURE_SHAKE_MS,
-    pixelateBackdrop: true,
-  },
-  warning: {
-    title: 'WARNING',
-    bits: WARNING_OVERLAY_BITS,
-    wash: 'rgba(255,200,20,0.58)',
-    letters: 'rgb(150,96,0)',
-    // Violet is the complement of the amber wash, so the bands stay readable through it.
-    intersections: 'rgb(88,40,196)',
-    shakeMs: 0,
-    pixelateBackdrop: false,
-  },
-};
 
 // Tiempo total (en segundos) que la animación avanza antes de invertirse (ping-pong); el ciclo
 // completo dura el doble: ida + regreso. Alargarlo NO hace más lenta la animación: la repite más

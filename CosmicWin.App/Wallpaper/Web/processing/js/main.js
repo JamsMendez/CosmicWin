@@ -6,9 +6,10 @@
 // a single global `failureState`, none of which still exist once the alert layer becomes a
 // tile-driven, per-kind state machine; see the task report for the full reasoning), the keyboard
 // shortcuts (Ctrl+F fullscreen, Ctrl+E/Ctrl+A alert toggles, Ctrl+-/Ctrl++ zoom), and the fullscreen
-// toggle itself. The alert overlay is now driven by js/alert-overlay.js's renderAlertOverlay(), called
-// last every frame with the SAME progress `p` drawAtomicOrbits used this frame (real bands, not a
-// copy -- see alert-overlay.js's own header remarks).
+// toggle itself. The alert overlay is now driven by
+// CosmicWin.App/Wallpaper/Web/shared/js/alert-overlay.js's renderAlertOverlay(), called last every
+// frame with the SAME progress `p` drawAtomicOrbits used this frame (real bands, not a copy -- see
+// that file's own header remarks and js/see-through-hook.js).
 //
 // main.js — the render loop (render(ms)) and startup. Loads last, after every other file.
 //
@@ -19,49 +20,16 @@
 // share the one canvas, so "cannot" is only as far as practical -- see resetCanvasStateForFrame's own
 // remarks), and scheduleFrame(render) always runs afterwards, unconditionally, so the loop itself
 // never stops.
+//
+// D6a: resetCanvasStateForFrame/createRenderStageReporter moved to the shared
+// CosmicWin.App/Wallpaper/Web/shared/js/render-loop.js (used unchanged by
+// CosmicWin.App/Wallpaper/Web/explorer/js/animate.js too) -- see that file's own header remarks for
+// the full original reasoning; this file keeps only the scene-specific render(ms) sequence and its
+// two try/catch blocks. renderAlertOverlay's own signature also dropped its sceneCx/sceneCy
+// parameters (D6a): only this scene's own see-through hook (js/see-through-hook.js) needs a center,
+// and it now computes one itself from sceneW/sceneH, the same formula this file always used.
 
-// One remembered message PER STAGE -- see reportRenderError below for why a single shared slot floods.
-var lastRenderErrorMessageByStage = {};
-
-// A throwing frame can leave the 2D context's own save/restore stack, transform and globalAlpha/
-// composite mode -- and, separately, the shake CSS transform applyFailureShake sets on the canvas
-// element itself -- in whatever state the failing draw call left them, which would otherwise corrupt
-// every later frame (a stray clip, an alpha stuck below 1, a shake transform frozen mid-shake). There
-// is no way to query the 2D context's own save/restore stack depth, so restore() defensively, several
-// times more than this page's own deepest save()/restore() nesting (drawFailureOverlay's own pairs,
-// well under this): restore() on an empty stack is a documented no-op (HTML Canvas 2D spec), so this
-// is always safe, even for a frame that never called save() at all.
-function resetCanvasStateForFrame() {
-  for (var i = 0; i < 16; i++) {
-    try { ctx.restore(); } catch (restoreError) { /* no-op: nothing left to restore */ }
-  }
-  try { ctx.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0); } catch (transformError) { /* ctx gone */ }
-  try { ctx.globalAlpha = 1; } catch (alphaError) { /* ctx gone */ }
-  try { ctx.globalCompositeOperation = "source-over"; } catch (compositeError) { /* ctx gone */ }
-  try { applyFailureShake(null); } catch (shakeError) { /* ctx/canvas gone */ }
-}
-
-// Reports a throwing frame once per DISTINCT message, not once per frame -- a failing layer can run at
-// up to 60fps, and without this guard the same error would flood the console 60x/sec instead of being
-// reported once, the way a wallpaper host actually needs to see it. Deduped PER STAGE, in
-// lastRenderErrorMessageByStage[stage] -- render()'s two try/catch blocks below call this with two
-// fixed stage names ("scene", "alert-overlay"), so the map holds at most one entry per call site (two,
-// today) no matter how many distinct messages a stage ever throws: each new call for a stage simply
-// OVERWRITES that stage's one remembered message, it never accumulates a history, so this cannot grow
-// unbounded even if a message embeds changing data (a counter, a timestamp). A single SHARED slot used
-// to compare a stage's message against whichever stage reported last: with the scene and the overlay
-// BOTH failing every frame, the remembered message alternates scene/overlay/scene/overlay, so neither
-// throw ever matches what was remembered a moment ago and console.error fires every frame for EACH
-// stage -- the exact flood this guard exists to stop. One slot per stage fixes that: a stage's repeats
-// are only ever compared against that SAME stage's own last message. If a stage's error stops for a
-// frame (recovers) and then returns with the SAME text, it stays suppressed, by design -- only a
-// genuinely different message for that stage (or a different stage) is reported again.
-function reportRenderError(stage, error) {
-  var message = stage + ": " + (error && error.message ? error.message : String(error));
-  if (lastRenderErrorMessageByStage[stage] === message) return;
-  lastRenderErrorMessageByStage[stage] = message;
-  console.error("[processing-scene] render frame failed (" + stage + ")", error);
-}
+var reportRenderError = createRenderStageReporter("[processing-scene]");
 
 function octagonPulse(ms) {
   const duration = OCTAGON_PULSE_DURATION * 1000;
@@ -77,12 +45,12 @@ function animationProgress(ms) {
 }
 
 function render(ms) {
-  // Safe, cheap defaults for the values the alert overlay call needs below: if the scene itself throws
-  // before computing its own cx/cy/p (the try block below), the overlay must still receive SOMETHING
-  // rather than a ReferenceError from a half-initialized variable -- the fault-isolation try/catch
-  // pair below only isolates each layer's OWN draw calls, not one layer's inputs from the other's
-  // failure. cx/cy only ever depend on W/H, so computing them up front changes nothing when the scene
-  // succeeds.
+  // cx/cy are this scene's own center, used only inside the try block below (the scene's own draw
+  // calls); computing them up front changes nothing when the scene succeeds. `p` is a safe, cheap
+  // default for the value the alert overlay call needs below: if the scene itself throws before
+  // computing its own progress (the try block below), the overlay must still receive SOMETHING rather
+  // than a ReferenceError from a half-initialized variable -- the fault-isolation try/catch pair below
+  // only isolates each layer's OWN draw calls, not one layer's inputs from the other's failure.
   var cx = W * 0.505;
   var cy = H * 0.515;
   var p = 0;
@@ -127,10 +95,9 @@ function render(ms) {
   }
 
   try {
-    // Same `p` drawAtomicOrbits used above (or the safe default 0 above, if the scene just failed), in
-    // scene (W, H) coordinates -- see alert-overlay.js's drawFailureBandIntersections for how the
-    // band-intersection layer reuses it.
-    renderAlertOverlay(ms, cx, cy, W, H, p);
+    // Same `p` drawAtomicOrbits used above (or the safe default 0 above, if the scene just failed) --
+    // see js/see-through-hook.js for how this scene's own see-through layer reuses it.
+    renderAlertOverlay(ms, W, H, p);
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("alert-overlay", error);

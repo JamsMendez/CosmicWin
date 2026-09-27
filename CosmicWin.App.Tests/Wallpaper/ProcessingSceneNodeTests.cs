@@ -24,6 +24,11 @@ public sealed class ProcessingSceneNodeTests
     private static readonly string ProcessingSceneDirectory =
         Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web", "processing");
 
+    // D6a (html-wallpaper-demo): the shared alert-overlay module every scene page now loads from
+    // ../shared/js/ -- see CosmicWin.App/Wallpaper/Web/shared/js/alert-overlay.js.
+    private static readonly string SharedDirectory =
+        Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web", "shared");
+
     private static readonly string HarnessScriptPath =
         Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web", "processing-scene.tests.js");
 
@@ -41,8 +46,10 @@ public sealed class ProcessingSceneNodeTests
     {
         Assert.True(Directory.Exists(ProcessingSceneDirectory),
             $"Expected '{ProcessingSceneDirectory}' to exist (shipped content, see CosmicWin.App.csproj's Wallpaper\\Web\\** Content item).");
-        Assert.True(File.Exists(Path.Combine(ProcessingSceneDirectory, "js", "alert-overlay.js")),
-            $"Expected the shipped alert-overlay.js under '{ProcessingSceneDirectory}'.");
+        Assert.True(File.Exists(Path.Combine(ProcessingSceneDirectory, "js", "see-through-hook.js")),
+            $"Expected the shipped see-through-hook.js under '{ProcessingSceneDirectory}'.");
+        Assert.True(File.Exists(Path.Combine(SharedDirectory, "js", "alert-overlay.js")),
+            $"Expected the shipped shared alert-overlay.js under '{SharedDirectory}'.");
         Assert.True(File.Exists(HarnessScriptPath),
             $"Expected '{HarnessScriptPath}' to exist (test content, see this project's .csproj).");
 

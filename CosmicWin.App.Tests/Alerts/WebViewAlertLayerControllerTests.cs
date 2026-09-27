@@ -224,12 +224,17 @@ public sealed class WebViewAlertLayerControllerTests
 
     /// <summary>
     /// D3 (html-wallpaper-demo, demo/html-wallpaper-d3-switch): a controller built in html wallpaper
-    /// mode must map and navigate to the processing SCENE page (D2, shipped by the csproj's own
+    /// mode must map and navigate to the active SCENE page (shipped by the csproj's own
     /// <c>Wallpaper\Web\**</c> Content item) instead of the alert-only page, under its own reserved
     /// example domain -- the video-mode literals proven by
     /// <see cref="VirtualHostUsesAReservedExampleDomainNotDotLocal"/> and
     /// <see cref="PreloadNavigatesTheBarePageWithNoKindOrDurationHash"/> above must still be present
     /// UNCHANGED, since video mode must behave exactly as it did before D3.
+    /// <para>
+    /// D6a: the mapping now covers the WHOLE <c>Wallpaper\Web</c> folder (every scene page now loads
+    /// <c>Wallpaper\Web\shared\...</c> siblings), and the navigated URL's scene segment comes from
+    /// the single <c>HtmlWallpaperSceneName</c> constant (still literally "processing" until D6d).
+    /// </para>
     /// </summary>
     [Fact]
     public void HtmlWallpaperMode_MapsAndNavigatesToTheProcessingScenePageUnderItsOwnDomain()
@@ -242,8 +247,10 @@ public sealed class WebViewAlertLayerControllerTests
 
         // Html wallpaper mode, new.
         Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-scene.example\"", source);
-        Assert.Contains("Navigate(\"https://cosmicwin-scene.example/index.html\")", source);
-        Assert.Contains("\"Wallpaper\", \"Web\", \"processing\"", source);
+        Assert.Contains("private const string HtmlWallpaperSceneName = \"processing\";", source);
+        Assert.Contains("Navigate($\"https://cosmicwin-scene.example/{HtmlWallpaperSceneName}/index.html\")", source);
+        Assert.Contains("\"Wallpaper\", \"Web\")", source);
+        Assert.DoesNotContain("\"Wallpaper\", \"Web\", \"processing\"", source);
         Assert.DoesNotContain(".local\"", source);
         Assert.DoesNotContain(".local/", source);
     }
