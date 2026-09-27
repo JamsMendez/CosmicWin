@@ -71,6 +71,7 @@ public sealed class HttpAlertCompositionWiringTests
     private static Harness Wire(
         bool alertsEnabled = true, bool httpEnabled = false, int httpPort = 47811,
         string? token = "test-token", bool videoWallpaperHttpEnabled = false,
+        bool wallpaperSceneHttpEnabled = false,
         Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
     {
         var primary = new FakeDisplay(
@@ -125,6 +126,7 @@ public sealed class HttpAlertCompositionWiringTests
             alertHttpEnabled: httpEnabled,
             alertHttpPort: httpPort,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
+            wallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled,
             createLocalHttpCommandServer: resolvedHttpFactory,
             loadAlertHttpToken: () =>
             {
@@ -180,7 +182,8 @@ public sealed class HttpAlertCompositionWiringTests
                 h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
             Assert.Contains(
                 h.Trace.Lines,
-                l => l == "http-server start requested port=6001 alerts-route=False video-route=True");
+                l => l == "http-server start requested port=6001 alerts-route=False video-route=True "
+                    + "scene-route=False");
         }
     }
 
@@ -195,7 +198,8 @@ public sealed class HttpAlertCompositionWiringTests
             Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6002");
             Assert.Contains(
                 h.Trace.Lines,
-                l => l == "http-server start requested port=6002 alerts-route=True video-route=False");
+                l => l == "http-server start requested port=6002 alerts-route=True video-route=False "
+                    + "scene-route=False");
         }
     }
 
@@ -210,7 +214,30 @@ public sealed class HttpAlertCompositionWiringTests
             Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6003");
             Assert.Contains(
                 h.Trace.Lines,
-                l => l == "http-server start requested port=6003 alerts-route=True video-route=True");
+                l => l == "http-server start requested port=6003 alerts-route=True video-route=True "
+                    + "scene-route=False");
+        }
+    }
+
+    /// <summary>
+    /// S10 (wallpaper-scene-http-endpoint, follow-up): the trace line above V4 added only reported
+    /// the alerts/video routes -- proves the scene route (S4) is reported too, independently of the
+    /// other two, exactly the way S4's own gate (<c>wallpaperSceneHttpEnabled</c> alone, unrelated to
+    /// <c>alertsEnabled</c>/<c>videoWallpaperHttpEnabled</c>) already works.
+    /// </summary>
+    [Fact]
+    public void SceneRouteOn_TraceReportsIt()
+    {
+        var h = Wire(
+            alertsEnabled: false, httpEnabled: false, videoWallpaperHttpEnabled: false,
+            wallpaperSceneHttpEnabled: true, httpPort: 6004);
+        using (h.Composition)
+        {
+            Assert.NotNull(h.HttpSceneSwitchHandler);
+            Assert.Contains(
+                h.Trace.Lines,
+                l => l == "http-server start requested port=6004 alerts-route=False video-route=False "
+                    + "scene-route=True");
         }
     }
 

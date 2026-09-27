@@ -1446,9 +1446,14 @@ public sealed class AppComposition : IDisposable
                     // V4: which routes actually ended up in the routing table, so a trace reader
                     // can tell a video-only start (alerts fully disabled) from every other
                     // combination without inferring it from the line above being absent.
+                    // S10 (wallpaper-scene-http-endpoint, follow-up): the scene route (S4) is a
+                    // third independent gate, same as the other two -- it belongs on this same line
+                    // rather than a separate one, or a trace reader could tell a video-only start
+                    // from every OTHER combination except this one.
                     desktopTrace?.Record(
                         $"http-server start requested port={alertHttpPort} " +
-                        $"alerts-route={alertHttpRouteOn} video-route={videoWallpaperHttpRouteOn}");
+                        $"alerts-route={alertHttpRouteOn} video-route={videoWallpaperHttpRouteOn} " +
+                        $"scene-route={wallpaperSceneHttpRouteOn}");
                 }
             }
             // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a
