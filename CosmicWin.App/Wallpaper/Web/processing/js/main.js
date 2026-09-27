@@ -20,7 +20,8 @@
 // remarks), and scheduleFrame(render) always runs afterwards, unconditionally, so the loop itself
 // never stops.
 
-var lastRenderErrorMessage = null;
+// One remembered message PER STAGE -- see reportRenderError below for why a single shared slot floods.
+var lastRenderErrorMessageByStage = {};
 
 // A throwing frame can leave the 2D context's own save/restore stack, transform and globalAlpha/
 // composite mode -- and, separately, the shake CSS transform applyFailureShake sets on the canvas
@@ -42,11 +43,23 @@ function resetCanvasStateForFrame() {
 
 // Reports a throwing frame once per DISTINCT message, not once per frame -- a failing layer can run at
 // up to 60fps, and without this guard the same error would flood the console 60x/sec instead of being
-// reported once, the way a wallpaper host actually needs to see it.
+// reported once, the way a wallpaper host actually needs to see it. Deduped PER STAGE, in
+// lastRenderErrorMessageByStage[stage] -- render()'s two try/catch blocks below call this with two
+// fixed stage names ("scene", "alert-overlay"), so the map holds at most one entry per call site (two,
+// today) no matter how many distinct messages a stage ever throws: each new call for a stage simply
+// OVERWRITES that stage's one remembered message, it never accumulates a history, so this cannot grow
+// unbounded even if a message embeds changing data (a counter, a timestamp). A single SHARED slot used
+// to compare a stage's message against whichever stage reported last: with the scene and the overlay
+// BOTH failing every frame, the remembered message alternates scene/overlay/scene/overlay, so neither
+// throw ever matches what was remembered a moment ago and console.error fires every frame for EACH
+// stage -- the exact flood this guard exists to stop. One slot per stage fixes that: a stage's repeats
+// are only ever compared against that SAME stage's own last message. If a stage's error stops for a
+// frame (recovers) and then returns with the SAME text, it stays suppressed, by design -- only a
+// genuinely different message for that stage (or a different stage) is reported again.
 function reportRenderError(stage, error) {
   var message = stage + ": " + (error && error.message ? error.message : String(error));
-  if (message === lastRenderErrorMessage) return;
-  lastRenderErrorMessage = message;
+  if (lastRenderErrorMessageByStage[stage] === message) return;
+  lastRenderErrorMessageByStage[stage] = message;
   console.error("[processing-scene] render frame failed (" + stage + ")", error);
 }
 

@@ -320,9 +320,68 @@ test("a throwing frame is reported once via console.error, not flooded on every 
   page.sandbox.render(0);
   page.sandbox.render(16);
   page.sandbox.render(32);
-  assert.ok(page.consoleErrorCalls.length >= 1, "expected at least one console.error report");
   assert.strictEqual(page.consoleErrorCalls.length, 1,
     "expected the SAME repeating error to be reported once, not once per frame");
+});
+
+// D2b hardening review (R4-error-dedup-single-slot-flood / R3-error-dedup-single-slot /
+// R2-render-error-dedup-comment-misleading): reportRenderError used to remember only ONE last-reported
+// message, shared by BOTH render() try/catch blocks (scene and alert-overlay, see render() below). If
+// the two stages fail on every frame, the remembered message alternates scene/overlay/scene/overlay --
+// so neither throw ever matches what was remembered a moment ago, and console.error fires for EVERY
+// frame of EACH stage: exactly the 60x/sec flood this guard exists to stop, even though the comment
+// claimed "once per DISTINCT message". Deduping PER STAGE (one remembered message per render() try/
+// catch) fixes this: each stage's own repeats are compared only against that SAME stage's last message.
+
+test("a scene error and an overlay error that both fire on every frame are each reported once, not flip-flopped into a flood", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  page.sandbox.drawSoftOvalFields = function () { throw new Error("D2b-dedup-scene"); };
+  page.sandbox.renderAlertOverlay = function () { throw new Error("D2b-dedup-overlay"); };
+
+  page.sandbox.render(0);
+  page.sandbox.render(16);
+  page.sandbox.render(32);
+  page.sandbox.render(48);
+
+  assert.strictEqual(page.consoleErrorCalls.length, 2,
+    "expected exactly one console.error for the repeating scene error and one for the repeating " +
+    "overlay error (2 total across 4 frames), saw " + page.consoleErrorCalls.length);
+});
+
+// Only the overlay throws (scene keeps succeeding every frame): proves the overlay's OWN catch path
+// (D2b, R3-overlay-catch-path-unproved) -- every fault-isolation test above only ever made the SCENE
+// throw, leaving renderAlertOverlay's own try/catch (report, resetCanvasStateForFrame, scheduleFrame
+// still running, the scene still drawing) unproved.
+
+test("only the alert overlay throwing is reported once, does not stop the loop or the scene, and does not leak canvas state", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  var sceneDrawCalls = 0;
+  var originalDrawSoftOvalFields = page.sandbox.drawSoftOvalFields;
+  page.sandbox.drawSoftOvalFields = function () {
+    sceneDrawCalls++;
+    return originalDrawSoftOvalFields.apply(this, arguments);
+  };
+  page.sandbox.renderAlertOverlay = function () { throw new Error("D2b-overlay-only-throw"); };
+  page.ctx.globalAlpha = 0.33;
+  page.ctx.globalCompositeOperation = "difference";
+  page.canvas.style.transform = "translate(999px, 999px)"; // stale shake, as if mid-throw
+
+  var before = page.requestAnimationFrameCalls.length;
+  page.sandbox.render(0);
+  page.sandbox.render(16);
+  page.sandbox.render(32);
+
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 3,
+    "expected scheduleFrame(render) to keep running every frame while only the overlay throws");
+  assert.strictEqual(sceneDrawCalls, 3,
+    "expected the scene to keep drawing every frame while only the overlay throws");
+  assert.strictEqual(page.consoleErrorCalls.length, 1,
+    "expected the SAME repeating overlay error to be reported once, not once per frame");
+  assert.strictEqual(page.ctx.globalAlpha, 1, "expected globalAlpha reset after the overlay throws");
+  assert.strictEqual(page.ctx.globalCompositeOperation, "source-over",
+    "expected the composite mode reset after the overlay throws");
+  assert.strictEqual(page.canvas.style.transform, "",
+    "expected the stale shake transform cleared after the overlay throws");
 });
 
 test("a throwing scene layer does not leak canvas state (alpha/composite/shake) into later frames", function () {
