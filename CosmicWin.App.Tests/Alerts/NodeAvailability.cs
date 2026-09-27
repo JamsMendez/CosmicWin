@@ -25,9 +25,10 @@ internal static class NodeAvailability
             : "Requires `node` on PATH to run the alert-layer.js vm-sandbox harness (T9, alert-tile-mosaic).";
 
     /// <summary>
-    /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout): the same bound
-    /// <c>AlertLayerLayoutNodeTests.HarnessTimeout</c> uses for the harness itself, scaled down for a
-    /// probe that should answer in milliseconds -- <c>node --version</c> hanging is not something a
+    /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout): the probe's OWN bound,
+    /// independent of <c>AlertLayerLayoutNodeTests.HarnessTimeout</c> -- nothing derives one from the
+    /// other, so changing the harness timeout leaves this one alone. Short because
+    /// <c>node --version</c> should answer in milliseconds; a hang here is not something a
     /// well-behaved install ever does.
     /// </summary>
     private const int ProbeTimeoutMilliseconds = 5000;

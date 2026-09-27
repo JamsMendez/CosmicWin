@@ -235,9 +235,15 @@ test("hash API: the old single-kind #kind= form still maps to one full-canvas ti
 // "warning" tiles that fill the cap and push the real tiles out entirely. Confirmed by temporarily
 // restoring the old map-then-filter order in alert-layer.js: this fact failed with
 // ["warning", "warning"] instead of ["failed", "warning"], then passed again once reverted.
+//
+// Review follow-up R3-t15-cap-no-longer-exercised: with only two real entries left after the
+// filter, a 2x1 grid never had to cap anything, so deleting the cap still passed. A THIRD real entry
+// after the junk makes the cap load-bearing: without it the result is ["failed", "warning", "failed"].
+// Confirmed by temporarily deleting the .slice(0, columns * rows) call: this fact failed, then passed
+// again once restored.
 test("hash API: tiles= drops empty/unknown entries before mapping, then caps at columns*rows (T12/T15)", function () {
   var page = loadPage({
-    hash: "#tiles=bogus,,bogus,failed,warning&columns=2&rows=1&gap=0&duration=1000",
+    hash: "#tiles=bogus,,bogus,failed,warning,failed&columns=2&rows=1&gap=0&duration=1000",
   });
   assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
 });
