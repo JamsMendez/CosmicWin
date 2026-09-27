@@ -628,4 +628,76 @@ public sealed class SettingsTests
         Assert.Equal(TreeArranger.DefaultGap, settings.Gap);
         Assert.False(settings.Tiling);
     }
+
+    /// <summary>
+    /// D3 (html-wallpaper-demo, demo-only switch, 2026-09-26): <see cref="WallpaperMode.Video"/>
+    /// unless the file says otherwise -- a settings file that has never been written must not switch
+    /// the desktop wallpaper away from the video it always played.
+    /// </summary>
+    [Fact]
+    public void WallpaperModeDefaultsToVideo()
+    {
+        Assert.Equal(WallpaperMode.Video, Settings.Default.WallpaperMode);
+        Assert.Equal(WallpaperMode.Video, Settings.Parse(string.Empty).WallpaperMode);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-mode = html")]
+    [InlineData("wallpaper-mode=html")]
+    [InlineData("  WALLPAPER-MODE   =   Html  ")]
+    public void WallpaperModeIsReadAsHtml_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.Equal(WallpaperMode.Html, Settings.Parse(line).WallpaperMode);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-mode = video")]
+    [InlineData("wallpaper-mode=video")]
+    [InlineData("  WALLPAPER-MODE   =   Video  ")]
+    public void WallpaperModeIsReadAsVideo_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.Equal(WallpaperMode.Video, Settings.Parse(line).WallpaperMode);
+    }
+
+    /// <summary>Same rule as every other key: a value nobody recognises keeps the default rather than guessing.</summary>
+    [Theory]
+    [InlineData("wallpaper-mode = perhaps")]
+    [InlineData("wallpaper-mode =")]
+    [InlineData("wallpaper-mode")]
+    public void AnUnreadableWallpaperMode_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(WallpaperMode.Video, Settings.Parse(line).WallpaperMode);
+    }
+
+    [Theory]
+    [InlineData(WallpaperMode.Video)]
+    [InlineData(WallpaperMode.Html)]
+    public void SerializeThenParse_RoundTripsTheWallpaperMode(WallpaperMode wallpaperMode)
+    {
+        var original = new Settings(FocusBorder: true, WallpaperMode: wallpaperMode);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    [Fact]
+    public void Serialize_IncludesTheWallpaperModeAndMarksItAsADemo()
+    {
+        var serialized = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.Html).Serialize();
+
+        Assert.Contains("# wallpaper-mode:", serialized, StringComparison.Ordinal);
+        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wallpaper-mode = html", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void WallpaperModeIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\nwallpaper-mode = html\ntiling = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
+        Assert.False(settings.Tiling);
+    }
 }

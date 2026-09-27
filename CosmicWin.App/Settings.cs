@@ -3,6 +3,20 @@ using CosmicWin.Interop;
 namespace CosmicWin.App;
 
 /// <summary>
+/// D3 (html-wallpaper-demo, demo-only switch, 2026-09-26): which renderer draws the desktop
+/// wallpaper. <see cref="Video"/> is CosmicWin's only real, supported behaviour -- the looped MP4 at
+/// <see cref="Settings.VideoWallpaperPath"/>. <see cref="Html"/> is the demo: no video ever plays,
+/// and the wallpaper host is attached (see <c>AppComposition.Wire</c>'s <c>AttachHtmlWallpaper</c>)
+/// purely so an animated HTML scene page can be composited over it, driven by the same alert
+/// commands the video layer answers. See <c>odd/tasks/html-wallpaper-demo.md</c>.
+/// </summary>
+public enum WallpaperMode
+{
+    Video,
+    Html,
+}
+
+/// <summary>
 /// The handful of preferences CosmicWin keeps between runs.
 /// </summary>
 /// <param name="FocusBorder">
@@ -48,6 +62,11 @@ namespace CosmicWin.App;
 /// defaults to <see cref="TreeArranger.DefaultGap"/>, the value <c>TreeArranger.Gap</c> was hard-set
 /// to before this was a settings key at all.
 /// </param>
+/// <param name="WallpaperMode">
+/// DEMO ONLY (D3, html-wallpaper-demo, 2026-09-26): <see cref="CosmicWin.App.WallpaperMode.Video"/>
+/// unless the file says otherwise -- a settings file that has never been written must not switch the
+/// wallpaper away from the video it always played.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -68,7 +87,7 @@ namespace CosmicWin.App;
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
-    int Gap = TreeArranger.DefaultGap)
+    int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Video)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -96,6 +115,13 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string GapKey = "gap";
 
+    /// <summary>DEMO ONLY (D3, html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperMode"/>.</summary>
+    private const string WallpaperModeKey = "wallpaper-mode";
+
+    private const string WallpaperModeVideoValue = "video";
+
+    private const string WallpaperModeHtmlValue = "html";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -118,6 +144,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var alertHttpPort = Default.AlertHttpPort;
         var videoWallpaperHttpEnabled = Default.VideoWallpaperHttpEnabled;
         var gap = Default.Gap;
+        var wallpaperMode = Default.WallpaperMode;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -187,10 +214,15 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 gap = gapValue;
             }
+            else if (key.Equals(WallpaperModeKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadWallpaperMode(value, out var wallpaperModeValue))
+            {
+                wallpaperMode = wallpaperModeValue;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
-            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap);
+            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap, wallpaperMode);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -231,6 +263,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # {GapKey}: whole pixels of space around and between tiled windows, and around and between
          # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+
+         # {WallpaperModeKey}: DEMO ONLY, not a supported feature. `{WallpaperModeVideoValue}` (default)
+         # plays the configured video as today; `{WallpaperModeHtmlValue}` shows an animated HTML scene
+         # instead, with no video ever playing underneath it.
+         {WallpaperModeKey} = {(WallpaperMode == WallpaperMode.Html ? WallpaperModeHtmlValue : WallpaperModeVideoValue)}
 
          """;
 
@@ -325,6 +362,26 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
         gap = 0;
         return false;
+    }
+
+    /// <summary>
+    /// DEMO ONLY (D3, html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively.
+    /// Same rule as every other key: anything else keeps the default rather than guessing.
+    /// </summary>
+    private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
+    {
+        switch (value.ToLowerInvariant())
+        {
+            case WallpaperModeVideoValue:
+                mode = WallpaperMode.Video;
+                return true;
+            case WallpaperModeHtmlValue:
+                mode = WallpaperMode.Html;
+                return true;
+            default:
+                mode = WallpaperMode.Video;
+                return false;
+        }
     }
 
     /// <summary>Doubles each of the three nibbles: <c>0xF80</c> becomes <c>0xFF8800</c>.</summary>
