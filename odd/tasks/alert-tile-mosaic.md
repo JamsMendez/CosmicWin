@@ -708,3 +708,20 @@ maintainer's decision, unrelated to gap.
     deliberately leaked for T14's RED evidence was found, confirmed, and killed before continuing, and
     no run after the fix left anything behind.
   - Status: **done** for T13, T14, T15.
+
+- 2026-09-26: review `review-5d86ba584a739fe1` (HIGH, 4 lenses, a3f3b3b..473119d) APPROVED and
+  acknowledged. Two follow-ups fixed inline in `4a63752`:
+  - WARNING R3-t15-cap-no-longer-exercised: T15's input left 2 real tiles in a 2x1 grid, so the
+    cap never cut. Added a third real entry. RED: with `.slice(0, columns*rows)` deleted the harness
+    still passed 13/13 on the OLD input; on the NEW input it failed 12/13; restored -> 13/13.
+    `dotnet test CosmicWin.App.Tests`: 1094 passed / 6 skipped.
+  - WARNING R2-probe-timeout-doc-contradicts-value: `NodeAvailability.ProbeTimeoutMilliseconds` doc
+    now says the probe bound is independent of `HarnessTimeout`.
+  Remaining SUGGESTIONs (not fixed, recorded): R2-harness-timeout-doc-hardcodes-case-count,
+  R2-reloadgap-comment-below-ambiguous, R2-reloadgap-uses-alert-layer-named-filter,
+  R3-deferred-reload-test-weak-capture, R3-probe-timeout-path-unproved,
+  R3/R4-runnode-timeout-branch-unbounded-result, R3-timeout-test-proves-root-only,
+  R4-reload-gap-swallow-depends-on-optional-trace.
+- 2026-09-26: review `review-e85924812e3008ea` (HIGH, 4 lenses, 473119d..4a63752) APPROVED and
+  acknowledged. One SUGGESTION: R3-t15-third-entry-duplicates-first (the third entry repeats
+  "failed"; a distinct kind would also catch an order bug). Recorded, not fixed.
