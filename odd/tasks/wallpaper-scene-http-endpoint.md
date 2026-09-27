@@ -298,7 +298,8 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   and 11 SettingsFileTests re-run, passed. Advisory findings:
   - WARNING R3-upgrade-default-flip-unproved: an EXISTING settings.conf with no `wallpaper-mode`
     / `alert-http` line (older installs, hand-edited files) also flips to html / opens the port on
-    upgrade, silently. Open: needs a maintainer decision (intended vs. new-installs-only).
+    upgrade, silently. DECIDED by the maintainer 2026-09-27: accepted as intended (option 1, same
+    defaults for upgrades as for fresh installs); no code change.
   - SUGGESTION R3-production-loadorcreate-wiring-untested: nothing proves WireProduction calls
     LoadOrCreate rather than Load.
   - SUGGESTION R3-first-run-write-failure-silent: a failed first-run write leaves no trace.
