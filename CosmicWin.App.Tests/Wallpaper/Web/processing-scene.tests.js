@@ -463,6 +463,137 @@ test("a malformed host message is ignored without throwing", function () {
   assert.strictEqual(page.sandbox.animating, true);
 });
 
+// ---- Case 8: shared render-loop fps cap (D6d, html-wallpaper-demo) --------------------------------
+// shared/js/render-loop.js's scheduleFrame is the ONE place every scene schedules its next animation
+// frame (see that file's own header remarks). These drive the REAL requestAnimationFrame mock
+// directly -- page.requestAnimationFrameCalls records each pushed callback (see loadPage's own
+// windowMock.requestAnimationFrame), so a test can fire it with a chosen timestamp exactly like the
+// browser would, instead of calling render(ms) directly (which bypasses scheduleFrame entirely, as
+// every earlier case in this file does on purpose -- see Case 2/3/6/7).
+
+test("readWallpaperFpsFromUrl parses fps=30 as 30", function () {
+  var page = loadPage({ search: "?fps=30" });
+  assert.strictEqual(page.sandbox.readWallpaperFpsFromUrl(), 30);
+});
+
+test("readWallpaperFpsFromUrl parses fps=60 as 60", function () {
+  var page = loadPage({ search: "?fps=60" });
+  assert.strictEqual(page.sandbox.readWallpaperFpsFromUrl(), 60);
+});
+
+test("readWallpaperFpsFromUrl treats an unrecognized fps value as 60", function () {
+  var page = loadPage({ search: "?fps=45" });
+  assert.strictEqual(page.sandbox.readWallpaperFpsFromUrl(), 60);
+});
+
+test("readWallpaperFpsFromUrl treats a missing fps param as 60", function () {
+  var page = loadPage({});
+  assert.strictEqual(page.sandbox.readWallpaperFpsFromUrl(), 60);
+});
+
+test("shared render loop: at the default 60fps, every scheduled animation frame draws", function () {
+  var page = loadPage({});
+  var drawnCount = 0;
+  function loop() { drawnCount++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  var frameTimesMs = [0, 16.7, 33.3, 50.0, 66.7];
+  frameTimesMs.forEach(function (ms) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(ms);
+  });
+
+  assert.strictEqual(drawnCount, frameTimesMs.length,
+    "expected every rAF callback to draw at the default 60fps, same as before this cap existed");
+});
+
+test("shared render loop: fps=60 explicitly in the URL behaves the same as the default", function () {
+  var page = loadPage({ search: "?fps=60" });
+  var drawnCount = 0;
+  function loop() { drawnCount++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  [0, 16.7, 33.3].forEach(function (ms) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(ms);
+  });
+
+  assert.strictEqual(drawnCount, 3);
+});
+
+test("shared render loop: at 30fps, rAF callbacks spaced 16.7ms apart draw about every other frame", function () {
+  var page = loadPage({ search: "?fps=30" });
+  var drawnTimesMs = [];
+  function loop(ms) { drawnTimesMs.push(ms); page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  for (var i = 0; i < 10; i++) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(i * 16.7);
+  }
+
+  assert.strictEqual(drawnTimesMs.length, 5,
+    "expected about half of 10 60fps-spaced rAF callbacks to draw under a 30fps cap, drew at: " + JSON.stringify(drawnTimesMs));
+  for (var j = 1; j < drawnTimesMs.length; j++) {
+    assert.ok(drawnTimesMs[j] - drawnTimesMs[j - 1] >= 30,
+      "expected consecutive DRAWN frames to be at least ~30ms apart (30fps), got " + JSON.stringify(drawnTimesMs));
+  }
+});
+
+test("shared render loop: an unrecognized fps value in the URL keeps every frame drawing (default 60fps)", function () {
+  var page = loadPage({ search: "?fps=45" });
+  var drawnCount = 0;
+  function loop() { drawnCount++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  [0, 16.7, 33.3].forEach(function (ms) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(ms);
+  });
+
+  assert.strictEqual(drawnCount, 3);
+});
+
+test("shared render loop: a skipped frame still reschedules the next animation frame, without invoking the callback", function () {
+  var page = loadPage({ search: "?fps=30" });
+  var calls = 0;
+  function loop() { calls++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  var before = page.requestAnimationFrameCalls.length;
+  var firstWrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+  firstWrapper(0); // first frame always draws (nothing drawn yet to compare against)
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 1,
+    "expected the drawn frame's own reschedule to push exactly one new rAF call");
+
+  var secondWrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+  secondWrapper(16.7); // well under the ~33.3ms 30fps interval -- must be skipped
+  assert.strictEqual(calls, 1, "expected the skipped frame to NOT invoke the callback");
+  assert.strictEqual(page.requestAnimationFrameCalls.length, before + 2,
+    "expected the skipped frame to still reschedule the next animation frame on its own");
+});
+
+test("an alert's 'done' still fires on its own duration under a 30fps cap, not distorted by skipped frames", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500, withWebview: true, search: "?fps=30" });
+  page.sandbox.startShowing(["warning"], 1, 1, 0, 1000);
+
+  var doneFiredAtMs = null;
+  for (var i = 0; i <= 70 && doneFiredAtMs === null; i++) {
+    var ms = i * 16.7;
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(ms);
+    if (page.postedMessages.indexOf("done") !== -1) doneFiredAtMs = ms;
+  }
+
+  assert.strictEqual(page.sandbox.kindState.warning.state, "shown");
+  assert.ok(doneFiredAtMs !== null, "expected 'done' to fire eventually under the 30fps cap");
+  assert.ok(doneFiredAtMs >= 1000,
+    "expected 'done' to fire only once REAL elapsed time reached the alert's own 1000ms duration, got " + doneFiredAtMs);
+  assert.ok(doneFiredAtMs < 1050,
+    "expected 'done' close to the actual duration boundary, not badly delayed by the 30fps cap, got " + doneFiredAtMs);
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

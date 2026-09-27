@@ -432,6 +432,30 @@ test("drawSeeThroughIntersections balances its own save/restore even when the ho
     "expected a normal (non-throwing) call to also balance save()/restore(), saw " + JSON.stringify(normalG.counts));
 });
 
+// ---- Shared render-loop fps cap smoke check (D6d, html-wallpaper-demo) ----------------------------
+// The throttle itself (skip-still-reschedules, exact 30fps spacing, fps parsing, alert duration
+// unaffected) is exhaustively covered against the shared code in processing-scene.tests.js; this only
+// proves THIS scene's own render loop actually routes through it (animate.js's own
+// `scheduleFrame(renderFrame)`, not a local override) rather than re-deriving the throttle's own
+// correctness.
+
+test("shared render loop: fps=30 in the URL caps this scene's OWN renderFrame() loop, not just the shared helper", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600, search: "?fps=30" });
+  var sceneDrawCalls = 0;
+  var original = page.sandbox.drawStarfield;
+  page.sandbox.drawStarfield = function () { sceneDrawCalls++; return original.apply(this, arguments); };
+
+  var frameTimesMs = [0, 16.7, 33.3, 50.0, 66.7, 83.3];
+  frameTimesMs.forEach(function (ms) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(ms);
+  });
+
+  assert.ok(sceneDrawCalls < frameTimesMs.length,
+    "expected renderFrame() to run fewer times than rAF callbacks under a 30fps cap, ran " + sceneDrawCalls + " of " + frameTimesMs.length);
+  assert.ok(sceneDrawCalls >= 2, "expected at least two frames to still render, ran " + sceneDrawCalls);
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

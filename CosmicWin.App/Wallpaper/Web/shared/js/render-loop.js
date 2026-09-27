@@ -47,3 +47,64 @@ function createRenderStageReporter(logPrefix) {
     console.error(logPrefix + " render frame failed (" + stage + ")", error);
   };
 }
+
+// html-wallpaper-demo D6d: the shared frame-rate cap. Every scene used to declare its own
+// `const scheduleFrame = window.requestAnimationFrame.bind(window);` (processing/js/config.js,
+// raphael/js/config.js, explorer/js/animate.js, idle/js/animate.js) -- moved HERE, as the single
+// place every scene's render loop schedules its next animation frame, so the smallest possible
+// change (each scene's own file just stops declaring it) routes all four through one throttle. This
+// file already loads before every scene's own main.js/animate.js (see the SCRIPT_FILES order in each
+// scene's own index.html, right after shared/js/alert-overlay.js), so nothing needs to change about
+// load order.
+//
+// readWallpaperFpsFromUrl() reuses alert-overlay.js's own parseParams() (loaded just before this
+// file -- see that file's own header remarks) rather than re-parsing location.hash/location.search a
+// second way: `fps` is just one more query/hash param on the same navigated URL (see
+// WebViewAlertLayerController.cs's own Navigate call, `.../index.html?fps=<30|60>`), read exactly
+// once at load (settings take effect at startup, like wallpaper-mode; D6d needs no live reload).
+// Anything other than the literal "30" keeps the default 60 -- including "60" itself, a missing
+// param, or garbage -- exactly like Settings.cs's own TryReadWallpaperFps treats anything other than
+// exactly 30/60 as the default.
+function readWallpaperFpsFromUrl() {
+  try {
+    return Number(parseParams().get("fps")) === 30 ? 30 : 60;
+  } catch (parseError) {
+    return 60;
+  }
+}
+
+var wallpaperFrameIntervalMs = 1000 / readWallpaperFpsFromUrl();
+
+// The timestamp (rAF's own `ms` argument) of the last frame actually DRAWN -- i.e. the last time
+// `scheduleFrame`'s own wrapper decided to invoke its callback, never a frame it skipped. `null`
+// means no frame has drawn yet (always draws the very first one, with nothing to compare against).
+var wallpaperLastDrawnFrameTimeMs = null;
+
+// Tolerates rAF's own ordinary sub-millisecond delivery jitter without ever letting a full extra
+// frame slip through: a real interval a hair under the exact target (e.g. 33.29ms against a 33.33ms
+// 30fps target) still counts as "enough time passed", the same way a hair OVER never lets two frames
+// through where only one fpscap-worth of time has elapsed.
+var WALLPAPER_FRAME_INTERVAL_EPSILON_MS = 1;
+
+// The ONE place every scene's render loop schedules its next frame (see this function's own header
+// remarks above for what it replaces). At the default 60fps this is exactly one
+// requestAnimationFrame per drawn frame -- unchanged in effect from before this file existed. At
+// 30fps, roughly every other real animation frame is SKIPPED: `callback` is not invoked at all (so it
+// draws nothing and cannot advance whatever clock it reads from its own `ms` argument, e.g.
+// alertSceneMs), but the skip itself still reschedules via requestAnimationFrame -- unconditionally,
+// exactly like every scene's own render()/renderFrame() unconditionally calls scheduleFrame as its
+// last statement (D2b/D6a fault isolation) -- so the loop never stops. Because a DRAWN frame always
+// carries its REAL rAF timestamp, an alert's own duration (measured in wall-clock ms, see
+// alert-overlay.js's startShowing/render) still elapses correctly regardless of how many frames were
+// skipped in between; only the DRAWING rate is capped, never the clock a drawn frame is handed.
+function scheduleFrame(callback) {
+  window.requestAnimationFrame(function (frameTimeMs) {
+    if (wallpaperLastDrawnFrameTimeMs !== null &&
+        frameTimeMs - wallpaperLastDrawnFrameTimeMs < wallpaperFrameIntervalMs - WALLPAPER_FRAME_INTERVAL_EPSILON_MS) {
+      scheduleFrame(callback);
+      return;
+    }
+    wallpaperLastDrawnFrameTimeMs = frameTimeMs;
+    callback(frameTimeMs);
+  });
+}

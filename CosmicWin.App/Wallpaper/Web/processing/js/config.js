@@ -15,7 +15,8 @@
 const canvas = document.getElementById('scene');
 const ctx = canvas.getContext('2d', { alpha: true });
 const nebulaCanvas = document.getElementById('nebula');
-const scheduleFrame = window.requestAnimationFrame.bind(window);
+// D6d: scheduleFrame moved to the shared ../shared/js/render-loop.js (the fps-cap throttle), loaded
+// later but still before this scene's own js/main.js ever calls it -- see that file's own remarks.
 
 let W = 0;
 let H = 0;

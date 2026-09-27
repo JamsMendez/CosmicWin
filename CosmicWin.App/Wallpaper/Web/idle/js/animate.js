@@ -474,7 +474,8 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
 
 // --- Main animation loop -----------------------------------------------------------------------
 
-const scheduleFrame = window.requestAnimationFrame.bind(window);
+// D6d: scheduleFrame moved to the shared ../shared/js/render-loop.js (the fps-cap throttle), loaded
+// before this file -- see that file's own remarks.
 let animationStartMs = null;
 
 // html-wallpaper-demo D6c: the constellation ring's own {cache, cx, cy, angle} stamp, as drawn by
