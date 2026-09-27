@@ -14,7 +14,7 @@ var ctx = canvas.getContext("2d", { alpha: true });
 var scheduleFrame = window.requestAnimationFrame.bind(window);
 
 // alert-tile-mosaic (2026-09-26): W/H used to mean "the whole canvas' CSS size" -- every drawing
-// function below (drawFailureOverlay, drawFailureModules, foldingBandGeometry, ...) reads them to
+// function below (drawFailureOverlay, drawFailureModules, drawFailureTitle, ...) reads them to
 // size and center its own drawing. They now mean "the CURRENT TILE's CSS size" instead, set by
 // renderTile() right before each tile is drawn -- canvasW/canvasH hold the whole canvas' own CSS
 // size, which N=1 (see tileRects) still maps straight onto W/H, so a single tile looks exactly like
@@ -69,7 +69,6 @@ var FAILURE_OVERLAY_THEMES = {
     bits: FAILURE_OVERLAY_BITS,
     wash: "rgba(196,12,30,0.52)",
     letters: "rgb(112,0,16)",
-    intersections: "rgb(0,160,196)",
     shakeMs: FAILURE_SHAKE_MS,
     revealMs: FAILURE_REVEAL_MS,
   },
@@ -78,89 +77,17 @@ var FAILURE_OVERLAY_THEMES = {
     bits: WARNING_OVERLAY_BITS,
     wash: "rgba(255,200,20,0.58)",
     letters: "rgb(150,96,0)",
-    // Violet is the complement of the amber wash, so the bands stay readable through it.
-    intersections: "rgb(88,40,196)",
     shakeMs: 0,
     revealMs: 700,
   },
 };
 
-// Ping-pong band animation driving drawFailureBandIntersections -- kept from the source page so
-// the intersections mask animates exactly as it always did (backgroud-processing/script.js).
-var ONE_WAY_DURATION = 60 * 5;
-var ANIMATION_CYCLE_DURATION = 30;
-var FOLDING_BAND_SPEEDS = [3, -3, 3]; // [outer, middle, inner]
-
-function pingpong01(x) {
-  var cycle = x % 2;
-  return cycle <= 1 ? cycle : 2 - cycle;
-}
-
-function animationProgress(ms) {
-  return pingpong01((ms / 1000) / ONE_WAY_DURATION) * (ONE_WAY_DURATION / ANIMATION_CYCLE_DURATION);
-}
-
-function foldingBandCompression(fold) {
-  return 0.10 + 0.90 * Math.pow(Math.cos(fold), 2);
-}
-
-function foldingBandGeometry(rx, ry, width, foldPhase) {
-  var segmentCount = Math.max(48, Math.min(84, Math.round(Math.min(W, H) * 0.075)));
-  var points = [];
-  for (var i = 0; i <= segmentCount; i++) {
-    var a = (i / segmentCount) * TAU;
-    var x = Math.cos(a) * rx;
-    var y = Math.sin(a) * ry;
-    var tx = -Math.sin(a) * rx;
-    var ty = Math.cos(a) * ry;
-    var tangentLength = Math.hypot(tx, ty);
-    var nx = -ty / tangentLength;
-    var ny = tx / tangentLength;
-    var fold = a * 2 + foldPhase;
-    var compression = foldingBandCompression(fold);
-    var bandWidth = width * compression;
-    var skew = Math.sin(fold) * width * 0.22;
-    points.push({
-      left: [x + nx * bandWidth + (tx / tangentLength) * skew, y + ny * bandWidth + (ty / tangentLength) * skew],
-      right: [x - nx * bandWidth - (tx / tangentLength) * skew, y - ny * bandWidth - (ty / tangentLength) * skew],
-    });
-  }
-  return points;
-}
-
-function fillFoldingBandGeometry(g, points, fillStyle) {
-  g.fillStyle = fillStyle;
-  for (var i = 0; i < points.length - 1; i++) {
-    var a = points[i];
-    var b = points[i + 1];
-    g.beginPath();
-    g.moveTo(a.left[0], a.left[1]);
-    g.lineTo(b.left[0], b.left[1]);
-    g.lineTo(b.right[0], b.right[1]);
-    g.lineTo(a.right[0], a.right[1]);
-    g.closePath();
-    g.fill();
-  }
-}
-
-function foldingBandParameters(progress) {
-  var minD = Math.min(W, H);
-  var phase = progress * TAU;
-  var outerBandSpeed = FOLDING_BAND_SPEEDS[0];
-  var middleBandSpeed = FOLDING_BAND_SPEEDS[1];
-  var innerBandSpeed = FOLDING_BAND_SPEEDS[2];
-  return [
-    [minD * 0.385, minD * 0.255, -0.76 + phase * outerBandSpeed, minD * 0.025, phase * outerBandSpeed],
-    [minD * 0.235, minD * 0.365, 0.36 + phase * middleBandSpeed, minD * 0.023, phase * middleBandSpeed + 0.9],
-    [minD * 0.315, minD * 0.225, 0.10 + phase * innerBandSpeed, minD * 0.018, phase * innerBandSpeed + 1.8],
-  ];
-}
-
 var FAILURE_TITLE_FONT = '"Archivo Black", "Arial Black", "Helvetica Neue", sans-serif';
 var failureLayers = [];
 
-// Offscreen layers: 0 letters, 1 band intersections, 2 full overlay (used only during the reveal),
-// 3 the reveal's own pixelation buffer.
+// Offscreen layers: 0 letters, 2 full overlay (used only during the reveal), 3 the reveal's own
+// pixelation buffer. (Slot 1 held the fake band intersections, removed by remove-fake-letter-bands
+// B1; its number is left unused rather than renumbering the slots that remain.)
 function failureLayer(slot) {
   if (!failureLayers[slot]) {
     var layer = document.createElement("canvas");
@@ -207,26 +134,6 @@ function drawFailureTitle(g, frame, title) {
   g.rect(frame.x, frame.y + frame.h - H * 0.23, frame.w, H * 0.23);
   g.clip();
   g.fillText(title, W * 0.5, frame.y + frame.h + capHeight * 0.42);
-  g.restore();
-}
-
-function drawFailureBandIntersections(g, letters, cx, cy, progress, color) {
-  // Reuses the animated band geometry, then keeps it only where the letters are ('destination-in').
-  g.save();
-  g.translate(cx, cy);
-  var bands = foldingBandParameters(progress);
-  for (var i = 0; i < bands.length; i++) {
-    var rx = bands[i][0], ry = bands[i][1], rot = bands[i][2], width = bands[i][3], foldPhase = bands[i][4];
-    g.save();
-    g.rotate(rot);
-    fillFoldingBandGeometry(g, foldingBandGeometry(rx, ry, width, foldPhase), color);
-    g.restore();
-  }
-  g.restore();
-  g.save();
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.globalCompositeOperation = "destination-in";
-  g.drawImage(letters, 0, 0);
   g.restore();
 }
 
@@ -289,7 +196,7 @@ function drawFailureModules(g, frame, counter, overlayBits) {
   }
 }
 
-function drawFailureOverlay(g, cx, cy, progress, counter, theme) {
+function drawFailureOverlay(g, counter, theme) {
   var minD = Math.min(W, H);
   var frame = { x: W * 0.038, y: H * 0.064 };
   frame.w = W - frame.x * 2;
@@ -309,7 +216,8 @@ function drawFailureOverlay(g, cx, cy, progress, counter, theme) {
   for (var r = 0; r < rails.length; r++) g.fillRect(rails[r][0], rails[r][1], rails[r][2], rails[r][3]);
   g.restore();
 
-  // Letters are rendered into an offscreen mask so the bands can be clipped to them.
+  // Letters are rendered into an offscreen buffer so one shadowed blit (below) covers the whole
+  // title at once, instead of shadowing each of drawFailureTitle's two clipped fragments separately.
   var letters = failureLayer(0);
   letters.fillStyle = theme.letters;
   drawFailureTitle(letters, frame, theme.title);
@@ -320,11 +228,6 @@ function drawFailureOverlay(g, cx, cy, progress, counter, theme) {
   g.globalAlpha = 0.86;
   g.drawImage(letters.canvas, 0, 0, W, H);
   g.restore();
-  var intersections = failureLayer(1);
-  drawFailureBandIntersections(intersections, letters.canvas, cx, cy, progress, theme.intersections);
-  g.globalAlpha = 0.95;
-  g.drawImage(intersections.canvas, 0, 0, W, H);
-  g.globalAlpha = 1;
 
   g.strokeStyle = "rgba(255,255,255,0.9)";
   g.lineWidth = Math.max(2, minD * 0.004);
@@ -364,7 +267,7 @@ function drawPixelated(source, cell, slot, alpha) {
   ctx.restore();
 }
 
-function drawFailureLayer(cx, cy, progress, ms, kind) {
+function drawFailureLayer(ms, kind) {
   var entry = kindState[kind];
   if (entry.state === "hidden" || entry.state === "shaking") return;
   var theme = FAILURE_OVERLAY_THEMES[kind];
@@ -372,7 +275,7 @@ function drawFailureLayer(cx, cy, progress, ms, kind) {
   var counter = Math.floor(shownMs / FAILURE_COUNTER_STEP_MS) % 100;
 
   if (entry.state === "shown") {
-    drawFailureOverlay(ctx, cx, cy, progress, counter, theme);
+    drawFailureOverlay(ctx, counter, theme);
     return;
   }
 
@@ -384,7 +287,7 @@ function drawFailureLayer(cx, cy, progress, ms, kind) {
   var openT = Math.max(0, (t - FAILURE_REVEAL_LINE_SHARE) / (1 - FAILURE_REVEAL_LINE_SHARE));
   var cell = Math.max(1, Math.round(FAILURE_REVEAL_MAX_CELL * Math.pow(1 - eased, 1.4)));
   var overlay = failureLayer(2);
-  drawFailureOverlay(overlay, cx, cy, progress, counter, theme);
+  drawFailureOverlay(overlay, counter, theme);
 
   var revealW = W * (1 - Math.pow(1 - lineT, 2));
   var revealH = Math.max(H * 0.04, H * (1 - Math.pow(1 - openT, 3)));
@@ -590,22 +493,20 @@ function signalDoneIfElapsed(ms) {
 // Draws ONE tile: sets the tile-local W/H (see the remarks above their declaration), clips and
 // translates ctx to the tile's rect so every existing drawing function -- unaware anything changed
 // -- draws exactly as it always did, just inside this tile instead of the whole canvas.
-function renderTile(rect, kind, progress, ms) {
+function renderTile(rect, kind, ms) {
   W = rect.w;
   H = rect.h;
   tileDeviceX = Math.round(rect.x * canvasScaleX);
   tileDeviceY = Math.round(rect.y * canvasScaleY);
   tileDeviceW = Math.round(rect.w * canvasScaleX);
   tileDeviceH = Math.round(rect.h * canvasScaleY);
-  var cx = W * 0.5;
-  var cy = H * 0.5;
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
   ctx.translate(rect.x, rect.y);
-  drawFailureLayer(cx, cy, progress, ms, kind);
+  drawFailureLayer(ms, kind);
   ctx.restore();
 }
 
@@ -613,12 +514,11 @@ function render(ms) {
   if (!animating) return;
   if (showStartMs === null) showStartMs = ms;
   var rects = tileRects();
-  var progress = animationProgress(ms);
 
   clearCanvas();
   for (var i = 0; i < tiles.length && i < rects.length; i++) {
     advanceKindState(ms, tiles[i]);
-    renderTile(rects[i], tiles[i], progress, ms);
+    renderTile(rects[i], tiles[i], ms);
   }
 
   if (signalDoneIfElapsed(ms)) {

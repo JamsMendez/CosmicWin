@@ -35,18 +35,26 @@ const pageSource = fs.readFileSync(scriptPath, "utf8");
 // element with a 2D context (every method/property is a harmless no-op/slot -- nothing here draws
 // a single pixel; only tileRects()/gridAreaRect()/the hash parser are asserted on), window sizing
 // and devicePixelRatio, location.hash, and an optional chrome.webview bridge.
+// T16 (remove-fake-letter-bands, B1): fillStyle history, added only to let the "no fake band color
+// is ever painted" cases below assert on every color the page ever set, not just the last one a
+// plain slot would keep -- drawFailureOverlay sets fillStyle several times per frame (wash, rail
+// cutout, letters, and -- before this task -- the band intersections), so a single latched slot
+// value could never have caught a color painted mid-frame and overwritten before the frame ends.
 function make2dContext() {
   var slots = {};
+  var fillStyleHistory = [];
   return new Proxy({}, {
     get: function (target, prop) {
       if (prop === "measureText") {
         return function (text) { return { width: String(text).length * 8 }; };
       }
+      if (prop === "__fillStyleHistory") return fillStyleHistory;
       if (prop in slots) return slots[prop];
       return function () { /* no-op: save/restore/beginPath/rect/clip/fill/drawImage/... */ };
     },
     set: function (target, prop, value) {
       slots[prop] = value;
+      if (prop === "fillStyle") fillStyleHistory.push(value);
       return true;
     },
   });
@@ -97,7 +105,7 @@ function loadPage(options) {
   vm.createContext(sandbox);
   vm.runInContext(pageSource, sandbox, { filename: scriptPath });
 
-  return { sandbox: sandbox, postedMessages: postedMessages };
+  return { sandbox: sandbox, postedMessages: postedMessages, fillStyleHistory: ctx2d.__fillStyleHistory };
 }
 
 // ---- Tiny test runner -------------------------------------------------------------------------
@@ -246,6 +254,41 @@ test("hash API: tiles= drops empty/unknown entries before mapping, then caps at 
     hash: "#tiles=bogus,,bogus,failed,warning,failed&columns=2&rows=1&gap=0&duration=1000",
   });
   assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
+});
+
+// ---- Cases: the fake band intersections must never be painted (remove-fake-letter-bands, B1) ----
+// drawFailureOverlay used to draw a copy of the wallpaper's folding-band animation, clipped to the
+// letters, in a fixed color per kind (FAILURE_OVERLAY_THEMES[kind].intersections) -- a fake effect
+// unrelated to the real video behind the page, removed by this task. These cases drive a tile of
+// each kind all the way to "shown" (and through "revealing" on the way there, since drawFailureLayer
+// paints the SAME overlay, via the pixelation buffer, during the reveal too) and fail if the page
+// ever sets fillStyle to either kind's old band color -- a stronger check than grepping the source
+// for the color literal, since it proves the color is never actually PAINTED, in any state.
+var FAILED_BAND_COLOR = "rgb(0,160,196)";
+var WARNING_BAND_COLOR = "rgb(88,40,196)";
+
+test("shown failed tile never paints the fake band intersection color", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  page.sandbox.startShowing(["failed"], 1, 1, 0, 5000);
+  page.sandbox.render(0); // shaking (FAILURE_SHAKE_MS = 120)
+  page.sandbox.render(200); // revealing (120 <= 200 < 120 + FAILURE_REVEAL_MS(350) = 470)
+  assert.strictEqual(page.sandbox.kindState.failed.state, "revealing");
+  page.sandbox.render(600); // shown (600 >= 470)
+  assert.strictEqual(page.sandbox.kindState.failed.state, "shown");
+  assert.strictEqual(page.fillStyleHistory.indexOf(FAILED_BAND_COLOR), -1,
+    "expected the failed band color to never be painted, but fillStyle was set to it");
+});
+
+test("shown warning tile never paints the fake band intersection color", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  page.sandbox.startShowing(["warning"], 1, 1, 0, 5000);
+  page.sandbox.render(0); // shaking is skipped for warning (shakeMs = 0), straight to revealing
+  page.sandbox.render(400); // revealing (0 <= 400 < FAILURE_REVEAL_MS(700))
+  assert.strictEqual(page.sandbox.kindState.warning.state, "revealing");
+  page.sandbox.render(800); // shown (800 >= 700)
+  assert.strictEqual(page.sandbox.kindState.warning.state, "shown");
+  assert.strictEqual(page.fillStyleHistory.indexOf(WARNING_BAND_COLOR), -1,
+    "expected the warning band color to never be painted, but fillStyle was set to it");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
