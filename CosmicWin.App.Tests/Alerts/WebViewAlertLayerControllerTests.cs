@@ -240,6 +240,14 @@ public sealed class WebViewAlertLayerControllerTests
     /// <see cref="SceneFolderName_MapsEachSceneToItsFixedFolderName"/> for that pure mapping's own
     /// coverage), not a hardcoded constant, and carries the configured `fps` cap as a query param.
     /// </para>
+    /// <para>
+    /// S3 (wallpaper-scene-http-endpoint): the URL is now built by the pure <see cref="SceneUrl"/>
+    /// helper (see <see cref="SceneUrl_BuildsTheExactNavigatedUrlForEachSceneAndFps"/>) from the
+    /// MUTABLE <c>_currentScene</c> field rather than an inline string built from the constructor's
+    /// own <c>_htmlWallpaperScene</c> parameter directly -- <see
+    /// cref="SwitchScene_InHtmlModeWithNoControllerYet_RecordsTheSceneAndReturnsTrue"/> and <see
+    /// cref="ARecreateWouldNavigateToTheCurrentSceneNotTheConstructionTimeOne"/> cover why.
+    /// </para>
     /// </summary>
     [Fact]
     public void HtmlWallpaperMode_MapsAndNavigatesToTheConfiguredScenePageUnderItsOwnDomain()
@@ -250,12 +258,9 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-alert.example\"", source);
         Assert.Contains("Navigate(\"https://cosmicwin-alert.example/alert-layer.html\")", source);
 
-        // Html wallpaper mode, D6d.
+        // Html wallpaper mode, D6d/S3.
         Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-scene.example\"", source);
-        Assert.Contains("var sceneFolder = SceneFolderName(_htmlWallpaperScene);", source);
-        Assert.Contains(
-            "$\"https://cosmicwin-scene.example/{sceneFolder}/index.html?fps={_htmlWallpaperFps}\"",
-            source);
+        Assert.Contains("Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));", source);
         Assert.Contains("\"Wallpaper\", \"Web\")", source);
         Assert.DoesNotContain("\"Wallpaper\", \"Web\", \"processing\"", source);
         Assert.DoesNotContain(".local\"", source);
@@ -286,6 +291,132 @@ public sealed class WebViewAlertLayerControllerTests
     /// structurally here, the same way every other WebView2-only behaviour in this class is (see the
     /// class remarks).
     /// </summary>
+    /// <summary>
+    /// S3 (wallpaper-scene-http-endpoint): the exact URL a preload OR a live <see
+    /// cref="WebViewAlertLayerController.SwitchScene"/> navigates to for a scene -- pulled out as a
+    /// pure, directly-testable function (unlike the rest of this class's WebView2-only behaviour, see
+    /// the class remarks) since <c>CreateAsync</c> and <c>SwitchScene</c> both build the identical URL.
+    /// </summary>
+    [Theory]
+    [InlineData(WallpaperScene.Processing, 60, "https://cosmicwin-scene.example/processing/index.html?fps=60")]
+    [InlineData(WallpaperScene.Explorer, 30, "https://cosmicwin-scene.example/explorer/index.html?fps=30")]
+    [InlineData(WallpaperScene.Idle, 60, "https://cosmicwin-scene.example/idle/index.html?fps=60")]
+    [InlineData(WallpaperScene.Raphael, 30, "https://cosmicwin-scene.example/raphael/index.html?fps=30")]
+    public void SceneUrl_BuildsTheExactNavigatedUrlForEachSceneAndFps(WallpaperScene scene, int fps, string expected)
+    {
+        Assert.Equal(expected, WebViewAlertLayerController.SceneUrl(scene, fps));
+    }
+
+    /// <summary>
+    /// S3: outside html wallpaper mode there is no scene to switch -- the caller (AppComposition's
+    /// HTTP handler) reads <see langword="false"/> as "answer 503, do not dispatch anything". Video
+    /// mode's own host/controller are never touched, same trick as
+    /// <see cref="PreloadStartAndEndNeverReachWebView2WhenTheHostIsUnattached"/>.
+    /// </summary>
+    [Fact]
+    public void SwitchScene_OutsideHtmlWallpaperMode_ReturnsFalse()
+    {
+        bool? result = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                using var host = new Win32VideoWallpaperHost();
+                using var layer = new WebViewAlertLayerController(host); // video mode (default)
+                result = layer.SwitchScene(WallpaperScene.Idle);
+            }
+            catch (Exception ex) { error = ex; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(error);
+        Assert.False(result);
+    }
+
+    /// <summary>
+    /// S3: an UNATTACHED host (Hwnd == 0, IsCompositionReady == false) never creates a real
+    /// controller, so <c>SwitchScene</c> takes its "just record the scene" branch -- proving that
+    /// branch, and the "same scene again -> true, no-op" decision, without hardware.
+    /// </summary>
+    [Fact]
+    public void SwitchScene_InHtmlModeWithNoControllerYet_RecordsTheSceneAndReturnsTrue()
+    {
+        bool? first = null;
+        bool? same = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var dispatcher = Dispatcher.CurrentDispatcher;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+                using var host = new Win32VideoWallpaperHost();
+                using var layer = new WebViewAlertLayerController(host, htmlWallpaperMode: true);
+                first = layer.SwitchScene(WallpaperScene.Idle);
+                same = layer.SwitchScene(WallpaperScene.Idle); // same scene again -- still true
+            }
+            catch (Exception ex) { error = ex; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(error);
+        Assert.True(first);
+        Assert.True(same);
+    }
+
+    /// <summary>S3: every other public method on this class requires the owning dispatcher; SwitchScene is no exception.</summary>
+    [Fact]
+    public void SwitchScene_OffTheOwningDispatcher_Throws()
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(null);
+                _ = Dispatcher.CurrentDispatcher;
+                using var host = new Win32VideoWallpaperHost();
+                using var layer = new WebViewAlertLayerController(host, htmlWallpaperMode: true);
+                Assert.Throws<InvalidOperationException>(() =>
+                    Task.Run(() => layer.SwitchScene(WallpaperScene.Idle)).GetAwaiter().GetResult());
+            }
+            catch (Exception ex) { error = ex; }
+            finally { Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(10)));
+        Assert.Null(error);
+    }
+
+    /// <summary>
+    /// S3: <c>CreateAsync</c>'s html-mode Navigate reads the MUTABLE <c>_currentScene</c> field, never
+    /// the constructor's own <c>htmlWallpaperScene</c> parameter directly, and <c>TearDown</c> never
+    /// resets it -- together this is what makes a later recreate (TearDown -&gt; Poll -&gt;
+    /// CreateAsync, e.g. an Explorer restart) navigate to whatever scene is CURRENT rather than the
+    /// scene this controller happened to start with.
+    /// </summary>
+    [Fact]
+    public void ARecreateWouldNavigateToTheCurrentSceneNotTheConstructionTimeOne()
+    {
+        var source = ReadControllerSource();
+        Assert.Contains("Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));", source);
+
+        var start = source.IndexOf(
+            "private void TearDown(string reason, bool dropEnvironment = false)", StringComparison.Ordinal);
+        Assert.True(start >= 0, "expected a private void TearDown(string reason, bool dropEnvironment = false) method");
+        var next = source.IndexOf("\n    private void CheckAccess", start + 1, StringComparison.Ordinal);
+        var body = source[start..(next > 0 ? next : source.Length)];
+        Assert.DoesNotContain("_currentScene", body);
+    }
+
     [Fact]
     public void VisibilityDecisions_GoThroughTheSharedPolicyClass()
     {

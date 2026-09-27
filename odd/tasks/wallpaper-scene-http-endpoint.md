@@ -52,7 +52,7 @@ split into work-unit commits per task below.
 
 - [x] S1 - `WallpaperSceneHttpProtocol` + tests (pure validation). Route: delegated writer.
 - [x] S2 - `LocalHttpCommandServer` scene route + wire-level tests. Route: delegated writer.
-- [ ] S3 - `WebViewAlertLayerController.SwitchScene` + current-scene on recreate + tests.
+- [x] S3 - `WebViewAlertLayerController.SwitchScene` + current-scene on recreate + tests.
       Route: delegated writer.
 - [ ] S4 - Settings key `wallpaper-scene-http`, AppComposition handler (UI thread, html guard,
       persist), WireProduction wiring + wiring tests. Route: delegated writer.
@@ -82,6 +82,16 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   CosmicWin.Interop.Tests green (happy path, bad scene, 503, 500-with-loop-continues, token/method
   gates, disabled-route-is-404, and three-routes-on-one-server).
 
+- 2026-09-27: S3 done. `WebViewAlertLayerController._htmlWallpaperScene` became the mutable
+  `_currentScene`, `CreateAsync`'s Navigate now reads it through a new pure `SceneUrl(scene, fps)`
+  helper, and `SwitchScene(WallpaperScene)` re-navigates live (no-op on the same scene, records only
+  when no controller exists yet). Deviation from the map: `SwitchScene` returns `bool` (accepted,
+  per the map's own "your call"), and its one existing source-text assertion
+  (`HtmlWallpaperMode_MapsAndNavigatesToTheConfiguredScenePageUnderItsOwnDomain`) was updated because
+  the URL construction moved into `SceneUrl`, as the task instructions allowed. All 23
+  WebViewAlertLayerControllerTests green; full non-desktop suite green (1171 App + 425 Interop + 198
+  Layout + 13 Alert = 1807 passed, 3 skipped, 0 failed).
+
 ## Next step
 
-S3.
+S4.

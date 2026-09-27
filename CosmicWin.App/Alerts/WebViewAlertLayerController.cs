@@ -45,11 +45,17 @@ public sealed class WebViewAlertLayerController : IDisposable
     // D6a (html-wallpaper-demo): every scene page shares one virtual host mapping (see the
     // CoreWebView2.SetVirtualHostNameToFolderMapping/Navigate calls below), so only the scene
     // SEGMENT of the navigated URL needs to change to switch scenes.
-    // D6d: that segment now comes from the wallpaper-scene setting (_htmlWallpaperScene below),
-    // mapped to its fixed folder name by SceneFolderName -- a closed switch over a compile-time enum,
-    // so raw settings text (or anything else) can never reach the Navigate URL as an unvalidated scene
-    // segment. Still literally "processing" by default (WallpaperScene.Processing), same as before.
-    private readonly WallpaperScene _htmlWallpaperScene;
+    // D6d: that segment comes from the wallpaper-scene setting, mapped to its fixed folder name by
+    // SceneFolderName -- a closed switch over a compile-time enum, so raw settings text (or anything
+    // else) can never reach the Navigate URL as an unvalidated scene segment.
+    // S3 (wallpaper-scene-http-endpoint): MUTABLE, unlike every other field seeded from a constructor
+    // parameter in this class -- SwitchScene (below) updates it live, after CreateAsync has already
+    // navigated once. CreateAsync's own Navigate call reads THIS field, never the constructor's
+    // htmlWallpaperScene parameter directly, which is also what makes a later recreate (TearDown from
+    // a host change, then Poll calling CreateAsync again) navigate to whatever scene is CURRENT --
+    // TearDown never touches this field. Seeded from the constructor's htmlWallpaperScene parameter,
+    // still literally "processing" by default (WallpaperScene.Processing), same as before S3.
+    private WallpaperScene _currentScene;
     // D6d: caps how many times per second the scene page draws, forwarded to the page as the `fps`
     // query param on the Navigate URL below (shared/js/render-loop.js parses it). 30 or 60, same
     // fixed set Settings.WallpaperFps itself accepts; irrelevant in video mode.
@@ -79,7 +85,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         _host = host;
         _trace = trace;
         _htmlWallpaperMode = htmlWallpaperMode;
-        _htmlWallpaperScene = htmlWallpaperScene;
+        _currentScene = htmlWallpaperScene;
         _htmlWallpaperFps = htmlWallpaperFps;
         _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
@@ -133,6 +139,55 @@ public sealed class WebViewAlertLayerController : IDisposable
         // no-op): AlertLayerPreloadState.RequestShow always returns a value while Ready, regardless
         // of Visible -- see its own tests.
         if (_state.RequestShow(request) is { } show) PostShow(show);
+    }
+
+    /// <summary>
+    /// S3 (wallpaper-scene-http-endpoint): switches the live html-wallpaper scene without tearing
+    /// down or recreating the WebView2 controller -- the HTTP route's whole point is a live switch
+    /// with no restart. Returns <see langword="false"/> outside <see cref="_htmlWallpaperMode"/>:
+    /// there is no scene to switch while the video wallpaper is showing, and the caller
+    /// (<c>AppComposition</c>'s HTTP handler) reads that as "answer 503, dispatch nothing".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Decision (feature doc): requesting the CURRENT scene again is a no-op re-navigate but still
+    /// returns <see langword="true"/> -- the request was accepted, it simply had nothing to do.
+    /// </para>
+    /// <para>
+    /// When <see cref="_controller"/> has not been created yet (the host is not attached, or <see
+    /// cref="CreateAsync"/> has not run), only <see cref="_currentScene"/> is updated: the next <see
+    /// cref="CreateAsync"/> call reads it directly, so no separate "pending scene" state is needed.
+    /// </para>
+    /// </remarks>
+    public bool SwitchScene(WallpaperScene scene)
+    {
+        CheckAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_htmlWallpaperMode)
+        {
+            return false;
+        }
+
+        if (_currentScene == scene)
+        {
+            return true;
+        }
+
+        _currentScene = scene;
+        if (_controller is null)
+        {
+            // Recorded above -- the next CreateAsync call reads _currentScene directly.
+            return true;
+        }
+
+        // Mirrors the Navigate step of CreateAsync: reset the ready-state flags the SAME way, so
+        // OnNavigationCompleted/OnMessage's "ready" handshake runs again for the new page instead of
+        // treating this controller as already ready for a page it has not actually loaded yet.
+        _navigationCompleted = false;
+        _pageReportedReady = false;
+        _navigateStopwatch = Stopwatch.StartNew();
+        _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
+        return true;
     }
 
     public void End() => End("end");
@@ -281,12 +336,12 @@ public sealed class WebViewAlertLayerController : IDisposable
             // messages once it is ready.
             if (_htmlWallpaperMode)
             {
-                // D6d: the scene segment comes from the closed enum -> folder-name mapping below, and
-                // `fps` is a plain integer (30 or 60, from Settings.WallpaperFps) -- neither can ever
-                // inject an unexpected path segment or query into this URL.
-                var sceneFolder = SceneFolderName(_htmlWallpaperScene);
-                _controller.CoreWebView2.Navigate(
-                    $"https://cosmicwin-scene.example/{sceneFolder}/index.html?fps={_htmlWallpaperFps}");
+                // D6d: the scene segment comes from the closed enum -> folder-name mapping (SceneUrl
+                // -> SceneFolderName below), and `fps` is a plain integer (30 or 60, from
+                // Settings.WallpaperFps) -- neither can ever inject an unexpected path segment or
+                // query into this URL. S3: _currentScene, not the constructor's own
+                // htmlWallpaperScene parameter -- see that field's own remarks for why.
+                _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
             }
             else
             {
@@ -457,6 +512,16 @@ public sealed class WebViewAlertLayerController : IDisposable
         WallpaperScene.Raphael => "raphael",
         _ => "processing",
     };
+
+    /// <summary>
+    /// S3 (wallpaper-scene-http-endpoint): the exact URL <see cref="CreateAsync"/> and <see
+    /// cref="SwitchScene"/> both navigate to for <paramref name="scene"/> -- pulled out as a pure,
+    /// directly-testable function (unlike the rest of this class's WebView2-only behaviour, see the
+    /// class remarks) since both call sites need to build the identical URL. Internal so
+    /// <c>WebViewAlertLayerControllerTests</c> can exercise it directly.
+    /// </summary>
+    internal static string SceneUrl(WallpaperScene scene, int fps) =>
+        $"https://cosmicwin-scene.example/{SceneFolderName(scene)}/index.html?fps={fps}";
 
     public void Dispose()
     {
