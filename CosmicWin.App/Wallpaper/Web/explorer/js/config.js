@@ -1,6 +1,11 @@
 // html-wallpaper-demo D6a: copied verbatim from docs/great-sage/background-explorer/js/config.js
 // (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
-// only this header comment was added, the source own header/body follow unchanged.
+// only this header comment was added, the source own header/body follow unchanged, EXCEPT the two
+// new canvasScaleX/canvasScaleY globals just below W/H/DPR: the shared alert overlay
+// (CosmicWin.App/Wallpaper/Web/shared/js/alert-overlay.js) reads them to lay out its tile mosaic in
+// device pixels, the same technique CosmicWin.App/Wallpaper/Web/processing/js/config.js already
+// declares them for -- this scene's own js/main.js (D6a) is what actually computes their value, on
+// resize.
 
 // config.js — canvas/DOM bootstrap, mutable scene state, and every user-tunable constant.
 // Loads first: every other file reads names defined here. Depends on nothing.
@@ -10,6 +15,8 @@ const ctx = canvas.getContext('2d', { alpha: true });
 let W = 0;
 let H = 0;
 let DPR = 1;
+let canvasScaleX = 1;
+let canvasScaleY = 1;
 
 const TAU = Math.PI * 2;
 const SEED = 0x9e77c0de;

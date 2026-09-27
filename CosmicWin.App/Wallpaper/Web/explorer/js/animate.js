@@ -1,6 +1,12 @@
 // html-wallpaper-demo D6a: copied verbatim from docs/great-sage/background-explorer/js/animate.js
-// (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
-// only this header comment was added, the source own header/body follow unchanged.
+// (reference-only, excluded from git -- see the feature doc, "Source material"). Every function here
+// is unchanged EXCEPT the "Main animation loop" section at the very end of this file (renderFrame/
+// startAnimation): the requestAnimationFrame loop lives here, not in js/main.js (which only owns
+// resize() + startup, same as the reference scene) -- so the shared alert overlay's own render call
+// and per-stage fault isolation land here instead, the same way
+// CosmicWin.App/Wallpaper/Web/processing/js/main.js's own render() owns them for that scene (D2b; see
+// that file's own header remarks for the full original reasoning, and
+// CosmicWin.App/Wallpaper/Web/shared/js/render-loop.js for the shared helpers both scenes now use).
 
 // animate.js — the requestAnimationFrame loop, per-ring content caches, the single combined
 // lighting mask, and the chromatic-glow/spark particle system. Loads after rings.js (needs
@@ -465,55 +471,81 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
 const scheduleFrame = window.requestAnimationFrame.bind(window);
 let animationStartMs = null;
 
+// D6a: reportRenderError comes from the shared CosmicWin.App/Wallpaper/Web/shared/js/render-loop.js
+// (createRenderStageReporter), used unchanged by
+// CosmicWin.App/Wallpaper/Web/processing/js/main.js too -- see that file's own header remarks for the
+// full original D2b reasoning (one remembered message PER STAGE, restore() on an empty stack being a
+// documented no-op, scheduleFrame always running last, unconditionally).
+const reportRenderError = createRenderStageReporter("[explorer-scene]");
+
 function renderFrame(nowMs) {
-  if (animationStartMs === null) animationStartMs = nowMs;
-  const timeSeconds = (nowMs - animationStartMs) / 1000;
+  // alertSceneMs (shared/js/alert-overlay.js) freezes this scene's own clock while a FAILED tile is
+  // shaking (same effect CosmicWin.App/Wallpaper/Web/processing/js/main.js's render() gets from it)
+  // and drives that tile's per-frame shake wobble; it returns `nowMs` unchanged whenever no kind is
+  // currently shaking (including whenever no alert is showing at all), so this is a no-op then.
+  const sceneMs = alertSceneMs(nowMs);
+  if (animationStartMs === null) animationStartMs = sceneMs;
+  const timeSeconds = (sceneMs - animationStartMs) / 1000;
 
-  const cx = W * CENTER_X_FRACTION;
-  const cy = H * CENTER_Y_FRACTION;
-  const earthCx = W * EARTH_CENTER_X_FRACTION;
-  const earthCy = H * EARTH_CENTER_Y_FRACTION;
-  const basis = Math.min(W, H);
+  try {
+    const cx = W * CENTER_X_FRACTION;
+    const cy = H * CENTER_Y_FRACTION;
+    const earthCx = W * EARTH_CENTER_X_FRACTION;
+    const earthCy = H * EARTH_CENTER_Y_FRACTION;
+    const basis = Math.min(W, H);
 
-  // Rebuild on a basis (CSS-pixel) size change OR a DPR change (e.g. dragging the window to a
-  // display with a different scale factor) — DPR affects only the caches' backing-store pixel
-  // density, not any of the logical/CSS-equivalent geometry, but a stale backing store would
-  // otherwise stay blurry (or, after a DPR decrease, unnecessarily oversized) until some other
-  // resize happened to also change `basis`.
-  if (!ringCaches || ringCacheBasis !== basis || ringCacheDpr !== DPR) buildRingCaches(cx, cy, basis, DPR);
+    // Rebuild on a basis (CSS-pixel) size change OR a DPR change (e.g. dragging the window to a
+    // display with a different scale factor) — DPR affects only the caches' backing-store pixel
+    // density, not any of the logical/CSS-equivalent geometry, but a stale backing store would
+    // otherwise stay blurry (or, after a DPR decrease, unnecessarily oversized) until some other
+    // resize happened to also change `basis`.
+    if (!ringCaches || ringCacheBasis !== basis || ringCacheDpr !== DPR) buildRingCaches(cx, cy, basis, DPR);
 
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = BACKGROUND_COLOR;
-  ctx.fillRect(0, 0, W, H);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = BACKGROUND_COLOR;
+    ctx.fillRect(0, 0, W, H);
 
-  const earthRadius = basis * EARTH_RADIUS_FRACTION;
-  const earthLongitude = EARTH_LONGITUDE + (EARTH_ROTATION_DEGREES_PER_SECOND * Math.PI / 180) * timeSeconds;
+    const earthRadius = basis * EARTH_RADIUS_FRACTION;
+    const earthLongitude = EARTH_LONGITUDE + (EARTH_ROTATION_DEGREES_PER_SECOND * Math.PI / 180) * timeSeconds;
 
-  drawStarfield(ctx, cx, cy, basis * STARFIELD_INNER_RADIUS_FRACTION, timeSeconds);
-  drawDiscBorder(ctx, cx, cy, basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION);
+    drawStarfield(ctx, cx, cy, basis * STARFIELD_INNER_RADIUS_FRACTION, timeSeconds);
+    drawDiscBorder(ctx, cx, cy, basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION);
 
-  // IDL-12 perf: draw every ring's (unlit) rotated content first, then apply ONE combined
-  // lighting mask over all of them at once (see drawCombinedLightingMask) instead of one mask
-  // draw per ring — the dominant per-frame cost per profiling (see feature doc).
-  for (let i = 0; i < RING_ANIMATIONS.length; i++) {
-    const angle = RING_ANIMATIONS[i].speed * timeSeconds;
-    drawCachedRingContent(ctx, ringCaches[i], cx, cy, angle);
+    // IDL-12 perf: draw every ring's (unlit) rotated content first, then apply ONE combined
+    // lighting mask over all of them at once (see drawCombinedLightingMask) instead of one mask
+    // draw per ring — the dominant per-frame cost per profiling (see feature doc).
+    for (let i = 0; i < RING_ANIMATIONS.length; i++) {
+      const angle = RING_ANIMATIONS[i].speed * timeSeconds;
+      drawCachedRingContent(ctx, ringCaches[i], cx, cy, angle);
+    }
+    drawCombinedLightingMask(ctx, cx, cy);
+
+    drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
+    drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
+
+    // IDL-11: the persistent below-Earth star is removed — it only looked "fixed" in a single
+    // screenshot; left running, it never moved, which reads as a static prop rather than part of
+    // the animation. The only sparks now are the ones emitted by the chromatic glow below, which
+    // rise, brighten, and fade, and never cross above the Earth's horizontal middle (earthCy).
+    drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
+    // Explorer variant (rising-sparks.js): tint the finished scene blue, then draw the rising sparks
+    // on top so they stay white instead of being tinted along with everything else.
+    drawBlueLayer(ctx, cx, cy);
+    drawRisingSparks(ctx, timeSeconds);
+    drawVignette(ctx);
+  } catch (error) {
+    resetCanvasStateForFrame();
+    reportRenderError("scene", error);
   }
-  drawCombinedLightingMask(ctx, cx, cy);
 
-  drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
-  drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
-
-  // IDL-11: the persistent below-Earth star is removed — it only looked "fixed" in a single
-  // screenshot; left running, it never moved, which reads as a static prop rather than part of
-  // the animation. The only sparks now are the ones emitted by the chromatic glow below, which
-  // rise, brighten, and fade, and never cross above the Earth's horizontal middle (earthCy).
-  drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
-  // Explorer variant (rising-sparks.js): tint the finished scene blue, then draw the rising sparks
-  // on top so they stay white instead of being tinted along with everything else.
-  drawBlueLayer(ctx, cx, cy);
-  drawRisingSparks(ctx, timeSeconds);
-  drawVignette(ctx);
+  try {
+    // Same timeSeconds drawRisingSparks used above (or would have used, had the scene not just
+    // failed) -- see js/see-through-hook.js for how the shared overlay's see-through layer reuses it.
+    renderAlertOverlay(nowMs, W, H, timeSeconds);
+  } catch (error) {
+    resetCanvasStateForFrame();
+    reportRenderError("alert-overlay", error);
+  }
 
   scheduleFrame(renderFrame);
 }
