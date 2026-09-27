@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`; D6a -> `demo/html-wallpaper-d6a-shared-overlay-explorer`; D6b -> `demo/html-wallpaper-d6b-raphael`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -212,6 +212,22 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `dotnet build`: 0 errors. App tests 1122 passed / 6 skipped / 0 failed. Parent spot check: both
   scene node tests passed (23 s).
 
+- 2026-09-26: D6a review: the whole range (4832 lines) hit `lens_context_budget_exceeded` (no
+  authority created). Split into three candidates, each reviewed from a temporary detached
+  worktree under `../CosmicWin-worktrees/` (removed afterwards): 53723a0..5e1cdb6
+  (review-2d413b075b2c1d9a), 5e1cdb6..9fd43e7 (review-8051b558acd73565), 9fd43e7..17fcf8c
+  (review-e3aa3796a2b86428). All consent granted, all APPROVED + acknowledged.
+  Two lenses flagged a real WARNING: explorer's `alertSceneMs` ran outside the per-stage
+  try/catch (a throw would freeze the wallpaper). Fixed in ac5a70c (explorer clock inside the
+  guard; shared `drawSeeThroughIntersections` restores in finally; the fault-isolation test now
+  throws every frame). RED observed first (uncaught error; save 1 / restore 0). Review
+  review-291d897d3ccb3304 (4 lenses) APPROVED + acknowledged, SUGGESTIONs only.
+  Other open, non-blocking D6a findings: comment accuracy in shared/alert-overlay.js header
+  (explorer pointer, W/H restore attribution), render-loop/main.js circular pointer, stale
+  drawFailureBandIntersections name in processing config.js, recolor composite unasserted,
+  mapping checked only by source text, no page-load smoke test, RunNode duplicated in 3 runners.
+  `dotnet test CosmicWin.App.Tests`: 1122 passed / 6 skipped / 0 failed.
+
 ## Next step
 
-Review D6a, then D6b (raphael), D6c (idle), D6d (settings + fps + hardware).
+D6b (raphael), D6c (idle), D6d (settings + fps + hardware).
