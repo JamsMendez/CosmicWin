@@ -831,4 +831,78 @@ public sealed class SettingsTests
         Assert.Equal(30, settings.WallpaperFps);
         Assert.False(settings.Tiling);
     }
+
+    /// <summary>
+    /// S4 (wallpaper-scene-http-endpoint): off unless the file says otherwise, for the same reason
+    /// <see cref="Settings.VideoWallpaperHttpEnabled"/> is -- a settings file that has never been
+    /// written must not open a route nobody asked for. Its own key, independent of both
+    /// <c>alert-http</c> and <c>video-wallpaper-http</c>.
+    /// </summary>
+    [Fact]
+    public void WallpaperSceneHttpIsOff_UnlessTheFileSaysOtherwise()
+    {
+        Assert.False(Settings.Default.WallpaperSceneHttpEnabled);
+        Assert.False(Settings.Parse(string.Empty).WallpaperSceneHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-scene-http = on")]
+    [InlineData("wallpaper-scene-http=on")]
+    [InlineData("  WALLPAPER-SCENE-HTTP   =   On  ")]
+    [InlineData("wallpaper-scene-http = true")]
+    [InlineData("wallpaper-scene-http = 1")]
+    public void WallpaperSceneHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.True(Settings.Parse(line).WallpaperSceneHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-scene-http = off")]
+    [InlineData("wallpaper-scene-http = false")]
+    [InlineData("wallpaper-scene-http = 0")]
+    public void WallpaperSceneHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.False(Settings.Parse(line).WallpaperSceneHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-scene-http = perhaps")]
+    [InlineData("wallpaper-scene-http =")]
+    [InlineData("wallpaper-scene-http")]
+    public void AnUnreadableWallpaperSceneHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.False(Settings.Parse(line).WallpaperSceneHttpEnabled);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SerializeThenParse_RoundTripsTheWallpaperSceneHttpSwitch(bool wallpaperSceneHttpEnabled)
+    {
+        var original = new Settings(FocusBorder: true, WallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheWallpaperSceneHttpSwitchAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, WallpaperSceneHttpEnabled: true).Serialize();
+
+        Assert.Contains("# wallpaper-scene-http:", serialized, StringComparison.Ordinal);
+        Assert.Contains("wallpaper-scene-http = on", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void WallpaperSceneHttpIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse(
+            "focus-border = off\nwallpaper-scene-http = on\nalert-http = off\nvideo-wallpaper-http = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.True(settings.WallpaperSceneHttpEnabled);
+        Assert.False(settings.AlertHttpEnabled);
+        Assert.False(settings.VideoWallpaperHttpEnabled);
+    }
 }

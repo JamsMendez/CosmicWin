@@ -209,7 +209,11 @@ public sealed class AppComposition : IDisposable
         // LocalHttpCommandServer's own trailing optional constructor parameter, rather than
         // bypassing this seam with a second one.
         bool videoWallpaperHttpEnabled = false,
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
+        // S4 (wallpaper-scene-http-endpoint): extends the factory seam with a SECOND trailing
+        // delegate, mirroring how V4 added handleVideoWallpaperSwitch to it -- the scene route is
+        // gated independently of both alertHttpEnabled/alertsEnabled and videoWallpaperHttpEnabled
+        // (decision 2/S4, "a route whose switch is off answers 404, as if it did not exist").
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
         Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
@@ -229,6 +233,22 @@ public sealed class AppComposition : IDisposable
         // AttachHtmlWallpaper below), regardless of whether a path happens to be configured, because
         // an animated HTML scene page is the wallpaper instead. See odd/tasks/html-wallpaper-demo.md.
         WallpaperMode wallpaperMode = WallpaperMode.Video,
+        // S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own enable switch,
+        // independent of alertHttpEnabled/videoWallpaperHttpEnabled -- see
+        // createLocalHttpCommandServer's own remarks. Off by default, same reason every other
+        // HTTP-route switch is: no route opens for a composition that never asked for it.
+        bool wallpaperSceneHttpEnabled = false,
+        // The abstraction Wire operates on for the concrete WebViewAlertLayerController.SwitchScene
+        // method (mirroring startAlertLayer/endAlertLayer/preloadAlertLayer above, which do the same
+        // for Start/End/Preload) -- returns whether the switch was accepted for dispatch, exactly
+        // like handleVideoWallpaperSwitch's own contract. Unset (every test that predates S4, and
+        // production when no alert layer exists) means the composition has no live scene switch to
+        // offer at all: the HTTP handler answers false (503) without dispatching anything.
+        Func<WallpaperScene, bool>? switchHtmlWallpaperScene = null,
+        // Mirrors persistVideoWallpaperPath above, for the SAME reason: an optional seam so a test
+        // never touches real disk. Production (WireProduction) saves the scene into settings.conf,
+        // exactly like the video route persists its own path.
+        Action<WallpaperScene>? persistWallpaperScene = null,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -672,6 +692,80 @@ public sealed class AppComposition : IDisposable
             scheduleVideoWallpaperWork is null
                 ? false
                 : SwitchVideoWallpaper(path, phase: "http", skipIfUnchanged: true);
+
+        /// <summary>
+        /// S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's delegate, handed to
+        /// <see cref="createLocalHttpCommandServer"/>'s <c>handleWallpaperSceneSwitch</c> parameter
+        /// when <paramref name="wallpaperSceneHttpEnabled"/> is on. <paramref name="name"/> is
+        /// already validated against the closed allow-list by <see
+        /// cref="WallpaperSceneHttpProtocol.TryValidate"/> before this runs -- <see
+        /// cref="TryParseWallpaperScene"/> failing is only a defensive fallback, never expected in
+        /// production.
+        /// </summary>
+        /// <remarks>
+        /// Answers "not available" (503) rather than dispatching outside html wallpaper mode, or
+        /// when this composition has no live scene switch to offer at all (<paramref
+        /// name="switchHtmlWallpaperScene"/> unset -- no alert layer exists). Both checked BEFORE
+        /// posting anything, mirroring <see cref="HandleVideoWallpaperHttpSwitch"/>'s own
+        /// scheduleVideoWallpaperWork check. The actual switch (and, on success, the persist) runs
+        /// on <c>onOwningThread</c> -- the STA UI thread <see cref="WebViewAlertLayerController"/>
+        /// requires -- NEVER <c>onVideoWallpaperThread</c> (an MTA thread; WebView2 throws off its
+        /// own dispatcher). Non-blocking, same contract as the video route: this returns whether the
+        /// switch was accepted for dispatch, not its eventual outcome.
+        /// </remarks>
+        bool HandleWallpaperSceneHttpSwitch(string name)
+        {
+            if (wallpaperMode != WallpaperMode.Html || switchHtmlWallpaperScene is null)
+            {
+                return false;
+            }
+
+            if (!TryParseWallpaperScene(name, out var scene))
+            {
+                return false;
+            }
+
+            onOwningThread(() =>
+            {
+                if (switchHtmlWallpaperScene(scene))
+                {
+                    persistWallpaperScene?.Invoke(scene);
+                }
+            });
+
+            return true;
+        }
+
+        /// <summary>
+        /// S4: maps the canonical lowercase name <see cref="WallpaperSceneHttpProtocol.TryValidate"/>
+        /// already validated back to its <see cref="WallpaperScene"/> member. This class references
+        /// <c>CosmicWin.Interop</c>'s <see cref="WallpaperSceneHttpProtocol"/> for the closed
+        /// allow-list, but that project cannot reference THIS enum back, so the mapping lives here --
+        /// the one place a protocol/settings string ever becomes a <see cref="WallpaperScene"/>, the
+        /// same role <see cref="CosmicWin.App.Settings.Parse"/>'s own private
+        /// <c>TryReadWallpaperScene</c> plays for the settings file.
+        /// </summary>
+        static bool TryParseWallpaperScene(string name, out WallpaperScene scene)
+        {
+            switch (name)
+            {
+                case "processing":
+                    scene = WallpaperScene.Processing;
+                    return true;
+                case "explorer":
+                    scene = WallpaperScene.Explorer;
+                    return true;
+                case "idle":
+                    scene = WallpaperScene.Idle;
+                    return true;
+                case "raphael":
+                    scene = WallpaperScene.Raphael;
+                    return true;
+                default:
+                    scene = WallpaperScene.Processing;
+                    return false;
+            }
+        }
 
         string HandleAlertCommand(string text)
         {
@@ -1233,7 +1327,10 @@ public sealed class AppComposition : IDisposable
         // move; only the server that answers HTTP requests was ever nested unnecessarily.
         var alertHttpRouteOn = alertsEnabled && alertHttpEnabled;
         var videoWallpaperHttpRouteOn = videoWallpaperHttpEnabled;
-        if (alertHttpRouteOn || videoWallpaperHttpRouteOn)
+        // S4: gated on its own flag alone, exactly like the video route -- neither alertsEnabled nor
+        // videoWallpaperHttpEnabled has any bearing on whether the scene route is in the table.
+        var wallpaperSceneHttpRouteOn = wallpaperSceneHttpEnabled;
+        if (alertHttpRouteOn || videoWallpaperHttpRouteOn || wallpaperSceneHttpRouteOn)
         {
             try
             {
@@ -1251,13 +1348,16 @@ public sealed class AppComposition : IDisposable
                 else
                 {
                     var httpServerFactory = createLocalHttpCommandServer
-                        ?? ((port, t, handler, diagnostic, videoSwitch) =>
-                            new LocalHttpCommandServer(port, t, handler, diagnostic, videoSwitch));
+                        ?? ((port, t, handler, diagnostic, videoSwitch, sceneSwitch) =>
+                            new LocalHttpCommandServer(
+                                port, t, handler, diagnostic, videoSwitch,
+                                handleWallpaperSceneSwitch: sceneSwitch));
                     httpAlertServer = httpServerFactory(
                         alertHttpPort, token,
                         alertHttpRouteOn ? HandleAlertCommand : null,
                         message => desktopTrace?.Record(message),
-                        videoWallpaperHttpRouteOn ? HandleVideoWallpaperHttpSwitch : null);
+                        videoWallpaperHttpRouteOn ? HandleVideoWallpaperHttpSwitch : null,
+                        wallpaperSceneHttpRouteOn ? HandleWallpaperSceneHttpSwitch : null);
                     httpAlertServer.Start();
                     // H5b: Start() never throws -- a port already in use is reported by the server
                     // itself as "alert http: failed to start listening ..." through this same sink
@@ -1984,6 +2084,12 @@ public sealed class AppComposition : IDisposable
             alertHttpEnabled: settings.AlertHttpEnabled,
             alertHttpPort: settings.AlertHttpPort,
             videoWallpaperHttpEnabled: settings.VideoWallpaperHttpEnabled,
+            // S4 (wallpaper-scene-http-endpoint): null (no live switch to offer) when no alert layer
+            // exists, exactly the same shape startAlertLayer/endAlertLayer/preloadAlertLayer below
+            // already use for the SAME alertLayer collaborator.
+            wallpaperSceneHttpEnabled: settings.WallpaperSceneHttpEnabled,
+            switchHtmlWallpaperScene: alertLayer is null ? null : alertLayer.SwitchScene,
+            persistWallpaperScene: scene => SettingsFile.Save(stored = stored with { WallpaperScene = scene }),
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),

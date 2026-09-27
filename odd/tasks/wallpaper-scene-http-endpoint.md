@@ -54,7 +54,7 @@ split into work-unit commits per task below.
 - [x] S2 - `LocalHttpCommandServer` scene route + wire-level tests. Route: delegated writer.
 - [x] S3 - `WebViewAlertLayerController.SwitchScene` + current-scene on recreate + tests.
       Route: delegated writer.
-- [ ] S4 - Settings key `wallpaper-scene-http`, AppComposition handler (UI thread, html guard,
+- [x] S4 - Settings key `wallpaper-scene-http`, AppComposition handler (UI thread, html guard,
       persist), WireProduction wiring + wiring tests. Route: delegated writer.
 - [ ] S5 - README section + hardware check (switch all four scenes live over HTTP).
 
@@ -92,6 +92,18 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   WebViewAlertLayerControllerTests green; full non-desktop suite green (1171 App + 425 Interop + 198
   Layout + 13 Alert = 1807 passed, 3 skipped, 0 failed).
 
+- 2026-09-27: S4 done. `Settings.WallpaperSceneHttpEnabled` (key `wallpaper-scene-http`, default
+  off, independent of `alert-http`/`video-wallpaper-http`). `AppComposition.Wire` gained
+  `wallpaperSceneHttpEnabled`/`switchHtmlWallpaperScene`/`persistWallpaperScene`, a
+  `HandleWallpaperSceneHttpSwitch` local function (503 outside html mode or with no switch delegate,
+  dispatches on `onOwningThread` -- never the video MTA thread -- and persists only once the switch
+  itself reports success), and the `createLocalHttpCommandServer` factory seam grew a trailing
+  `Func<string,bool>?` scene delegate. `WireProduction` wires `settings.WallpaperSceneHttpEnabled`,
+  `alertLayer?.SwitchScene`, and a persist closure mirroring `persistVideoWallpaperPath`. All fake
+  factory lambdas across `CosmicWin.App.Tests` updated to the new 6-arg shape. Full non-desktop
+  suite green: 198 Layout + 13 Alert + 425 Interop + 1193 App = 1829 passed, 3 skipped, 0 failed;
+  `dotnet build CosmicWin.sln` succeeds with 0 errors.
+
 ## Next step
 
-S4.
+S5 (README + hardware check) -- parent's job, not this writer's.

@@ -169,7 +169,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
     }
 
     private sealed record Harness(
-        AppComposition Composition, TrayMenuController Tray, Func<string, bool>? HandleVideoWallpaperHttpSwitch);
+        AppComposition Composition, TrayMenuController Tray, Func<string, bool>? HandleVideoWallpaperHttpSwitch,
+        Func<string, bool>? HandleWallpaperSceneHttpSwitch);
 
     private static Harness Wire(
         IVideoWallpaperHost? videoWallpaperHost = null,
@@ -183,7 +184,12 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
         bool videoWallpaperHttpEnabled = false,
         Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null,
-        WallpaperMode wallpaperMode = WallpaperMode.Video)
+        WallpaperMode wallpaperMode = WallpaperMode.Video,
+        // S4 (wallpaper-scene-http-endpoint).
+        bool wallpaperSceneHttpEnabled = false,
+        Func<WallpaperScene, bool>? switchHtmlWallpaperScene = null,
+        Action<WallpaperScene>? persistWallpaperScene = null,
+        Action<Action>? scheduleOnOwningThread = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -193,6 +199,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var foreground = new NoForeground();
         TrayMenuController? tray = null;
         Func<string, bool>? capturedVideoSwitchHandler = null;
+        Func<string, bool>? capturedSceneSwitchHandler = null;
 
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
@@ -210,6 +217,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             importVideoWallpaper: importVideoWallpaper ?? (path => path),
             desktopTrace: desktopTrace,
+            scheduleOnOwningThread: scheduleOnOwningThread,
             videoWallpaperHost: videoWallpaperHost,
             videoWallpaperPlayer: videoWallpaperPlayer,
             scheduleVideoWallpaperWork: scheduleVideoWallpaperWork,
@@ -219,14 +227,18 @@ public sealed class VideoWallpaperPlaybackWiringTests
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
             wallpaperMode: wallpaperMode,
             readVideoFileSnapshot: readVideoFileSnapshot,
+            wallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled,
+            switchHtmlWallpaperScene: switchHtmlWallpaperScene,
+            persistWallpaperScene: persistWallpaperScene,
             loadAlertHttpToken: () => "test-token",
-            createLocalHttpCommandServer: (_, _, _, _, videoSwitch) =>
+            createLocalHttpCommandServer: (_, _, _, _, videoSwitch, sceneSwitch) =>
             {
                 capturedVideoSwitchHandler = videoSwitch;
+                capturedSceneSwitchHandler = sceneSwitch;
                 return new FakeHttpServer();
             });
 
-        return new Harness(composition, tray!, capturedVideoSwitchHandler);
+        return new Harness(composition, tray!, capturedVideoSwitchHandler, capturedSceneSwitchHandler);
     }
 
     [Fact]
@@ -930,6 +942,159 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.False(accepted);
             Assert.Equal(0, host.TryAttachCallCount);
             Assert.Equal(0, player.TryPlayCallCount);
+        }
+    }
+
+    // ---- S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own handler ----
+
+    /// <summary>The scene route is gated by its OWN key, independent of the video route.</summary>
+    [Fact]
+    public void WallpaperSceneHttpDisabled_NullSceneDelegatePassedToTheFactory()
+    {
+        // videoWallpaperHttpEnabled forces the shared HTTP server to actually start (and the factory
+        // to actually run) so this proves the SCENE delegate specifically is null, not merely that
+        // nothing was captured because the server never started.
+        var harness = Wire(wallpaperSceneHttpEnabled: false, videoWallpaperHttpEnabled: true);
+        using (harness.Composition)
+        {
+            Assert.Null(harness.HandleWallpaperSceneHttpSwitch);
+        }
+    }
+
+    /// <summary>
+    /// Html mode, a valid scene name, both collaborators wired: the delegate accepts (true) WITHOUT
+    /// running the switch inline -- same non-blocking contract as the video route -- and only runs it
+    /// (and persists) once the captured owning-thread work item is actually pumped.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_HtmlModeValidScene_DispatchesOnTheOwningThreadAndPersists()
+    {
+        // A List, not a Queue: Wire() itself already posts an unrelated startup work item (seeding
+        // the focus border colour) onto the SAME onOwningThread scheduler, so the work item THIS
+        // call posts is whichever one lands LAST, not first.
+        var posted = new List<Action>();
+        WallpaperScene? switched = null;
+        WallpaperScene? persisted = null;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: scene => { switched = scene; return true; },
+            persistWallpaperScene: scene => persisted = scene);
+        using (harness.Composition)
+        {
+            Assert.NotNull(harness.HandleWallpaperSceneHttpSwitch);
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("idle");
+
+            Assert.True(accepted);
+            Assert.Null(switched);
+            Assert.Null(persisted);
+            Assert.Equal(before + 1, posted.Count);
+
+            posted[^1]();
+
+            Assert.Equal(WallpaperScene.Idle, switched);
+            Assert.Equal(WallpaperScene.Idle, persisted);
+        }
+    }
+
+    /// <summary>Video mode: there is no scene to switch, so the delegate answers false and dispatches nothing.</summary>
+    [Fact]
+    public void HttpSceneSwitch_VideoMode_ReturnsFalseAndDispatchesNothing()
+    {
+        var posted = new List<Action>();
+        var switchCalls = 0;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Video,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: _ => { switchCalls++; return true; });
+        using (harness.Composition)
+        {
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("idle");
+
+            Assert.False(accepted);
+            Assert.Equal(before, posted.Count);
+            Assert.Equal(0, switchCalls);
+        }
+    }
+
+    /// <summary>
+    /// Html mode but no alert layer wired (switchHtmlWallpaperScene left null, its production default):
+    /// the handler must know availability, exactly like <see cref="_htmlWallpaperMode"/> alone is not
+    /// enough -- WireProduction only ever supplies this delegate when an alert layer exists.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_HtmlModeWithNoSwitchDelegateWired_ReturnsFalse()
+    {
+        var harness = Wire(wallpaperMode: WallpaperMode.Html, wallpaperSceneHttpEnabled: true);
+        using (harness.Composition)
+        {
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("idle");
+
+            Assert.False(accepted);
+        }
+    }
+
+    /// <summary>
+    /// Defensive: <see cref="WallpaperSceneHttpProtocol.TryValidate"/> already restricts the body to
+    /// the closed allow-list before this delegate is ever called in production, so this name should be
+    /// unreachable there -- but the delegate's own contract must not assume its caller's validation
+    /// forever.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_AnUnknownSceneName_ReturnsFalseWithoutDispatching()
+    {
+        var posted = new List<Action>();
+        var switchCalls = 0;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: _ => { switchCalls++; return true; });
+        using (harness.Composition)
+        {
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("not-a-scene");
+
+            Assert.False(accepted);
+            Assert.Equal(before, posted.Count);
+            Assert.Equal(0, switchCalls);
+        }
+    }
+
+    /// <summary>Persist only runs once the underlying switch actually reports success.</summary>
+    [Fact]
+    public void HttpSceneSwitch_UnderlyingSwitchReturnsFalse_DoesNotPersist()
+    {
+        var posted = new List<Action>();
+        var persistCalls = 0;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: _ => false,
+            persistWallpaperScene: _ => persistCalls++);
+        using (harness.Composition)
+        {
+            var before = posted.Count;
+
+            var accepted = harness.HandleWallpaperSceneHttpSwitch!("raphael");
+            Assert.True(accepted); // dispatch was accepted; the posted work item decides the rest
+            Assert.Equal(before + 1, posted.Count);
+
+            posted[^1]();
+
+            Assert.Equal(0, persistCalls);
         }
     }
 

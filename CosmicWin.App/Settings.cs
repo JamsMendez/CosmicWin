@@ -96,6 +96,16 @@ public enum WallpaperScene
 /// 60fps on any display faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a
 /// no-op default.
 /// </param>
+/// <param name="WallpaperSceneHttpEnabled">
+/// S4 (wallpaper-scene-http-endpoint): whether a request to switch the html wallpaper's SCENE is also
+/// accepted over the SAME loopback-only HTTP endpoint <see cref="AlertHttpEnabled"/> gates -- the
+/// same port and the same bearer token file, no second server. Its own key, independent of both
+/// <see cref="AlertHttpEnabled"/> and <see cref="VideoWallpaperHttpEnabled"/> (a route whose own
+/// switch is off answers 404, as if it did not exist -- the same decision <see
+/// cref="VideoWallpaperHttpEnabled"/> itself follows). Off by default, for the same reason every
+/// other HTTP-route switch is: a settings file that has never been written must not open a
+/// network-facing route nobody asked for.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -117,7 +127,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Video,
-    WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60)
+    WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
+    bool WallpaperSceneHttpEnabled = false)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -170,6 +181,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string WallpaperFps60Value = "60";
 
+    /// <summary>S4 (wallpaper-scene-http-endpoint): see <see cref="Settings.WallpaperSceneHttpEnabled"/>.</summary>
+    private const string WallpaperSceneHttpEnabledKey = "wallpaper-scene-http";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -195,6 +209,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var wallpaperMode = Default.WallpaperMode;
         var wallpaperScene = Default.WallpaperScene;
         var wallpaperFps = Default.WallpaperFps;
+        var wallpaperSceneHttpEnabled = Default.WallpaperSceneHttpEnabled;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -279,11 +294,16 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 wallpaperFps = wallpaperFpsValue;
             }
+            else if (key.Equals(WallpaperSceneHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var wallpaperSceneHttpFlag))
+            {
+                wallpaperSceneHttpEnabled = wallpaperSceneHttpFlag;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
             alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap, wallpaperMode,
-            wallpaperScene, wallpaperFps);
+            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -339,6 +359,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # rate: `{WallpaperFps30Value}` or `{WallpaperFps60Value}` (default). Before this setting
          # existed the scene drew uncapped, at the display's own refresh rate.
          {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+
+         # {WallpaperSceneHttpEnabledKey}: on to also accept a request to switch the html wallpaper's
+         # SCENE over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates -- the same
+         # port and the same alert-http.token bearer token file, off to leave that route closed.
+         {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
 
          """;
 

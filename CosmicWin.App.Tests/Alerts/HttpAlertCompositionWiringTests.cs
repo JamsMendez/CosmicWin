@@ -65,12 +65,13 @@ public sealed class HttpAlertCompositionWiringTests
     private sealed record Harness(
         AppComposition Composition, FakeServer? Pipe, RecordingDesktopTrace Trace,
         List<string> HttpFactoryCalls, int TokenLoadCalls, Func<string, string>? HttpHandler,
-        Func<string, bool>? HttpVideoSwitchHandler, IAlertCommandServer? HttpServer, List<string> Events);
+        Func<string, bool>? HttpVideoSwitchHandler, Func<string, bool>? HttpSceneSwitchHandler,
+        IAlertCommandServer? HttpServer, List<string> Events);
 
     private static Harness Wire(
         bool alertsEnabled = true, bool httpEnabled = false, int httpPort = 47811,
         string? token = "test-token", bool videoWallpaperHttpEnabled = false,
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
     {
         var primary = new FakeDisplay(
             new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -82,14 +83,16 @@ public sealed class HttpAlertCompositionWiringTests
         var tokenLoadCalls = 0;
         Func<string, string>? httpHandler = null;
         Func<string, bool>? httpVideoSwitchHandler = null;
+        Func<string, bool>? httpSceneSwitchHandler = null;
         IAlertCommandServer? httpServer = null;
         var events = new List<string>();
 
-        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic, videoSwitch) =>
+        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic, videoSwitch, sceneSwitch) =>
         {
             httpFactoryCalls.Add($"port={port} token={tok}");
             httpHandler = handler;
             httpVideoSwitchHandler = videoSwitch;
+            httpSceneSwitchHandler = sceneSwitch;
             var server = new FakeServer(handler ?? (_ => throw new InvalidOperationException(
                 "the alerts route is off -- this fake never routes to it")));
             httpServer = server;
@@ -131,7 +134,7 @@ public sealed class HttpAlertCompositionWiringTests
 
         return new Harness(
             composition, pipe, trace, httpFactoryCalls, tokenLoadCalls, httpHandler,
-            httpVideoSwitchHandler, httpServer, events);
+            httpVideoSwitchHandler, httpSceneSwitchHandler, httpServer, events);
     }
 
     [Fact]
@@ -265,7 +268,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpFactoryThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _, _) => throw new InvalidOperationException("factory boom"));
+            httpFactory: (_, _, _, _, _, _) => throw new InvalidOperationException("factory boom"));
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
@@ -282,7 +285,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpServerStartThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _, _) => new ThrowingStartServer());
+            httpFactory: (_, _, _, _, _, _) => new ThrowingStartServer());
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
