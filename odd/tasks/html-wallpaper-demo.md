@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`; D3 -> `demo/html-wallpaper-d3-switch`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -57,6 +57,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
       test that delivers real WebView2 show/hide messages. Route: delegated writer.
 - [ ] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
       permanently, alerts only toggle the overlay; shake moves into the canvas.
+      Route: delegated writer (several non-trivial C# files: settings, AppComposition, controller).
 - [ ] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
 - [ ] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
 - [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
