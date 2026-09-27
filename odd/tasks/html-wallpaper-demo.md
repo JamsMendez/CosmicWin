@@ -60,14 +60,14 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
       Route: delegated writer (several non-trivial C# files: settings, AppComposition, controller).
 - [x] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
 - [x] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
-- [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
+- [x] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
       Sliced 2026-09-26 (each ~2000 lines of ported scene code):
   - [x] D6a - Extract the alert overlay into a shared module with a per-scene "see-through" hook
         (processing keeps its bands, suites stay green) + explorer scene (rising sparks).
         Route: delegated writer.
   - [x] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
   - [x] D6c - idle scene (first-ring constellations).
-  - [ ] D6d - Scene selection wiring + fps cap + hardware check of all four. DECIDED by the
+  - [x] D6d - Scene selection wiring + fps cap + hardware check of all four. DECIDED by the
         maintainer 2026-09-26: settings.conf, not the tray -- `wallpaper-scene = processing |
         explorer | idle | raphael` and `wallpaper-fps = 30 | 60` for the html wallpaper (the fps
         cap is the first D4 cost lever). Defaults to decide in D6d (proposal: processing, 60 =
@@ -298,7 +298,29 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `dotnet build`: 0 errors. App 1163 passed / 6 skipped / 0 failed; Interop 384 / 42 / 0.
   Parent spot checks: 190 focused tests passed; processing harness re-run passed.
 
+- 2026-09-27: D6d hardware done. Release build of c577891 (tracker tip), elevated shell; settings
+  backup at %TEMP%\settings.conf.before-d6d.
+  Cost (processing, no alert, clean windows -- no `phase=http` lines):
+  | Run | CPU tree | GPU 3D tree (perf counter) | nvidia-smi power | GPU clock |
+  |---|---|---|---|---|
+  | html @ 60 fps cap | 1.30 cores | 30.0 % | 25.6 W | 1020 MHz |
+  | html @ 30 fps cap | 0.90 cores | 28.0 % | 24.1 W | 680 MHz |
+  | video mode | (D4: 0.07 cores) | (D4: 0.6 %) | 19.9 W | 668 MHz |
+  Reading: the "% GPU" counter is relative to the CURRENT clock, so it overstated the cost in D4;
+  in watts the scene adds ~4-6 W over the video, and 30 fps keeps the GPU at video-level clocks
+  and cuts CPU ~30 %. The 60 fps cap costs about the same as D4's uncapped run, which suggests the
+  WebView2 page was not actually rendering at 164 fps before (not investigated).
+  Scenes: processing, explorer, raphael, idle each shown with `failed:1` and `warning:1`
+  (6 s): every page ready, every alert shown and ended on time, no alert-layer error. The
+  maintainer watched and confirmed all four see-through layers (bands, sparks, golden glyphs,
+  constellations), blue for failed and violet for warning: "Todo bien".
+  Note: raphael's warning ended by the queue's hide without a page `done` line (second time, the
+  first was the D5 mosaic). No visible effect; not investigated.
+  App left running in html mode, scene idle, 60 fps.
+
 ## Next step
 
-D6d hardware: all four scenes via `wallpaper-scene`, alerts over each, and re-measure the cost at
-`wallpaper-fps = 60` and `30` (D4 was uncapped 164 fps).
+Demo complete. Optional follow-ups: the open review findings above (raphael parallel gold-ring
+geometry, idle silent ring-name miss, pacing comment), the missing `done` line, pausing the scene
+while the desktop is covered, and the D3 limitation (HTTP/tray video switch starts a player under
+the page). Merging anything to main is the maintainer's call.
