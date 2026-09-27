@@ -45,11 +45,22 @@ public sealed class GapReloadTests
         public nint GetForegroundHandle() => 0;
     }
 
+    /// <summary>Mirrors every other private recording trace fake in this test project (e.g. <c>CompositionRootTests.RecordingDesktopTrace</c>).</summary>
+    private sealed class RecordingDesktopTrace : CosmicWin.App.Diagnostics.IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
     private sealed record Harness(
         AppComposition Composition, TrayMenuController Tray, FakeWorkspace Workspace,
         LayoutTree Tree, Func<int> GapReloadCalls);
 
-    private static Harness Wire(Func<int> loadGap, bool tilingEnabled = true)
+    private static Harness Wire(
+        Func<int> loadGap, bool tilingEnabled = true,
+        Action<Action>? scheduleOnOwningThread = null,
+        CosmicWin.App.Diagnostics.IDesktopTrace? desktopTrace = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -75,6 +86,8 @@ public sealed class GapReloadTests
             },
             importVideoWallpaper: path => path,
             tilingEnabled: tilingEnabled,
+            scheduleOnOwningThread: scheduleOnOwningThread,
+            desktopTrace: desktopTrace,
             loadGap: () =>
             {
                 gapReloadCalls++;
@@ -176,6 +189,43 @@ public sealed class GapReloadTests
         finally
         {
             TreeArranger.Gap = originalGap;
+        }
+    }
+
+    /// <summary>
+    /// T13 (alert-tile-mosaic, review R4-reload-swallow-without-trace): <c>CompositionRoot.Reload</c>'s
+    /// own try/catch around <c>reloadGap?.Invoke()</c> only ever observes a SYNCHRONOUS failure. Every
+    /// other fact in this file relies on <c>AppComposition.Wire</c>'s default (synchronous)
+    /// <c>scheduleOnOwningThread</c>, which happens to run <c>ReloadGap</c> inline -- masking a real
+    /// production bug, because production wires <c>scheduleOnOwningThread: RunOnUiThread</c>
+    /// (<c>Dispatcher.BeginInvoke</c>), which returns before <c>ReloadGap</c>'s body ever runs.
+    /// <c>CompositionRoot.Reload</c> has already returned successfully by the time a failure would
+    /// occur, so nothing ever caught or traced it. This fact defers the queued action the way
+    /// <c>Dispatcher.BeginInvoke</c> actually does (stores it instead of running it), to prove the
+    /// trace fires from wherever <c>ReloadGap</c> actually executes, not from the already-returned
+    /// enqueue call.
+    /// </summary>
+    [Fact]
+    public void Reload_WithDeferredSchedulingLikeTheRealDispatcher_StillTracesAGapReloadFailure()
+    {
+        var trace = new RecordingDesktopTrace();
+        Action? deferred = null;
+        var harness = Wire(
+            () => throw new InvalidOperationException("settings.conf unreadable"),
+            scheduleOnOwningThread: work => deferred = work,
+            desktopTrace: trace);
+        using (harness.Composition)
+        {
+            var thrownByReload = Record.Exception(() => harness.Tray.Reload());
+
+            Assert.Null(thrownByReload);
+            Assert.NotNull(deferred);
+            Assert.DoesNotContain(trace.Lines, line => line.Contains("reload-gap-failed", StringComparison.Ordinal));
+
+            var thrownByTheDeferredWork = Record.Exception(deferred!);
+
+            Assert.Null(thrownByTheDeferredWork);
+            Assert.Contains(trace.Lines, line => line.Contains("reload-gap-failed", StringComparison.Ordinal));
         }
     }
 

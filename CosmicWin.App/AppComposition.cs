@@ -1041,16 +1041,31 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            TreeArranger.Gap = loadGap();
-
-            // Mirrors ToggleTiling's OFF branch, just below: while tiling is off, every window is
-            // deliberately left exactly where the layout last put it, and a live gap change must not
-            // reach in and move windows a mode promised not to touch. The new value still lands in
-            // TreeArranger.Gap, so it is there the moment tiling resumes, and it already reaches the
-            // alert mosaic (read at show time, above) regardless of the tiling switch.
-            if (tiling)
+            try
             {
-                RearrangeEveryDisplay();
+                TreeArranger.Gap = loadGap();
+
+                // Mirrors ToggleTiling's OFF branch, just below: while tiling is off, every window is
+                // deliberately left exactly where the layout last put it, and a live gap change must
+                // not reach in and move windows a mode promised not to touch. The new value still
+                // lands in TreeArranger.Gap, so it is there the moment tiling resumes, and it already
+                // reaches the alert mosaic (read at show time, above) regardless of the tiling switch.
+                if (tiling)
+                {
+                    RearrangeEveryDisplay();
+                }
+            }
+            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            {
+                // T13 (alert-tile-mosaic, review R4-reload-swallow-without-trace): traced HERE, not
+                // relying on CompositionRoot.Reload's own try/catch around reloadGap?.Invoke() below
+                // -- that one only ever wraps the SYNCHRONOUS call to onOwningThread(ReloadGap), which
+                // in production (scheduleOnOwningThread: RunOnUiThread, i.e. Dispatcher.BeginInvoke)
+                // returns as soon as this method is QUEUED, before its body ever runs. By the time a
+                // failure could happen in here, CompositionRoot.Reload has already returned
+                // successfully; without this catch the failure would reach nothing but WPF's
+                // unhandled-dispatcher-exception path instead of a trace line.
+                desktopTrace?.Record($"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
             }
         }
 
