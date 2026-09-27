@@ -55,7 +55,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 - [x] D2b - Fix the two D3-relevant D2 review WARNINGs (authorized by the maintainer 2026-09-26):
       render loop fault isolation (a throwing frame must not freeze the wallpaper) and a harness
       test that delivers real WebView2 show/hide messages. Route: delegated writer.
-- [ ] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
+- [x] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
       permanently, alerts only toggle the overlay; shake moves into the canvas.
       Route: delegated writer (several non-trivial C# files: settings, AppComposition, controller).
 - [ ] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
@@ -131,7 +131,29 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   Parent spot checks: ProcessingSceneNodeTests re-run after each round, passed.
   Tracker `demo/html-wallpaper` fast-forwarded to the D2b tip.
 
+- 2026-09-26: D3 done on `demo/html-wallpaper-d3-switch` (delegated writer).
+  - d4c5a10 feat(settings): add the demo wallpaper-mode setting (`wallpaper-mode = video|html`,
+    default video, unknown keeps default). RED: compile failure before the type existed.
+  - 78e90d3 feat(alerts): keep the scene page visible permanently in html mode (pure
+    `WebViewAlertLayerVisibility` policy; html mode maps `cosmicwin-scene.example` to
+    `Wallpaper/Web/processing`). RED: compile failure first.
+  - 53723a0 feat(wallpaper): attach the host without video in html mode (`AttachHtmlWallpaper`,
+    TryAttach only, trace `video-wallpaper phase=startup mode=html attached=<bool>`; keep-alive
+    runs on video OR html). Mutation-checked the three new boolean decisions.
+  - Writer decision, accepted by the parent: `desktopVisible` in UpdateAlertOverlay
+    (AppComposition ~730) is now `videoWallpaperActive || htmlWallpaperActive`; without it no alert
+    could ever show in html mode. AlertQueue and the fullscreen detector are unchanged.
+  `dotnet build`: 0 errors. App tests 1121 passed / 6 skipped / 0 failed; Interop 384 passed /
+  42 skipped / 0 failed. Parent spot check: 156 focused tests passed.
+  Review (assess medium, slice budget reached, base 62d6587): consent granted, 1 lens
+  (reliability), APPROVED + acknowledged (review-4d021e8aa82c22c5). Findings:
+  - WARNING R3-html-mode-video-switch-not-guarded: tray pick and HTTP video switch still start a
+    player in html mode (known limitation, out of D3 scope), and a comment claims the modes never
+    mix.
+  - SUGGESTION R3-html-mode-without-alerts-layer: html mode with alerts disabled attaches the host
+    but creates no WebView2 -> black desktop.
+
 ## Next step
 
-D3 (demo switch: host-only attach, controller navigates to the scene page, page permanently
-visible).
+D5-style hardware look at D3 with the maintainer: set `wallpaper-mode = html`, relaunch, confirm
+the scene is the wallpaper and alerts show over it with real bands.
