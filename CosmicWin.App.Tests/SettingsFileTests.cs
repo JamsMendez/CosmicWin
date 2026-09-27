@@ -222,11 +222,20 @@ public sealed class SettingsFileTests : IDisposable
     public void AThrowingDiagnostic_IsContained_AndLoadOrCreateStillReturnsTheDefaults()
     {
         Directory.CreateDirectory(Path_);
+        var diagnosticRan = false;
+        Settings? settings = null;
 
-        var exception = Record.Exception(() =>
-            SettingsFile.LoadOrCreate(Path_, _ => throw new IOException("trace unwritable too")));
+        var exception = Record.Exception(() => settings = SettingsFile.LoadOrCreate(Path_, _ =>
+        {
+            diagnosticRan = true;
+            throw new IOException("trace unwritable too");
+        }));
 
         Assert.Null(exception);
+        // R3-throwing-diagnostic-test-omits-defaults-assertion: prove the containment path really
+        // ran (the save failed and the diagnostic threw) and that startup still got its defaults.
+        Assert.True(diagnosticRan);
+        Assert.Equal(Settings.Default, settings);
     }
 
     /// <summary>A successful write never calls the diagnostic -- it exists to report FAILURES only.</summary>

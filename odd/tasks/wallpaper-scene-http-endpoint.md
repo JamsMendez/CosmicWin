@@ -375,6 +375,12 @@ implementation touches 2+ non-trivial files per task (writer trigger).
     fail (Assert.Contains() Failure), restored.
   Full non-desktop suite: 198 + 13 + 422 (3 skipped) + 1211 = 1844 passed, 3 skipped, 0 failed.
 
+- 2026-09-27: Review of aeabbd2 (49 lines): consent granted, APPROVED and acknowledged
+  (review-985871012d3d78ec). Two SUGGESTIONs applied by the parent in the next commit: the
+  containment test now also asserts the diagnostic ran and the defaults came back
+  (R3-throwing-diagnostic-test-omits-defaults-assertion); the catch-all is documented as deliberate
+  (R3-diagnostic-catch-swallows-all-exceptions). 15 SettingsFileTests passed.
+
 ## Next step
 
 Maintainer: decide on merging `feat/html-wallpaper-default` and `fix/settings-and-trace-followups`

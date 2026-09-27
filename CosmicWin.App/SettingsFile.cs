@@ -124,7 +124,10 @@ public static class SettingsFile
             // R3-ondiagnostic-throw-escapes-swallow: the diagnostic is best-effort. In production it
             // writes the desktop trace, which usually sits in the SAME app-data folder that just
             // refused this write -- if reporting fails too, there is nowhere left to report it, and
-            // letting it escape would break the swallow-and-continue promise above.
+            // letting it escape would break the swallow-and-continue promise above. Every exception
+            // type is swallowed ON PURPOSE (R3-diagnostic-catch-swallows-all-exceptions): whatever
+            // the reporter's own failure is, a lost diagnostic line must never cost a startup or a
+            // tray toggle.
             try
             {
                 onDiagnostic?.Invoke(exception.GetType().Name);
