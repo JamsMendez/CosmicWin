@@ -24,6 +24,14 @@ internal static class NodeAvailability
             ? null
             : "Requires `node` on PATH to run the alert-layer.js vm-sandbox harness (T9, alert-tile-mosaic).";
 
+    /// <summary>
+    /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout): the same bound
+    /// <c>AlertLayerLayoutNodeTests.HarnessTimeout</c> uses for the harness itself, scaled down for a
+    /// probe that should answer in milliseconds -- <c>node --version</c> hanging is not something a
+    /// well-behaved install ever does.
+    /// </summary>
+    private const int ProbeTimeoutMilliseconds = 5000;
+
     private static bool TryRunNodeVersion()
     {
         try
@@ -40,12 +48,38 @@ internal static class NodeAvailability
                 return false;
             }
 
-            process.WaitForExit(5000);
+            // Read concurrently, not that a single short version line could ever fill a pipe buffer,
+            // but so this probe never becomes a second place that reintroduces the sequential-read
+            // deadlock risk the harness runner (AlertLayerLayoutNodeTests.RunNode) was fixed for.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(ProbeTimeoutMilliseconds))
+            {
+                // R3-node-probe-leaks-on-timeout: the old code called WaitForExit and then read
+                // ExitCode regardless of whether it actually returned true, so a hung `node --version`
+                // was left running in the background AND (see the comment below) only reported
+                // "unavailable" by accident, via the exception ExitCode throws on a still-running
+                // process. Both are fixed together: kill the tree explicitly, and branch on
+                // WaitForExit's own result instead of relying on that exception.
+                process.Kill(entireProcessTree: true);
+                return false;
+            }
+
+            _ = stdoutTask.Result;
+            _ = stderrTask.Result;
             return process.ExitCode == 0;
         }
-        // Same "a gate deciding whether to SKIP must never crash test discovery" reasoning as
-        // DesktopGate.IsRaisedDesktopLayout: node missing from PATH surfaces as Win32Exception on
-        // some machines, and a process that never starts still leaves WaitForExit valid to call.
+        // R2-node-probe-catch-comment-misleading: this used to say only "node missing from PATH
+        // surfaces as Win32Exception on some machines, and a process that never starts still leaves
+        // WaitForExit valid to call" -- true, but it hid the ACTUAL reason InvalidOperationException
+        // used to reach here on every timeout: Process.ExitCode throws that exact type when read
+        // before the process has exited, which is exactly what an unchecked WaitForExit result let
+        // happen above. Now that the timeout branch checks WaitForExit's result explicitly and
+        // returns before ever touching ExitCode, this catch guards only genuine start failures
+        // (Win32Exception) and the unlikely case of the process handle becoming invalid between the
+        // checks above (InvalidOperationException) -- a gate deciding whether to SKIP must still never
+        // crash test discovery over either one.
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             return false;

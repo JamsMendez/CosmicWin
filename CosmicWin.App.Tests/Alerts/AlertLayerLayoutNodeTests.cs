@@ -33,22 +33,68 @@ public sealed class AlertLayerLayoutNodeTests
     private static readonly string HarnessScriptPath =
         Path.Combine(AppContext.BaseDirectory, "Alerts", "Web", "alert-layer-layout.tests.js");
 
+    /// <summary>
+    /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout): generous, but bounded -- the
+    /// harness runs 13 small vm-sandboxed cases and normally finishes in well under a second; this
+    /// only exists to turn "the process manager wedged" into a reported test failure instead of a
+    /// `dotnet test` run that never comes back.
+    /// </summary>
+    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(30);
+
     [RequiresNodeFact]
     public void TileLayoutHarness_PassesAgainstTheRealShippedPage()
     {
         Assert.True(File.Exists(AlertLayerJsPath), $"Expected '{AlertLayerJsPath}' to exist (shipped content, see AlertLayerWebPageTests).");
         Assert.True(File.Exists(HarnessScriptPath), $"Expected '{HarnessScriptPath}' to exist (test content, see this project's .csproj).");
 
-        var (exitCode, stdout, stderr) = RunNode(HarnessScriptPath, AlertLayerJsPath);
+        var result = RunNode(HarnessTimeout, HarnessScriptPath, AlertLayerJsPath);
 
+        Assert.False(
+            result.TimedOut,
+            $"Node harness did not exit within {HarnessTimeout} and was killed (process tree).{Environment.NewLine}" +
+            $"--- stdout ---{Environment.NewLine}{result.Stdout}{Environment.NewLine}" +
+            $"--- stderr ---{Environment.NewLine}{result.Stderr}");
         Assert.True(
-            exitCode == 0,
-            $"Node harness failed (exit {exitCode}).{Environment.NewLine}" +
-            $"--- stdout ---{Environment.NewLine}{stdout}{Environment.NewLine}" +
-            $"--- stderr ---{Environment.NewLine}{stderr}");
+            result.ExitCode == 0,
+            $"Node harness failed (exit {result.ExitCode}).{Environment.NewLine}" +
+            $"--- stdout ---{Environment.NewLine}{result.Stdout}{Environment.NewLine}" +
+            $"--- stderr ---{Environment.NewLine}{result.Stderr}");
     }
 
-    private static (int ExitCode, string Stdout, string Stderr) RunNode(params string[] arguments)
+    /// <summary>
+    /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout, R3-node-probe-leaks-on-timeout):
+    /// cheap proof of the timeout path that does not wait anywhere near <see cref="HarnessTimeout"/>
+    /// -- a process that never exits on its own (a bare <c>setInterval</c>, nothing calls
+    /// <c>unref</c>) run against a tiny bound, asserting it is both REPORTED as timed out and
+    /// actually KILLED (the whole tree, not left running in the background).
+    /// </summary>
+    [RequiresNodeFact]
+    public void RunNode_AProcessThatNeverExits_IsKilledAndReportedAsTimedOut()
+    {
+        var result = RunNode(TimeSpan.FromMilliseconds(200), "-e", "setInterval(() => {}, 1000)");
+
+        Assert.True(result.TimedOut, "Expected the hung node process to be reported as timed out.");
+        Assert.False(
+            ProcessStillRunning(result.ProcessId),
+            "Expected the timed-out node process to actually be killed, not just reported.");
+    }
+
+    private static bool ProcessStillRunning(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            // No process with that id -- exactly what "actually killed" means here.
+            return false;
+        }
+    }
+
+    private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNode(
+        TimeSpan timeout, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("node")
         {
@@ -64,9 +110,24 @@ public sealed class AlertLayerLayoutNodeTests
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start `node` -- RequiresNodeFact should have skipped this fact instead.");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
-        process.WaitForExit();
-        return (process.ExitCode, stdout, stderr);
+
+        // Read BOTH streams CONCURRENTLY, never one after the other: a script that writes enough to
+        // stderr while stdout is still being drained here (or vice versa) fills that pipe's OS buffer,
+        // and a full pipe nobody is reading blocks the CHILD forever -- a deadlock inside `node`, not
+        // a hang in this method, but indistinguishable from one without this.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+        {
+            // Kill the WHOLE tree, not just this process: node can have spawned children of its own,
+            // and an orphan left running (holding the pipes open) would also keep the two read tasks
+            // above from ever completing.
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit(5000);
+            return (-1, stdoutTask.Result, stderrTask.Result, TimedOut: true, process.Id);
+        }
+
+        return (process.ExitCode, stdoutTask.Result, stderrTask.Result, TimedOut: false, process.Id);
     }
 }
