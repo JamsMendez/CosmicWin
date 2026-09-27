@@ -42,7 +42,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   `demo/html-wallpaper` (never merged into main unless the maintainer decides); each task is a
   child branch `demo/html-wallpaper-<task>` cut from the previous one and fast-forwarded into the
   tracker when done. Local only: no PRs, no push.
-- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`.
+- Slices: D2 -> `demo/html-wallpaper-d2-processing-page`; D2b -> `demo/html-wallpaper-d2b-hardening`.
 - Coverage caveat: ring-shaped layers (bands, constellations) sit around the screen center, so on
   3392x1440 only the middle letters cross them, and off-center mosaic tiles may show none.
 
@@ -52,6 +52,9 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
       playing? Answer from code first, then on hardware. Decides how D3 is wired.
 - [x] D2 - processing scene page in the app (scene + alert in one loop, real bands), driven by the
       existing hash/postMessage alert API.
+- [ ] D2b - Fix the two D3-relevant D2 review WARNINGs (authorized by the maintainer 2026-09-26):
+      render loop fault isolation (a throwing frame must not freeze the wallpaper) and a harness
+      test that delivers real WebView2 show/hide messages. Route: delegated writer.
 - [ ] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
       permanently, alerts only toggle the overlay; shake moves into the canvas.
 - [ ] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
@@ -112,5 +115,4 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 
 ## Next step
 
-Maintainer decides: fix the two D3-relevant WARNINGs (render loop isolation, message contract
-test) as D2b before D3, or go straight to D3.
+D2b, then D3.
