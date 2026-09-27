@@ -224,9 +224,20 @@ test("hash API: the old single-kind #kind= form still maps to one full-canvas ti
 // actually dropped anything -- an empty or bogus entry silently became an extra "warning" tile
 // instead of being ignored, and nothing capped the result at the grid's own capacity. Fixed: filter
 // to exactly "failed"/"warning" BEFORE mapping, then cap at columns*rows.
-test("hash API: tiles= drops empty/unknown entries before mapping, then caps at columns*rows (T12)", function () {
+//
+// T15 (review follow-up R3-t12-filter-fix-not-discriminated): the ORIGINAL input here
+// ("failed,,bogus,warning,failed", cap 2) does not actually tell the fix apart from the bug it
+// fixed -- under the OLD map-then-filter order the junk entries still map to "warning" and the cap
+// still keeps only the first two results, which happen to start "failed", "warning" (the raw
+// "failed" then the raw "" defaulting to "warning") for THIS input, matching the correct answer by
+// coincidence. Putting the junk entries FIRST makes the two orders diverge for real: filtering
+// first drops them and the two REAL tiles survive the cap; mapping first turns both into extra
+// "warning" tiles that fill the cap and push the real tiles out entirely. Confirmed by temporarily
+// restoring the old map-then-filter order in alert-layer.js: this fact failed with
+// ["warning", "warning"] instead of ["failed", "warning"], then passed again once reverted.
+test("hash API: tiles= drops empty/unknown entries before mapping, then caps at columns*rows (T12/T15)", function () {
   var page = loadPage({
-    hash: "#tiles=failed,,bogus,warning,failed&columns=2&rows=1&gap=0&duration=1000",
+    hash: "#tiles=bogus,,bogus,failed,warning&columns=2&rows=1&gap=0&duration=1000",
   });
   assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
 });
