@@ -85,4 +85,86 @@ public sealed class SettingsFileTests : IDisposable
             System.IO.Path.GetDirectoryName(ExceptionListFile.ResolvePath()),
             System.IO.Path.GetDirectoryName(path));
     }
+
+    /// <summary>
+    /// S9 (wallpaper-scene-http-endpoint, 2026-09-27, maintainer's decision: "en la instalacion cree
+    /// un settings.conf con los valores por defecto" -- CosmicWin has no installer, so first start IS
+    /// the install moment). A missing file is not just answered with the defaults in memory: it gets
+    /// written, so the machine has a settings.conf to hand-edit from the very first run.
+    /// </summary>
+    [Fact]
+    public void MissingFile_LoadOrCreate_WritesTheDefaultsToDisk()
+    {
+        Assert.False(File.Exists(Path_));
+
+        var settings = SettingsFile.LoadOrCreate(Path_);
+
+        Assert.Equal(Settings.Default, settings);
+        Assert.True(File.Exists(Path_));
+        Assert.Equal(Settings.Default, Settings.Parse(File.ReadAllText(Path_)));
+    }
+
+    /// <summary>
+    /// The written file is a real settings.conf, not a bare value dump -- the same comments a save
+    /// from the tray menu would produce, so a first-run file reads exactly like a hand-edited one.
+    /// </summary>
+    [Fact]
+    public void MissingFile_LoadOrCreate_WritesTheFullCommentedTemplate()
+    {
+        SettingsFile.LoadOrCreate(Path_);
+
+        var written = File.ReadAllText(Path_);
+
+        Assert.Equal(Settings.Default.Serialize(), written, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// S9's other maintainer decision folded into the same first-run write: html mode, the scene
+    /// route, alerts and now alert-http itself all come up on for a fresh install.
+    /// </summary>
+    [Fact]
+    public void MissingFile_LoadOrCreate_TheWrittenDefaultsMatchTheS9Decisions()
+    {
+        var settings = SettingsFile.LoadOrCreate(Path_);
+
+        Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
+        Assert.True(settings.WallpaperSceneHttpEnabled);
+        Assert.True(settings.AlertHttpEnabled);
+        Assert.True(settings.AlertsEnabled);
+    }
+
+    /// <summary>
+    /// The other half of "created once": a file that already exists is data the maintainer may have
+    /// hand-edited, and LoadOrCreate must never overwrite it -- not even to normalise formatting.
+    /// </summary>
+    [Fact]
+    public void ExistingFile_LoadOrCreate_IsNeverRewritten()
+    {
+        var original = "focus-border = off\nalert-http = off\n";
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path_, original);
+        var writeTimeBefore = File.GetLastWriteTimeUtc(Path_);
+
+        var settings = SettingsFile.LoadOrCreate(Path_);
+
+        Assert.Equal(original, File.ReadAllText(Path_), StringComparer.Ordinal);
+        Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(Path_));
+        Assert.False(settings.FocusBorder);
+        Assert.False(settings.AlertHttpEnabled);
+    }
+
+    /// <summary>
+    /// A path LoadOrCreate cannot write to (here: something already sits there as a directory, so
+    /// writing the file fails the same way <c>Save</c> already tolerates elsewhere) must not crash
+    /// startup -- it degrades to the in-memory defaults exactly like an unreadable existing file does.
+    /// </summary>
+    [Fact]
+    public void AnUnwritablePath_LoadOrCreate_ReturnsTheDefaultsInsteadOfThrowing()
+    {
+        Directory.CreateDirectory(Path_);
+
+        var settings = SettingsFile.LoadOrCreate(Path_);
+
+        Assert.Equal(Settings.Default, settings);
+    }
 }

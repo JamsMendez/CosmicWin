@@ -61,8 +61,11 @@ public enum WallpaperScene
 /// </param>
 /// <param name="AlertHttpEnabled">
 /// Whether the same alert commands are also accepted over a loopback-only HTTP endpoint, next to the
-/// named pipe. Off by default: a settings file that has never been written must not open a
-/// network-facing port nobody asked for, even a loopback one.
+/// named pipe. ON by default since S9 (wallpaper-scene-http-endpoint, 2026-09-27, maintainer's
+/// decision: "alertas tambien debe estar prendidas") -- loopback-only (127.0.0.1 / localhost, never
+/// reachable over the network) and gated by a bearer token nothing outside this machine can read, so
+/// a fresh install opens this port as an accepted consequence, the same call S8 already made for
+/// <see cref="WallpaperSceneHttpEnabled"/>.
 /// </param>
 /// <param name="AlertHttpPort">
 /// The loopback TCP port the HTTP endpoint listens on when <see cref="AlertHttpEnabled"/> is on.
@@ -107,8 +110,8 @@ public enum WallpaperScene
 /// cref="VideoWallpaperHttpEnabled"/> itself follows). ON by default since S8
 /// (wallpaper-scene-http-endpoint, 2026-09-27): the html wallpaper is now CosmicWin's default
 /// renderer and this route is its live scene control, so a fresh install opens this loopback-only
-/// port -- an accepted consequence, unlike <see cref="AlertHttpEnabled"/> and
-/// <see cref="VideoWallpaperHttpEnabled"/>, which stay off until the maintainer opts in.
+/// port -- an accepted consequence, the same one S9 later made for <see cref="AlertHttpEnabled"/>.
+/// <see cref="VideoWallpaperHttpEnabled"/> alone still stays off until the maintainer opts in.
 /// </param>
 /// <remarks>
 /// <para>
@@ -128,7 +131,7 @@ public enum WallpaperScene
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = false,
+    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = true,
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
@@ -331,10 +334,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # {AlertsEnabledKey}: on to accept live alert commands, off to ignore the alert pipe.
          {AlertsEnabledKey} = {(AlertsEnabled ? "on" : "off")}
 
-         # {AlertHttpEnabledKey}: on to also accept alert commands over a local, loopback-only HTTP
-         # endpoint (127.0.0.1 / localhost only -- never reachable over the network), off to leave it
-         # closed. Its bearer token lives in %LOCALAPPDATA%\CosmicWin\alert-http.token, created
-         # automatically the first time the endpoint starts.
+         # {AlertHttpEnabledKey}: on (default) to also accept alert commands over a local,
+         # loopback-only HTTP endpoint (127.0.0.1 / localhost only -- never reachable over the
+         # network), off to leave it closed. Its bearer token lives in
+         # %LOCALAPPDATA%\CosmicWin\alert-http.token, created automatically the first time the
+         # endpoint starts.
          {AlertHttpEnabledKey} = {(AlertHttpEnabled ? "on" : "off")}
 
          # {AlertHttpPortKey}: the loopback TCP port the HTTP endpoint listens on when {AlertHttpEnabledKey} is on.

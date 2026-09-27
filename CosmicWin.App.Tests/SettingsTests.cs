@@ -330,14 +330,16 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// Off unless the file says otherwise: a settings file that has never been written must not open
-    /// a network-facing port nobody asked for.
+    /// ON unless the file says otherwise, since S9 (wallpaper-scene-http-endpoint, 2026-09-27,
+    /// maintainer's decision: "alertas tambien debe estar prendidas") -- loopback-only and gated by a
+    /// bearer token, so a fresh install opens this port as an accepted consequence, the same call S8
+    /// made for <see cref="Settings.WallpaperSceneHttpEnabled"/>.
     /// </summary>
     [Fact]
-    public void AlertHttpIsOff_UnlessTheFileSaysOtherwise()
+    public void AlertHttpIsOn_UnlessTheFileSaysOtherwise()
     {
-        Assert.False(Settings.Default.AlertHttpEnabled);
-        Assert.False(Settings.Parse(string.Empty).AlertHttpEnabled);
+        Assert.True(Settings.Default.AlertHttpEnabled);
+        Assert.True(Settings.Parse(string.Empty).AlertHttpEnabled);
     }
 
     [Theory]
@@ -366,7 +368,7 @@ public sealed class SettingsTests
     [InlineData("alert-http")]
     public void AnUnreadableAlertHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.False(Settings.Parse(line).AlertHttpEnabled);
+        Assert.True(Settings.Parse(line).AlertHttpEnabled);
     }
 
     [Theory]

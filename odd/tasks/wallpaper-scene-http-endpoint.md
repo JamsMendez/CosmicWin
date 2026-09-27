@@ -76,7 +76,7 @@ implementation touches 2+ non-trivial files per task (writer trigger).
       install opens the loopback HTTP port for the scene route. Branch feat/html-wallpaper-default.
       Route: delegated writer.
 
-- [ ] S9 - First run writes settings.conf with the defaults (maintainer 2026-09-27: "en la
+- [x] S9 - First run writes settings.conf with the defaults (maintainer 2026-09-27: "en la
       instalacion cree un settings.conf con los valores por defecto"; CosmicWin has no installer,
       so first start is the install moment): when the file is missing, write `Settings.Default`
       serialized (with its comments); an existing file is never touched. Also default
@@ -253,6 +253,44 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   claim the feature is unsupported, so left as historical identifiers per the task's own instruction;
   the false-positive "demonstrate(d)" hits in layout files are unrelated. Committed in the same commit
   as this Progress entry.
+
+- 2026-09-27: S9 done, on `feat/html-wallpaper-default` (off S8's d581f4f). `Settings`'s
+  `AlertHttpEnabled` record default flipped `false` -> `true` (maintainer: "alertas tambien debe
+  estar prendidas"); its XML doc and the `Serialize` template comment for `alert-http` rewritten to
+  justify ON-by-default the same way `WallpaperSceneHttpEnabled`'s already did (loopback-only, bearer
+  token, accepted consequence for a fresh install), rather than the old off-by-default justification.
+  `alerts-enabled` and `wallpaper-scene-http` were already on (S8); `video-wallpaper-http` untouched,
+  still off. `SettingsFile` gained `LoadOrCreate(path)` / `LoadOrCreate()`: when the file does not
+  exist it calls the EXISTING `Save` (reused, not duplicated -- `Save` already swallows
+  `IOException`/`UnauthorizedAccessException` and already creates the directory) with
+  `Settings.Default`, then returns `Settings.Default`; when the file exists it is exactly `Load` --
+  read, never rewritten, not even to normalise formatting. `Load` itself is untouched and stays
+  side-effect-free for its other two callers (`loadGap`'s Reload closure, all `SettingsFile.Load`
+  test call sites). `AppComposition.WireProduction`'s one `var settings = SettingsFile.Load();` (the
+  sole production read, ahead of `Wire`) became `SettingsFile.LoadOrCreate()` -- the one seam that
+  needed the write; `loadGap: () => SettingsFile.Load().Gap` deliberately kept as plain `Load` (a
+  Reload must not create or rewrite the file either). A write failure degrades to
+  `Settings.Default` exactly like an unreadable existing file already does, via `Save`'s own
+  swallowed catch -- no new diagnostic added, since `Save` itself records nothing on failure and S9
+  was told to reuse, not duplicate, whatever pattern it already had.
+  TDD: RED observed for 7 assertions before the fix -- `SettingsTests.AlertHttpIsOn_UnlessTheFileSaysOtherwise`
+  (`Assert.True()` got `False` against the old `false` default) and 3
+  `AnUnreadableAlertHttpValue_KeepsTheDefaultRatherThanGuessing` theory cases (same failure), plus 3
+  new `SettingsFileTests` facts against a deliberate `LoadOrCreate(path) => Load(path)` stub with no
+  write: `MissingFile_LoadOrCreate_WritesTheDefaultsToDisk` (`Assert.True(File.Exists(...))` got
+  `False`), `MissingFile_LoadOrCreate_WritesTheFullCommentedTemplate`
+  (`DirectoryNotFoundException` reading a file that was never created),
+  `MissingFile_LoadOrCreate_TheWrittenDefaultsMatchTheS9Decisions` (`Assert.True(settings.AlertHttpEnabled)`
+  got `False`); all 7 GREEN after flipping the default and implementing the real `LoadOrCreate`. Two
+  more new facts (`ExistingFile_LoadOrCreate_IsNeverRewritten`,
+  `AnUnwritablePath_LoadOrCreate_ReturnsTheDefaultsInsteadOfThrowing`) already passed against the stub
+  since it happened to delegate to the untouched `Load`, and still pass unchanged against the real
+  implementation. README's HTTP-alerts section rewritten: on by default, loopback-only, bearer
+  token, `alert-http = off` shown as the opt-out, plus a line stating CosmicWin writes settings.conf
+  itself on first start and never rewrites an existing one. Full non-desktop suite green: 198 Layout
+  + 13 Alert + 425 Interop (422 passed, 3 skipped) + 1203 App = 1839 passed, 3 skipped, 0 failed (5
+  more than S8's 1834 -- the 5 new `SettingsFileTests` facts, no App tests removed); `dotnet build
+  CosmicWin.sln` 0 errors.
 
 ## Next step
 

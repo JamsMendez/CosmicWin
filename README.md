@@ -113,16 +113,21 @@ CosmicWinAlert.exe warning:2 failed:1 duration:5
 
 ### Over HTTP (localhost only)
 
-Other programs on the same PC can send the same command over HTTP. The endpoint is **off by
-default**. Turn it on in `settings.conf` and restart CosmicWin:
+Other programs on the same PC can send the same command over HTTP. The endpoint is **on by
+default** (`alert-http = on`), loopback-only (`127.0.0.1` / `localhost`, never reachable over the
+network) and gated by a bearer token nothing outside this machine can read. Turn it off in
+`settings.conf` and restart CosmicWin:
 
 ```ini
-alert-http = on
-alert-http-port = 47811
+alert-http = off
 ```
 
-On first start CosmicWin writes a random token to `%LOCALAPPDATA%\CosmicWin\alert-http.token`. It
-keeps that token across restarts. Delete the file to get a new one on the next start.
+CosmicWin has no installer: the first time it runs, it writes `settings.conf` itself, with every
+default already filled in (the same commented file a tray-menu save produces), before anyone has
+touched a single setting -- so this port is already open on a fresh install unless you turn it off.
+An existing `settings.conf` is never rewritten. On first start CosmicWin also writes a random token
+to `%LOCALAPPDATA%\CosmicWin\alert-http.token`. It keeps that token across restarts. Delete the file
+to get a new one on the next start.
 
 ```powershell
 $token = Get-Content "$env:LOCALAPPDATA\CosmicWin\alert-http.token"

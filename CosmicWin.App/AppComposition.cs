@@ -2081,7 +2081,12 @@ public sealed class AppComposition : IDisposable
         // ahead of the gap assignment below (T5, alert-tile-mosaic) so TreeArranger.Gap can start
         // from the settings file's own gap key instead of always starting from the compiled-in
         // default and waiting for a Reload to correct it.
-        var settings = SettingsFile.Load();
+        //
+        // S9 (wallpaper-scene-http-endpoint, 2026-09-27): LoadOrCreate rather than Load -- the ONE
+        // production call site that must also WRITE settings.conf when it is missing, since CosmicWin
+        // has no installer and first start is the install moment. SettingsFile.Load itself stays
+        // side-effect-free for its other callers (loadGap's Reload below, tests).
+        var settings = SettingsFile.LoadOrCreate();
 
         // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
         // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
