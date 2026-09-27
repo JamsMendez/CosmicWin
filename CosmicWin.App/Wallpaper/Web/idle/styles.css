@@ -1,0 +1,30 @@
+/* html-wallpaper-demo D6c: copied verbatim from docs/great-sage/background-idle/styles.css
+   (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
+   only this header comment was added, the source's own body follows unchanged. */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #01040a;
+}
+
+body {
+  position: relative;
+  font-family: system-ui, sans-serif;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #01040a;
+}
