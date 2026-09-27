@@ -23,6 +23,21 @@ namespace CosmicWin.App;
 /// duration of an in-memory record `with` plus one small file write costs no more than what each
 /// individual unsynchronized closure already paid on its own.
 /// </remarks>
+/// <remarks>
+/// S10 (wallpaper-scene-http-endpoint, R3-settings-store-save-failure-semantics-unproved): a
+/// throwing <paramref name="save"/> is NOT caught here. <see cref="Update"/> assigns
+/// <see cref="_current"/> BEFORE calling <paramref name="save"/>, so memory always reflects the
+/// change regardless of whether persisting it succeeded, then lets a save failure propagate to the
+/// caller uncaught -- exactly what <c>AppComposition.HandleWallpaperSceneHttpSwitch</c>'s own
+/// try/catch around <c>persistWallpaperScene?.Invoke</c> already assumes. In production this never
+/// actually fires for the two failure modes it exists to tolerate: <c>save</c> is
+/// <c>SettingsFile.Save</c>, which itself swallows <see cref="IOException"/>/<see
+/// cref="UnauthorizedAccessException"/> (reporting them through its own <c>onDiagnostic</c> callback
+/// instead, S10's other change). The result is eventually convergent, one save behind: the NEXT
+/// successful <see cref="Update"/> reads that same ahead-of-disk <see cref="_current"/>, so its
+/// saved snapshot carries both the failed update's field and its own. Nothing is ever lost, only
+/// delayed until a save succeeds.
+/// </remarks>
 internal sealed class SynchronizedSettingsStore(Settings initial, Action<Settings> save)
 {
     private readonly object _gate = new();

@@ -82,7 +82,7 @@ implementation touches 2+ non-trivial files per task (writer trigger).
       serialized (with its comments); an existing file is never touched. Also default
       `alert-http = on` (maintainer: "alertas tambien debe estar prendidas"); `alerts-enabled`
       is already on; `video-wallpaper-http` stays off. Route: delegated writer.
-- [ ] S10 - Follow-ups (maintainer 2026-09-27: "Dale a esos pendientes chicos"), on branch
+- [x] S10 - Follow-ups (maintainer 2026-09-27: "Dale a esos pendientes chicos"), on branch
       fix/settings-and-trace-followups: (a) `http-server start` trace line reports the scene route;
       (b) a test proves WireProduction reads settings through LoadOrCreate
       (R3-production-loadorcreate-wiring-untested); (c) a failed settings write (first run or any
@@ -314,7 +314,54 @@ implementation touches 2+ non-trivial files per task (writer trigger).
 - 2026-09-27: Maintainer confirmed on screen: the scenes really change live over HTTP, and alerts
   work in html mode. Closes the "visual change not eyeballed" gap from S5.
 
+- 2026-09-27: S10 done, on `fix/settings-and-trace-followups` (off main 910940b), four work-unit
+  commits:
+  - (a) 113f4b9 `fix(http): report the scene route in the server start trace` --
+    `http-server start requested ...` gained `scene-route={wallpaperSceneHttpRouteOn}`. RED: the
+    three existing exact-line assertions in `HttpAlertCompositionWiringTests` failed against the
+    old text once extended; GREEN after the one-line source change. New
+    `SceneRouteOn_TraceReportsIt` fact added.
+  - (b) 6278b6e `test(settings): pin the production settings read to LoadOrCreate` --
+    (R3-production-loadorcreate-wiring-untested). New
+    `WireProductionSettingsPersistenceWiringTests.cs`, same source-text technique as
+    `WireProductionHtmlWallpaperSettingsWiringTests`: anchors on the one `var settings = ...`
+    assignment inside `WireProduction`, distinct from `loadGap`'s own still-plain `Load()`.
+    Mutation check (the wiring was already correct, nothing to break honestly): temporarily
+    reverted the call to `Load()`, observed a real `Assert.StartsWith` failure, restored.
+  - (c) 1ec03e6 `fix(settings): trace a failed settings write` --
+    (R3-first-run-write-failure-silent). `SettingsFile.Save`/`LoadOrCreate` gained an optional
+    `onDiagnostic` callback (exception TYPE NAME ONLY, never path/message), invoked from the
+    existing swallow catch without changing the swallow-and-continue behaviour. `WireProduction`
+    wires BOTH the first-run `LoadOrCreate` call and `SynchronizedSettingsStore`'s save delegate to
+    one `OnSettingsSaveFailed` local function recording
+    `settings-file save-failed error=<type>` through `desktopTrace` -- moved `desktopTrace`'s
+    construction earlier in `WireProduction` (ahead of the settings load) so it exists before the
+    first write that might fail; `T9a`'s stale comment updated. RED: two new `SettingsFileTests`
+    facts failed with `Assert.Single()` on an empty collection when the `onDiagnostic` invocation
+    was temporarily commented out; restored. A new structural wiring test
+    (`WireProduction_WiresTheSameSaveFailureDiagnosticIntoLoadOrCreateAndTheSettingsStore`) pins
+    both call sites the same way (b) does.
+  - (d) (this commit) `test(settings): pin the store's behaviour when a save fails` --
+    (R3-settings-store-save-failure-semantics-unproved). New
+    `SynchronizedSettingsStoreTests.Update_WhenSaveThrows_MemoryStaysAheadAndTheNextSuccessfulUpdateSavesBothChanges`
+    characterizes `SynchronizedSettingsStore.Update`'s actual contract: `_current` is assigned
+    BEFORE `save` runs, so a throwing save still leaves memory holding the new value; `Update`
+    itself does not catch the throw, so it propagates to the caller (matching what
+    `AppComposition.HandleWallpaperSceneHttpSwitch`'s own try/catch around
+    `persistWallpaperScene?.Invoke` already assumes); the next successful `Update` reads that same
+    ahead-of-disk snapshot, so its saved result carries BOTH fields -- one save behind, nothing
+    lost. Production's own `save` delegate (`SettingsFile.Save`, after (c)) never actually throws
+    for the two failure modes it swallows, so this pins the store's OWN contract in the general
+    case, not a production reachability claim. Class XML doc updated with the same semantics.
+    Mutation check: temporarily made `Update` assign `_current` only AFTER a successful save,
+    reran, observed a real `Assert.False()` failure (`Expected: False, Actual: True`), restored.
+  Full non-desktop suite green after every commit; final counts: 198 Layout + 13 Alert + 425 Interop
+  (422 passed, 3 skipped) + 1210 App = 1846 passed+skipped, 0 failed (7 more than S9's baseline of
+  1839 -- 1 new App fact for (a), 1 new file/fact for (b), 4 new App facts for (c), 1 new App fact
+  for (d)). `dotnet build CosmicWin.sln` 0 errors after every commit (only the 2 pre-existing
+  unrelated nullable warnings in `MultiMonitorWorkspaceAdapter.cs`).
+
 ## Next step
 
-Maintainer: decide on merging `feat/html-wallpaper-default` into main. Follow-ups: scene-route
-trace line, R3-settings-store-save-failure-semantics-unproved.
+Maintainer: decide on merging `feat/html-wallpaper-default` and `fix/settings-and-trace-followups`
+into main. No open follow-ups remain from this task.

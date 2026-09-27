@@ -60,4 +60,57 @@ public sealed class SynchronizedSettingsStoreTests
         Assert.False(saved[^1].FocusBorder);
         Assert.False(saved[^1].Tiling);
     }
+
+    /// <summary>
+    /// S10 (wallpaper-scene-http-endpoint, R3-settings-store-save-failure-semantics-unproved):
+    /// characterizes what <see cref="SynchronizedSettingsStore.Update"/> actually does when the save
+    /// delegate throws -- an open follow-up from the S6/S7 review, accepted then as "eventually
+    /// convergent" but never pinned. Production's own <c>save</c> delegate is
+    /// <c>SettingsFile.Save</c>, which already swallows <see cref="IOException"/>/
+    /// <see cref="UnauthorizedAccessException"/> internally (S10's other change, R3-first-run-write-
+    /// failure-silent) and therefore never actually throws either of those two -- so this is a
+    /// characterization of <see cref="SynchronizedSettingsStore"/>'s OWN contract in the general
+    /// case, not a production reachability claim: <c>_current</c> is assigned BEFORE <c>save</c> is
+    /// called, so a throwing save (for any reason at all) still leaves memory holding the new value;
+    /// <see cref="SynchronizedSettingsStore.Update"/> does not catch that throw itself, so it
+    /// propagates to the caller -- exactly what
+    /// <c>AppComposition.HandleWallpaperSceneHttpSwitch</c>'s own try/catch around
+    /// <c>persistWallpaperScene?.Invoke</c> already assumes (it wraps the call precisely because
+    /// <c>Update</c> might throw). The NEXT successful <see cref="SynchronizedSettingsStore.Update"/>
+    /// starts its own <c>change</c> from that same ahead-of-disk <c>_current</c>, so its saved
+    /// snapshot ends up carrying BOTH the failed update's field and its own -- one save behind,
+    /// never lost.
+    /// </summary>
+    [Fact]
+    public void Update_WhenSaveThrows_MemoryStaysAheadAndTheNextSuccessfulUpdateSavesBothChanges()
+    {
+        var saved = new List<Settings>();
+        var saveCallCount = 0;
+        void Save(Settings settings)
+        {
+            saveCallCount++;
+            if (saveCallCount == 1)
+            {
+                throw new IOException("disk full");
+            }
+
+            saved.Add(settings);
+        }
+
+        var store = new SynchronizedSettingsStore(Settings.Default, Save);
+
+        var thrown = Assert.Throws<IOException>(() => store.Update(s => s with { FocusBorder = false }));
+        Assert.Equal("disk full", thrown.Message);
+
+        // Memory is already ahead of disk: _current was assigned before the throwing save ran.
+        Assert.False(store.Current.FocusBorder);
+
+        // The next successful Update reads that same ahead-of-disk _current, so BOTH fields land in
+        // the one snapshot it actually manages to save -- the failed update is not lost, only delayed.
+        store.Update(s => s with { Tiling = false });
+
+        var onlySavedSnapshot = Assert.Single(saved);
+        Assert.False(onlySavedSnapshot.FocusBorder);
+        Assert.False(onlySavedSnapshot.Tiling);
+    }
 }
