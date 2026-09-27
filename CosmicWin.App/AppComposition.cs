@@ -1936,9 +1936,13 @@ public sealed class AppComposition : IDisposable
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
         var alertLayer = settings.AlertsEnabled
             ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
-                // D3 (html-wallpaper-demo, DEMO-ONLY): navigates to the processing scene page and
+                // D3 (html-wallpaper-demo, DEMO-ONLY): navigates to the configured scene page and
                 // stays visible permanently once ready, instead of the ordinary alert-only page.
-                htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html)
+                htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html,
+                // D6d (html-wallpaper-demo, DEMO-ONLY): which scene and frame-rate cap -- irrelevant
+                // in video mode, where the controller never reads either field.
+                htmlWallpaperScene: settings.WallpaperScene,
+                htmlWallpaperFps: settings.WallpaperFps)
             : null;
         // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
         // wallpaper thread's failure sink can point at it directly with no reordering.

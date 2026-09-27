@@ -2,6 +2,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using CosmicWin.Interop.Win32;
+using CosmicWin.App;
 using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
@@ -232,12 +233,16 @@ public sealed class WebViewAlertLayerControllerTests
     /// UNCHANGED, since video mode must behave exactly as it did before D3.
     /// <para>
     /// D6a: the mapping now covers the WHOLE <c>Wallpaper\Web</c> folder (every scene page now loads
-    /// <c>Wallpaper\Web\shared\...</c> siblings), and the navigated URL's scene segment comes from
-    /// the single <c>HtmlWallpaperSceneName</c> constant (still literally "processing" until D6d).
+    /// <c>Wallpaper\Web\shared\...</c> siblings).
+    /// </para>
+    /// <para>
+    /// D6d: the navigated URL's scene segment comes from <see cref="SceneFolderName"/> (see
+    /// <see cref="SceneFolderName_MapsEachSceneToItsFixedFolderName"/> for that pure mapping's own
+    /// coverage), not a hardcoded constant, and carries the configured `fps` cap as a query param.
     /// </para>
     /// </summary>
     [Fact]
-    public void HtmlWallpaperMode_MapsAndNavigatesToTheProcessingScenePageUnderItsOwnDomain()
+    public void HtmlWallpaperMode_MapsAndNavigatesToTheConfiguredScenePageUnderItsOwnDomain()
     {
         var source = ReadControllerSource();
 
@@ -245,14 +250,34 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-alert.example\"", source);
         Assert.Contains("Navigate(\"https://cosmicwin-alert.example/alert-layer.html\")", source);
 
-        // Html wallpaper mode, new.
+        // Html wallpaper mode, D6d.
         Assert.Contains("SetVirtualHostNameToFolderMapping(\"cosmicwin-scene.example\"", source);
-        Assert.Contains("private const string HtmlWallpaperSceneName = \"processing\";", source);
-        Assert.Contains("Navigate($\"https://cosmicwin-scene.example/{HtmlWallpaperSceneName}/index.html\")", source);
+        Assert.Contains("var sceneFolder = SceneFolderName(_htmlWallpaperScene);", source);
+        Assert.Contains(
+            "$\"https://cosmicwin-scene.example/{sceneFolder}/index.html?fps={_htmlWallpaperFps}\"",
+            source);
         Assert.Contains("\"Wallpaper\", \"Web\")", source);
         Assert.DoesNotContain("\"Wallpaper\", \"Web\", \"processing\"", source);
         Assert.DoesNotContain(".local\"", source);
         Assert.DoesNotContain(".local/", source);
+    }
+
+    /// <summary>
+    /// D6d (html-wallpaper-demo, wallpaper-scene setting): <see
+    /// cref="WebViewAlertLayerController.SceneFolderName"/> is the ONLY place a
+    /// <see cref="WallpaperScene"/> value becomes a folder name that reaches the Navigate URL -- a
+    /// pure, closed mapping over a compile-time-fixed enum, so this is a real behavioural test (not a
+    /// source-text guard like most of this file, which exists only because the rest of this class
+    /// needs a live WebView2 to exercise).
+    /// </summary>
+    [Theory]
+    [InlineData(WallpaperScene.Processing, "processing")]
+    [InlineData(WallpaperScene.Explorer, "explorer")]
+    [InlineData(WallpaperScene.Idle, "idle")]
+    [InlineData(WallpaperScene.Raphael, "raphael")]
+    public void SceneFolderName_MapsEachSceneToItsFixedFolderName(WallpaperScene scene, string expectedFolder)
+    {
+        Assert.Equal(expectedFolder, WebViewAlertLayerController.SceneFolderName(scene));
     }
 
     /// <summary>

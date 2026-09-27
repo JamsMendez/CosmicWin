@@ -42,12 +42,18 @@ public sealed class WebViewAlertLayerController : IDisposable
     // WebViewAlertLayerVisibility and the mode branches in CreateAsync/TryMarkReady/End/OnMessage.
     // False (the default) reproduces exactly what this class did before D3.
     private readonly bool _htmlWallpaperMode;
-    // D6a (html-wallpaper-demo): the SINGLE place the active html-wallpaper scene folder name lives
-    // -- every scene page now shares one virtual host mapping (see the CoreWebView2.
-    // SetVirtualHostNameToFolderMapping/Navigate calls below), so only this constant, not a mapping
-    // root or a URL, needs to change to switch scenes. A literal for now; D6d turns it into a real
-    // setting without touching any other line in this class.
-    private const string HtmlWallpaperSceneName = "processing";
+    // D6a (html-wallpaper-demo): every scene page shares one virtual host mapping (see the
+    // CoreWebView2.SetVirtualHostNameToFolderMapping/Navigate calls below), so only the scene
+    // SEGMENT of the navigated URL needs to change to switch scenes.
+    // D6d: that segment now comes from the wallpaper-scene setting (_htmlWallpaperScene below),
+    // mapped to its fixed folder name by SceneFolderName -- a closed switch over a compile-time enum,
+    // so raw settings text (or anything else) can never reach the Navigate URL as an unvalidated scene
+    // segment. Still literally "processing" by default (WallpaperScene.Processing), same as before.
+    private readonly WallpaperScene _htmlWallpaperScene;
+    // D6d: caps how many times per second the scene page draws, forwarded to the page as the `fps`
+    // query param on the Navigate URL below (shared/js/render-loop.js parses it). 30 or 60, same
+    // fixed set Settings.WallpaperFps itself accepts; irrelevant in video mode.
+    private readonly int _htmlWallpaperFps;
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
@@ -65,13 +71,16 @@ public sealed class WebViewAlertLayerController : IDisposable
     private Stopwatch? _navigateStopwatch;
 
     public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null,
-        Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false)
+        Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
+        WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("A WPF UI STA is required.");
         _host = host;
         _trace = trace;
         _htmlWallpaperMode = htmlWallpaperMode;
+        _htmlWallpaperScene = htmlWallpaperScene;
+        _htmlWallpaperFps = htmlWallpaperFps;
         _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
         _poll = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
@@ -272,7 +281,12 @@ public sealed class WebViewAlertLayerController : IDisposable
             // messages once it is ready.
             if (_htmlWallpaperMode)
             {
-                _controller.CoreWebView2.Navigate($"https://cosmicwin-scene.example/{HtmlWallpaperSceneName}/index.html");
+                // D6d: the scene segment comes from the closed enum -> folder-name mapping below, and
+                // `fps` is a plain integer (30 or 60, from Settings.WallpaperFps) -- neither can ever
+                // inject an unexpected path segment or query into this URL.
+                var sceneFolder = SceneFolderName(_htmlWallpaperScene);
+                _controller.CoreWebView2.Navigate(
+                    $"https://cosmicwin-scene.example/{sceneFolder}/index.html?fps={_htmlWallpaperFps}");
             }
             else
             {
@@ -426,6 +440,23 @@ public sealed class WebViewAlertLayerController : IDisposable
     {
         if (!_dispatcher.CheckAccess()) throw new InvalidOperationException("Use the owning UI dispatcher.");
     }
+
+    /// <summary>
+    /// D6d (html-wallpaper-demo): the ONLY place a <see cref="WallpaperScene"/> value becomes a folder
+    /// name -- a closed switch over a compile-time-fixed enum, so no settings text (or anything else)
+    /// can ever reach <see cref="CreateAsync"/>'s Navigate URL as an unvalidated scene segment. An
+    /// enum value outside the defined members (never produced by <c>Settings.Parse</c>'s own
+    /// <c>TryReadWallpaperScene</c>, which only ever returns a defined member) falls back to
+    /// <c>"processing"</c>, the same folder <see cref="WallpaperScene.Processing"/> itself maps to --
+    /// internal so <c>WebViewAlertLayerControllerTests</c> can exercise this pure mapping directly.
+    /// </summary>
+    internal static string SceneFolderName(WallpaperScene scene) => scene switch
+    {
+        WallpaperScene.Explorer => "explorer",
+        WallpaperScene.Idle => "idle",
+        WallpaperScene.Raphael => "raphael",
+        _ => "processing",
+    };
 
     public void Dispose()
     {

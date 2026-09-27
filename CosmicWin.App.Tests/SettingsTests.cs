@@ -700,4 +700,135 @@ public sealed class SettingsTests
         Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
         Assert.False(settings.Tiling);
     }
+
+    /// <summary>
+    /// D6d (html-wallpaper-demo, demo-only setting, 2026-09-27): <see
+    /// cref="WallpaperScene.Processing"/> unless the file says otherwise -- a settings file that has
+    /// never been written must not switch the html wallpaper away from the one scene that shipped
+    /// before D6d.
+    /// </summary>
+    [Fact]
+    public void WallpaperSceneDefaultsToProcessing()
+    {
+        Assert.Equal(WallpaperScene.Processing, Settings.Default.WallpaperScene);
+        Assert.Equal(WallpaperScene.Processing, Settings.Parse(string.Empty).WallpaperScene);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-scene = explorer", WallpaperScene.Explorer)]
+    [InlineData("wallpaper-scene=explorer", WallpaperScene.Explorer)]
+    [InlineData("  WALLPAPER-SCENE   =   Explorer  ", WallpaperScene.Explorer)]
+    [InlineData("wallpaper-scene = idle", WallpaperScene.Idle)]
+    [InlineData("wallpaper-scene = IDLE", WallpaperScene.Idle)]
+    [InlineData("wallpaper-scene = raphael", WallpaperScene.Raphael)]
+    [InlineData("wallpaper-scene = Raphael", WallpaperScene.Raphael)]
+    [InlineData("wallpaper-scene = processing", WallpaperScene.Processing)]
+    [InlineData("wallpaper-scene = PROCESSING", WallpaperScene.Processing)]
+    public void WallpaperSceneIsReadAsEachOfTheFourFixedValues_HoweverTheLineIsSpelled(
+        string line, WallpaperScene expected)
+    {
+        Assert.Equal(expected, Settings.Parse(line).WallpaperScene);
+    }
+
+    /// <summary>Same rule as every other key: a value nobody recognises keeps the default rather than guessing.</summary>
+    [Theory]
+    [InlineData("wallpaper-scene = perhaps")]
+    [InlineData("wallpaper-scene =")]
+    [InlineData("wallpaper-scene")]
+    public void AnUnreadableWallpaperScene_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(WallpaperScene.Processing, Settings.Parse(line).WallpaperScene);
+    }
+
+    [Theory]
+    [InlineData(WallpaperScene.Processing)]
+    [InlineData(WallpaperScene.Explorer)]
+    [InlineData(WallpaperScene.Idle)]
+    [InlineData(WallpaperScene.Raphael)]
+    public void SerializeThenParse_RoundTripsTheWallpaperScene(WallpaperScene wallpaperScene)
+    {
+        var original = new Settings(FocusBorder: true, WallpaperScene: wallpaperScene);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    [Fact]
+    public void Serialize_IncludesTheWallpaperSceneAndMarksItAsADemo()
+    {
+        var serialized = new Settings(FocusBorder: true, WallpaperScene: WallpaperScene.Raphael).Serialize();
+
+        Assert.Contains("# wallpaper-scene:", serialized, StringComparison.Ordinal);
+        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wallpaper-scene = raphael", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// D6d: <c>60</c> unless the file says otherwise -- a settings file that has never been written
+    /// must not cap the html wallpaper's frame rate below its own historical, uncapped behaviour.
+    /// </summary>
+    [Fact]
+    public void WallpaperFpsDefaultsTo60()
+    {
+        Assert.Equal(60, Settings.Default.WallpaperFps);
+        Assert.Equal(60, Settings.Parse(string.Empty).WallpaperFps);
+    }
+
+    [Theory]
+    [InlineData("wallpaper-fps = 30", 30)]
+    [InlineData("wallpaper-fps=30", 30)]
+    [InlineData("  WALLPAPER-FPS   =   30  ", 30)]
+    [InlineData("wallpaper-fps = 60", 60)]
+    [InlineData("wallpaper-fps=60", 60)]
+    public void WallpaperFpsIsReadAsEachOfTheTwoFixedValues_HoweverTheLineIsSpelled(string line, int expected)
+    {
+        Assert.Equal(expected, Settings.Parse(line).WallpaperFps);
+    }
+
+    /// <summary>Same rule as every other key: a value nobody recognises -- including any OTHER number -- keeps the default.</summary>
+    [Theory]
+    [InlineData("wallpaper-fps = 45")]
+    [InlineData("wallpaper-fps = 0")]
+    [InlineData("wallpaper-fps = -30")]
+    [InlineData("wallpaper-fps = perhaps")]
+    [InlineData("wallpaper-fps =")]
+    [InlineData("wallpaper-fps")]
+    public void AnUnreadableWallpaperFps_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(60, Settings.Parse(line).WallpaperFps);
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    public void SerializeThenParse_RoundTripsTheWallpaperFps(int wallpaperFps)
+    {
+        var original = new Settings(FocusBorder: true, WallpaperFps: wallpaperFps);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    /// <summary>The written file marks this key as a demo switch, so nobody mistakes it for a supported feature.</summary>
+    [Fact]
+    public void Serialize_IncludesTheWallpaperFpsAndMarksItAsADemo()
+    {
+        var serialized = new Settings(FocusBorder: true, WallpaperFps: 30).Serialize();
+
+        Assert.Contains("# wallpaper-fps:", serialized, StringComparison.Ordinal);
+        Assert.Contains("demo", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("wallpaper-fps = 30", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
+    [Fact]
+    public void WallpaperSceneAndFpsAreReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse(
+            "focus-border = off\nwallpaper-scene = idle\nwallpaper-fps = 30\ntiling = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.Equal(WallpaperScene.Idle, settings.WallpaperScene);
+        Assert.Equal(30, settings.WallpaperFps);
+        Assert.False(settings.Tiling);
+    }
 }
