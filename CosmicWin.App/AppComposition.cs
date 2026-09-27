@@ -223,6 +223,12 @@ public sealed class AppComposition : IDisposable
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
+        // D3 (html-wallpaper-demo, DEMO-ONLY switch): Video is the only real, supported behaviour --
+        // startup attaches AND plays videoWallpaperPath exactly as before this parameter existed. Html
+        // is the demo: startup attaches the SAME host with no player involved at all (see
+        // AttachHtmlWallpaper below), regardless of whether a path happens to be configured, because
+        // an animated HTML scene page is the wallpaper instead. See odd/tasks/html-wallpaper-demo.md.
+        WallpaperMode wallpaperMode = WallpaperMode.Video,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -402,6 +408,13 @@ public sealed class AppComposition : IDisposable
         // the UI thread's watch tick.
         var videoWallpaperActive = new VolatileFlag();
 
+        // D3 (html-wallpaper-demo): the html-mode equivalent of videoWallpaperActive above -- true
+        // once AttachHtmlWallpaper's TryAttach has actually succeeded, false otherwise. Never touched
+        // by ActivateVideoWallpaper/SwitchVideoWallpaper, exactly as videoWallpaperActive is never
+        // touched by AttachHtmlWallpaper: wallpaperMode is chosen once, at Wire time, and the two
+        // flags describe two mutually exclusive modes that are never mixed within one running process.
+        var htmlWallpaperActive = new VolatileFlag();
+
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
         // never both true at once for longer than one video-wallpaper work item. Without this a
         // video-wallpaper thread slower than 400ms would see its queue grow one item per tick
@@ -467,6 +480,28 @@ public sealed class AppComposition : IDisposable
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
                 $"tryAttach={attached} tryPlay={(played is { } result ? result.ToString() : "skipped")}");
+        }
+
+        /// <summary>
+        /// D3 (html-wallpaper-demo, DEMO-ONLY): the html-mode startup activation -- attaches the SAME
+        /// <paramref name="videoWallpaperHost"/> a video path would use, with NO player involved at
+        /// all: D1 proved TryAttach alone builds the composition swapchain (D3D device + one
+        /// black test-pattern Present), which is all the WebView2 overlay above it needs to render
+        /// over. Never calls TryPlay, even if a video path happens to be configured -- html mode
+        /// always wins over a stale video-wallpaper-path setting. videoWallpaperPlayer's own Shake()
+        /// becomes an unreachable no-op with no active playback session (D1); left as-is on purpose,
+        /// the scene page shakes itself instead.
+        /// </summary>
+        void AttachHtmlWallpaper(string phase)
+        {
+            if (videoWallpaperHost is null)
+            {
+                return;
+            }
+
+            var attached = videoWallpaperHost.TryAttach();
+            htmlWallpaperActive.Value = attached;
+            desktopTrace?.Record($"video-wallpaper phase={phase} mode=html attached={attached}");
         }
 
         /// <summary>
@@ -684,8 +719,16 @@ public sealed class AppComposition : IDisposable
                 // alertDesktopVisible, when supplied, still overrides this composition entirely (the
                 // seam every test predating T10 uses); isPrimaryMonitorCovered is the new, narrower
                 // seam for the coverage half alone, wired to the real Win32 check by WireProduction.
+                // D3 (html-wallpaper-demo): htmlWallpaperActive generalizes the SAME "is the
+                // wallpaper actually up" signal videoWallpaperActive already provides here -- in html
+                // mode nothing ever sets videoWallpaperActive (no player is ever started, by design),
+                // so without this an alert command would sit pending forever and eventually expire,
+                // contradicting the whole point of the demo switch (alerts still toggle the overlay).
+                // Composition wiring only: AlertQueue.Advance and PrimaryMonitorFullscreenDetector
+                // stay exactly as they are.
                 var desktopVisible = (alertDesktopVisible?.Invoke()
-                    ?? (videoWallpaperActive.Value && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
+                    ?? ((videoWallpaperActive.Value || htmlWallpaperActive.Value)
+                        && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
                     && (startAlertLayer is null || alertRendererReady?.Invoke() != false);
                 active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
             }
@@ -1747,7 +1790,13 @@ public sealed class AppComposition : IDisposable
             // tick is what actually notices; gated on videoWallpaperActive so a never-activated or
             // failed video wallpaper posts nothing, and on the pending flag so a slow
             // video-wallpaper thread never gets a second one queued behind the one it has not run.
-            if (videoWallpaperActive.Value && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending.Value)
+            //
+            // D3 (html-wallpaper-demo): the SAME re-raise applies verbatim to html mode's own
+            // composition swapchain -- htmlWallpaperActive is that mode's equivalent of
+            // videoWallpaperActive, so this tick must also fire while the host is attached in html
+            // mode, not only while a video is genuinely playing.
+            if ((videoWallpaperActive.Value || htmlWallpaperActive.Value)
+                && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending.Value)
             {
                 videoWallpaperKeepAlivePending.Value = true;
                 onVideoWallpaperThread(() =>
@@ -1794,9 +1843,21 @@ public sealed class AppComposition : IDisposable
         // pump the host window: Win32VideoWallpaperHost's own doc comment requires this (its
         // TaskbarCreated re-attach depends on being pumped), and onOwningThread is already how every
         // other Win32-window-touching callback in this method reaches that thread.
-        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null && videoWallpaperPath is not null)
+        //
+        // D3 (html-wallpaper-demo): the SAME threading rule applies in html mode, but the activation
+        // itself is attach-only (see AttachHtmlWallpaper) -- no path is required, and a configured one
+        // is deliberately ignored (never played) rather than left to a stale ActivateVideoWallpaper
+        // call, since the demo's whole point is that an animated HTML scene page is the wallpaper.
+        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
         {
-            onVideoWallpaperThread(() => ActivateVideoWallpaper("startup", videoWallpaperPath));
+            if (wallpaperMode == WallpaperMode.Html)
+            {
+                onVideoWallpaperThread(() => AttachHtmlWallpaper("startup"));
+            }
+            else if (videoWallpaperPath is not null)
+            {
+                onVideoWallpaperThread(() => ActivateVideoWallpaper("startup", videoWallpaperPath));
+            }
         }
 
         return new AppComposition(
@@ -1874,7 +1935,10 @@ public sealed class AppComposition : IDisposable
         // Startup runs on the owning STA before its dispatcher synchronization context may
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
         var alertLayer = settings.AlertsEnabled
-            ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record)
+            ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
+                // D3 (html-wallpaper-demo, DEMO-ONLY): navigates to the processing scene page and
+                // stays visible permanently once ready, instead of the ordinary alert-only page.
+                htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html)
             : null;
         // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
         // wallpaper thread's failure sink can point at it directly with no reordering.
@@ -1945,6 +2009,7 @@ public sealed class AppComposition : IDisposable
                 videoWallpaperThread.Dispose();
             },
             videoWallpaperPath: settings.VideoWallpaperPath,
+            wallpaperMode: settings.WallpaperMode,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }

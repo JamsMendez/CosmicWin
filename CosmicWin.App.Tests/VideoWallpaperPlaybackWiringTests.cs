@@ -182,7 +182,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Action<string>? persistVideoWallpaperPath = null,
         Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
         bool videoWallpaperHttpEnabled = false,
-        Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null)
+        Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null,
+        WallpaperMode wallpaperMode = WallpaperMode.Video)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -216,6 +217,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             videoWallpaperPath: videoWallpaperPath,
             persistVideoWallpaperPath: persistVideoWallpaperPath,
             videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
+            wallpaperMode: wallpaperMode,
             readVideoFileSnapshot: readVideoFileSnapshot,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, videoSwitch) =>
@@ -262,6 +264,61 @@ public sealed class VideoWallpaperPlaybackWiringTests
         using (harness.Composition)
         {
             Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+        }
+    }
+
+    /// <summary>
+    /// D3 (html-wallpaper-demo, demo/html-wallpaper-d3-switch): in html mode startup attaches the
+    /// SAME host with no player involved at all -- never TryPlay -- even though a video path is
+    /// configured (decision: html mode always wins over a stale video-path setting). Traced with
+    /// mode=html so it reads distinctly from an ordinary video startup line.
+    /// </summary>
+    [Fact]
+    public void Startup_InHtmlMode_AttachesTheHostWithoutPlayingEvenWithAConfiguredPath()
+    {
+        var events = new List<string>();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost(events);
+        var player = new FakeVideoWallpaperPlayer(events);
+        var trace = new RecordingDesktopTrace();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
+            wallpaperMode: WallpaperMode.Html);
+        using (harness.Composition)
+        {
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+            Assert.Equal(["host.TryAttach"], events);
+            Assert.Equal(
+                ["video-wallpaper phase=startup mode=html attached=True"],
+                trace.Lines);
+        }
+    }
+
+    /// <summary>D1: html mode needs no configured path at all -- there is nothing to play, only a host to attach.</summary>
+    [Fact]
+    public void Startup_InHtmlMode_WithNoConfiguredPath_StillAttachesTheHost()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            scheduleVideoWallpaperWork: queued.Enqueue, wallpaperMode: WallpaperMode.Html);
+        using (harness.Composition)
+        {
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(1, host.TryAttachCallCount);
             Assert.Equal(0, player.TryPlayCallCount);
         }
     }
@@ -636,6 +693,63 @@ public sealed class VideoWallpaperPlaybackWiringTests
             queued.Dequeue().Invoke();
             Assert.Equal(1, host.TryAttachCallCount);
             Assert.Equal(1, player.TryPlayCallCount);
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+            Assert.Equal(1, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>
+    /// D3 (html-wallpaper-demo): the app-level keep-alive re-raise (T3) must also run while the host
+    /// is attached in html mode -- exactly the same slideshow/WorkerW re-raise problem T3 fixed for
+    /// video applies to html mode's own composition swapchain, since nothing else calls TryAttach on
+    /// this cadence.
+    /// </summary>
+    [Fact]
+    public void ReconcileTick_WithAnAttachedHtmlWallpaper_PostsExactlyOneKeepAliveTryAttach()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            wallpaperMode: WallpaperMode.Html);
+        using (harness.Composition)
+        {
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, host.TryAttachCallCount);
+
+            scheduler.Fire();
+
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+            Assert.Equal(2, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>Mirrors <see cref="ReconcileTick_WhenStartupTryPlayFailed_PostsNothing"/> for html mode: a failed startup attach must never be retried by the keep-alive tick.</summary>
+    [Fact]
+    public void ReconcileTick_WhenHtmlStartupAttachFailed_PostsNothing()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost { TryAttachReturns = false };
+        var player = new FakeVideoWallpaperPlayer();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            wallpaperMode: WallpaperMode.Html);
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke();
+            Assert.Equal(1, host.TryAttachCallCount);
 
             scheduler.Fire();
 

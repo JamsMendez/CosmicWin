@@ -61,7 +61,8 @@ public sealed class WebViewAlertCompositionWiringTests
     private sealed class Host : IVideoWallpaperHost
     {
         public int Attempts { get; private set; }
-        public bool TryAttach() => ++Attempts != 2;
+        public bool FailAttach { get; set; }
+        public bool TryAttach() { Attempts++; return !FailAttach && Attempts != 2; }
         ID3D11Device IVideoWallpaperHost.Device => throw new NotSupportedException();
         ID3D11Texture2D IVideoWallpaperHost.GetBackBuffer() => throw new NotSupportedException();
         public void Present() { }
@@ -136,7 +137,7 @@ public sealed class WebViewAlertCompositionWiringTests
     private static (AppComposition Composition, Scheduler Timer, Server Server, List<string> Events, FakeTimeProvider Clock, RecordingDesktopTrace Trace, FakeDisplay Display) Create(
         Func<bool>? visible = null, bool enabled = true, Func<bool>? ready = null,
         Host? host = null, Action<AlertShowRequest>? startAlertLayer = null, Action? preloadAlertLayer = null,
-        IDisplay? primaryDisplay = null)
+        IDisplay? primaryDisplay = null, WallpaperMode wallpaperMode = WallpaperMode.Video)
     {
         var events = new List<string>();
         var timer = new Scheduler();
@@ -168,6 +169,7 @@ public sealed class WebViewAlertCompositionWiringTests
             endAlertLayer: () => events.Add("end"),
             shakeAlertVideo: duration => events.Add($"shake:{duration.TotalMilliseconds}"),
             preloadAlertLayer: preloadAlertLayer,
+            wallpaperMode: wallpaperMode,
             timeProvider: clock);
         return (composition, timer, server!, events, clock, trace, display);
     }
@@ -526,6 +528,41 @@ public sealed class WebViewAlertCompositionWiringTests
         var h = Create(enabled: false);
         using (h.Composition) h.Timer.Tick();
         Assert.Empty(h.Events);
+    }
+
+    /// <summary>
+    /// D3 (html-wallpaper-demo, demo/html-wallpaper-d3-switch): in html mode no player is ever started
+    /// (D1/D3 wiring: TryAttach only, never TryPlay), so nothing ever sets the ordinary
+    /// videoWallpaperActive flag <c>UpdateAlertOverlay</c>'s desktopVisible predicate reads. Without
+    /// generalizing that predicate to also read the html-attached flag, a queued alert would sit
+    /// pending forever -- this proves it actually shows once the host is attached, with no
+    /// alertDesktopVisible override supplied (host is non-null here, so Create's own default leaves
+    /// that override unset, exactly as WireProduction does).
+    /// </summary>
+    [Fact]
+    public void InHtmlWallpaperMode_AnAlertShowsEvenThoughNoVideoEverPlays()
+    {
+        var host = new Host();
+        var h = Create(host: host, wallpaperMode: WallpaperMode.Html);
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:1 duration:1"));
+            Assert.StartsWith("start:warning:", Assert.Single(h.Events));
+        }
+    }
+
+    /// <summary>The other half of the fact above: html mode alone is not enough -- the host must have actually attached, or the alert stays held exactly as it would with no desktop visible at all.</summary>
+    [Fact]
+    public void InHtmlWallpaperMode_WhenTheHostNeverAttaches_AlertsStayHeld()
+    {
+        var host = new Host { FailAttach = true };
+        var h = Create(host: host, wallpaperMode: WallpaperMode.Html);
+        using (h.Composition)
+        {
+            Assert.Equal(AlertPipeProtocol.OkReply, h.Server.Send("warning:1 duration:1"));
+            h.Timer.Tick();
+            Assert.Empty(h.Events);
+        }
     }
 
     /// <summary>
