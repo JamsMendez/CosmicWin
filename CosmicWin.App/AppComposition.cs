@@ -2081,6 +2081,22 @@ public sealed class AppComposition : IDisposable
 
         var desktops = new Win32VirtualDesktopService();
 
+        // S10 (wallpaper-scene-http-endpoint, R3-first-run-write-failure-silent): desktopTrace now
+        // constructed HERE, ahead of the settings load below, instead of after it (T9a originally put
+        // it right before the alert layer, further down) -- so a failed first-run settings.conf write
+        // has somewhere to report to. Moving it earlier costs nothing: FileDesktopTrace's constructor
+        // only resolves a path, it opens no file and depends on no other collaborator built below.
+        var desktopTrace = new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath());
+
+        // S10: reports a failed settings write -- first-run create below, OR any later toggle through
+        // settingsStore's own save delegate -- by exception TYPE NAME ONLY (never the path or
+        // message), the same house rule every other `*-failed` line in this file already follows
+        // (e.g. SwitchVideoWallpaper's own import-failed line). SettingsFile.Save/LoadOrCreate still
+        // swallow the failure and keep running on the in-memory value; this only makes that swallow
+        // observable instead of silent.
+        void OnSettingsSaveFailed(string errorType) =>
+            desktopTrace.Record($"settings-file save-failed error={errorType}");
+
         // Read ONCE here rather than inside Wire, so every test drives the same composition with the
         // value stated explicitly instead of whatever this machine's file happens to say. Moved
         // ahead of the gap assignment below (T5, alert-tile-mosaic) so TreeArranger.Gap can start
@@ -2091,7 +2107,7 @@ public sealed class AppComposition : IDisposable
         // production call site that must also WRITE settings.conf when it is missing, since CosmicWin
         // has no installer and first start is the install moment. SettingsFile.Load itself stays
         // side-effect-free for its other callers (loadGap's Reload below, tests).
-        var settings = SettingsFile.LoadOrCreate();
+        var settings = SettingsFile.LoadOrCreate(onDiagnostic: OnSettingsSaveFailed);
 
         // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
         // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
@@ -2113,7 +2129,12 @@ public sealed class AppComposition : IDisposable
         // could both read the SAME pre-update snapshot and race their `with`, one silently clobbering
         // the other's field. SynchronizedSettingsStore.Update wraps the whole read-modify-write-and-
         // save in one lock, so every persist below is now serialized against every other one.
-        var settingsStore = new SynchronizedSettingsStore(settings, SettingsFile.Save);
+        //
+        // S10: the save delegate now reports a failed write through the SAME OnSettingsSaveFailed
+        // the first-run LoadOrCreate above uses, so every persistXyz closure below (focus border,
+        // border colour, tiling, video path, scene) gets the same observability, not just first run.
+        var settingsStore = new SynchronizedSettingsStore(
+            settings, s => SettingsFile.Save(s, OnSettingsSaveFailed));
 
         // ONE hoisted instance for the life of the process, read once per untiled focus chord --
         // not reconstructed per chord, which would pay Win32NativeWindowSource's own construction
@@ -2122,11 +2143,10 @@ public sealed class AppComposition : IDisposable
 
         var videoWallpaperHost = new Win32VideoWallpaperHost();
         var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
-        // T9a (webview-alert-layer): the desktop trace is created here, ahead of the alert layer, so
+        // T9a (webview-alert-layer): desktopTrace (constructed further up now, S10) is passed here so
         // BOTH the controller's own lifecycle telemetry and Wire's desktopTrace parameter share the
         // exact same sink -- T6 found production had no alert-layer navigation/render telemetry at
         // all, which left F1/F2 unexplained.
-        var desktopTrace = new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath());
         // Startup runs on the owning STA before its dispatcher synchronization context may
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
         var alertLayer = settings.AlertsEnabled

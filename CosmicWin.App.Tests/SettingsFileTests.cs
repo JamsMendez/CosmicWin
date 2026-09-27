@@ -167,4 +167,58 @@ public sealed class SettingsFileTests : IDisposable
 
         Assert.Equal(Settings.Default, settings);
     }
+
+    /// <summary>
+    /// S10 (wallpaper-scene-http-endpoint, R3-first-run-write-failure-silent): a failed first-run
+    /// write must still swallow-and-continue (defaults returned, no throw -- unchanged from
+    /// <see cref="AnUnwritablePath_LoadOrCreate_ReturnsTheDefaultsInsteadOfThrowing"/> above), but now
+    /// reports itself exactly once, by exception TYPE NAME ONLY, to whoever asked to hear about it.
+    /// </summary>
+    [Fact]
+    public void AnUnwritablePath_LoadOrCreate_ReportsTheFailureByTypeNameOnly()
+    {
+        Directory.CreateDirectory(Path_);
+        var diagnostics = new List<string>();
+
+        var settings = SettingsFile.LoadOrCreate(Path_, error => diagnostics.Add(error));
+
+        Assert.Equal(Settings.Default, settings);
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.True(
+            diagnostic is nameof(IOException) or nameof(UnauthorizedAccessException),
+            $"expected an IOException or UnauthorizedAccessException type name, got '{diagnostic}'");
+        // Never the path, never a message -- only the two rules Save's own catch clause is allowed
+        // to see the shape of.
+        Assert.DoesNotContain(_directory, diagnostic, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The general-purpose overload -- the one <c>SynchronizedSettingsStore</c>'s save delegate wraps
+    /// in production -- reports the SAME way as <see cref="LoadOrCreate(string, Action{string}?)"/>'s
+    /// own internal call to it, since it is the exact same method.
+    /// </summary>
+    [Fact]
+    public void Save_ToAnUnwritablePath_ReportsTheFailureByTypeNameOnly()
+    {
+        Directory.CreateDirectory(Path_);
+        var diagnostics = new List<string>();
+
+        SettingsFile.Save(Path_, new Settings(FocusBorder: false), error => diagnostics.Add(error));
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.True(
+            diagnostic is nameof(IOException) or nameof(UnauthorizedAccessException),
+            $"expected an IOException or UnauthorizedAccessException type name, got '{diagnostic}'");
+    }
+
+    /// <summary>A successful write never calls the diagnostic -- it exists to report FAILURES only.</summary>
+    [Fact]
+    public void Save_Succeeding_NeverInvokesTheDiagnostic()
+    {
+        var diagnostics = new List<string>();
+
+        SettingsFile.Save(Path_, new Settings(FocusBorder: false), error => diagnostics.Add(error));
+
+        Assert.Empty(diagnostics);
+    }
 }

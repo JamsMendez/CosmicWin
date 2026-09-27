@@ -53,4 +53,37 @@ public sealed class WireProductionSettingsPersistenceWiringTests
         // LoadOrCreate -- a Reload is not a first run and must never create or rewrite the file.
         Assert.Contains("loadGap: () => SettingsFile.Load().Gap", source, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// S10 (wallpaper-scene-http-endpoint, R3-first-run-write-failure-silent): a failed settings
+    /// write must reach <c>desktopTrace</c> from BOTH the first-run <c>LoadOrCreate</c> call AND
+    /// every later persist through <see cref="SynchronizedSettingsStore"/>'s own save delegate --
+    /// otherwise only one of the two paths would ever be observable.
+    /// </summary>
+    [Fact]
+    public void WireProduction_WiresTheSameSaveFailureDiagnosticIntoLoadOrCreateAndTheSettingsStore()
+    {
+        var source = ReadAppCompositionSource();
+
+        var methodStart = source.IndexOf(
+            "public static AppComposition WireProduction(Action shutdown)", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "expected to find WireProduction's declaration in AppComposition.cs");
+
+        Assert.Contains(
+            "void OnSettingsSaveFailed(string errorType) =>", source[methodStart..], StringComparison.Ordinal);
+        Assert.Contains(
+            "SettingsFile.LoadOrCreate(onDiagnostic: OnSettingsSaveFailed)",
+            source[methodStart..], StringComparison.Ordinal);
+        // Anchored on the call's start/end rather than the exact line-wrapping in between, which
+        // CRLF/formatting differences make fragile (same reasoning as
+        // WireProductionHtmlWallpaperSettingsWiringTests' own closeMarker anchor).
+        var storeCallStart = source.IndexOf(
+            "new SynchronizedSettingsStore(", methodStart, StringComparison.Ordinal);
+        Assert.True(storeCallStart >= 0, "expected a `new SynchronizedSettingsStore(...)` call inside WireProduction");
+        var storeCallEnd = source.IndexOf(");", storeCallStart, StringComparison.Ordinal);
+        Assert.True(storeCallEnd > storeCallStart, "expected the SynchronizedSettingsStore call to end with `);`");
+        var storeCall = source[storeCallStart..(storeCallEnd + 2)];
+
+        Assert.Contains("settings, s => SettingsFile.Save(s, OnSettingsSaveFailed)", storeCall, StringComparison.Ordinal);
+    }
 }
