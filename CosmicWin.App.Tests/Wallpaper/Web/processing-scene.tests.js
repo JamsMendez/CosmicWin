@@ -594,6 +594,114 @@ test("an alert's 'done' still fires on its own duration under a 30fps cap, not d
     "expected 'done' close to the actual duration boundary, not badly delayed by the 30fps cap, got " + doneFiredAtMs);
 });
 
+// ---- Case 9: the cap must pace to the TARGET RATE on any display refresh rate, not to "1 of every N
+// display frames" (html-wallpaper-demo D6d hardening, three review lenses WARNING). The pre-fix
+// scheduleFrame skipped a frame whenever less than one INTERVAL had passed since the last DRAWN
+// frame's own timestamp -- draw-1-of-every-N-real-frames, where N depends on the display's refresh
+// rate, not on the fps setting. Measured FACT on the maintainer's own 164Hz (6.0976ms/frame) display:
+// wallpaper-fps=60 drew every 3rd frame (~54.7fps, not 60) and wallpaper-fps=30 drew every 6th
+// (~27.3fps, not 30); a 75Hz display turned the 60fps cap into 37.5fps. The fix is a target-time
+// (accumulator) scheduler: a fixed `nextDueMs` schedule that advances by exactly one interval per
+// draw (never re-based off "now"), so the AVERAGE drawn rate converges on the configured fps on any
+// refresh rate at or above it, instead of drifting with whatever the display happens to run at.
+//
+// simulateDrawnCount drives the REAL requestAnimationFrame mock at a fixed simulated refresh
+// interval, exactly like the Case 8 tests above -- never calling render(ms) directly, so scheduleFrame
+// itself is what is under test.
+function simulateDrawnCount(page, frameIntervalMs, durationMs) {
+  var drawnCount = 0;
+  function loop() { drawnCount++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  var frameCount = Math.round(durationMs / frameIntervalMs);
+  var frameTimeMs = 0;
+  for (var i = 0; i < frameCount; i++) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(frameTimeMs);
+    frameTimeMs += frameIntervalMs;
+  }
+  return drawnCount;
+}
+
+// +/-2% of the expected count, or +/-2 frames/sec worth of frames over the simulated duration --
+// whichever is LARGER -- so a short simulation is not held to an unreasonably tight absolute bound.
+function assertPacedRate(actualDrawnCount, targetFps, durationSeconds, label) {
+  var expected = targetFps * durationSeconds;
+  var tolerance = Math.max(0.02 * expected, 2 * durationSeconds);
+  assert.ok(Math.abs(actualDrawnCount - expected) <= tolerance,
+    label + ": expected ~" + expected + " drawn frames (+/-" + tolerance + ") for a " + targetFps +
+    "fps cap over " + durationSeconds + "s, got " + actualDrawnCount);
+}
+
+var SIMULATED_DISPLAYS = [
+  { hz: 164, frameIntervalMs: 1000 / 164 }, // the maintainer's own measured display
+  { hz: 144, frameIntervalMs: 1000 / 144 },
+  { hz: 75, frameIntervalMs: 1000 / 75 },
+  { hz: 60, frameIntervalMs: 1000 / 60 },
+];
+
+SIMULATED_DISPLAYS.forEach(function (display) {
+  [60, 30].forEach(function (fps) {
+    test("shared render loop: a " + display.hz + "Hz display paces wallpaper-fps=" + fps +
+        " to the target rate over 5 simulated seconds, not 1-of-every-N display frames", function () {
+      var page = loadPage({ search: "?fps=" + fps });
+      var durationMs = 5000;
+      var drawnCount = simulateDrawnCount(page, display.frameIntervalMs, durationMs);
+
+      if (display.hz <= fps) {
+        var expectedFrameCount = Math.round(durationMs / display.frameIntervalMs);
+        assert.strictEqual(drawnCount, expectedFrameCount,
+          "expected EVERY frame to draw when the " + display.hz + "Hz display is at or below the " +
+          fps + "fps cap, drew " + drawnCount + " of " + expectedFrameCount);
+      } else {
+        assertPacedRate(drawnCount, fps, durationMs / 1000, display.hz + "Hz display, wallpaper-fps=" + fps);
+      }
+    });
+  });
+});
+
+test("shared render loop: after a simulated 500ms hitch, the schedule resyncs instead of bursting a catch-up flood", function () {
+  var page = loadPage({ search: "?fps=60" });
+  var frameIntervalMs = 1000 / 164; // this maintainer's own measured display
+
+  var drawnCount = 0;
+  function loop() { drawnCount++; page.sandbox.scheduleFrame(loop); }
+  page.sandbox.scheduleFrame(loop);
+
+  // Reach steady state at 164Hz first (about 1 simulated second).
+  var frameTimeMs = 0;
+  var steadyStateFrames = Math.round(1000 / frameIntervalMs);
+  for (var i = 0; i < steadyStateFrames; i++) {
+    var wrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    wrapper(frameTimeMs);
+    frameTimeMs += frameIntervalMs;
+  }
+
+  // Simulate a 500ms hitch (a throttled background tab, a long hitch): no rAF fires during it, then
+  // one real frame lands 500ms late.
+  frameTimeMs += 500;
+  var drawnBeforeHitchFrame = drawnCount;
+  var hitchWrapper = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+  hitchWrapper(frameTimeMs);
+  assert.strictEqual(drawnCount - drawnBeforeHitchFrame, 1,
+    "expected exactly one draw for the single real frame that lands right after the hitch");
+
+  // The next handful of real frames, back at normal 164Hz cadence, must not burst to catch up the
+  // 500ms the schedule fell behind -- at most 1-2 draws across the next 5 real frames (~30.5ms of
+  // simulated time at 164Hz), the same pace as steady state, never a flood of consecutive draws.
+  frameTimeMs += frameIntervalMs;
+  var drawnBeforeWindow = drawnCount;
+  for (var j = 0; j < 5; j++) {
+    var w = page.requestAnimationFrameCalls[page.requestAnimationFrameCalls.length - 1];
+    w(frameTimeMs);
+    frameTimeMs += frameIntervalMs;
+  }
+  var drawnInWindow = drawnCount - drawnBeforeWindow;
+  assert.ok(drawnInWindow <= 2,
+    "expected at most 1-2 draws in the 5 real frames right after the hitch (back to pace, not a " +
+    "catch-up burst), saw " + drawnInWindow);
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

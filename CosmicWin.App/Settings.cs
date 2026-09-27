@@ -91,8 +91,10 @@ public enum WallpaperScene
 /// </param>
 /// <param name="WallpaperFps">
 /// DEMO ONLY (D6d, html-wallpaper-demo, 2026-09-27): caps how many times per second the html
-/// wallpaper's scene and alert overlay draw, 30 or 60. Defaults to 60 -- today's uncapped behaviour
-/// (one draw per real animation frame), unchanged for anyone who never edits this key.
+/// wallpaper's scene and alert overlay draw, 30 or 60. Defaults to 60. Before D6d the scene had no
+/// cap at all and drew on every real animation frame -- i.e. at the display's own refresh rate (over
+/// 60fps on any display faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a
+/// no-op default.
 /// </param>
 /// <remarks>
 /// <para>
@@ -334,7 +336,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          {WallpaperSceneKey} = {WallpaperSceneValue(WallpaperScene)}
 
          # {WallpaperFpsKey}: DEMO ONLY, not a supported feature. Caps the html wallpaper's own frame
-         # rate: `{WallpaperFps30Value}` or `{WallpaperFps60Value}` (default, today's uncapped behaviour).
+         # rate: `{WallpaperFps30Value}` or `{WallpaperFps60Value}` (default). Before this setting
+         # existed the scene drew uncapped, at the display's own refresh rate.
          {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;
@@ -492,7 +495,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <summary>
     /// DEMO ONLY (D6d, html-wallpaper-demo): reads exactly <c>30</c> or <c>60</c>. Same rule as every
     /// other key: anything else -- including a number that merely isn't one of those two -- keeps the
-    /// default (60, today's uncapped behaviour) rather than guessing.
+    /// default (60) rather than guessing. 60 is a CAP, not the historical behaviour: before this
+    /// setting existed the scene drew uncapped, at the display's own refresh rate.
     /// </summary>
     private static bool TryReadWallpaperFps(string value, out int fps)
     {

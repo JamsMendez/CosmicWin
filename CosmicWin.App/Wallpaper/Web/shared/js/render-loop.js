@@ -75,10 +75,26 @@ function readWallpaperFpsFromUrl() {
 
 var wallpaperFrameIntervalMs = 1000 / readWallpaperFpsFromUrl();
 
-// The timestamp (rAF's own `ms` argument) of the last frame actually DRAWN -- i.e. the last time
-// `scheduleFrame`'s own wrapper decided to invoke its callback, never a frame it skipped. `null`
-// means no frame has drawn yet (always draws the very first one, with nothing to compare against).
-var wallpaperLastDrawnFrameTimeMs = null;
+// html-wallpaper-demo D6d hardening (three review lenses WARNING, post-merge): the FIRST cut of this
+// throttle (dc47db5) skipped a frame whenever less than one interval had passed since the last DRAWN
+// frame's own rAF timestamp -- i.e. "draw 1 of every N real display frames", where N depends on the
+// DISPLAY's refresh rate, not on wallpaperFrameIntervalMs. That makes the actually-observed draw rate
+// a function of the monitor: measured FACT on the maintainer's own 164Hz (6.0976ms/frame) display,
+// wallpaper-fps=60 drew every 3rd real frame (~54.7fps, not 60) and wallpaper-fps=30 drew every 6th
+// (~27.3fps, not 30); a 75Hz display turned the 60fps cap into 37.5fps. See
+// CosmicWin.App.Tests/Wallpaper/Web/processing-scene.tests.js's "Case 9" for the tests that pin this
+// down across several simulated refresh rates.
+//
+// The fix below is a target-time (accumulator) scheduler instead: `wallpaperNextDueFrameTimeMs` is a
+// FIXED schedule that always advances by exactly one interval per draw -- never re-derived from "now"
+// -- so the AVERAGE drawn rate converges on the configured fps on any refresh rate at or above it
+// (every real frame lands on one side or the other of the next fixed due-time, and which side varies
+// frame to frame in a way that cancels out over time, instead of a constant N baked in by the first
+// real interval it happened to measure).
+
+// The next fixed point in time (rAF's own `ms` timeline) at which a frame is due to be DRAWN. `null`
+// means no frame has drawn yet (always draws the very first one -- nothing to be "due" against yet).
+var wallpaperNextDueFrameTimeMs = null;
 
 // Tolerates rAF's own ordinary sub-millisecond delivery jitter without ever letting a full extra
 // frame slip through: a real interval a hair under the exact target (e.g. 33.29ms against a 33.33ms
@@ -87,10 +103,11 @@ var wallpaperLastDrawnFrameTimeMs = null;
 var WALLPAPER_FRAME_INTERVAL_EPSILON_MS = 1;
 
 // The ONE place every scene's render loop schedules its next frame (see this function's own header
-// remarks above for what it replaces). At the default 60fps this is exactly one
-// requestAnimationFrame per drawn frame -- unchanged in effect from before this file existed. At
-// 30fps, roughly every other real animation frame is SKIPPED: `callback` is not invoked at all (so it
-// draws nothing and cannot advance whatever clock it reads from its own `ms` argument, e.g.
+// remarks above for what it replaces, and the D6d hardening remarks just above for the pacing rule
+// itself). At the default 60fps on a 60Hz-or-slower display this draws every real animation frame,
+// same as before this file existed; on any FASTER display (including today's common 120-165Hz
+// monitors), or under the 30fps setting, some real frames are SKIPPED: `callback` is not invoked at
+// all (so it draws nothing and cannot advance whatever clock it reads from its own `ms` argument, e.g.
 // alertSceneMs), but the skip itself still reschedules via requestAnimationFrame -- unconditionally,
 // exactly like every scene's own render()/renderFrame() unconditionally calls scheduleFrame as its
 // last statement (D2b/D6a fault isolation) -- so the loop never stops. Because a DRAWN frame always
@@ -99,12 +116,31 @@ var WALLPAPER_FRAME_INTERVAL_EPSILON_MS = 1;
 // skipped in between; only the DRAWING rate is capped, never the clock a drawn frame is handed.
 function scheduleFrame(callback) {
   window.requestAnimationFrame(function (frameTimeMs) {
-    if (wallpaperLastDrawnFrameTimeMs !== null &&
-        frameTimeMs - wallpaperLastDrawnFrameTimeMs < wallpaperFrameIntervalMs - WALLPAPER_FRAME_INTERVAL_EPSILON_MS) {
+    if (wallpaperNextDueFrameTimeMs !== null &&
+        frameTimeMs < wallpaperNextDueFrameTimeMs - WALLPAPER_FRAME_INTERVAL_EPSILON_MS) {
       scheduleFrame(callback);
       return;
     }
-    wallpaperLastDrawnFrameTimeMs = frameTimeMs;
+
+    if (wallpaperNextDueFrameTimeMs === null ||
+        frameTimeMs - wallpaperNextDueFrameTimeMs >= wallpaperFrameIntervalMs) {
+      // Either the very first frame ever (nothing scheduled yet), or the loop fell far behind its
+      // own fixed schedule by a full interval or more -- a throttled background tab, a long GC/layout
+      // hitch, the wallpaper host briefly not pumping messages, ... Resync to NOW + one interval
+      // rather than leaving the old due-time in place, which would otherwise make EVERY frame from
+      // here look "overdue" and fire a burst of consecutive catch-up draws until the schedule caught
+      // back up to real time.
+      wallpaperNextDueFrameTimeMs = frameTimeMs + wallpaperFrameIntervalMs;
+    } else {
+      // The ordinary case: advance the FIXED schedule by exactly one interval, not to "now + interval"
+      // (that would re-base off whichever real frame happened to cross the line, letting the drawn
+      // rate drift to whatever the display's refresh rate divides into -- the exact bug this hardening
+      // fixes). Keeping the schedule fixed is what makes the AVERAGE drawn rate converge on the
+      // configured fps on any display: some real frames land a little early against the next due
+      // time, some a little late, and those differences cancel out over time instead of compounding.
+      wallpaperNextDueFrameTimeMs += wallpaperFrameIntervalMs;
+    }
+
     callback(frameTimeMs);
   });
 }
