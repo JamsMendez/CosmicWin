@@ -1,10 +1,15 @@
 <!doctype html>
 <!--
-  html-wallpaper-demo D6c: copied verbatim from docs/great-sage/background-idle/index.html
-  (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
-  only this header comment was added, the source's own body follows unchanged. The actual
-  wallpaper page adaptation (shared alert overlay wiring, see-through hook, dropped
-  fullscreen/keyboard shortcuts) is a separate commit.
+  html-wallpaper-demo D6c: the idle scene as a wallpaper page, with the alert overlay drawn into the
+  SAME canvas/loop (see ../shared/js/alert-overlay.js's header remarks) -- adapted from
+  docs/great-sage/background-idle/index.html (reference-only, excluded from git; see the feature
+  doc, "Source material"), the same technique CosmicWin.App/Wallpaper/Web/explorer/index.html (D6a)
+  and CosmicWin.App/Wallpaper/Web/raphael/index.html (D6b) already use.
+
+  Driven by the same hash/postMessage alert API as every other scene page, e.g.:
+      index.html#tiles=failed,warning&columns=2&rows=1&gap=8&duration=5000
+      index.html#kind=failed&duration=5000
+  Starts idle (scene only) when no hash param is present -- see ../shared/js/alert-overlay.js.
 -->
 <html lang="en">
 <head>
@@ -20,6 +25,9 @@
   <script src="js/glyphs.js"></script>
   <script src="js/earth.js"></script>
   <script src="js/rings.js"></script>
+  <script src="js/see-through-hook.js"></script>
+  <script src="../shared/js/alert-overlay.js"></script>
+  <script src="../shared/js/render-loop.js"></script>
   <script src="js/animate.js"></script>
   <script src="js/main.js"></script>
 </body>

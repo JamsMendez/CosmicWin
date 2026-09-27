@@ -1,6 +1,17 @@
 /* html-wallpaper-demo D6c: copied verbatim from docs/great-sage/background-idle/styles.css
    (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
-   only this header comment was added, the source's own body follows unchanged. */
+   only this header comment and the @font-face block below were added -- the source's own body
+   follows unchanged. The alert overlay's title text (shared/js/alert-overlay.js) needs "Archivo
+   Black", the same offline bundled font every other scene page already declares (D2/D6a) and
+   CosmicWin.App/Wallpaper/Web/shared/fonts/ ships for every scene. */
+
+@font-face {
+  font-family: "Archivo Black";
+  src: url("../shared/fonts/ArchivoBlack-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
 
 :root {
   color-scheme: dark;
