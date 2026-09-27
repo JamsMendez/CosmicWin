@@ -945,6 +945,96 @@ public sealed class VideoWallpaperPlaybackWiringTests
         }
     }
 
+    // ---- S7 (wallpaper-scene-http-endpoint): guard the video route in html mode ----
+
+    /// <summary>
+    /// S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): html mode owns
+    /// the wallpaper surface -- an HTTP-initiated video switch must never start a player
+    /// underneath it. A real dedicated thread and a real (counting) import delegate are wired so a
+    /// false accept here can ONLY come from the html-mode guard, never from the "no thread"/"no
+    /// collaborators" checks <see
+    /// cref="HttpSwitch_WithADedicatedThreadButNoHostOrPlayer_ReturnsFalseAndQueuesNothing"/> and
+    /// friends already cover -- both host and player are wired.
+    /// </summary>
+    [Fact]
+    public void HttpSwitch_InHtmlMode_ReturnsFalseWithoutImportingOrTouchingThePlayer()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var persisted = new List<string>();
+        var importCalls = 0;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
+            persistVideoWallpaperPath: persisted.Add, videoWallpaperHttpEnabled: true,
+            wallpaperMode: WallpaperMode.Html,
+            importVideoWallpaper: path => { importCalls++; return path; });
+        using (harness.Composition)
+        {
+            // Startup itself queues one html-mode attach work item (AttachHtmlWallpaper) whenever
+            // both collaborators are wired -- drain it so the assertions below read only the
+            // switch's own effect, not startup's.
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+            var attachCallsBefore = host.TryAttachCallCount;
+            var playCallsBefore = player.TryPlayCallCount;
+
+            var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.False(accepted);
+            Assert.Empty(queued);
+            Assert.Equal(0, importCalls);
+            Assert.Equal(attachCallsBefore, host.TryAttachCallCount);
+            Assert.Equal(playCallsBefore, player.TryPlayCallCount);
+            Assert.Empty(persisted);
+            Assert.Equal(["video-wallpaper phase=http skipped reason=html-mode"], trace.Lines);
+        }
+    }
+
+    /// <summary>
+    /// S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded, tray half -- the
+    /// maintainer's "Tambien html", 2026-09-27): the tray's own video pick reaches the SAME
+    /// <c>SwitchVideoWallpaper</c> the HTTP route does, so the ONE guard at its top covers this
+    /// entry point too, with no separate check at the tray call site.
+    /// </summary>
+    [Fact]
+    public void TrayPick_InHtmlMode_DoesNothingAndRecordsATraceLine()
+    {
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var persisted = new List<string>();
+        var importCalls = 0;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player,
+            scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
+            persistVideoWallpaperPath: persisted.Add,
+            wallpaperMode: WallpaperMode.Html,
+            importVideoWallpaper: path => { importCalls++; return path; });
+        using (harness.Composition)
+        {
+            // Drains startup's own html-mode attach work item, same reason as the HTTP test above.
+            queued.Dequeue().Invoke();
+            trace.Lines.Clear();
+            var attachCallsBefore = host.TryAttachCallCount;
+            var playCallsBefore = player.TryPlayCallCount;
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.Empty(queued);
+            Assert.Equal(0, importCalls);
+            Assert.Equal(attachCallsBefore, host.TryAttachCallCount);
+            Assert.Equal(playCallsBefore, player.TryPlayCallCount);
+            Assert.Empty(persisted);
+            Assert.Equal(["video-wallpaper phase=pick skipped reason=html-mode"], trace.Lines);
+        }
+    }
+
     // ---- S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own handler ----
 
     /// <summary>The scene route is gated by its OWN key, independent of the video route.</summary>

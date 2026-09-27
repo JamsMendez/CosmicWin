@@ -433,6 +433,14 @@ public sealed class AppComposition : IDisposable
         // by ActivateVideoWallpaper/SwitchVideoWallpaper, exactly as videoWallpaperActive is never
         // touched by AttachHtmlWallpaper: wallpaperMode is chosen once, at Wire time, and the two
         // flags describe two mutually exclusive modes that are never mixed within one running process.
+        //
+        // S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): before S7 this
+        // last claim was aspirational only for the SWITCH side -- wallpaperMode being chosen once
+        // says nothing about SwitchVideoWallpaper, which had no mode check of its own, so a tray
+        // pick or an HTTP video switch reaching this composition in html mode WOULD have set
+        // videoWallpaperActive right here too, alongside htmlWallpaperActive from startup. It is
+        // SwitchVideoWallpaper's own html-mode guard (see its remarks) that now makes "never mixed"
+        // true in practice, not merely wallpaperMode being read once.
         var htmlWallpaperActive = new VolatileFlag();
 
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
@@ -564,6 +572,25 @@ public sealed class AppComposition : IDisposable
         /// </remarks>
         bool SwitchVideoWallpaper(string path, string phase = "pick", bool skipIfUnchanged = false)
         {
+            // S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): html mode
+            // owns the wallpaper surface -- BOTH callers of this method (the tray pick's
+            // setVideoWallpaperPath closure below, and HandleVideoWallpaperHttpSwitch right after
+            // this method) reach it, and only it, to stop/import/persist/(re)activate a video, so
+            // ONE guard here -- checked first, before the collaborator-null check that follows --
+            // covers both entry points without duplicating it at either call site. False on every
+            // video-mode call, exactly as before this task, so video-mode behaviour is untouched.
+            // No import, no persist, no player touch happens below this line when it fires -- and
+            // it fires BEFORE onVideoWallpaperThread ever posts anything, so nothing is queued
+            // either. Traced with THIS caller's own phase, matching the file's existing
+            // "video-wallpaper phase=<phase> ..." vocabulary (see ActivateVideoWallpaper below): a
+            // skipped tray pick reads "phase=pick skipped reason=html-mode" and a skipped HTTP
+            // switch reads "phase=http skipped reason=html-mode".
+            if (wallpaperMode == WallpaperMode.Html)
+            {
+                desktopTrace?.Record($"video-wallpaper phase={phase} skipped reason=html-mode");
+                return false;
+            }
+
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
             {
                 return false;
@@ -687,6 +714,12 @@ public sealed class AppComposition : IDisposable
         /// is the least surprising choice for a composition that was never going to switch
         /// anything asynchronously in the first place, and it costs nothing beyond this one null
         /// check -- no new thread is spun up just to make the endpoint technically answer 202.
+        /// </remarks>
+        /// <remarks>
+        /// S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): also answers
+        /// 503 in html mode, exactly like the video route's video-mode-only contract requires. This
+        /// method has no mode check of its own -- <see cref="SwitchVideoWallpaper"/>'s own guard,
+        /// which fires first, covers it, the same guard the tray pick below relies on.
         /// </remarks>
         bool HandleVideoWallpaperHttpSwitch(string path) =>
             scheduleVideoWallpaperWork is null

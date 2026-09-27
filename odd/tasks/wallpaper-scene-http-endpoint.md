@@ -61,7 +61,7 @@ split into work-unit commits per task below.
       serialize the settings read-modify-write shared by scene and video persist
       (R3-persist-shared-stored-capture), and move the orphaned summary back
       (R3-orphaned-doc-summary). Route: delegated writer.
-- [ ] S7 - Guard `/v1/wallpaper/video` in html mode: answer 503 instead of starting a player
+- [x] S7 - Guard `/v1/wallpaper/video` in html mode: answer 503 instead of starting a player
       (closes html-wallpaper-demo WARNING R3-html-mode-video-switch-not-guarded). Tray pick
       INCLUDED (maintainer 2026-09-27: "Tambien html"): in html mode the tray video pick does
       nothing and records a trace line. Route: delegated writer.
@@ -150,6 +150,29 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   (310 lines) -- pending in the slice, reviewed together with S7. Parent spot check: 8 S6 tests
   (SynchronizedSettingsStore + HttpSceneSwitch) re-run, passed.
 
+- 2026-09-27: S7 done. `SwitchVideoWallpaper` gained ONE guard at its top -- `wallpaperMode ==
+  WallpaperMode.Html` -- checked before the collaborator-null check, before
+  `onVideoWallpaperThread` ever posts anything: no import, no persist, no player touch, nothing
+  queued, and a `desktopTrace?.Record("video-wallpaper phase={phase} skipped reason=html-mode")`
+  line using the CALLER's own phase. This single shared guard covers BOTH `SwitchVideoWallpaper`
+  callers -- `HandleVideoWallpaperHttpSwitch` (traces `phase=http`) and the tray's own
+  `setVideoWallpaperPath` closure, which calls `SwitchVideoWallpaper(path)` with its default
+  `phase="pick"` (traces `phase=pick`, not the map's guessed `phase=tray` -- the tray call site has
+  never passed a `phase` argument) -- since those are the method's only two callers in the whole
+  file; no per-caller duplication was needed. Video-mode behaviour is byte-for-byte unchanged (the
+  guard's condition is always false there). Fixed the `htmlWallpaperActive`/`videoWallpaperActive`
+  comment (html-wallpaper-demo review, "a comment claims the modes never mix"): the claim is now
+  true in practice, but it was only ASPIRATIONAL before this task -- `wallpaperMode` being chosen
+  once at Wire time said nothing about `SwitchVideoWallpaper` itself, which had no mode check of
+  its own until this task added one; the comment now says so. Also added a remark to
+  `HandleVideoWallpaperHttpSwitch` cross-referencing the shared guard. TDD: RED observed for both
+  new tests (`HttpSwitch_InHtmlMode_ReturnsFalseWithoutImportingOrTouchingThePlayer`:
+  `Assert.False()` got `True`; `TrayPick_InHtmlMode_DoesNothingAndRecordsATraceLine`:
+  `Assert.Empty(queued)` found one queued work item) against the pre-fix code, both GREEN after the
+  guard. Full non-desktop suite green: 198 Layout + 13 Alert + 425 Interop (422 passed, 3 skipped) +
+  1198 App = 1834 passed, 3 skipped, 0 failed; `dotnet build CosmicWin.sln` 0 errors. Committed in
+  the same commit as this Progress entry.
+
 ## Next step
 
-S7, then S5 (README + hardware check).
+S5 (README + hardware check).
