@@ -27,6 +27,13 @@
     <Content Include="Alerts\Web\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- html-wallpaper-demo D2: the processing scene + alert-overlay wallpaper page, served the same
+         way (loose content next to the executable, mapped through SetVirtualHostNameToFolderMapping
+         once D3 wires the controller to it). CosmicWin.App.Tests reads these through the same
+         ProjectReference propagation AlertLayerLayoutNodeTests already relies on. -->
+    <Content Include="Wallpaper\Web\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
