@@ -292,6 +292,17 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   more than S8's 1834 -- the 5 new `SettingsFileTests` facts, no App tests removed); `dotnet build
   CosmicWin.sln` 0 errors.
 
+- 2026-09-27: Review of S8+S9 (base 8d3bcea, commits d581f4f..050b19d; assess medium,
+  slice_budget_reached, 473 lines): consent granted, 1 lens (reliability), APPROVED and
+  acknowledged (review-ed64317909a5c82a, authority burned). Parent spot checks: 201 SettingsTests
+  and 11 SettingsFileTests re-run, passed. Advisory findings:
+  - WARNING R3-upgrade-default-flip-unproved: an EXISTING settings.conf with no `wallpaper-mode`
+    / `alert-http` line (older installs, hand-edited files) also flips to html / opens the port on
+    upgrade, silently. Open: needs a maintainer decision (intended vs. new-installs-only).
+  - SUGGESTION R3-production-loadorcreate-wiring-untested: nothing proves WireProduction calls
+    LoadOrCreate rather than Load.
+  - SUGGESTION R3-first-run-write-failure-silent: a failed first-run write leaves no trace.
+
 ## Next step
 
 Maintainer: decide on merging `feat/html-wallpaper-default` into main. Follow-ups: scene-route
