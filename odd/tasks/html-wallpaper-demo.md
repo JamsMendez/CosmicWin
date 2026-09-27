@@ -62,17 +62,20 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 - [x] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
 - [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
       Sliced 2026-09-26 (each ~2000 lines of ported scene code):
-  - [ ] D6a - Extract the alert overlay into a shared module with a per-scene "see-through" hook
+  - [x] D6a - Extract the alert overlay into a shared module with a per-scene "see-through" hook
         (processing keeps its bands, suites stay green) + explorer scene (rising sparks).
         Route: delegated writer.
   - [ ] D6b - raphael scene (golden glyph ring; its fake bands are dropped).
   - [ ] D6c - idle scene (first-ring constellations).
-  - [ ] D6d - Scene selection wiring + hardware check of all four.
+  - [ ] D6d - Scene selection wiring + fps cap + hardware check of all four. DECIDED by the
+        maintainer 2026-09-26: settings.conf, not the tray -- `wallpaper-scene = processing |
+        explorer | idle | raphael` and `wallpaper-fps = 30 | 60` for the html wallpaper (the fps
+        cap is the first D4 cost lever). Defaults to decide in D6d (proposal: processing, 60 =
+        today's behavior).
 
 ## Open questions
 
-- How the 4 scenes are selected (setting? tray?).
-- fps cap (30 vs 60) if D4 is expensive; pause the scene while the desktop is covered?
+- Pause the scene while the desktop is covered? (fps cap decided: `wallpaper-fps`, D6d.)
 
 ## Progress
 
@@ -190,6 +193,25 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   Levers if the idea goes further (not decided): fps cap (30 would roughly halve it), pause the
   scene while the desktop is covered (detector exists), render at lower DPR, WebGL port.
 
+- 2026-09-26: D6a done on `demo/html-wallpaper-d6a-shared-overlay-explorer` (delegated writer).
+  - 5e1cdb6 refactor(wallpaper): share the alert overlay across scenes (+303/-183). Shared
+    `Wallpaper/Web/shared/js/alert-overlay.js` + `render-loop.js` + font. Hook:
+    `sceneSeeThroughLayer(g, sceneW, sceneH, sceneTime)`; the overlay translates by the tile origin,
+    recolors with source-in (kind color) and clips with destination-in. C#: the scene host now maps
+    the `Wallpaper/Web` root and navigates to `/<HtmlWallpaperSceneName>/index.html`
+    (const "processing", the single place D6d turns into a setting).
+    Processing harness 14/14 green on the extracted code; mutation-checked (removing the hook call
+    turned the band test red).
+  - 9fd43e7 chore(wallpaper): import the explorer scene sources (2467 lines, verbatim; parent
+    re-diffed 5 files against docs/great-sage: no source line lost).
+  - c1e011a feat(wallpaper): add the explorer scene page (+629/-110). Sparks hook forwards to
+    `drawRisingSparks(g, sceneTimeSeconds)`. RED first (page did not exist: ENOENT/ReferenceError),
+    then GREEN; the key test (same time as the scene, offset by a non-origin tile) mutation-checked
+    on both assertions. Harness mock gained createImageData/putImageData (earth.js bakes noise at
+    load); that bake makes the explorer harness ~23 s, timeout raised to 90 s.
+  `dotnet build`: 0 errors. App tests 1122 passed / 6 skipped / 0 failed. Parent spot check: both
+  scene node tests passed (23 s).
+
 ## Next step
 
-D6a. Open product question for D6d: how a scene is selected.
+Review D6a, then D6b (raphael), D6c (idle), D6d (settings + fps + hardware).
