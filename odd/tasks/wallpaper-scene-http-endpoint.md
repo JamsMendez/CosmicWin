@@ -62,8 +62,9 @@ split into work-unit commits per task below.
       (R3-persist-shared-stored-capture), and move the orphaned summary back
       (R3-orphaned-doc-summary). Route: delegated writer.
 - [ ] S7 - Guard `/v1/wallpaper/video` in html mode: answer 503 instead of starting a player
-      (closes html-wallpaper-demo WARNING R3-html-mode-video-switch-not-guarded for HTTP).
-      Tray pick scope: to confirm with the maintainer. Route: delegated writer.
+      (closes html-wallpaper-demo WARNING R3-html-mode-video-switch-not-guarded). Tray pick
+      INCLUDED (maintainer 2026-09-27: "Tambien html"): in html mode the tray video pick does
+      nothing and records a trace line. Route: delegated writer.
 - [ ] S5 - README section + hardware check (switch all four scenes live over HTTP; video route
       answers 503 in html mode).
 
@@ -145,6 +146,10 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   1196 App = 1832 passed, 3 skipped, 0 failed; `dotnet build CosmicWin.sln` 0 errors. Committed in
   the same commit as this Progress entry.
 
+- 2026-09-27: S6 assess (base d007997, committed-only): medium, review_due=false, under_budget
+  (310 lines) -- pending in the slice, reviewed together with S7. Parent spot check: 8 S6 tests
+  (SynchronizedSettingsStore + HttpSceneSwitch) re-run, passed.
+
 ## Next step
 
-S7 or S5 (README + hardware check) -- parent's job, not this writer's.
+S7, then S5 (README + hardware check).
