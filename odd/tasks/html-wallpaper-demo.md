@@ -52,7 +52,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
       playing? Answer from code first, then on hardware. Decides how D3 is wired.
 - [x] D2 - processing scene page in the app (scene + alert in one loop, real bands), driven by the
       existing hash/postMessage alert API.
-- [ ] D2b - Fix the two D3-relevant D2 review WARNINGs (authorized by the maintainer 2026-09-26):
+- [x] D2b - Fix the two D3-relevant D2 review WARNINGs (authorized by the maintainer 2026-09-26):
       render loop fault isolation (a throwing frame must not freeze the wallpaper) and a harness
       test that delivers real WebView2 show/hide messages. Route: delegated writer.
 - [ ] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
@@ -113,6 +113,24 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   - WARNING R2-misleading-scene-center-param; R2-stale-tuning-comments (ported config comments).
   - SUGGESTION R3-message-tiles-not-capped; R2-dead-invariant-helpers; R2-dangling-check-reference.
 
+- 2026-09-26: D2b done on `demo/html-wallpaper-d2b-hardening` (delegated writer, two rounds).
+  - b18378b fix(wallpaper): keep the scene loop alive when a frame throws. RED observed first
+    (4 new cases failed: the error escaped render(), no reschedule), GREEN 10/10.
+  - 7327cf7 test(wallpaper): deliver real host messages in the scene harness. RED observed
+    (0 listeners registered). Shapes checked against WebViewAlertLayerController PostShow
+    (`{type:"show",tiles,columns,rows,gap,workArea,duration}`) and End (`{type:"hide"}`); the
+    legacy kind form is no longer sent by the controller.
+  - Review review-551b5ebf7dcea236 (4 lenses) APPROVED + acknowledged; three lenses flagged the
+    same WARNING (single-slot error dedup still floods when scene and overlay both throw), fixed:
+  - 62d6587 fix(wallpaper): report each failing render stage once (per-stage dedup map). RED
+    observed (8 !== 2). Overlay-only throw case passed first run, mutation-checked (RED without
+    the reset, reverted). Review review-9c6d27a99fafd66c (4 lenses) APPROVED + acknowledged,
+    SUGGESTIONs only (long dedup comment, test comment pointer, two test-strength notes).
+  `dotnet build`: 0 errors. `dotnet test CosmicWin.App.Tests`: 1095 passed, 6 skipped, 0 failed.
+  Parent spot checks: ProcessingSceneNodeTests re-run after each round, passed.
+  Tracker `demo/html-wallpaper` fast-forwarded to the D2b tip.
+
 ## Next step
 
-D2b, then D3.
+D3 (demo switch: host-only attach, controller navigates to the scene page, page permanently
+visible).
