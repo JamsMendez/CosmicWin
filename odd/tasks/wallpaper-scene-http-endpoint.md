@@ -76,6 +76,12 @@ implementation touches 2+ non-trivial files per task (writer trigger).
       install opens the loopback HTTP port for the scene route. Branch feat/html-wallpaper-default.
       Route: delegated writer.
 
+- [ ] S9 - First run writes settings.conf with the defaults (maintainer 2026-09-27: "en la
+      instalacion cree un settings.conf con los valores por defecto"; CosmicWin has no installer,
+      so first start is the install moment): when the file is missing, write `Settings.Default`
+      serialized (with its comments); an existing file is never touched. Also default
+      `alert-http = on` (maintainer: "alertas tambien debe estar prendidas"); `alerts-enabled`
+      is already on; `video-wallpaper-http` stays off. Route: delegated writer.
 ## Acceptance criteria
 
 - `POST /v1/wallpaper/scene {"scene":"idle"}` with the token, in html mode -> 202 and the wallpaper
