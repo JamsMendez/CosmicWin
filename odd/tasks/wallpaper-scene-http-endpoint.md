@@ -104,6 +104,19 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   suite green: 198 Layout + 13 Alert + 425 Interop + 1193 App = 1829 passed, 3 skipped, 0 failed;
   `dotnet build CosmicWin.sln` succeeds with 0 errors.
 
+- 2026-09-27: Review of S1-S4 (base 87fadd5, commits 8df363d..d007997; assess medium,
+  slice_budget_reached, 1366 lines): consent granted, 1 lens (reliability), APPROVED and
+  acknowledged (review-dd5766fd4dc20e41, authority burned). Parent spot check: 32
+  WallpaperSceneHttpProtocolTests re-run, passed. Advisory findings (follow-up, non-blocking):
+  - WARNING R3-owning-thread-work-unguarded: the posted UI work (SwitchScene + persist) has no
+    exception guard and runs after the 202 reply; a throw is unreported / may hit the dispatcher.
+  - WARNING R3-persist-shared-stored-capture: scene persist (UI thread) and video persist (MTA
+    thread) both read-modify-write the captured `stored` without synchronization.
+  - SUGGESTION R3-live-renavigate-unproved: a late NavigationCompleted/ready from the old page after
+    the reset is untested (S5 hardware covers it).
+  - SUGGESTION R3-orphaned-doc-summary: WebViewAlertLayerControllerTests has a summary block moved
+    off VisibilityDecisions_GoThroughTheSharedPolicyClass onto the SceneUrl theory.
+
 ## Next step
 
 S5 (README + hardware check) -- parent's job, not this writer's.
