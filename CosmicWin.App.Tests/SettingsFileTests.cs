@@ -211,6 +211,24 @@ public sealed class SettingsFileTests : IDisposable
             $"expected an IOException or UnauthorizedAccessException type name, got '{diagnostic}'");
     }
 
+    /// <summary>
+    /// S10 (wallpaper-scene-http-endpoint, R3-ondiagnostic-throw-escapes-swallow): the diagnostic
+    /// runs INSIDE Save's catch, and in production it writes to the desktop trace -- which usually
+    /// lives in the SAME app-data folder that just refused the settings write. A diagnostic that
+    /// throws must be contained, or the swallow-and-continue promise breaks and a first-run
+    /// LoadOrCreate takes startup down.
+    /// </summary>
+    [Fact]
+    public void AThrowingDiagnostic_IsContained_AndLoadOrCreateStillReturnsTheDefaults()
+    {
+        Directory.CreateDirectory(Path_);
+
+        var exception = Record.Exception(() =>
+            SettingsFile.LoadOrCreate(Path_, _ => throw new IOException("trace unwritable too")));
+
+        Assert.Null(exception);
+    }
+
     /// <summary>A successful write never calls the diagnostic -- it exists to report FAILURES only.</summary>
     [Fact]
     public void Save_Succeeding_NeverInvokesTheDiagnostic()

@@ -121,7 +121,17 @@ public static class SettingsFile
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            onDiagnostic?.Invoke(exception.GetType().Name);
+            // R3-ondiagnostic-throw-escapes-swallow: the diagnostic is best-effort. In production it
+            // writes the desktop trace, which usually sits in the SAME app-data folder that just
+            // refused this write -- if reporting fails too, there is nowhere left to report it, and
+            // letting it escape would break the swallow-and-continue promise above.
+            try
+            {
+                onDiagnostic?.Invoke(exception.GetType().Name);
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 }

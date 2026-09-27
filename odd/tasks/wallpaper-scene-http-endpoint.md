@@ -361,6 +361,20 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   for (d)). `dotnet build CosmicWin.sln` 0 errors after every commit (only the 2 pre-existing
   unrelated nullable warnings in `MultiMonitorWorkspaceAdapter.cs`).
 
+- 2026-09-27: Review of S10 (base 910940b, 113f4b9..5a11774; assess medium, under_budget 385 lines,
+  offered anyway per the maintainer's review-everything preference): consent granted, 1 lens
+  (reliability), APPROVED and acknowledged (review-6b94ba712cb72a23). Findings, both fixed by the
+  parent in the next commit:
+  - WARNING R3-ondiagnostic-throw-escapes-swallow: a throwing diagnostic (desktop trace in the same
+    unwritable folder) escaped Save's catch and could crash first-run startup. Fixed: the
+    diagnostic call is now best-effort (contained). RED: new
+    AThrowingDiagnostic_IsContained_AndLoadOrCreateStillReturnsTheDefaults failed
+    (Assert.Null() Failure: Value is not null), GREEN after the fix.
+  - SUGGESTION R3-save-failed-trace-text-unasserted: the wiring test now pins the exact
+    `settings-file save-failed error={errorType}` Record call. Mutation (body -> no-op) made it
+    fail (Assert.Contains() Failure), restored.
+  Full non-desktop suite: 198 + 13 + 422 (3 skipped) + 1211 = 1844 passed, 3 skipped, 0 failed.
+
 ## Next step
 
 Maintainer: decide on merging `feat/html-wallpaper-default` and `fix/settings-and-trace-followups`

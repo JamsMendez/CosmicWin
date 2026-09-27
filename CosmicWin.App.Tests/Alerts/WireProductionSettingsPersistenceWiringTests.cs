@@ -71,6 +71,11 @@ public sealed class WireProductionSettingsPersistenceWiringTests
 
         Assert.Contains(
             "void OnSettingsSaveFailed(string errorType) =>", source[methodStart..], StringComparison.Ordinal);
+        // R3-save-failed-trace-text-unasserted: the declaration alone would still pass with a no-op
+        // body -- pin that it records the exact, type-name-only line to the desktop trace.
+        Assert.Contains(
+            "desktopTrace.Record($\"settings-file save-failed error={errorType}\")",
+            source[methodStart..], StringComparison.Ordinal);
         Assert.Contains(
             "SettingsFile.LoadOrCreate(onDiagnostic: OnSettingsSaveFailed)",
             source[methodStart..], StringComparison.Ordinal);
