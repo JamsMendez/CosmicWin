@@ -52,5 +52,12 @@ public sealed class SynchronizedSettingsStoreTests
 
         Assert.False(store.Current.FocusBorder);
         Assert.False(store.Current.Tiling);
+
+        // R3-settings-store-test-asserts-unused-snapshot: production never reads Current -- what
+        // reaches disk is the argument handed to save, so the LAST saved snapshot must carry both
+        // fields too, or a regression that saves a stale value would bring the lost update back.
+        Assert.Equal(2, saved.Count);
+        Assert.False(saved[^1].FocusBorder);
+        Assert.False(saved[^1].Tiling);
     }
 }

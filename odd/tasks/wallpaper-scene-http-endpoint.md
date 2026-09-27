@@ -173,6 +173,17 @@ implementation touches 2+ non-trivial files per task (writer trigger).
   1198 App = 1834 passed, 3 skipped, 0 failed; `dotnet build CosmicWin.sln` 0 errors. Committed in
   the same commit as this Progress entry.
 
+- 2026-09-27: Review of S6+S7 (base d007997 -> ff06f8b; assess medium, slice_budget_reached, 461
+  lines): consent granted, 1 lens (reliability), APPROVED and acknowledged
+  (review-95cb465f03fc6d13, authority burned). Parent spot check: 5 InHtmlMode tests re-run,
+  passed. Advisory findings:
+  - SUGGESTION R3-settings-store-test-asserts-unused-snapshot: FIXED by the parent in the next
+    commit -- the concurrency test now asserts the last SAVED snapshot. Proof: mutating Update to
+    save the pre-change snapshot made it fail (Assert.False() Failure); restored -> passes.
+  - SUGGESTION R3-settings-store-save-failure-semantics-unproved: open follow-up. Update sets
+    _current before save; a throwing save leaves memory ahead of disk until the next successful
+    Update writes it. Accepted as eventually convergent; not pinned by a test.
+
 ## Next step
 
 S5 (README + hardware check).
