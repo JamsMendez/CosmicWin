@@ -100,6 +100,12 @@ function loadPage(options) {
     log: function () { /* no-op: unused by the scene */ },
     warn: function () { /* no-op: unused by the scene */ },
   };
+  // D2b (R3-host-message-path-unproved): used to be a no-op, so handleHostMessage (js/alert-overlay.js)
+  // never ran in any test -- every "show"/"hide" case above only proved startShowing()/hide() work when
+  // called DIRECTLY, never that a real WebView2 message reaches them. Registered listeners are recorded
+  // here so a test can dispatch a message shaped exactly like the ones
+  // CosmicWin.App/Alerts/WebViewAlertLayerController.cs posts (see dispatchHostMessage below).
+  var messageListeners = [];
 
   var windowMock = {
     innerWidth: options.innerWidth || 1000,
@@ -114,7 +120,9 @@ function loadPage(options) {
       ? {
           webview: {
             postMessage: function (message) { postedMessages.push(message); },
-            addEventListener: function () { },
+            addEventListener: function (type, listener) {
+              if (type === "message") messageListeners.push(listener);
+            },
           },
         }
       : undefined,
@@ -163,6 +171,14 @@ function loadPage(options) {
     // Returned directly from this closure instead, since it already holds the exact same references.
     ctx: ctx2d,
     canvas: sceneCanvas,
+    messageListenerCount: messageListeners.length,
+    // Dispatches a message to every registered "message" listener, exactly like a real WebView2
+    // CoreWebView2.WebMessageReceived -> window.chrome.webview "message" event delivers one: `data` is
+    // already the deserialized object (WebView2 parses PostWebMessageAsJson's JSON before the page ever
+    // sees it), so callers pass the same shape WebViewAlertLayerController.cs posts, not a JSON string.
+    dispatchHostMessage: function (data) {
+      messageListeners.forEach(function (listener) { listener({ data: data }); });
+    },
   };
 }
 
@@ -323,6 +339,57 @@ test("a throwing scene layer does not leak canvas state (alpha/composite/shake) 
     "expected the composite mode reset after a throwing frame");
   assert.strictEqual(page.canvas.style.transform, "",
     "expected the stale shake transform cleared after a throwing frame");
+});
+
+// ---- Case 7: the REAL WebView2 host message path (D2b, R3-host-message-path-unproved) -------------
+// Case 2 above only proves startShowing()/hide() work when called DIRECTLY -- the mock's
+// chrome.webview.addEventListener used to be a no-op, so handleHostMessage (js/alert-overlay.js) never
+// ran in any test, leaving the show/hide message contract D3 relies on unproved. These dispatch EXACTLY
+// the JSON shapes CosmicWin.App/Alerts/WebViewAlertLayerController.cs posts: PostShow's
+// {type:"show",tiles,columns,rows,gap,workArea:{left,top,width,height},duration} (~line 147-150) and
+// End's {type:"hide"} (~line 127). No "kind"/duration legacy message shape is exercised here: the
+// controller itself never sends it any more (see its own CreateAsync remarks, "No kind/duration hash
+// any more (T9b)") -- the page's fallback for that shape (handleHostMessage's else branch) exists only
+// for a manual hand-posted check, same as alert-layer.js's own back-compat branch.
+
+test("a real 'show' host message reaches shown per kind, and a real 'hide' message stops it", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500, withWebview: true });
+  assert.strictEqual(page.messageListenerCount, 1,
+    "expected handleHostMessage to register exactly one 'message' listener");
+
+  page.dispatchHostMessage({
+    type: "show",
+    tiles: ["failed", "warning"],
+    columns: 2,
+    rows: 1,
+    gap: 0,
+    workArea: { left: 0, top: 0, width: 0, height: 0 },
+    duration: 1000,
+  });
+
+  page.sandbox.render(0);
+  page.sandbox.render(300);
+  page.sandbox.render(950); // failed: 230+700=930 -> shown by 950. warning: shown by 700.
+  assert.strictEqual(page.sandbox.kindState.failed.state, "shown");
+  assert.strictEqual(page.sandbox.kindState.warning.state, "shown");
+
+  page.dispatchHostMessage({ type: "hide" });
+  assert.strictEqual(page.sandbox.animating, false, "expected the real 'hide' message to stop the overlay");
+});
+
+test("a malformed host message is ignored without throwing", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600, withWebview: true });
+  page.sandbox.startShowing(["warning"], 1, 1, 0, 5000);
+  page.sandbox.render(0);
+
+  assert.doesNotThrow(function () {
+    page.dispatchHostMessage(null);
+    page.dispatchHostMessage("not-an-object");
+    page.dispatchHostMessage({ type: "unrecognized-type" });
+  });
+
+  // None of the above malformed messages should have stopped or reset the still-running overlay.
+  assert.strictEqual(page.sandbox.animating, true);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
