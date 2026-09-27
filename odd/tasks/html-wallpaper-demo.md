@@ -58,7 +58,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
 - [x] D3 - Demo switch (`wallpaper-mode = html`): no video playback, the page stays visible
       permanently, alerts only toggle the overlay; shake moves into the canvas.
       Route: delegated writer (several non-trivial C# files: settings, AppComposition, controller).
-- [ ] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
+- [x] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
 - [x] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
 - [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
 
@@ -164,6 +164,25 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   looked right. Note: the mosaic ended by the queue's own hide at 8.0 s with no page `done` line;
   the maintainer switched virtual desktops during it. Not investigated, no visible effect.
 
+- 2026-09-26: D4 measured (Release a4b8269-based build, 3392x1440, 16 cores, no alert showing,
+  script in the session scratchpad: Get-Counter `GPU Engine(*)` per pid over the CosmicWin.App
+  process tree incl. its msedgewebview2 children, CPU from TotalProcessorTime deltas, 20 samples).
+  The first two html runs were contaminated by external HTTP video switches (the maintainer's own
+  tooling; the known D3 limitation started a player under the page) and were discarded; the clean
+  runs had no `video-wallpaper phase=http` line in their window.
+
+  | Mode | CPU (tree) | GPU 3D (tree) | GPU video decode | System 3D | Working set |
+  |---|---|---|---|---|---|
+  | html (processing scene) | 1.28 cores (8.0 % of machine) | 29.1 % | 0 % | 33.4 % avg, 36.4 % max | 1055 MB |
+  | video (MF hardware decode) | 0.07 cores (0.4 %) | 0.6 % | 30.9 % | 4.4 % avg | 567 MB |
+
+  Reading: the scene costs ~19x the CPU and keeps ~30 % of the GPU's 3D engine busy all the time;
+  the video uses the dedicated fixed-function decoder, which does not compete with 3D work (games,
+  other GPU apps). The app was left in VIDEO mode after measuring (the `wallpaper-mode = html` line
+  was removed; the app itself keeps a comment line for the key).
+  Levers if the idea goes further (not decided): fps cap (30 would roughly halve it), pause the
+  scene while the desktop is covered (detector exists), render at lower DPR, WebGL port.
+
 ## Next step
 
-D4 (measure GPU/CPU of the scene vs the video wallpaper), then D6 (explorer, raphael, idle).
+Maintainer decides: D6 (explorer, raphael, idle), and/or a cost lever from D4.
