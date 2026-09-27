@@ -59,7 +59,7 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
       permanently, alerts only toggle the overlay; shake moves into the canvas.
       Route: delegated writer (several non-trivial C# files: settings, AppComposition, controller).
 - [ ] D4 - Measure GPU/CPU of the scene full screen vs the video wallpaper.
-- [ ] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
+- [x] D5 - Hardware check with the maintainer watching (failed, warning, mixed mosaic).
 - [ ] D6 - explorer, raphael, idle scenes with their own see-through layer + scene selection.
 
 ## Open questions
@@ -153,7 +153,17 @@ Scenes used by the demo are COPIED (without `.git`) into the app.
   - SUGGESTION R3-html-mode-without-alerts-layer: html mode with alerts disabled attaches the host
     but creates no WebView2 -> black desktop.
 
+- 2026-09-26: D5 done. Release build of a4b8269 (tracker tip) launched from bin\Release (PID 29408,
+  elevated shell) with `wallpaper-mode = html` appended to settings.conf (backup of the previous
+  file: %TEMP%\settings.conf.before-html-demo; video-wallpaper-path is still configured and was
+  correctly NOT played). Trace: `video-wallpaper phase=startup mode=html attached=True`, page
+  ready in ~0.55 s. Sent via CosmicWinAlert.exe: `failed:1 duration:6`, `warning:1 duration:6`,
+  `failed:2 warning:2 duration:8` -> grids 1x1, 1x1, 2x2, each ended on time, no alert-layer
+  error. The maintainer watched and confirmed: the scene is the wallpaper and stays after each
+  alert; real bands through the letters, blue for failed and violet for warning; the 4-tile mosaic
+  looked right. Note: the mosaic ended by the queue's own hide at 8.0 s with no page `done` line;
+  the maintainer switched virtual desktops during it. Not investigated, no visible effect.
+
 ## Next step
 
-D5-style hardware look at D3 with the maintainer: set `wallpaper-mode = html`, relaunch, confirm
-the scene is the wallpaper and alerts show over it with real bands.
+D4 (measure GPU/CPU of the scene vs the video wallpaper), then D6 (explorer, raphael, idle).
