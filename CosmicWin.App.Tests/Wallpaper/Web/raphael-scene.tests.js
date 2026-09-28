@@ -456,7 +456,7 @@ test("shared render loop: fps=30 in the URL caps this scene's OWN render() loop,
 });
 
 // ---- Blue glyph ring density (RAP-35) --------------------------------------------------------
-// The blue ring carries GLYPH_RING_BLUE_EXTRA_COUNT (20) glyphs beyond the count its own
+// The blue ring carries GLYPH_RING_BLUE_EXTRA_COUNT (30) glyphs beyond the count its own
 // circumference/(width + gap) derivation gives, filling the spare space between glyphs, while
 // ink still never touches at the ring's (tighter) inner radius. The gold ring is unchanged.
 // Base-size fractions are config.js's documented literals (gold 0.5, blue 0.3, gap 20px), since
@@ -474,7 +474,7 @@ function captureRingCounts(page) {
   return calls;
 }
 
-test("the blue glyph ring holds 20 more glyphs than its base count, without ink touching at its inner radius, and gold is unchanged", function () {
+test("the blue glyph ring holds 30 more glyphs than its base count, without ink touching at its inner radius, and gold is unchanged", function () {
   var page = loadPage({ innerWidth: 1000, innerHeight: 800 });
   var calls = captureRingCounts(page);
   assert.strictEqual(calls.length, 2, "test setup sanity: expected one gold and one blue ring draw, saw " + calls.length);
@@ -488,8 +488,8 @@ test("the blue glyph ring holds 20 more glyphs than its base count, without ink 
   var goldBase = page.sandbox.glyphRingCountForRing(gold, goldWidth, 20);
   var blueBase = page.sandbox.glyphRingCountForRing(blue, blueWidth, 20);
   assert.strictEqual(calls[0].count, goldBase, "expected the gold ring count to stay at its base " + goldBase);
-  assert.strictEqual(calls[1].count, blueBase + 20,
-    "expected the blue ring to hold " + (blueBase + 20) + " glyphs (base " + blueBase + " + 20), saw " + calls[1].count);
+  assert.strictEqual(calls[1].count, blueBase + 30,
+    "expected the blue ring to hold " + (blueBase + 30) + " glyphs (base " + blueBase + " + 30), saw " + calls[1].count);
   assert.ok(page.sandbox.glyphRingLinearGapAtRadius(blue.innerRadius, calls[1].count, blueWidth) >= 0,
     "expected no ink contact at the blue ring's inner radius with " + calls[1].count + " glyphs");
 });

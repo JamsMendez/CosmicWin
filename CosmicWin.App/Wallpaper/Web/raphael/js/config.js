@@ -402,8 +402,8 @@ const GLYPH_RING_GAP_PX = 20;
 // Extra glyphs beyond the blue ring's derived count, drawn from the same RING_GLYPH_POOL; the gap
 // between neighbours shrinks to fit them, and extras that would make ink touch at the ring's inner
 // radius are dropped (glyphRingCountWithExtra, js/glyph-rings.js). Gold stays at its derived count.
-// Follow-up after seeing it on screen: "Agrégale otros 10" (10 -> 20).
-const GLYPH_RING_BLUE_EXTRA_COUNT = 20;
+// Follow-ups after seeing it on screen: "Agrégale otros 10" (10 -> 20), then "otros 10 más" (20 -> 30).
+const GLYPH_RING_BLUE_EXTRA_COUNT = 30;
 // RAP-13/21 (user feedback): "Caracteres azules deben tener más weight ... una 'fuente' gruesa,
 // donde los bordes no tienen alfa pero su centro sí tiene alfa" (blue), then "A los caracteres
 // dorados también agrégales contorno" (gold too) — both rings are an outline font: each glyph
