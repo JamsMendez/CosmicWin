@@ -503,7 +503,8 @@ test("the chromatic glow starts screen-wide at the bottom and thins toward the E
     var screenBasis = Math.min(size.innerWidth, size.innerHeight);
     var bottom = halfWidth(0);
     var tip = halfWidth(1);
-    var expectedBottom = screenBasis * 0.075 * 3.5;
+    // 7 = CHROMATIC_GLOW_BASE_WIDTH_SCALE: doubled from 3.5 (2026-09-27), the fan base read too thin.
+    var expectedBottom = screenBasis * 0.075 * 7;
     var expectedTip = page.sandbox.sceneBasis(size.innerWidth, size.innerHeight) * 0.075;
     assert.ok(Math.abs(bottom - expectedBottom) < 1e-6,
       label + ": expected bottom half-width " + expectedBottom + ", got " + bottom);

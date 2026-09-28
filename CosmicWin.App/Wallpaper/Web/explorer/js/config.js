@@ -418,7 +418,9 @@ const CHROMATIC_GLOW_INTENSITY = 2.2; // alpha multiplier applied to every inter
 // (screen edge) sample. Only the x-radius grows — the y-radius (and therefore the existing sample
 // spacing/vertical continuity) is untouched, so this only needs "horizontal widening" as requested,
 // not a taller column or more samples.
-const CHROMATIC_GLOW_BASE_WIDTH_SCALE = 3.5; // ellipse x-radius multiplier at the bottom sample (t=0)
+// 2026-09-27: doubled (3.5 -> 7) per the maintainer, the fan base still read too thin after the
+// chroma-width fix; the tip is unchanged, so the fan keeps thinning toward the Earth.
+const CHROMATIC_GLOW_BASE_WIDTH_SCALE = 7; // ellipse x-radius multiplier at the bottom sample (t=0)
 
 // --- IDL-8 animation tunables ----------------------------------------------------------------
 // Every speed/direction below is user-tunable; defaults are deliberately slow (this is a desktop
