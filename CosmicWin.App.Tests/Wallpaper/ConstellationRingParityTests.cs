@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace CosmicWin.App.Tests.Wallpaper;
 
 /// <summary>
@@ -54,8 +56,10 @@ public sealed class ConstellationRingParityTests
         return source[start..end];
     }
 
+    // Whole declarations, from `const CONSTELLATION_` up to the terminating `;`, so a value that
+    // spans several lines (an array or object literal) is compared in full, not just its first line.
     private static string[] ConstellationTunables(string source) =>
-        source.Split('\n')
-            .Where(line => line.StartsWith("const CONSTELLATION_", StringComparison.Ordinal))
+        Regex.Matches(source, @"^const CONSTELLATION_\w+\s*=.*?;", RegexOptions.Multiline | RegexOptions.Singleline)
+            .Select(match => match.Value)
             .ToArray();
 }
