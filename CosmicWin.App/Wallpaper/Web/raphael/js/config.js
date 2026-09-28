@@ -405,9 +405,11 @@ const GLYPH_RING_GAP_PX = 20;
 // Extra glyphs beyond the blue ring's derived count, drawn from the same RING_GLYPH_POOL; the gap
 // between neighbours shrinks to fit them, and extras that would make ink touch at the ring's inner
 // radius are dropped (glyphRingCountWithExtra, js/glyph-rings.js). Gold stays at its derived count.
-// Follow-ups after seeing it on screen: "Agrégale otros 10" (10 -> 20), then "otros 10 más" (20 -> 30).
-// At 0.25 width, 50 asks for more than fits, so glyphRingCountWithExtra caps the ring at its
-// no-contact maximum (92): the blue ring is filled as far as it goes.
+// Follow-ups after seeing it on screen: "Agrégale otros 10" (10 -> 20), then "otros 10 más" (20 -> 30),
+// then 40, which the 0.3-wide glyphs could not fit (their no-contact ceiling is 77, reached at 30).
+// So the glyphs were narrowed to 0.25 (see GLYPH_RING_BLUE_BASE_SIZE_FRACTION) and 50 extras now ask
+// for more than fits: glyphRingCountWithExtra caps the ring at its no-contact maximum, 92, filling it
+// as far as it goes (raphael-scene.tests.js pins that 92).
 const GLYPH_RING_BLUE_EXTRA_COUNT = 50;
 // RAP-13/21 (user feedback): "Caracteres azules deben tener más weight ... una 'fuente' gruesa,
 // donde los bordes no tienen alfa pero su centro sí tiene alfa" (blue), then "A los caracteres

@@ -497,6 +497,16 @@ test("the blue glyph ring adds its extra glyphs up to the most that fit without 
     "expected the blue ring to hold " + expectedBlue + " glyphs (base " + blueBase + " + 50, capped at " + blueCeiling + "), saw " + calls[1].count);
   assert.ok(sandbox.glyphRingLinearGapAtRadius(blue.innerRadius, calls[1].count, blueWidth) >= 0,
     "expected no ink contact at the blue ring's inner radius with " + calls[1].count + " glyphs");
+  // The number config.js documents: floor(2*PI*1.85r / (0.25*0.5r)) = floor(92.99), for any r.
+  assert.strictEqual(calls[1].count, 92, "expected the blue ring filled to its documented ceiling of 92");
+});
+
+test("zero or negative extra glyphs leave the base count exactly as it is", function () {
+  var sandbox = loadPage({ innerWidth: 1000, innerHeight: 800 }).sandbox;
+  var annulus = { innerRadius: 100, outerRadius: 140 };
+  var base = sandbox.glyphRingCountForRing(annulus, 30, 20);
+  assert.strictEqual(sandbox.glyphRingCountWithExtra(annulus, 30, 20, 0), base, "extra 0");
+  assert.strictEqual(sandbox.glyphRingCountWithExtra(annulus, 30, 20, -5), base, "extra -5");
 });
 
 test("extra glyphs that would make ink touch at the inner radius are dropped, never below the base count", function () {
