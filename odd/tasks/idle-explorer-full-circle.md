@@ -93,3 +93,6 @@ taller than the screen. The center also sits low (`CENTER_Y_FRACTION = 0.511`).
   - Full suite: `dotnet test CosmicWin.App.Tests` -> `Passed! - Failed: 0, Passed: 1212, Skipped: 6,
     Total: 1218`. The 6 skips are pre-existing environment-gated desktop/elevated integration tests
     (real-window tiling, real schtasks, keyboard hook with real Notepad), unrelated to this change.
+
+- 2026-09-27: RDD assess high (process_boundary in the test harness); maintainer granted review; lineage review-1802b56c3f94234d approved with 4 lenses, no blockers, acknowledged (authority burned). Informational follow-ups: R2-001..004 (config.js comment/constant clarity), R3-glow-baseline-decoupled (explorer animate.js:504-510), R3-untested-cap-floor-branches (sceneBasis cap/floor), R3-zero-slack-float-boundary (test tolerance).
+- 2026-09-27: T2 Edge headless screenshot wrote no file in the elevated session; both scenes opened in the maintainer's browser for the visual verdict (pending).
