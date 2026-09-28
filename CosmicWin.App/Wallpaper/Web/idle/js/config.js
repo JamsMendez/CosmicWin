@@ -104,8 +104,6 @@ const CONSTELLATION_COUNT = 16;
 // IDL-7: shrunk so each figure keeps a ~20-25% margin from both ring boundaries (was 0.85,
 // filling nearly the whole ring width with no clearance).
 const CONSTELLATION_FIGURE_MARGIN = 0.55; // fraction of the ring's radial thickness each figure's bounding box may fill
-const CONSTELLATION_POINTS_MIN = 3;
-const CONSTELLATION_POINTS_MAX = 6;
 // IDL-16: shrunk per user request (5 -> 2.75, mid-point of the requested ~2.5-3 range) so the
 // dots read thinner/smaller against the now hand-drawn connecting lines.
 const CONSTELLATION_DOT_RADIUS = 2.75;
@@ -117,8 +115,8 @@ const CONSTELLATION_ROTATION = 0;
 // IDL-16: connecting lines redrawn as hand-drawn "brush" strokes instead of plain straight lines —
 // tapered ends, a gentle organic wobble along the length, slight per-edge width jitter, and a
 // couple of faint offset "bristle" strokes alongside the main one. Every parameter here is
-// deterministic (drawn from the same seeded mulberry32 stream already used to build each figure's
-// points, see makeConstellations in rings.js — no Math.random anywhere), and drawConstellationRing
+// deterministic (drawn from each figure's own seeded mulberry32 stream, see
+// makeConstellations in rings.js — no Math.random anywhere), and drawConstellationRing
 // only ever runs while baking a ring's content into its offscreen cache (animate.js), so this adds
 // no per-frame cost.
 const CONSTELLATION_BRUSH_WOBBLE_AMPLITUDE = 0.06; // organic bow, as a fraction of the edge's own length

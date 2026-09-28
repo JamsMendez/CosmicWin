@@ -21,16 +21,71 @@ function drawInnerRing(context, cx, cy, radius) {
 }
 
 // --- Ring 3: constellation ring (dedicated ring with its own boundary lines) -----------------
-// Each figure's raw points are generated in an arbitrary [-0.45, 0.45] box, then normalized here
-// (once, at module load) so its actual bounding box is centered at the origin and scaled to fill
-// exactly CONSTELLATION_FIGURE_MARGIN of a unit box — guaranteeing that once it is placed at the
-// ring's mid-radius and scaled by the ring's own thickness, it can never cross either boundary,
-// including at the left/right sides where earlier passes let it touch the neighboring band.
+// Real constellations, reduced to their main (brightest) stars. Each figure is a star list in an
+// arbitrary x-right / y-down space plus the edges joining them by index — a graph, not a polyline,
+// because figures such as Orion, Leo or the Sagittarius teapot branch and close loops. If the ring
+// holds more figures than this table, the table repeats.
+const CONSTELLATION_FIGURES = [
+  { name: 'Ursa Major', // Big Dipper: Alkaid, Mizar, Alioth, Megrez, Phecda, Merak, Dubhe
+    stars: [[0, 0], [1, 0.3], [2, 0.4], [3, 0.6], [3.2, 1.4], [4.4, 1.5], [4.5, 0.6]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 3]] },
+  { name: 'Cassiopeia',
+    stars: [[0, 0], [1, 1], [2, 0.4], [3, 1.1], [4, 0.1]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4]] },
+  { name: 'Orion', // Betelgeuse, Bellatrix, belt, Saiph, Rigel, Meissa
+    stars: [[0, 0], [2, 0.2], [0.8, 1.6], [1.05, 1.5], [1.3, 1.4], [0.3, 3], [2.2, 2.8], [1, -0.6]],
+    edges: [[0, 2], [1, 4], [2, 3], [3, 4], [2, 5], [4, 6], [0, 7], [7, 1]] },
+  { name: 'Cygnus', // Deneb, Sadr, Albireo, wings
+    stars: [[0, 0], [0, 1], [0, 2.6], [-1.2, 0.7], [1.2, 1.2]],
+    edges: [[0, 1], [1, 2], [3, 1], [1, 4]] },
+  { name: 'Leo', // sickle from Regulus, triangle to Denebola
+    stars: [[0, 2], [0, 1.2], [0.3, 0.5], [0, -0.2], [-0.5, -0.4], [-0.8, 0], [3.5, 1.6], [2.3, 0.8], [2.4, 1.7]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [2, 7], [7, 6], [6, 8], [8, 0]] },
+  { name: 'Lyra', // Vega and its parallelogram
+    stars: [[0, 0], [0.4, 0.8], [1.2, 0.9], [1.4, 2], [0.6, 1.9]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 1]] },
+  { name: 'Scorpius', // claws fanning from Antares, curled tail down to Shaula
+    stars: [[-1.2, -1], [-1.4, -0.3], [-1.3, 0.3], [0, 0], [0.4, 0.5], [0.8, 1.3], [0.9, 2.1], [0.8, 2.8], [1.2, 3.4], [1.9, 3.6], [2.5, 3], [2, 2.6]],
+    edges: [[0, 1], [1, 2], [1, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8], [8, 9], [9, 10], [10, 11]] },
+  { name: 'Gemini', // Castor and Pollux heading two parallel twins
+    stars: [[0, 0], [1, 0.1], [0.2, 1.2], [1.3, 1.3], [0.5, 2.4], [1.5, 2.3], [0.7, 3.3], [1.9, 3.3]],
+    edges: [[0, 1], [0, 2], [2, 4], [4, 6], [1, 3], [3, 5], [5, 7], [2, 3]] },
+  { name: 'Pegasus', // Great Square plus Enif's neck and a foreleg
+    stars: [[0, 1], [0, 0], [1.4, -0.1], [1.4, 1.1], [-0.8, 1.5], [-1.9, 1.7], [-1, -0.3], [-1.8, 0]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [4, 5], [1, 6], [6, 7]] },
+  { name: 'Taurus', // Hyades V with Aldebaran, horns out to Elnath and zeta
+    stars: [[0, 0], [-0.9, -0.4], [-2.5, -1.2], [-0.6, -0.9], [-1.8, -2.2], [1, 0.6], [1.8, 0.3]],
+    edges: [[0, 1], [1, 2], [0, 3], [3, 4], [0, 5], [5, 6]] },
+  { name: 'Ursa Minor', // Little Dipper from Polaris to Kochab and Pherkad
+    stars: [[0, 0], [0.7, 0.2], [1.3, 0.5], [1.7, 1], [2.6, 0.9], [2.5, 1.6], [1.6, 1.6]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 3]] },
+  { name: 'Perseus', // Mirfak's arc and Algol
+    stars: [[0, 0], [0.4, 0.6], [0.6, 1.4], [0.3, 2.2], [-0.3, -0.5], [-0.6, -1.1], [-0.9, 0.6], [-1.1, 1.2]],
+    edges: [[1, 0], [0, 4], [4, 5], [1, 2], [2, 3], [0, 6], [6, 7]] },
+  { name: 'Sagittarius', // the teapot: lid, body, handle, spout
+    stars: [[0, 1.4], [0.1, 0.6], [0.8, 0.2], [1.3, 0.7], [2, 0.5], [2, 1.2], [1.2, 1.4], [-0.7, 0.9]],
+    edges: [[1, 2], [2, 3], [1, 3], [3, 6], [6, 0], [0, 1], [3, 4], [4, 5], [5, 6], [0, 7], [7, 1]] },
+  { name: 'Andromeda', // Alpheratz, Mirach, Almach and the mu-nu branch
+    stars: [[0, 0], [0.9, 0.3], [1.9, 0.5], [3.1, 0.5], [1.8, -0.3], [1.7, -0.9]],
+    edges: [[0, 1], [1, 2], [2, 3], [2, 4], [4, 5]] },
+  { name: 'Draco', // head quadrilateral, body winding past Thuban
+    stars: [[0, 0], [0.5, -0.3], [0.8, 0.2], [0.4, 0.5], [0.2, 1.4], [1.2, 2], [2.2, 1.6], [2.8, 0.8], [3.4, 0.2], [3.6, 1.3], [4.4, 1.8], [5.2, 1.4]],
+    edges: [[0, 1], [1, 2], [2, 3], [3, 0], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8], [8, 9], [9, 10], [10, 11]] },
+  { name: 'Aries', // Hamal, Sheratan, Mesarthim, 41 Arietis
+    stars: [[-0.6, -0.9], [0, 0], [0.9, 0.4], [1.05, 0.7]],
+    edges: [[0, 1], [1, 2], [2, 3]] },
+];
+
+// Each figure's stars are normalized here (once, at module load) so its actual bounding box is
+// centered at the origin and scaled to fill exactly CONSTELLATION_FIGURE_MARGIN of a unit box —
+// guaranteeing that once it is placed at the ring's mid-radius and scaled by the ring's own
+// thickness, it can never cross either boundary, including at the left/right sides where earlier
+// passes let it touch the neighboring band.
 function makeConstellations(count, seedBase) {
   return Array.from({ length: count }, (_, index) => {
     const random = mulberry32((seedBase + index * 0x85ebca6b) >>> 0);
-    const pointCount = CONSTELLATION_POINTS_MIN + Math.floor(random() * (CONSTELLATION_POINTS_MAX - CONSTELLATION_POINTS_MIN + 1));
-    const rawPoints = Array.from({ length: pointCount }, () => [(random() - 0.5) * 0.9, (random() - 0.5) * 0.9]);
+    const figure = CONSTELLATION_FIGURES[index % CONSTELLATION_FIGURES.length];
+    const rawPoints = figure.stars;
 
     const xs = rawPoints.map((p) => p[0]);
     const ys = rawPoints.map((p) => p[1]);
@@ -42,11 +97,12 @@ function makeConstellations(count, seedBase) {
     const scale = CONSTELLATION_FIGURE_MARGIN / boxSpan;
     const points = rawPoints.map(([x, y]) => [(x - boxCenterX) * scale, (y - boxCenterY) * scale]);
 
-    // IDL-16: per-edge hand-drawn "brush" stroke parameters, drawn from the SAME seeded RNG stream
-    // right after the figure's own points, so the whole figure (points and its brush look) stays
-    // deterministic from one seed with no live Math.random anywhere. One entry per polyline edge
-    // (points.length - 1) — see drawBrushStroke below for how each field is used.
-    const segments = Array.from({ length: Math.max(0, points.length - 1) }, () => ({
+    // IDL-16: per-edge hand-drawn "brush" stroke parameters, drawn from the figure's own seeded
+    // RNG stream, so the brush look stays deterministic from one seed with no live Math.random anywhere. One entry per figure edge —
+    // see drawBrushStroke below for how each field is used.
+    const segments = figure.edges.map(([from, to]) => ({
+      from,
+      to,
       wobbleAmp: (random() - 0.5) * 2 * CONSTELLATION_BRUSH_WOBBLE_AMPLITUDE,
       wobblePhaseWeight: random() * CONSTELLATION_BRUSH_WOBBLE_HARMONIC_WEIGHT,
       widthJitter: CONSTELLATION_BRUSH_WIDTH_JITTER_MIN + random() * (CONSTELLATION_BRUSH_WIDTH_JITTER_MAX - CONSTELLATION_BRUSH_WIDTH_JITTER_MIN),
@@ -123,10 +179,9 @@ function drawConstellationRing(context, cx, cy, innerRadius, outerRadius, rotati
     context.rotate(tangential);
     context.scale(boxSize, boxSize);
     const peakHalfWidth = (CONSTELLATION_LINE_WIDTH / boxSize) / 2;
-    for (let p = 1; p < points.length; p++) {
-      const seg = segments[p - 1];
-      const [x0, y0] = points[p - 1];
-      const [x1, y1] = points[p];
+    for (const seg of segments) {
+      const [x0, y0] = points[seg.from];
+      const [x1, y1] = points[seg.to];
       drawBrushStroke(context, x0, y0, x1, y1, peakHalfWidth * seg.widthJitter, seg.wobbleAmp, seg.wobblePhaseWeight, 0, lineColor);
       for (const bristle of seg.bristles) {
         const bristleOffset = bristle.sign * CONSTELLATION_BRUSH_BRISTLE_OFFSET_FRACTION * peakHalfWidth * 2;
