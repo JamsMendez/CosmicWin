@@ -511,11 +511,14 @@ test("the chromatic glow starts screen-wide at the bottom and thins toward the E
     var halfWidth = page.sandbox.chromaticGlowSampleHalfWidth;
     assert.strictEqual(typeof halfWidth, "function", label + ": expected chromaticGlowSampleHalfWidth(t)");
     var screenBasis = Math.min(size.innerWidth, size.innerHeight);
+    // Read the shipped tunables from the page realm (top-level consts share its global lexical
+    // scope) so retuning them never leaves a stale copy here.
+    var radiusFraction = vm.runInContext("CHROMATIC_GLOW_RADIUS_FRACTION", page.sandbox);
+    var baseWidthScale = vm.runInContext("CHROMATIC_GLOW_BASE_WIDTH_SCALE", page.sandbox);
     var bottom = halfWidth(0);
     var tip = halfWidth(1);
-    // 7 = CHROMATIC_GLOW_BASE_WIDTH_SCALE: doubled from 3.5 (2026-09-27), the fan base read too thin.
-    var expectedBottom = screenBasis * 0.075 * 7;
-    var expectedTip = page.sandbox.sceneBasis(size.innerWidth, size.innerHeight) * 0.075;
+    var expectedBottom = screenBasis * radiusFraction * baseWidthScale;
+    var expectedTip = page.sandbox.sceneBasis(size.innerWidth, size.innerHeight) * radiusFraction;
     assert.ok(Math.abs(bottom - expectedBottom) < 1e-6,
       label + ": expected bottom half-width " + expectedBottom + ", got " + bottom);
     assert.ok(Math.abs(tip - expectedTip) < 1e-6,

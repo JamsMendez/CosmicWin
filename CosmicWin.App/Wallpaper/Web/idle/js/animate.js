@@ -441,12 +441,13 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
     // Slow brightness undulation along the column, phase-offset by height so it flows upward.
     const phase = (timeSeconds / CHROMATIC_GLOW_FLOW_PERIOD_SECONDS + t * 0.7) * TAU;
     const flow = 0.75 + 0.25 * Math.sin(phase);
-    // IDL-16: fan/inverted-cone shape. t=1 is the tip touching the Earth's bottom limb — its width
-    // scale is exactly 1 (unchanged radius/position from before this task). t=0 (the bottom,
-    // screen-edge sample) widens to CHROMATIC_GLOW_BASE_WIDTH_SCALE. Only the x-radius grows (via a
-    // horizontal-only context.scale around the sample's own center, turning the circle into an
-    // ellipse); the y-radius — and therefore the existing sample spacing/vertical continuity — is
-    // untouched, so the fan reads as horizontal widening, not a taller or gappier column.
+    // IDL-16: fan/inverted-cone shape. t=1 is the tip touching the Earth's bottom limb: width scale
+    // 1 and the sceneBasis-sized radius. t=0 (the bottom, screen-edge sample) is stretched
+    // horizontally by CHROMATIC_GLOW_BASE_WIDTH_SCALE via a horizontal-only context.scale around the
+    // sample's own center, turning the circle into an ellipse. Since the chroma-width fix the radius
+    // itself also grows toward the bottom (see chromaticGlowSampleRadius), so the lower samples get
+    // taller too; that extra height mostly falls below the screen edge and only thickens the overlap
+    // between samples, so the column stays continuous.
     const widthScale = chromaticGlowSampleWidthScale(t);
     const radius = chromaticGlowSampleRadius(t);
     // A wider ellipse spreads the same peak alpha over more area; under 'lighter' (additive)
