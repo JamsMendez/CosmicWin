@@ -31,9 +31,15 @@ const GLYPH_LOCAL_HALF_EXTENT = 0.45;
 // Center of the ring system (every ring 2-8 is a circle around this point), as a fraction of
 // viewport width/height. Corrected from a 100px-gridded overlay of the 1680x939 reference:
 // ring center ~= (845, 480) => (0.503, 0.511).
+// Full-circle-fit (2026-09-27, maintainer decision): recentered from the measured 0.511 to an exact
+// 0.5 so the disc gets an equal top/bottom margin once its radius is fit to the screen (see
+// sceneBasis() below) instead of sitting slightly low and clipping the top first. The ORIGINAL
+// measured value is kept as MEASURED_RING_CENTER_Y_FRACTION below because EARTH_CENTER_Y_FRACTION
+// was pixel-measured relative to THAT value, not to this tunable.
 const CENTER_X_FRACTION = 0.503;
-const CENTER_Y_FRACTION = 0.511;
-// Every radius below is a fraction of min(W, H) so the composition scales with the window.
+const CENTER_Y_FRACTION = 0.5;
+// Every radius below is a fraction of sceneBasis(W, H) (see below) so the composition scales with
+// the window, fitted to stay fully on screen instead of a plain min(W, H).
 const SCENE_SCALE_BASIS = 'min'; // 'min' keeps the ring system fully visible on both axes.
 
 // --- Earth ---------------------------------------------------------------------
@@ -41,6 +47,17 @@ const SCENE_SCALE_BASIS = 'min'; // 'min' keeps the ring system fully visible on
 // higher than the ring center by (480-445)=35px => 35/939 = 0.0373 of H, same x.
 const EARTH_CENTER_X_FRACTION = 0.503;
 const EARTH_CENTER_Y_FRACTION = 0.474;
+// The ring-center fraction EARTH_CENTER_Y_FRACTION above was actually measured against (0.511, the
+// original CENTER_Y_FRACTION before the full-circle-fit recenter above). Kept as its own constant,
+// independent of CENTER_Y_FRACTION's current value, so the Earth's measured offset from the ring
+// center never drifts just because CENTER_Y_FRACTION itself is retuned later.
+const MEASURED_RING_CENTER_Y_FRACTION = 0.511;
+// The Earth's position relative to the ring center, in basis units (not H units): scaled by
+// sceneBasis() alongside every other radius (see animate.js) so it shrinks/grows with the rest of
+// the composition instead of staying pinned to a fixed fraction of H. 0 for x (same center column
+// as the rings); ~-0.037 for y (Earth sits slightly above the ring center).
+const EARTH_CENTER_X_OFFSET_FRACTION = EARTH_CENTER_X_FRACTION - CENTER_X_FRACTION;
+const EARTH_CENTER_Y_OFFSET_FRACTION = EARTH_CENTER_Y_FRACTION - MEASURED_RING_CENTER_Y_FRACTION;
 // Reference: Earth radius ~= 210px on a 939px-tall frame => 210/939 = 0.2237 (top limb at
 // y~=235, sides at x~=640/1055, dim-but-visible lower edge down to y~=655 — all consistent
 // with this center/radius).
@@ -289,6 +306,27 @@ const DISC_BORDER_INNER_RADIUS_FRACTION = 0.776; // right at the outer glyph rin
 const DISC_BORDER_OUTER_RADIUS_FRACTION = 0.792;
 const DISC_BORDER_EDGE_COLOR = 'rgba(220,220,220,0.9)'; // the solid edge line itself
 const DISC_BORDER_RIM_COLOR = 'rgba(120,120,120,0.5)'; // the slightly lighter rim band fill
+
+// --- Full-circle fit (2026-09-27, maintainer decision) --------------------------------------
+// Every ring/disc radius in this file is a fraction of a single "basis" length. That basis used to
+// be plain Math.min(W, H): on a landscape screen (W > H) that puts the disc's outer edge
+// (DISC_BORDER_OUTER_RADIUS_FRACTION * H = 0.792*H from a center near H/2) closer to the top/bottom
+// edge than DISC_EDGE_MARGIN_PX allows, clipping it. sceneBasis() instead picks the largest basis
+// whose disc border still leaves this margin on every side, capped at the historical min(W, H) so a
+// tall/narrow viewport never makes the composition bigger than its original design.
+const DISC_EDGE_MARGIN_PX = 25;
+// Never let a pathologically tiny canvas (e.g. a stray 0x0/10x10 resize event mid-layout) collapse
+// the fitted basis into 0 or negative, which would turn every ring fraction into degenerate/
+// overlapping geometry.
+const SCENE_BASIS_MIN_PX = 10;
+
+function sceneBasis(W, H) {
+  const cx = W * CENTER_X_FRACTION;
+  const cy = H * CENTER_Y_FRACTION;
+  const roomToNearestEdge = Math.min(cy, H - cy, cx, W - cx) - DISC_EDGE_MARGIN_PX;
+  const fittedBasis = roomToNearestEdge / DISC_BORDER_OUTER_RADIUS_FRACTION;
+  return Math.max(SCENE_BASIS_MIN_PX, Math.min(Math.min(W, H), fittedBasis));
+}
 
 const STARFIELD_INNER_RADIUS_FRACTION = 0.792; // stars begin just beyond the stone disc border (IDL-12: was 0.78)
 const STARFIELD_COUNT = 420; // sparse, deterministic distant stars

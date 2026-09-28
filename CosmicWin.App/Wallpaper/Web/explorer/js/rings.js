@@ -341,10 +341,11 @@ const RULER_MAJOR_TICK_COUNT = Math.ceil(RULER_TICK_COUNT / RULER_LONG_TICK_EVER
 const RULER_NUMERAL_POOL = makeHieroglyphPool(RULER_MAJOR_TICK_COUNT, 0x00c0ffee);
 
 function drawRulerRing(context, cx, cy, radius, rotation) {
-  const shortLength = RULER_TICK_LENGTH_SHORT_FRACTION * Math.min(W, H);
-  const longLength = RULER_TICK_LENGTH_LONG_FRACTION * Math.min(W, H);
-  const labelSize = RULER_LABEL_SIZE_FRACTION * Math.min(W, H);
-  const labelGap = RULER_LABEL_GAP_FRACTION * Math.min(W, H);
+  const basis = sceneBasis(W, H);
+  const shortLength = RULER_TICK_LENGTH_SHORT_FRACTION * basis;
+  const longLength = RULER_TICK_LENGTH_LONG_FRACTION * basis;
+  const labelSize = RULER_LABEL_SIZE_FRACTION * basis;
+  const labelGap = RULER_LABEL_GAP_FRACTION * basis;
 
   for (let i = 0; i < RULER_TICK_COUNT; i++) {
     const angle = rotation + (i / RULER_TICK_COUNT) * TAU;
@@ -379,7 +380,7 @@ function drawRulerRing(context, cx, cy, radius, rotation) {
 
 // --- Ring 7: paragraph ring ----------------------------------------------------------
 function drawParagraphRing(context, cx, cy, innerRadius, rotation) {
-  const rowGap = PARAGRAPH_ROW_GAP_FRACTION * Math.min(W, H);
+  const rowGap = PARAGRAPH_ROW_GAP_FRACTION * sceneBasis(W, H);
   // IDL-11: glyphSize shrunk slightly (0.72 -> PARAGRAPH_GLYPH_SIZE_FRACTION_OF_ROW_GAP, see
   // config.js) so each glyph keeps a clearer margin inside its row slot, and the band now draws
   // explicit thin boundary lines (below) so it reads as clearly delimited like the other rings.
@@ -426,7 +427,7 @@ function drawParagraphRing(context, cx, cy, innerRadius, rotation) {
 // glyph band, not a fisheye/tunnel effect. Fixed size regardless of viewport aspect ratio, so it
 // stays proportionate on ultrawide screens instead of ballooning to fill unused width/height.
 function drawOuterGlyphRing(context, cx, cy, innerRadius, rotation) {
-  const basis = Math.min(W, H);
+  const basis = sceneBasis(W, H);
   const thickness = OUTER_GLYPH_RING_THICKNESS_FRACTION * basis;
   const outerRadius = innerRadius + thickness;
   const radius = innerRadius + thickness / 2;

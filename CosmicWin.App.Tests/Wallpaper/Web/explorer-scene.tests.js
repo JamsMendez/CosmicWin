@@ -469,6 +469,36 @@ test("the constellation tunables match the idle scene's, value for value", funct
   constellationRingChecks.checkTunablesMatchTwin(sceneDir, "idle");
 });
 
+// ---- Full-circle fit (2026-09-27): the disc border must stay fully on screen, with >= 25px margin
+// on every side, instead of the old fixed min(W,H) basis clipping its top/bottom on a landscape
+// screen. Asserted against what the scene actually passes to drawDiscBorder (spied), not a
+// re-derivation of the fit formula, so this only fails when the real draw call would clip.
+
+test("the disc border fits inside the screen with >= 25px margin on every side, at 1920x1080 and 1000x800", function () {
+  var margin = 25;
+  [{ innerWidth: 1920, innerHeight: 1080 }, { innerWidth: 1000, innerHeight: 800 }].forEach(function (size) {
+    var page = loadPage(size);
+    var borderCalls = [];
+    var original = page.sandbox.drawDiscBorder;
+    page.sandbox.drawDiscBorder = function (context, cx, cy, innerRadius, outerRadius) {
+      borderCalls.push({ cx: cx, cy: cy, outerRadius: outerRadius });
+      return original.apply(this, arguments);
+    };
+    page.sandbox.renderFrame(0);
+    var label = size.innerWidth + "x" + size.innerHeight;
+    assert.strictEqual(borderCalls.length, 1, label + ": expected exactly one drawDiscBorder call per frame");
+    var call = borderCalls[0];
+    assert.ok(call.outerRadius + margin <= call.cy,
+      label + ": expected outerRadius(" + call.outerRadius + ") + " + margin + " <= cy(" + call.cy + ")");
+    assert.ok(call.outerRadius + margin <= size.innerHeight - call.cy,
+      label + ": expected outerRadius(" + call.outerRadius + ") + " + margin + " <= H-cy(" + (size.innerHeight - call.cy) + ")");
+    assert.ok(call.outerRadius + margin <= call.cx,
+      label + ": expected outerRadius(" + call.outerRadius + ") + " + margin + " <= cx(" + call.cx + ")");
+    assert.ok(call.outerRadius + margin <= size.innerWidth - call.cx,
+      label + ": expected outerRadius(" + call.outerRadius + ") + " + margin + " <= W-cx(" + (size.innerWidth - call.cx) + ")");
+  });
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

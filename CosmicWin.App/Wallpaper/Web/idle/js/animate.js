@@ -394,7 +394,7 @@ function chromaticGlowColorAt(t) {
 
 function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSeconds) {
   const baseY = H * CHROMATIC_GLOW_Y_FRACTION;
-  const radius = Math.min(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
+  const radius = sceneBasis(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
   // IDL-13: derived from Earth geometry (was a fixed CHROMATIC_GLOW_HEIGHT_FRACTION) so the
   // topmost stacked glow's center always lands exactly on the Earth's bottom limb
   // (earthCy + earthRadius), at any aspect ratio/resolution, per user request that the glow
@@ -449,8 +449,8 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
   }
   context.restore();
 
-  const sparkSize = GLOW_SPARK_SIZE_FRACTION * Math.min(W, H);
-  const jitterRange = GLOW_SPARK_HORIZONTAL_JITTER_FRACTION * Math.min(W, H);
+  const sparkSize = GLOW_SPARK_SIZE_FRACTION * sceneBasis(W, H);
+  const jitterRange = GLOW_SPARK_HORIZONTAL_JITTER_FRACTION * sceneBasis(W, H);
   // IDL-13: the rise distance is now derived (baseY - earthCy) instead of a fixed fraction of H,
   // so a spark always rises exactly to the Earth's horizontal middle line regardless of
   // resolution/aspect ratio; GLOW_SPARK_LIFETIME_SECONDS/_SPAWN_INTERVAL_SECONDS (config.js) are
@@ -519,9 +519,13 @@ function renderFrame(nowMs) {
 
     const cx = W * CENTER_X_FRACTION;
     const cy = H * CENTER_Y_FRACTION;
-    const earthCx = W * EARTH_CENTER_X_FRACTION;
-    const earthCy = H * EARTH_CENTER_Y_FRACTION;
-    const basis = Math.min(W, H);
+    // Full-circle fit (2026-09-27): basis is fit to the screen (see config.js's sceneBasis), not a
+    // plain min(W, H); the Earth's own center is derived from it too (below) so it keeps the SAME
+    // position relative to the ring center (cx, cy) as the composition shrinks/grows, instead of
+    // staying pinned to a fixed fraction of H.
+    const basis = sceneBasis(W, H);
+    const earthCx = cx + EARTH_CENTER_X_OFFSET_FRACTION * basis;
+    const earthCy = cy + EARTH_CENTER_Y_OFFSET_FRACTION * basis;
 
     // Rebuild on a basis (CSS-pixel) size change OR a DPR change (e.g. dragging the window to a
     // display with a different scale factor) — DPR affects only the caches' backing-store pixel
