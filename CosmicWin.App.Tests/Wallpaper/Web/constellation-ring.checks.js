@@ -54,8 +54,9 @@ function checkConstellationTable(context) {
 // config.js's only host dependency at load is the scene canvas:
 //   const canvas = document.getElementById('scene');
 //   const ctx = canvas.getContext('2d', ...);
-// which CONFIG_HOST_STUB stands in for. Anything else it starts touching fails with a message
-// naming this stub, not a bare ReferenceError from inside the sandbox.
+// which makeConfigHostStub stands in for. A missing host GLOBAL (a ReferenceError) fails with a
+// message naming this stub; any other load failure (a SyntaxError, a fault in config.js's own
+// logic) is rethrown untouched, so it is not misdiagnosed as a stub gap.
 var CONFIG_HOST_STUB_DESCRIPTION = "document.getElementById('scene').getContext()";
 function makeConfigHostStub() {
   return {
@@ -69,8 +70,14 @@ function readConstellationTunables(configPath) {
   try {
     vm.runInContext(source, context, { filename: configPath });
   } catch (error) {
-    throw new Error(configPath + " touched a host API beyond the stub (" + CONFIG_HOST_STUB_DESCRIPTION +
-      ") while loading; extend makeConfigHostStub in constellation-ring.checks.js. Cause: " + error);
+    // Errors thrown inside the sandbox belong to ITS realm, so `instanceof ReferenceError` (this
+    // realm's constructor) would be false; the name is what identifies them.
+    if (error && error.name === "ReferenceError") {
+      throw new Error(configPath + " reads a host global the stub (" + CONFIG_HOST_STUB_DESCRIPTION +
+        ") does not provide; extend makeConfigHostStub in constellation-ring.checks.js. " + error.message,
+        { cause: error });
+    }
+    throw error;
   }
 
   var names = Array.from(source.matchAll(/^(?:const|let|var)\s+(CONSTELLATION_\w+)/gm), function (m) { return m[1]; });
@@ -78,7 +85,16 @@ function readConstellationTunables(configPath) {
   // structuredClone re-creates each value in THIS realm: every vm context has its own
   // Array.prototype/Object.prototype, and deepStrictEqual compares prototypes, so array or object
   // tunables read straight from two contexts would never compare equal even with identical values.
-  names.forEach(function (name) { values[name] = structuredClone(vm.runInContext(name, context)); });
+  // Tunables are plain data; one holding a function, class instance or symbol cannot be cloned, and
+  // the error names which one instead of surfacing a bare DataCloneError.
+  names.forEach(function (name) {
+    try {
+      values[name] = structuredClone(vm.runInContext(name, context));
+    } catch (error) {
+      throw new Error(configPath + ": " + name + " is not plain data (numbers, strings, arrays, objects), " +
+        "so it cannot be compared by value. " + error.message, { cause: error });
+    }
+  });
   return values;
 }
 
