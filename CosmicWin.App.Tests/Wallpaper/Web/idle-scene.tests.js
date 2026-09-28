@@ -489,6 +489,35 @@ test("the disc border fits inside the screen with >= 25px margin on every side, 
   });
 });
 
+// ---- Chroma width (2026-09-27): the full-circle fit shrank sceneBasis, and the chromatic glow
+// sized itself from it, so its bottom fan got narrower too. The bottom sample must keep its
+// screen-relative width (the pre-fit look), the tip must stay sized from sceneBasis (tied to the
+// Earth), and the fan must thin monotonically on the way up.
+
+test("the chromatic glow starts screen-wide at the bottom and thins toward the Earth, at 1920x1080 and 1000x800", function () {
+  [{ innerWidth: 1920, innerHeight: 1080 }, { innerWidth: 1000, innerHeight: 800 }].forEach(function (size) {
+    var page = loadPage(size);
+    var label = size.innerWidth + "x" + size.innerHeight;
+    var halfWidth = page.sandbox.chromaticGlowSampleHalfWidth;
+    assert.strictEqual(typeof halfWidth, "function", label + ": expected chromaticGlowSampleHalfWidth(t)");
+    var screenBasis = Math.min(size.innerWidth, size.innerHeight);
+    var bottom = halfWidth(0);
+    var tip = halfWidth(1);
+    var expectedBottom = screenBasis * 0.075 * 3.5;
+    var expectedTip = page.sandbox.sceneBasis(size.innerWidth, size.innerHeight) * 0.075;
+    assert.ok(Math.abs(bottom - expectedBottom) < 1e-6,
+      label + ": expected bottom half-width " + expectedBottom + ", got " + bottom);
+    assert.ok(Math.abs(tip - expectedTip) < 1e-6,
+      label + ": expected tip half-width " + expectedTip + ", got " + tip);
+    var previous = Infinity;
+    for (var i = 0; i <= 10; i++) {
+      var w = halfWidth(i / 10);
+      assert.ok(w < previous, label + ": half-width must shrink on the way up (t=" + (i / 10) + ": " + w + " >= " + previous + ")");
+      previous = w;
+    }
+  });
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];

@@ -386,9 +386,29 @@ function chromaticGlowColorAt(t) {
   });
 }
 
+// Chroma width (2026-09-27): the full-circle fit shrank sceneBasis, and sizing every sample from it
+// narrowed the whole fan. Each sample's radius now blends from the SCREEN-relative size at the
+// bottom (t=0, the pre-fit look, anchored to the screen edge the glow rises from) to the
+// sceneBasis size at the tip (t=1, tied to the Earth it touches), so the fan starts wide and thins
+// as it rises.
+function chromaticGlowSampleRadius(t) {
+  const screenRadius = Math.min(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
+  const tipRadius = sceneBasis(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
+  return mix(screenRadius, tipRadius, t);
+}
+
+// Horizontal stretch of one sample (the IDL-16 fan, see drawChromaticGlowAnimated below).
+function chromaticGlowSampleWidthScale(t) {
+  return mix(CHROMATIC_GLOW_BASE_WIDTH_SCALE, 1, t);
+}
+
+// Half the horizontal extent of one sample: what the fan's width actually is at height t.
+function chromaticGlowSampleHalfWidth(t) {
+  return chromaticGlowSampleRadius(t) * chromaticGlowSampleWidthScale(t);
+}
+
 function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSeconds) {
   const baseY = H * CHROMATIC_GLOW_Y_FRACTION;
-  const radius = sceneBasis(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
   // IDL-13: derived from Earth geometry (was a fixed CHROMATIC_GLOW_HEIGHT_FRACTION) so the
   // topmost stacked glow's center always lands exactly on the Earth's bottom limb
   // (earthCy + earthRadius), at any aspect ratio/resolution, per user request that the glow
@@ -421,7 +441,8 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
     // horizontal-only context.scale around the sample's own center, turning the circle into an
     // ellipse); the y-radius — and therefore the existing sample spacing/vertical continuity — is
     // untouched, so the fan reads as horizontal widening, not a taller or gappier column.
-    const widthScale = mix(CHROMATIC_GLOW_BASE_WIDTH_SCALE, 1, t);
+    const widthScale = chromaticGlowSampleWidthScale(t);
+    const radius = chromaticGlowSampleRadius(t);
     // A wider ellipse spreads the same peak alpha over more area; under 'lighter' (additive)
     // compositing that would otherwise make the wide bottom read as a more saturated blob than the
     // narrow top. Compensate with 1/sqrt(widthScale): gentler than a full 1/widthScale (which would
