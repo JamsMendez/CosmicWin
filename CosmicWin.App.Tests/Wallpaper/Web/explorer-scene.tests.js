@@ -456,6 +456,42 @@ test("shared render loop: fps=30 in the URL caps this scene's OWN renderFrame() 
   assert.ok(sceneDrawCalls >= 2, "expected at least two frames to still render, ran " + sceneDrawCalls);
 });
 
+// ---- Constellation table integrity (real-constellations follow-up) ------------------------------
+// js/rings.js draws each edge as points[from] -> points[to], so an out-of-range index in the
+// hand-written CONSTELLATION_FIGURES table would only surface as a TypeError while the ring bakes.
+// This catches it here instead. `const` bindings are not sandbox properties, so read them through
+// the context itself.
+
+test("every constellation figure only joins stars it actually has, and leaves no star unjoined", function () {
+  var page = loadPage({ innerWidth: 800, innerHeight: 600 });
+  var figures = vm.runInContext("CONSTELLATION_FIGURES", page.sandbox);
+  var pool = vm.runInContext("CONSTELLATION_POOL", page.sandbox);
+
+  assert.ok(figures.length > 0, "expected at least one constellation figure");
+  figures.forEach(function (figure) {
+    var starCount = figure.stars.length;
+    assert.ok(starCount >= 2, figure.name + ": expected at least two stars, got " + starCount);
+    var joined = new Array(starCount).fill(false);
+    figure.edges.forEach(function (edge, e) {
+      assert.strictEqual(edge.length, 2, figure.name + " edge " + e + ": expected [from, to]");
+      edge.forEach(function (index) {
+        assert.ok(Number.isInteger(index) && index >= 0 && index < starCount,
+          figure.name + " edge " + e + ": star index " + index + " is outside 0.." + (starCount - 1));
+        joined[index] = true;
+      });
+      assert.notStrictEqual(edge[0], edge[1], figure.name + " edge " + e + ": joins a star to itself");
+    });
+    var loose = joined.map(function (isJoined, i) { return isJoined ? -1 : i; }).filter(function (i) { return i >= 0; });
+    assert.deepStrictEqual(loose, [], figure.name + ": stars with no edge: " + loose.join(", "));
+  });
+
+  pool.forEach(function (built, i) {
+    var figure = figures[i % figures.length];
+    assert.strictEqual(built.segments.length, figure.edges.length,
+      "ring slot " + i + " (" + figure.name + "): expected one brush segment per edge");
+  });
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];
