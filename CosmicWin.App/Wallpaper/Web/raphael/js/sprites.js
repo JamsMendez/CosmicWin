@@ -199,8 +199,9 @@ function buildOutlineRingGlowSprites(annulus, baseSizeFraction, strokeWidthFract
 // Builds one ring's outline-font glyph sprites: every glyph independently fit (glyphRingFitScale)
 // to the SAME target width/height derived from the annulus thickness (via that RING's OWN
 // baseSizeFraction — RAP-29 made this per-ring so blue can go slimmer/denser while gold stays put),
-// then baked once and cached — no per-frame path building or scaling.
-function buildOutlineRingSprites(annulus, baseSizeFraction, strokeWidthFraction, borderColor, interiorColor) {
+// then baked once and cached — no per-frame path building or scaling. `extraCount` (RAP-35, blue
+// only) adds glyphs beyond the ring's derived count; see glyphRingCountWithExtra.
+function buildOutlineRingSprites(annulus, baseSizeFraction, strokeWidthFraction, borderColor, interiorColor, extraCount = 0) {
   const thickness = annulus.outerRadius - annulus.innerRadius;
   const targetWidth = thickness * baseSizeFraction;
   const targetHeight = thickness - 2 * GLYPH_RING_EDGE_MARGIN_PX;
@@ -212,7 +213,7 @@ function buildOutlineRingSprites(annulus, baseSizeFraction, strokeWidthFraction,
   const bodyWidth = Math.max(targetWidth * strokeWidthFraction, GLYPH_RING_BODY_WIDTH_FLOOR_PX);
   const borderWidth = Math.max(bodyWidth * GLYPH_RING_BORDER_FRACTION, GLYPH_RING_BORDER_WIDTH_FLOOR_PX);
   const dotRadiusPx = bodyWidth * 0.55;
-  const count = glyphRingCountForRing(annulus, targetWidth, GLYPH_RING_GAP_PX);
+  const count = glyphRingCountWithExtra(annulus, targetWidth, GLYPH_RING_GAP_PX, extraCount);
   return Array.from({ length: count }, (_, i) => {
     const strokes = RING_GLYPH_POOL[i % RING_GLYPH_POOL.length];
     // RAP-26b: ringGlyphRenderedBounds (not strokesBounds' conservative full-circle curve measure)
@@ -371,7 +372,7 @@ function buildSprites() {
     }),
     outlineGlyphsGold: buildOutlineRingSprites(ringAnnuli[1], GLYPH_RING_GOLD_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_BORDER_COLOR, GLYPH_RING_GOLD_INTERIOR_COLOR),
     outlineGlyphsGoldGlow: buildOutlineRingGlowSprites(ringAnnuli[1], GLYPH_RING_GOLD_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_GLOW_COLOR, GLYPH_RING_GOLD_GLOW_BLUR_PX),
-    outlineGlyphs: buildOutlineRingSprites(ringAnnuli[3], GLYPH_RING_BLUE_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_BLUE, GLYPH_RING_BLUE_BORDER_COLOR, GLYPH_RING_BLUE_INTERIOR_COLOR),
+    outlineGlyphs: buildOutlineRingSprites(ringAnnuli[3], GLYPH_RING_BLUE_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_BLUE, GLYPH_RING_BLUE_BORDER_COLOR, GLYPH_RING_BLUE_INTERIOR_COLOR, GLYPH_RING_BLUE_EXTRA_COUNT),
     featherSharp: FEATHER_VARIANTS.map((variant) =>
       bakeSprite(FEATHER_SPRITE_REFERENCE_LENGTH * 1.05, FEATHER_SPRITE_REFERENCE_LENGTH * 0.5,
         (g, k) => paintFeatherVariant(g, k, variant, FEATHER_SPRITE_REFERENCE_LENGTH, false))

@@ -140,6 +140,19 @@ function glyphRingCountForRing(annulus, glyphWidthPx, gapPx) {
   return count;
 }
 
+// RAP-35: glyphRingCountForRing's count plus `extra` more glyphs, packed into the spare space the
+// gapPx spacing leaves between neighbours (the even angular layout just tightens the gap). Extras
+// are dropped one at a time while ink would touch at the annulus's INNER radius, so the same
+// "ink never touches" rule still holds; it never goes below the base count.
+function glyphRingCountWithExtra(annulus, glyphWidthPx, gapPx, extra) {
+  const base = glyphRingCountForRing(annulus, glyphWidthPx, gapPx);
+  let count = base + Math.max(0, extra);
+  while (count > base && glyphRingLinearGapAtRadius(annulus.innerRadius, count, glyphWidthPx) < 0) {
+    count -= 1;
+  }
+  return count;
+}
+
 // RAP-26b (coordinator item 3 — parent headless check): "each glyph's local up axis must equal the
 // outward radial direction." A ring glyph's local +Y is the axis transformStrokesForRing stretches
 // to fill the ring's thickness (glyphRingFitScale's scaleY); this returns the ctx.rotate() angle

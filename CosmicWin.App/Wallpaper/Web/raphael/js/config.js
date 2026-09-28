@@ -397,6 +397,12 @@ const GLYPH_RING_GOLD_BASE_SIZE_FRACTION = 0.5;
 const GLYPH_RING_BLUE_BASE_SIZE_FRACTION = 0.3;
 const GLYPH_RING_EDGE_MARGIN_PX = 10;
 const GLYPH_RING_GAP_PX = 20;
+// RAP-35 (user feedback, blue ring only): "agrégale 10 caracteres más (del catálogo existente) ...
+// quiero ver si se ve más lleno el anillo aprovechando el espacio entre caracteres que sobra."
+// Extra glyphs beyond the blue ring's derived count, drawn from the same RING_GLYPH_POOL; the gap
+// between neighbours shrinks to fit them, and extras that would make ink touch at the ring's inner
+// radius are dropped (glyphRingCountWithExtra, js/glyph-rings.js). Gold stays at its derived count.
+const GLYPH_RING_BLUE_EXTRA_COUNT = 10;
 // RAP-13/21 (user feedback): "Caracteres azules deben tener más weight ... una 'fuente' gruesa,
 // donde los bordes no tienen alfa pero su centro sí tiene alfa" (blue), then "A los caracteres
 // dorados también agrégales contorno" (gold too) — both rings are an outline font: each glyph

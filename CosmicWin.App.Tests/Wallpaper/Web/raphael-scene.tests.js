@@ -455,6 +455,59 @@ test("shared render loop: fps=30 in the URL caps this scene's OWN render() loop,
   assert.ok(sceneDrawCalls >= 2, "expected at least two frames to still render, ran " + sceneDrawCalls);
 });
 
+// ---- Blue glyph ring density (RAP-35) --------------------------------------------------------
+// The blue ring carries GLYPH_RING_BLUE_EXTRA_COUNT (10) glyphs beyond the count its own
+// circumference/(width + gap) derivation gives, filling the spare space between glyphs, while
+// ink still never touches at the ring's (tighter) inner radius. The gold ring is unchanged.
+// Base-size fractions are config.js's documented literals (gold 0.5, blue 0.3, gap 20px), since
+// config.js's `const`s do not attach to the vm context's global object.
+
+function captureRingCounts(page) {
+  var calls = [];
+  var original = page.sandbox.drawOutlineGlyphRing;
+  page.sandbox.drawOutlineGlyphRing = function (cx, cy, radius, count) {
+    calls.push({ radius: radius, count: count });
+    return original.apply(this, arguments);
+  };
+  page.sandbox.render(0);
+  page.sandbox.drawOutlineGlyphRing = original;
+  return calls;
+}
+
+test("the blue glyph ring holds 10 more glyphs than its base count, without ink touching at its inner radius, and gold is unchanged", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 800 });
+  var calls = captureRingCounts(page);
+  assert.strictEqual(calls.length, 2, "test setup sanity: expected one gold and one blue ring draw, saw " + calls.length);
+
+  var r = page.sandbox.coreRadius(Math.min(1000, 800));
+  var annuli = page.sandbox.glyphRingAnnuli(r);
+  var gold = annuli[1], blue = annuli[3];
+  var goldWidth = (gold.outerRadius - gold.innerRadius) * 0.5;
+  var blueWidth = (blue.outerRadius - blue.innerRadius) * 0.3;
+
+  var goldBase = page.sandbox.glyphRingCountForRing(gold, goldWidth, 20);
+  var blueBase = page.sandbox.glyphRingCountForRing(blue, blueWidth, 20);
+  assert.strictEqual(calls[0].count, goldBase, "expected the gold ring count to stay at its base " + goldBase);
+  assert.strictEqual(calls[1].count, blueBase + 10,
+    "expected the blue ring to hold " + (blueBase + 10) + " glyphs (base " + blueBase + " + 10), saw " + calls[1].count);
+  assert.ok(page.sandbox.glyphRingLinearGapAtRadius(blue.innerRadius, calls[1].count, blueWidth) >= 0,
+    "expected no ink contact at the blue ring's inner radius with " + calls[1].count + " glyphs");
+});
+
+test("extra glyphs that would make ink touch at the inner radius are dropped, never below the base count", function () {
+  var sandbox = loadPage({ innerWidth: 1000, innerHeight: 800 }).sandbox;
+  // A tight ring: 100px inner radius, 30px-wide glyphs. Base count fits the 20px gap at mid radius.
+  var annulus = { innerRadius: 100, outerRadius: 140 };
+  var base = sandbox.glyphRingCountForRing(annulus, 30, 20);
+  var count = sandbox.glyphRingCountWithExtra(annulus, 30, 20, 10);
+  assert.ok(count >= base, "expected at least the base count " + base + ", saw " + count);
+  assert.ok(count < base + 10, "test setup sanity: expected this tight ring to be unable to take all 10 extras");
+  assert.ok(sandbox.glyphRingLinearGapAtRadius(annulus.innerRadius, count, 30) >= 0,
+    "expected no ink contact at the inner radius with " + count + " glyphs");
+  assert.ok(sandbox.glyphRingLinearGapAtRadius(annulus.innerRadius, count + 1, 30) < 0,
+    "expected the count to be the largest that still avoids contact, but " + (count + 1) + " also fits");
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];
