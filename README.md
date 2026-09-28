@@ -374,3 +374,5 @@ virtual-desktop interop defends itself against an undocumented vtable moving und
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+[![Built with Gentle-AI](https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png)](https://github.com/Gentleman-Programming/gentle-ai)
