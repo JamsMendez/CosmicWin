@@ -54,9 +54,10 @@ function checkConstellationTable(context) {
 // config.js's only host dependency at load is the scene canvas:
 //   const canvas = document.getElementById('scene');
 //   const ctx = canvas.getContext('2d', ...);
-// which makeConfigHostStub stands in for. A missing host GLOBAL (a ReferenceError) fails with a
-// message naming this stub; any other load failure (a SyntaxError, a fault in config.js's own
-// logic) is rethrown untouched, so it is not misdiagnosed as a stub gap.
+// which makeConfigHostStub stands in for. A load failure cannot be reliably told apart as "the stub
+// lacks something" versus "config.js itself is wrong" (a missing stub method is a TypeError, a typo
+// in config.js is a ReferenceError), so no guess is made: the original error is reported as is,
+// with the stub mentioned only as a possible cause.
 var CONFIG_HOST_STUB_DESCRIPTION = "document.getElementById('scene').getContext()";
 function makeConfigHostStub() {
   return {
@@ -70,14 +71,9 @@ function readConstellationTunables(configPath) {
   try {
     vm.runInContext(source, context, { filename: configPath });
   } catch (error) {
-    // Errors thrown inside the sandbox belong to ITS realm, so `instanceof ReferenceError` (this
-    // realm's constructor) would be false; the name is what identifies them.
-    if (error && error.name === "ReferenceError") {
-      throw new Error(configPath + " reads a host global the stub (" + CONFIG_HOST_STUB_DESCRIPTION +
-        ") does not provide; extend makeConfigHostStub in constellation-ring.checks.js. " + error.message,
-        { cause: error });
-    }
-    throw error;
+    throw new Error(configPath + " failed to load for the tunables comparison: " + String(error) +
+      ". If it now needs a host API beyond the stub (" + CONFIG_HOST_STUB_DESCRIPTION +
+      "), extend makeConfigHostStub in constellation-ring.checks.js.", { cause: error });
   }
 
   var names = Array.from(source.matchAll(/^(?:const|let|var)\s+(CONSTELLATION_\w+)/gm), function (m) { return m[1]; });
@@ -85,11 +81,13 @@ function readConstellationTunables(configPath) {
   // structuredClone re-creates each value in THIS realm: every vm context has its own
   // Array.prototype/Object.prototype, and deepStrictEqual compares prototypes, so array or object
   // tunables read straight from two contexts would never compare equal even with identical values.
-  // Tunables are plain data; one holding a function, class instance or symbol cannot be cloned, and
-  // the error names which one instead of surfacing a bare DataCloneError.
+  // Tunables are plain data. A function or symbol cannot be cloned, and the error names which
+  // tunable instead of surfacing a bare DataCloneError. (A class instance does clone, into a plain
+  // object without its prototype, which is still a fair by-value comparison for data.)
   names.forEach(function (name) {
+    var value = vm.runInContext(name, context);
     try {
-      values[name] = structuredClone(vm.runInContext(name, context));
+      values[name] = structuredClone(value);
     } catch (error) {
       throw new Error(configPath + ": " + name + " is not plain data (numbers, strings, arrays, objects), " +
         "so it cannot be compared by value. " + error.message, { cause: error });
