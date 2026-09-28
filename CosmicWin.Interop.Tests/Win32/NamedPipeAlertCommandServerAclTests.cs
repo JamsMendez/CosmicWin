@@ -1,3 +1,4 @@
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
 using CosmicWin.Interop.Win32;
@@ -46,7 +47,19 @@ public sealed class NamedPipeAlertCommandServerAclTests
         // access), not the generic alias that went in. Observed directly against a live handle
         // rather than assumed.
         Assert.Equal("FA", ace.Rights);
-        Assert.Equal(userSid, ace.TrusteeSid);
+        Assert.Equal(userSid, ResolveSddlTrustee(ace.TrusteeSid));
+    }
+
+    /// <summary>
+    /// SDDL output abbreviates well-known SIDs to two-letter aliases: when the process runs as the
+    /// built-in local Administrator (RID 500, as on GitHub-hosted Windows runners) the trustee comes
+    /// back as <c>LA</c> rather than <c>S-1-5-21-...-500</c>. Round-tripping the trustee through
+    /// <see cref="RawSecurityDescriptor"/> resolves an alias to its full SID and leaves a full SID
+    /// unchanged, so the comparison holds on every account.
+    /// </summary>
+    private static string ResolveSddlTrustee(string trustee)
+    {
+        return new RawSecurityDescriptor($"O:{trustee}").Owner.Value;
     }
 
     /// <summary>
