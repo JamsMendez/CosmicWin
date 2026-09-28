@@ -43,6 +43,11 @@
     <Content Include="Wallpaper\Web\raphael-scene.tests.js">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- The constellation-ring checks idle-scene.tests.js and explorer-scene.tests.js both require()
+         from next to themselves (one shared copy instead of two pasted ones). -->
+    <Content Include="Wallpaper\Web\constellation-ring.checks.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <!-- html-wallpaper-demo D6c: the committed Node vm-sandbox harness proving the idle-scene
          wallpaper page's own contract (IdleSceneNodeTests shells out to `node` and passes it this
          file's resolved output path, same technique as explorer-scene.tests.js above). -->

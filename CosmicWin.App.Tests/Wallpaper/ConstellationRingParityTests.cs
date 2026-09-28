@@ -1,17 +1,17 @@
-using System.Text.RegularExpressions;
-
 namespace CosmicWin.App.Tests.Wallpaper;
 
 /// <summary>
-/// The idle and explorer scenes each ship their own copy of the constellation ring (the
-/// CONSTELLATION_FIGURES table and the code that draws it in <c>js/rings.js</c>, plus its
-/// CONSTELLATION_* tunables in <c>js/config.js</c>). Nothing else ties the two copies together, so
-/// a fix made to one scene could quietly skip the other; these tests make that drift fail loudly.
+/// The idle and explorer scenes each ship their own copy of the constellation ring code (the
+/// CONSTELLATION_FIGURES table and the code that draws it in <c>js/rings.js</c>). Nothing else ties
+/// the two copies together, so a fix made to one scene could quietly skip the other; this test makes
+/// that drift fail loudly.
 /// </summary>
 /// <remarks>
 /// Reads the REAL shipped files from the test output (the same <c>Wallpaper\Web\**</c> content
 /// <see cref="IdleSceneNodeTests"/> and <see cref="ExplorerSceneNodeTests"/> load). Only the
-/// constellation ring is compared: the rest of each scene is free to differ.
+/// constellation ring is compared: the rest of each scene is free to differ. The ring's
+/// CONSTELLATION_* tunables in <c>js/config.js</c> are compared by value instead, inside both scene
+/// harnesses (<c>constellation-ring.checks.js</c>), since that needs the config evaluated.
 /// </remarks>
 public sealed class ConstellationRingParityTests
 {
@@ -30,16 +30,6 @@ public sealed class ConstellationRingParityTests
         Assert.Equal(idle, explorer);
     }
 
-    [Fact]
-    public void TheConstellationTunables_AreTheSameInTheIdleAndExplorerScenes()
-    {
-        var idle = ConstellationTunables(ReadScene("idle", "config.js"));
-        var explorer = ConstellationTunables(ReadScene("explorer", "config.js"));
-
-        Assert.NotEmpty(idle);
-        Assert.Equal(idle, explorer);
-    }
-
     private static string ReadScene(string scene, string file)
     {
         var path = Path.Combine(WebDirectory, scene, "js", file);
@@ -55,11 +45,4 @@ public sealed class ConstellationRingParityTests
         Assert.True(end > start, $"Expected the '{RingEndMarker}' marker after the constellation ring in rings.js.");
         return source[start..end];
     }
-
-    // Whole declarations, from `const CONSTELLATION_` up to the terminating `;`, so a value that
-    // spans several lines (an array or object literal) is compared in full, not just its first line.
-    private static string[] ConstellationTunables(string source) =>
-        Regex.Matches(source, @"^const CONSTELLATION_\w+\s*=.*?;", RegexOptions.Multiline | RegexOptions.Singleline)
-            .Select(match => match.Value)
-            .ToArray();
 }
