@@ -43,8 +43,8 @@
     <Content Include="Wallpaper\Web\raphael-scene.tests.js">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <!-- The constellation-ring checks idle-scene.tests.js and explorer-scene.tests.js both require()
-         from next to themselves (one shared copy instead of two pasted ones). -->
+    <!-- Shared constellation-ring checks that idle-scene.tests.js and explorer-scene.tests.js both
+         require() from their own directory (one shared copy instead of two pasted ones). -->
     <Content Include="Wallpaper\Web\constellation-ring.checks.js">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
