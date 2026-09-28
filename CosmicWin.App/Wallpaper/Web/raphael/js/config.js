@@ -394,8 +394,9 @@ const GLYPH_RING_BLUE_OUTER_FACTOR = 2.35;
 // shared base-size fraction into a per-ring constant so blue can go slimmer (more count, since
 // count is derived from w) while gold stays exactly as it was.
 const GLYPH_RING_GOLD_BASE_SIZE_FRACTION = 0.5;
-// RAP-35 trial: 0.3 -> 0.25 so the blue ring can hold more glyphs (its no-contact ceiling is
-// 2*PI*GLYPH_RING_BLUE_INNER/width, about 77 at 0.3 and 92 at 0.25), at the cost of slimmer glyphs.
+// RAP-35: 0.3 -> 0.25 so the blue ring can hold more glyphs. Its no-contact ceiling is
+// floor(2*PI*innerRadius / width), which does not depend on the core radius: about 77 glyphs at 0.3
+// and 92 at 0.25. The maintainer compared both on screen and chose 92 (slimmer, fuller glyphs).
 const GLYPH_RING_BLUE_BASE_SIZE_FRACTION = 0.25;
 const GLYPH_RING_EDGE_MARGIN_PX = 10;
 const GLYPH_RING_GAP_PX = 20;
@@ -405,8 +406,8 @@ const GLYPH_RING_GAP_PX = 20;
 // between neighbours shrinks to fit them, and extras that would make ink touch at the ring's inner
 // radius are dropped (glyphRingCountWithExtra, js/glyph-rings.js). Gold stays at its derived count.
 // Follow-ups after seeing it on screen: "Agrégale otros 10" (10 -> 20), then "otros 10 más" (20 -> 30).
-// Trial at 0.25 width: 50 asks for more than fits, so glyphRingCountWithExtra caps the ring at its
-// no-contact maximum (92), i.e. "fill the ring as far as it goes".
+// At 0.25 width, 50 asks for more than fits, so glyphRingCountWithExtra caps the ring at its
+// no-contact maximum (92): the blue ring is filled as far as it goes.
 const GLYPH_RING_BLUE_EXTRA_COUNT = 50;
 // RAP-13/21 (user feedback): "Caracteres azules deben tener más weight ... una 'fuente' gruesa,
 // donde los bordes no tienen alfa pero su centro sí tiene alfa" (blue), then "A los caracteres
