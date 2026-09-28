@@ -98,6 +98,33 @@ Four things worth knowing before you rely on it:
   installation, not a configuration file — editing it changes nothing until the next install, which
   overwrites it.
 
+## Settings
+
+CosmicWin has no installer: the first time it runs, it writes `%LOCALAPPDATA%\CosmicWin\settings.conf`
+itself, with every default already filled in, before anyone has touched a single setting. An existing
+file is never rewritten except by a tray-menu save, a settings-changing HTTP request (the wallpaper
+scene route, below), or a hand edit of your own — and a hand edit takes effect at CosmicWin's next
+start.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `focus-border` | `on` | Draw CosmicWin's own thicker focus border. |
+| `border-color` | `accent` | `#RRGGBB`, or `accent` to follow Windows' own accent colour. |
+| `tiling` | `on` | Lay windows out at all; off leaves them where they open. |
+| `video-wallpaper-path` | *(blank)* | Absolute path to the imported video wallpaper. Set by the tray menu or the video HTTP route, not meant to be hand-edited. |
+| `alerts-enabled` | `on` | Accept live alert commands over the named pipe. |
+| `alert-http` | `on` | Also accept alert commands over the loopback HTTP endpoint. |
+| `alert-http-port` | `47811` | The loopback TCP port the HTTP endpoint listens on. |
+| `video-wallpaper-http` | `off` | Accept a video-wallpaper switch over the same HTTP endpoint. |
+| `gap` | `8` | Whole pixels of space around and between tiled windows and alert tiles (0–64). |
+| `wallpaper-mode` | `html` | `html` shows an animated scene wallpaper; `video` loops the configured video instead. |
+| `wallpaper-scene` | `processing` | Which html scene to show: `processing`, `explorer`, `idle` or `raphael`. |
+| `wallpaper-fps` | `60` | Caps the html wallpaper's own frame rate: `30` or `60`. |
+| `wallpaper-scene-http` | `on` | Accept a wallpaper-scene switch over the same HTTP endpoint. |
+
+Every HTTP-related key above is served by the same local HTTP server, sharing one port and one
+bearer-token file — see Alerts, below, for how that endpoint is gated.
+
 ## Alerts
 
 CosmicWin can flash a `warning` or `failed` alert over the desktop, for example when a build breaks.
@@ -122,12 +149,10 @@ network) and gated by a bearer token nothing outside this machine can read. Turn
 alert-http = off
 ```
 
-CosmicWin has no installer: the first time it runs, it writes `settings.conf` itself, with every
-default already filled in (the same commented file a tray-menu save produces), before anyone has
-touched a single setting -- so this port is already open on a fresh install unless you turn it off.
-An existing `settings.conf` is never rewritten. On first start CosmicWin also writes a random token
-to `%LOCALAPPDATA%\CosmicWin\alert-http.token`. It keeps that token across restarts. Delete the file
-to get a new one on the next start.
+Since `alert-http` defaults to on (see Settings, above), this port is already open on a fresh install
+unless you turn it off. On first start CosmicWin also writes a random token to
+`%LOCALAPPDATA%\CosmicWin\alert-http.token`, kept across restarts; delete the file to get a new one
+on the next start.
 
 ```powershell
 $token = Get-Content "$env:LOCALAPPDATA\CosmicWin\alert-http.token"
@@ -147,6 +172,13 @@ The body is a JSON object with `warning`, `failed` and `duration`, all integers 
 At least one of `warning` or `failed` is required. The request is checked by the same rules as the
 pipe.
 
+Every request to every route on this server — alerts, video wallpaper, wallpaper scene — is checked
+in the same fixed order, cheapest first: the connection must be loopback; there must be no `Origin`
+header (any value means a browser sent it); the `Host` header must be exactly `127.0.0.1:<port>` or
+`localhost:<port>` (blocking DNS rebinding); the path must name a route that is turned on; the
+method must be `POST`; the bearer token must match; and `Content-Type` must be `application/json` —
+only then is the body itself parsed and validated.
+
 | Status | Meaning |
 |---|---|
 | 202 | Queued; body `ok` |
@@ -158,16 +190,35 @@ pipe.
 | 415 | `Content-Type` is not `application/json` |
 | 503 | Alerts are turned off |
 
-The endpoint listens on `127.0.0.1` and `localhost` only. It refuses connections from other
-machines, and it refuses web pages even when they run on your own PC. If the port is already in
-use, the HTTP endpoint stays off and the named pipe keeps working. The reason is written to
-CosmicWin's desktop trace.
+If the port is already in use, the HTTP endpoint (all three routes) stays off and the named pipe
+keeps working for alerts. The reason is written to CosmicWin's desktop trace.
 
-## Video wallpaper over HTTP
+## Video wallpaper
 
-The tray menu can set an MP4 as a playing wallpaper. Another program on the same PC can do the same
-over HTTP, by sending the absolute path of a video that is already on this PC. The route is **off
-by default** and independent of alerts. Turn it on in `settings.conf` and restart CosmicWin:
+Loops a single MP4 as the desktop wallpaper (`wallpaper-mode = video`), instead of the default html
+scene wallpaper described under HTML wallpaper, below.
+
+### Picking a video
+
+The tray menu's **Wallpaper de video...** entry opens a file picker restricted to `.mp4` files. The
+picked file is imported into `%LOCALAPPDATA%\CosmicWin\video-wallpaper<ext>` before it plays: when
+the source is on the same drive as `%LOCALAPPDATA%`, the import is a hard link, so switching to a
+multi-gigabyte file is instant; on a different drive, or if linking fails for any reason, CosmicWin
+falls back to copying the file, which can take minutes for a large video. Either way the wallpaper
+keeps playing if you later move or delete the original — a hard-linked import is the same data as
+the original, so editing the source file in place changes the wallpaper too. Re-picking overwrites
+the previous import; there is only ever one active video, recorded at `video-wallpaper-path` in
+`settings.conf`.
+
+If Explorer restarts (a crash, or `explorer.exe /restart`), CosmicWin listens for the shell's own
+`TaskbarCreated` broadcast and re-attaches the video host to the desktop automatically, without
+losing the running video.
+
+### Over HTTP
+
+Another program on the same PC can also switch the video, by sending the absolute path of a video
+that is already on this PC. The route is **off by default** and independent of alerts. Turn it on in
+`settings.conf` and restart CosmicWin:
 
 ```ini
 video-wallpaper-http = on
@@ -195,12 +246,9 @@ letter and a backslash (`C:\...`). Relative paths, forward slashes, network shar
 device paths and URLs are rejected. Nothing is ever downloaded.
 
 The request is answered as soon as the path is checked. The switch itself then runs in the
-background, exactly like a pick from the tray menu. If the video is on the same drive as
-`%LOCALAPPDATA%`, CosmicWin imports it as a hard link, which is instant whatever the file size.
-Otherwise it copies the file, which can take minutes for a large video. Either way the wallpaper
-keeps playing if you later move or delete the original. A hard-linked import is the same data as
-the original, so editing the original in place changes the wallpaper too. If the switch fails, the
-previous video keeps playing. The outcome is written to the desktop trace, never the path.
+background, exactly like a pick from the tray menu — see Picking a video, above, for the hard-link
+import and what it guarantees. If the switch fails, the previous video keeps playing. The outcome is
+written to the desktop trace, never the path.
 
 | Status | Meaning |
 |---|---|
@@ -216,12 +264,28 @@ In html mode (`wallpaper-mode = html`, the default) the video route answers 503 
 video, and the tray menu's video pick does nothing. Both write a `skipped reason=html-mode` line to
 the desktop trace.
 
-## Wallpaper scene over HTTP
+## HTML wallpaper
 
-CosmicWin's desktop wallpaper is the html scene by default (`wallpaper-mode = html`); set
-`wallpaper-mode = video` in `settings.conf` to loop a video wallpaper instead (see above). In html
-mode the wallpaper is an animated scene, chosen by `wallpaper-scene` in `settings.conf`. Another
-program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
+CosmicWin's desktop wallpaper is this html scene by default (`wallpaper-mode = html`); set
+`wallpaper-mode = video` in `settings.conf` to loop a video wallpaper instead (see Video wallpaper,
+above). The scene is rendered through a permanently preloaded WebView2 layer rather than a browser
+window, and settings take effect at startup — changing `wallpaper-mode` or `wallpaper-scene` by hand
+needs a restart; the HTTP route below exists for switching the scene without one.
+
+### Modes, scenes and frame rate
+
+Four scenes ship, chosen by `wallpaper-scene` in `settings.conf`: `processing` (the default),
+`explorer`, `idle` and `raphael`. `wallpaper-fps` caps the scene's own frame rate at `30` or `60`
+(default `60`); before this setting existed the scene drew uncapped, at the display's own refresh
+rate.
+
+Alerts render through the same preloaded WebView2 layer as the scene itself: each `warning`/`failed`
+tile's letters are see-through, showing the running scene's own animation moving inside the letter
+shapes, rather than a flat colour overlay. Every scene has its own hook for this effect.
+
+### Switching the scene over HTTP
+
+Another program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
 
 The route is **on by default**, independent of the other two routes: since the html wallpaper is
 CosmicWin's default renderer, a fresh install already accepts scene switches on this loopback-only
