@@ -151,6 +151,19 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   outside mini traces skipped. README documents mini mode, mini-corner and Alt+M. RED 9 -> GREEN 97.
   Suite after T5: App 1301, Interop 424 (3 skipped), Layout 198, Alert 13, 0 failed. Parent spot check: MiniMode|ChordTable 77 passed.
   WireProduction mini path only covered by a source-text guard (real Win32/WebView2).
+- Review slice 563d669..fc811a5 (high, 27 files, 2178 lines): consent granted, 4 lenses, APPROVED, acknowledged
+  (lineage review-29d1a21eef02224c, authority burned). Reviewed boundary is now fc811a5.
+  Advisory follow-ups (non-blocking) -> T7:
+  - WARNINGs:
+    - AppComposition.cs:499 misleading failure filter.
+    - AppComposition.cs:524-529 alert thread affinity unproved.
+    - AppComposition.cs:1493-1514 Alt+M acts after a failed Show.
+    - MiniSceneWindowController.cs:114-116 Show ignores the place result and returns true before the WebView attaches.
+    - WebView2MiniSceneBrowser.cs:93-98 no recovery after a WebView2 process failure.
+  - Suggestions:
+    - stale 288 comment (WebView2MiniSceneBrowser.cs:59).
+    - stale renderer comment (AppComposition.cs:1007).
+    - partial attach leak (WebView2MiniSceneBrowser.cs:57-68).
 
 ## Next step
-Review of slice 563d669..HEAD (RDD), then T7 cleanup, then T6 hardware check.
+T7 cleanup (both reviews' follow-ups), then T6 hardware check.
