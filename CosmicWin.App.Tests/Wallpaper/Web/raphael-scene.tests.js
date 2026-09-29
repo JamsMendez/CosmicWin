@@ -124,6 +124,27 @@ function loadPage(options) {
   var ctx2d = made.context;
   var sceneCanvas = makeCanvasElement(ctx2d);
   var nebulaCanvasElement = makeCanvasElement(ctx2d);
+  // mini-scene-window T2e: with options.fakeWebGl the #nebula canvas hands out a recording fake 'webgl'
+  // context (context attributes, clearColor and uniform1f calls) so the mini-only alpha/fade handling in
+  // nebula.js is observable without a GPU. The shader math itself is verified in the headless preview.
+  var gl = { contextAttributes: null, clearColorCalls: [], uniformCalls: {} };
+  if (options.fakeWebGl) {
+    var fakeGl = new Proxy({}, {
+      get: function (target, prop) {
+        if (prop === "COMPILE_STATUS" || prop === "LINK_STATUS") return prop;
+        if (prop === "getShaderParameter" || prop === "getProgramParameter") return function () { return true; };
+        if (prop === "getUniformLocation") return function (program, name) { return { name: name }; };
+        if (prop === "clearColor") return function () { gl.clearColorCalls.push(Array.prototype.slice.call(arguments)); };
+        if (prop === "uniform1f") return function (location, value) { gl.uniformCalls[location && location.name] = value; };
+        if (typeof prop === "string" && /^[A-Z_0-9]+$/.test(prop)) return 1;
+        return function () { return {}; };
+      },
+    });
+    nebulaCanvasElement.getContext = function (type, attributes) {
+      gl.contextAttributes = attributes;
+      return fakeGl;
+    };
+  }
   var postedMessages = [];
   var requestAnimationFrameCalls = [];
   var consoleErrorCalls = [];
@@ -140,7 +161,7 @@ function loadPage(options) {
     devicePixelRatio: options.devicePixelRatio || 1,
     // No WebGLRenderingContext global -- initializeNebulaRenderer (nebula.js) bails out before ever
     // touching a 'webgl' context, exactly like a browser with WebGL disabled would.
-    WebGLRenderingContext: undefined,
+    WebGLRenderingContext: options.fakeWebGl ? function () {} : undefined,
     requestAnimationFrame: function (callback) { requestAnimationFrameCalls.push(callback); },
     addEventListener: function () { /* "resize" only; never fired here */ },
     chrome: options.withWebview
@@ -188,6 +209,7 @@ function loadPage(options) {
   }
 
   return {
+    gl: gl,
     sandbox: sandbox,
     postedMessages: postedMessages,
     requestAnimationFrameCalls: requestAnimationFrameCalls,
@@ -530,12 +552,13 @@ test("the scene variant parses from the URL: default full, mini recognized, garb
   miniVariantChecks.checkVariantParse(sharedDir);
 });
 
-test("mini draws only its kept layers, on a transparent canvas, with no nebula, and still renders the alert overlay", function () {
+test("mini draws only its kept layers (plus the gold nebula and the rays), on a transparent canvas, and still renders the alert overlay", function () {
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "render",
-    keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawCentralCore"],
-    drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawPerspectiveRays", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
+    keepNebula: true,
+    keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawPerspectiveRays", "drawCentralCore"],
+    drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
   });
 });
 
@@ -543,14 +566,14 @@ test("the full variant still draws every layer", function () {
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "render",
-    keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawCentralCore"],
-    drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawPerspectiveRays", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
+    keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawPerspectiveRays", "drawCentralCore"],
+    drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
     hasBackgroundFill: false,
   });
 });
 
-test("the stylesheet makes the mini page transparent and hides #nebula", function () {
-  miniVariantChecks.checkMiniStylesheet(sceneDir, "hidden");
+test("the stylesheet makes the mini page and #nebula transparent", function () {
+  miniVariantChecks.checkMiniStylesheet(sceneDir, "transparent");
 });
 
 // ---- mini-scene-window T2d: the mini glyph rings stay tall strokes, and the gold ring is denser --------
@@ -603,6 +626,42 @@ test("the full variant's glyph rings are unchanged (1920x1080: gold 35 at 16x21.
   assert.ok(Math.abs(stats.gold.hw - 16) < 0.01 && Math.abs(stats.gold.hh - 21.5) < 0.01, "gold sprite " + stats.gold.hw + "x" + stats.gold.hh);
   assert.ok(Math.abs(stats.blue.hw - 13.5) < 0.01 && Math.abs(stats.blue.hh - 42.5) < 0.01, "blue sprite " + stats.blue.hw + "x" + stats.blue.hh);
   assert.strictEqual(page.sandbox.goldGlyphRingDrawParams(0).count, 35);
+});
+
+// ---- mini-scene-window T2e: gold nebula (mini only) and independently rotating rays ---------------------
+
+test("the mini nebula is gold, alpha-only and uses the wider edge fade; the full page keeps its opaque nebula", function () {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini", fakeWebGl: true });
+  mini.sandbox.render(0);
+  assert.strictEqual(mini.gl.contextAttributes && mini.gl.contextAttributes.alpha, true, "mini needs a WebGL context with alpha");
+  assert.strictEqual(mini.gl.clearColorCalls[0][3], 0, "mini must clear the nebula buffer to alpha 0");
+  assert.strictEqual(mini.gl.uniformCalls.u_mini, 1, "mini must switch the shader's gold/alpha branch on");
+  // Wider than processing's (0.5..0.9): still fully transparent at the window edge (r = 1) and corners.
+  assert.strictEqual(mini.gl.uniformCalls.u_miniFadeStart, 0.75);
+  assert.strictEqual(mini.gl.uniformCalls.u_miniFadeEnd, 0.98);
+  assert.ok(mini.gl.uniformCalls.u_miniFadeEnd < 1, "the nebula alpha must reach 0 before the window edge");
+
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500, fakeWebGl: true });
+  full.sandbox.render(0);
+  assert.strictEqual(full.gl.contextAttributes && full.gl.contextAttributes.alpha, false, "the full page keeps the opaque WebGL buffer");
+  assert.strictEqual(full.gl.clearColorCalls[0][3], 1, "the full page still clears the nebula to opaque black");
+  assert.strictEqual(full.gl.uniformCalls.u_mini, 0, "the full page must leave the shader's mini branch off");
+});
+
+test("the perspective rays rotate independently: each has its own signed angular speed, both directions present, and the angles diverge over time", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var rays = vm.runInContext("PERSPECTIVE_RAYS", page.sandbox);
+  assert.ok(rays.length >= 2, "expected several rays");
+  var speeds = rays.map(function (r) { return r.angularSpeed; });
+  assert.ok(speeds.some(function (v) { return v > 0; }), "expected at least one clockwise ray");
+  assert.ok(speeds.some(function (v) { return v < 0; }), "expected at least one counter-clockwise ray");
+  assert.strictEqual(new Set(speeds).size, speeds.length, "every ray needs its own speed");
+  // Angle over time follows angularSpeed per ray (sign = direction), so two rays of opposite sign turn opposite ways.
+  var cw = rays.filter(function (r) { return r.angularSpeed > 0; })[0];
+  var ccw = rays.filter(function (r) { return r.angularSpeed < 0; })[0];
+  var delta = function (ray) { return page.sandbox.perspectiveRayAngle(1, ray) - page.sandbox.perspectiveRayAngle(0, ray); };
+  assert.ok(delta(cw) > 0 && delta(ccw) < 0, "opposite-sign rays must turn in opposite directions");
+  assert.ok(Math.abs(delta(cw) - delta(ccw)) > 1e-6);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

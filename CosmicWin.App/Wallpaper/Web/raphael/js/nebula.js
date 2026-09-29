@@ -35,6 +35,11 @@ uniform float u_coreRadiusPx;
 uniform float u_goldZoneExtent;
 uniform float u_goldZoneIntensity;
 uniform float u_goldZoneNoiseScale;
+// mini-scene-window T2e: 1.0 in the ?variant=mini corner window, 0.0 otherwise (full scene unchanged).
+// u_miniFadeStart/u_miniFadeEnd: the mini alpha reaches 0 at u_miniFadeEnd (< 1.0 = before the window edge).
+uniform float u_mini;
+uniform float u_miniFadeStart;
+uniform float u_miniFadeEnd;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(41.71, 289.13))) * 43758.5453);
@@ -141,6 +146,17 @@ void main() {
   float goldZoneNoise = fbm(circularAngle * u_goldZoneNoiseScale + vec2(radialLog * 2.4, -radialLog * 1.8) + drift * 0.5);
   float goldZoneRadial = 1.0 - smoothstep(coreRadiusNorm * 0.5, goldZoneOuter, screenRadius);
   float goldZone = goldZoneRadial * (0.5 + 0.5 * goldZoneNoise) * u_goldZoneIntensity;
+  if (u_mini > 0.5) {
+    // Mini: the page is see-through, so the nebula must never reach the window edge. Gold only (the
+    // shader's own gold: the same vec3 the gold band, wisps and gold zone use, no green/blue), with
+    // premultiplied alpha = density plus the central gold zone, faded to exactly 0 by u_miniFadeEnd of
+    // the half-side so every edge and corner pixel is fully transparent.
+    float squareRadius = length(2.0 * gl_FragCoord.xy - u_resolution) / min(u_resolution.x, u_resolution.y);
+    float fade = 1.0 - smoothstep(u_miniFadeStart, u_miniFadeEnd, squareRadius);
+    float alpha = clamp(density * u_intensity + goldZone, 0.0, 1.0) * fade;
+    gl_FragColor = vec4(gold * alpha, alpha);
+    return;
+  }
   gl_FragColor = vec4(color * density * u_intensity + gold * goldZone, 1.0);
 }`;
 
@@ -161,7 +177,8 @@ function initializeNebulaRenderer() {
   if (!nebulaCanvas || !window.WebGLRenderingContext) return;
   try {
     const gl = nebulaCanvas.getContext('webgl', {
-      alpha: false,
+      // Mini needs a real alpha channel (see-through window); the full page keeps the opaque buffer.
+      alpha: isMiniVariant,
       antialias: false,
       depth: false,
       stencil: false,
@@ -205,6 +222,9 @@ function initializeNebulaRenderer() {
       goldZoneExtent: gl.getUniformLocation(program, 'u_goldZoneExtent'),
       goldZoneIntensity: gl.getUniformLocation(program, 'u_goldZoneIntensity'),
       goldZoneNoiseScale: gl.getUniformLocation(program, 'u_goldZoneNoiseScale'),
+      mini: gl.getUniformLocation(program, 'u_mini'),
+      miniFadeStart: gl.getUniformLocation(program, 'u_miniFadeStart'),
+      miniFadeEnd: gl.getUniformLocation(program, 'u_miniFadeEnd'),
     };
     resizeNebula();
   } catch (_) {
@@ -222,9 +242,9 @@ function resizeNebula() {
 function renderNebula(ms) {
   if (!nebulaRenderer) return;
   try {
-    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity, goldBandWidth, goldBandIntensity, goldWispThreshold, goldWispIntensity, coreRadiusPx, goldZoneExtent, goldZoneIntensity, goldZoneNoiseScale } = nebulaRenderer;
+    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity, goldBandWidth, goldBandIntensity, goldWispThreshold, goldWispIntensity, coreRadiusPx, goldZoneExtent, goldZoneIntensity, goldZoneNoiseScale, mini, miniFadeStart, miniFadeEnd } = nebulaRenderer;
     gl.viewport(0, 0, nebulaCanvas.width, nebulaCanvas.height);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(0, 0, 0, isMiniVariant ? 0 : 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(program);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -251,6 +271,9 @@ function renderNebula(ms) {
     gl.uniform1f(goldZoneExtent, NEBULA_GOLD_ZONE_EXTENT_FACTOR);
     gl.uniform1f(goldZoneIntensity, NEBULA_GOLD_ZONE_INTENSITY);
     gl.uniform1f(goldZoneNoiseScale, NEBULA_GOLD_ZONE_NOISE_SCALE);
+    gl.uniform1f(mini, isMiniVariant ? 1 : 0);
+    gl.uniform1f(miniFadeStart, MINI_NEBULA_FADE_START);
+    gl.uniform1f(miniFadeEnd, MINI_NEBULA_FADE_END);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   } catch (_) {
     nebulaRenderer = null;
@@ -295,4 +318,5 @@ function resize() {
 window.addEventListener('resize', resize, { passive: true });
 document.addEventListener('fullscreenchange', resize);
 resize();
-initializeNebulaRenderer();
+// initializeNebulaRenderer() now runs from main.js (right before the first frame): it needs
+// isMiniVariant (shared/js/render-loop.js), which loads after this file.

@@ -543,8 +543,9 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
-    // The blue tint (source-atop) tints whatever is already drawn: the planet and fan must come after it.
-    order: [["drawInnerRing", "drawBlueRingTint"], ["drawBlueRingTint", "drawEarth"], ["drawBlueRingTint", "drawChromaticGlowAnimated"]],
+    // The blue tint (source-atop) tints whatever is already drawn: ring AND planet come before it, the
+    // chroma fan (and the sparks) after it, so the fan stays untinted.
+    order: [["drawInnerRing", "drawEarth"], ["drawEarth", "drawBlueRingTint"], ["drawBlueRingTint", "drawChromaticGlowAnimated"], ["drawChromaticGlowAnimated", "drawRisingSparks"]],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
     drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
     fit: function (page) {

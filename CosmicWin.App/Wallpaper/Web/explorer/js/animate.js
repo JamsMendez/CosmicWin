@@ -564,10 +564,10 @@ function renderFrame(nowMs) {
     drawCombinedLightingMask(ctx, cx, cy);
 
     drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
-    // Mini tints only the ring (source-atop tints everything drawn so far), so it runs BEFORE the planet
-    // and the fan: the centered planet stays untinted and readable.
-    if (isMiniVariant) drawBlueRingTint(ctx);
     drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
+    // Mini tints the ring AND the planet blue (source-atop tints everything drawn so far), so it runs
+    // right after the planet and BEFORE the chroma fan: the fan and the sparks stay untinted.
+    if (isMiniVariant) drawBlueRingTint(ctx);
 
     // IDL-11: the persistent below-Earth star is removed — it only looked "fixed" in a single
     // screenshot; left running, it never moved, which reads as a static prop rather than part of

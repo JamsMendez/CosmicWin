@@ -39,6 +39,11 @@ const viewZoom = 1;
 // fills most of the small square window (the full scene's own geometry is sized for a landscape
 // screen, where the ring is only ~65% of the short side).
 const MINI_SCENE_ZOOM = 1.2;
+// mini-scene-window T2e: the mini nebula's alpha fade, in half-side units from the window center
+// (1.0 = the middle of an edge). Wider than processing's (0.5..0.9) so the gold cloud reaches out toward
+// the edges, but it is 0 at 0.98, so every edge and corner pixel stays fully transparent.
+const MINI_NEBULA_FADE_START = 0.75;
+const MINI_NEBULA_FADE_END = 0.98;
 
 // Tiempo total (en segundos) que la animación avanza antes de invertirse (ping-pong); el ciclo
 // completo dura el doble: ida + regreso. Alargarlo NO hace más lenta la animación: la repite más

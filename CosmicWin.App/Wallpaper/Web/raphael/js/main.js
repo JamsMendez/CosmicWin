@@ -47,8 +47,9 @@ function render(ms) {
     // share the scene's own try/catch -- a throw here must only fail this frame's "scene" stage, never
     // skip scheduleFrame(render) entirely.
     const sceneMs = alertSceneMs(ms);
-    // Mini has no #nebula WebGL background (the page must stay transparent).
-    if (!isMiniVariant) renderNebula(sceneMs);
+    // Mini renders the nebula too: transparent WebGL buffer, gold only, faded out before the window edges
+    // (see the u_mini branch in nebula.js).
+    renderNebula(sceneMs);
     p = animationProgress(sceneMs);
     const phase = p * TAU;
     const pulse = hexadecagonPulse(sceneMs);
@@ -63,8 +64,9 @@ function render(ms) {
     ctx.scale(zoom, zoom);
     ctx.translate(-cx, -cy);
 
-    // Mini keeps only the gold glyph ring, the golden hexadecagon and the central core: no feathers,
-    // ovals, stars, streaks, flares, chroma loops, perspective rays, grain, vignette or counters.
+    // Mini keeps the gold glyph ring, the golden hexadecagon, the perspective rays and the central core
+    // (plus the gold nebula): no feathers, ovals, stars, streaks, flares, chroma loops, grain, vignette or
+    // counters.
     if (!isMiniVariant) {
       drawFeathers(cx, cy, p, phase);
       drawSoftOvalFields(cx, cy, phase);
@@ -76,7 +78,8 @@ function render(ms) {
     }
     drawGlyphRings(cx, cy, p);
     drawGoldenHexadecagon(cx, cy, p, pulse);
-    if (!isMiniVariant) drawPerspectiveRays(cx, cy, phase);
+    // Each ray already turns on its own (alternating direction, own speed: sphere.js), in mini too.
+    drawPerspectiveRays(cx, cy, phase);
     drawCentralCore(cx, cy, phase, pulse);
 
     ctx.restore();
@@ -106,4 +109,5 @@ function render(ms) {
   scheduleFrame(render);
 }
 
+initializeNebulaRenderer();
 scheduleFrame(render);
