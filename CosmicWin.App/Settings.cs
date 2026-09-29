@@ -151,7 +151,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    bool WallpaperSceneHttpEnabled = true, MiniCorner MiniCorner = MiniCorner.BottomRight)
+    bool WallpaperSceneHttpEnabled = true, MiniCorner MiniCorner = MiniCorner.TopRight)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -411,8 +411,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
 
          # {MiniCornerKey}: which corner of the work area the `{WallpaperModeMiniValue}` window sits in:
-         # `{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}`, `{MiniCornerBottomLeftValue}` or
-         # `{MiniCornerBottomRightValue}` (default).
+         # `{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}` (default), `{MiniCornerBottomLeftValue}` or
+         # `{MiniCornerBottomRightValue}`.
          {MiniCornerKey} = {MiniCornerValue(MiniCorner)}
 
          """;
@@ -561,7 +561,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     /// <summary>
     /// Reads one of the four fixed corner names, case-insensitively. Same rule as every other key:
-    /// anything else keeps the default (bottom-right) rather than guessing.
+    /// anything else keeps the default (top-right) rather than guessing.
     /// </summary>
     private static bool TryReadMiniCorner(string value, out MiniCorner corner)
     {
@@ -580,7 +580,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
                 corner = MiniCorner.BottomRight;
                 return true;
             default:
-                corner = MiniCorner.BottomRight;
+                corner = MiniCorner.TopRight;
                 return false;
         }
     }

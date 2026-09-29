@@ -930,10 +930,10 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void MiniCornerDefaultsToBottomRight()
+    public void MiniCornerDefaultsToTopRight()
     {
-        Assert.Equal(MiniCorner.BottomRight, Settings.Default.MiniCorner);
-        Assert.Equal(MiniCorner.BottomRight, Settings.Parse(string.Empty).MiniCorner);
+        Assert.Equal(MiniCorner.TopRight, Settings.Default.MiniCorner);
+        Assert.Equal(MiniCorner.TopRight, Settings.Parse(string.Empty).MiniCorner);
     }
 
     [Theory]
@@ -952,7 +952,7 @@ public sealed class SettingsTests
     [InlineData("mini-corner")]
     public void AnUnreadableMiniCorner_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.Equal(MiniCorner.BottomRight, Settings.Parse(line).MiniCorner);
+        Assert.Equal(MiniCorner.TopRight, Settings.Parse(line).MiniCorner);
     }
 
     [Theory]
@@ -973,8 +973,9 @@ public sealed class SettingsTests
         var serialized = Settings.Default.Serialize();
 
         Assert.Contains("# mini-corner:", serialized, StringComparison.Ordinal);
-        Assert.Contains("mini-corner = bottom-right", serialized, StringComparison.Ordinal);
+        Assert.Contains("mini-corner = top-right", serialized, StringComparison.Ordinal);
         Assert.Contains("top-left", serialized, StringComparison.Ordinal);
+        Assert.Contains("bottom-right", serialized, StringComparison.Ordinal);
     }
 
     [Fact]

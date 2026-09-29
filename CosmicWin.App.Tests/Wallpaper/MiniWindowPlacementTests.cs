@@ -42,6 +42,28 @@ public sealed class MiniWindowPlacementTests
         Assert.True(rect.Y + rect.Height < 1440 + WorkArea.Y);
     }
 
+    [Fact]
+    public void ATopCornerStaysBelowATaskbarDockedAtTheTop()
+    {
+        // 2560x1440 monitor with a 48px taskbar docked at the top edge.
+        var topTaskbarWorkArea = new Rect(0, 48, 2560, 1392);
+
+        var rect = MiniWindowPlacement.Compute(topTaskbarWorkArea, 1440, MiniCorner.TopRight);
+
+        Assert.Equal(new Rect(2560 - 288, 48, 288, 288), rect);
+    }
+
+    [Fact]
+    public void ARightCornerStaysLeftOfATaskbarDockedAtTheRight()
+    {
+        // 2560x1440 monitor with a 64px taskbar docked at the right edge.
+        var rightTaskbarWorkArea = new Rect(0, 0, 2560 - 64, 1440);
+
+        var rect = MiniWindowPlacement.Compute(rightTaskbarWorkArea, 1440, MiniCorner.TopRight);
+
+        Assert.Equal(new Rect(2560 - 64 - 288, 0, 288, 288), rect);
+    }
+
     [Theory]
     [InlineData(MiniCorner.TopLeft, MiniCorner.TopRight)]
     [InlineData(MiniCorner.TopRight, MiniCorner.BottomRight)]
