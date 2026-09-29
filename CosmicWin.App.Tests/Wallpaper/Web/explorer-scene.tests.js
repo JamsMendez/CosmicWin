@@ -549,8 +549,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
     drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
     fit: function (page) {
-      // The ring is centered in the square and its disc border fills most of it (>= 90% of the
-      // half-side), with a margin so the outer edge is never clipped.
+      // The ring is centered in the square, its disc border stays inside the edge fade's opaque radius
+      // (so the mask never clips it) and still fills most of the square (>= 0.36 of the side).
       var borderCalls = [];
       var original = page.sandbox.drawDiscBorder;
       page.sandbox.drawDiscBorder = function (context, cx, cy, innerRadius, outerRadius) {
@@ -571,9 +571,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
       var call = borderCalls[0];
       assert.ok(Math.abs(call.cx - 144) < 1e-6 && Math.abs(call.cy - 144) < 1e-6,
         "expected the ring centered at (144, 144), got (" + call.cx + ", " + call.cy + ")");
-      assert.ok(call.outerRadius <= 144 - 2, "expected a margin: outerRadius " + call.outerRadius + " must be <= 142");
-      // The edge fade holds alpha 1 out to MINI_EDGE_FADE_INNER of the side: the whole disc must sit inside it
-      // (never clipped by the mask) while still filling most of the square.
+      // The edge fade holds alpha 1 out to MINI_EDGE_FADE_INNER of the side (a stricter bound than any fixed
+      // px margin): the whole disc must sit inside it while still filling most of the square.
       var fadeInner = page.sandbox.MINI_EDGE_FADE_INNER * 288;
       assert.ok(call.outerRadius <= fadeInner + 1e-6, "the ring (" + call.outerRadius + ") must stay inside the fade opaque radius " + fadeInner);
       assert.ok(call.outerRadius >= 288 * 0.36, "expected the ring to fill most of the square: outerRadius " + call.outerRadius);

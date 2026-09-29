@@ -77,11 +77,21 @@ var wallpaperFrameIntervalMs = 1000 / readWallpaperFpsFromUrl();
 
 // mini-scene-window T2: the scene variant, read once at load from the same query/hash params as fps
 // (`?variant=mini`). "mini" is the small always-on-top corner window: transparent page, no background
-// layers, no alert overlay, composition fitted to the (square) viewport. Anything other than the
+// layers, composition fitted to the (square) viewport; the alert overlay is KEPT (alerts show inside the
+// window's square, after the edge fade). Anything other than the
 // literal "mini" -- a missing param or garbage -- is "full", i.e. the unchanged wallpaper rendering.
 //
 // Reads BOTH location.search and location.hash (parseParams() only reads the hash when one exists), so
 // `index.html?variant=mini#tiles=failed` -- the manual alert hash API -- still selects the mini variant.
+// The basis of a mini composition whose disc border (outer radius = `discOuterRadiusFraction` x basis) is
+// fitted to `ringRadiusFraction` of the short side. Shared by idle and explorer, whose mini fit is the
+// same rule with their own constants; a scene's config.js calls it from its miniSceneBasis (resolved at
+// call time, so load order does not matter).
+function miniRingBasis(W, H, ringRadiusFraction, discOuterRadiusFraction, minBasisPx) {
+  const room = Math.min(W, H) * ringRadiusFraction;
+  return Math.max(minBasisPx, room / discOuterRadiusFraction);
+}
+
 function readSceneVariantFromUrl() {
   try {
     var raw = String(location.search || "").replace(/^[#?]/, "") + "&" + String(location.hash || "").replace(/^[#?]/, "");

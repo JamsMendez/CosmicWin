@@ -341,9 +341,9 @@ function activeSceneBasis() {
   return isMiniVariant ? miniSceneBasis(W, H) : sceneBasis(W, H);
 }
 
+// The fit rule itself lives in shared/js/render-loop.js (miniRingBasis), shared with the other scene.
 function miniSceneBasis(W, H) {
-  const room = Math.min(W, H) * MINI_RING_RADIUS_FRACTION;
-  return Math.max(SCENE_BASIS_MIN_PX, room / DISC_BORDER_OUTER_RADIUS_FRACTION);
+  return miniRingBasis(W, H, MINI_RING_RADIUS_FRACTION, DISC_BORDER_OUTER_RADIUS_FRACTION, SCENE_BASIS_MIN_PX);
 }
 
 const STARFIELD_INNER_RADIUS_FRACTION = 0.792; // stars begin just beyond the stone disc border (IDL-12: was 0.78)

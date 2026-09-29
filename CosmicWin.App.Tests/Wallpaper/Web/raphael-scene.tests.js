@@ -618,6 +618,21 @@ test("mini gold ring has 3x the glyphs the standard sizing rule gives at that sc
   assert.strictEqual(sb.goldGlyphRingDrawParams(0).count, stats.gold.count, "the see-through hook must draw the same gold count");
 });
 
+test("mini gold ring count is capped at the most that fit when 3x the standard rule would overlap", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var sb = page.sandbox;
+  var gold = sb.glyphRingAnnuli(sb.coreRadius(288))[1];
+  var thickness = gold.outerRadius - gold.innerRadius;
+  // Wide glyphs: the tripled standard count no longer fits, so goldGlyphRingCount must take the cap branch.
+  var wide = thickness * 1.5;
+  var standard = sb.glyphRingCountForRing(gold, thickness * vm.runInContext("GLYPH_RING_GOLD_BASE_SIZE_FRACTION", sb), sb.glyphRingGapPx());
+  var fits = sb.glyphRingCountForRing(gold, wide, vm.runInContext("MINI_GOLD_MIN_GAP_PX", sb));
+  assert.ok(fits < 3 * standard, "test setup: expected the cap to bind, fits " + fits + " vs 3 x " + standard);
+  var count = sb.goldGlyphRingCount(gold, wide);
+  assert.strictEqual(count, fits, "expected the count capped at what fits (" + fits + "), got " + count);
+  assert.ok(sb.glyphRingLinearGapAtRadius(gold.innerRadius, count, wide) >= 0, "the capped glyphs must not overlap at the inner radius");
+});
+
 test("the full variant's glyph rings are unchanged (1920x1080: gold 35 at 16x21.5, blue 92 at 13.5x42.5)", function () {
   var page = loadPage({ innerWidth: 1920, innerHeight: 1080 });
   var stats = ringSpriteStats(page);
