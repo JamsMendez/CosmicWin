@@ -413,14 +413,17 @@ const GLYPH_RING_EDGE_MARGIN_PX = 10;
 const GLYPH_RING_GAP_PX = 20;
 // mini-scene-window T2d: the two px values above (10px edge margin, 20px gap) are absolute, so at the
 // 288px mini window they ate the whole ring (blue glyph hh/hw 0.40, gold 0.33 -> short dashes). Mini
-// scales both with the composition (glyph-rings.js's glyphRingMiniScale) which keeps the full scene's
-// stretched proportions, and draws the gold ring as MINI_GOLD_COUNT_FACTOR x the glyphs the standard
-// rule gives at that scale, in thin tall strokes (MINI_GOLD_BASE_SIZE_FRACTION of the ring thickness
-// wide instead of 0.5), never closer than MINI_GOLD_MIN_GAP_PX. If the tripled count does not fit at
-// that gap, the largest count that does is used instead. The full variant never reads these.
-const MINI_GOLD_BASE_SIZE_FRACTION = 0.2;
-const MINI_GOLD_COUNT_FACTOR = 3;
-const MINI_GOLD_MIN_GAP_PX = 0.75;
+// scales both with the composition (glyph-rings.js's glyphRingMiniScale), which keeps the full scene's
+// stretched proportions for the blue ring.
+//
+// T11: the GOLD ring is the same in every variant (the maintainer liked the mini one): GLYPH_RING_GOLD_COUNT_FACTOR
+// x the glyphs the standard rule gives (GLYPH_RING_GOLD_BASE_SIZE_FRACTION-wide glyphs, the ring's gap), drawn as
+// thin tall strokes GLYPH_RING_GOLD_SLIM_SIZE_FRACTION of the ring thickness wide, never closer than
+// GLYPH_RING_GOLD_MIN_GAP_FRACTION of that width. If the tripled count does not fit at that gap, the largest
+// count that does is used instead. The gold glyphs have no glow.
+const GLYPH_RING_GOLD_SLIM_SIZE_FRACTION = 0.2;
+const GLYPH_RING_GOLD_COUNT_FACTOR = 3;
+const GLYPH_RING_GOLD_MIN_GAP_FRACTION = 0.3;
 // RAP-35 (user feedback, blue ring only): "agrégale 10 caracteres más (del catálogo existente) ...
 // quiero ver si se ve más lleno el anillo aprovechando el espacio entre caracteres que sobra."
 // Extra glyphs beyond the blue ring's derived count, drawn from the same RING_GLYPH_POOL; the gap
@@ -446,9 +449,6 @@ const GLYPH_RING_BORDER_FRACTION = 0.2; // border rim as a fraction of the (deri
 // RAP-34 (user feedback): "los caracteres amarillos deben tener efecto de luz" — a warm gold halo
 // baked ONCE per glyph (never blurred per frame) as a separate, larger, blurred sprite stamped
 // BENEATH the crisp outline glyph with 'screen' compositing, so the outline stays readable.
-const GLYPH_RING_GOLD_GLOW_COLOR = 'rgba(255,225,140,0.9)';
-const GLYPH_RING_GOLD_GLOW_BLUR_PX = 4; // baked blur radius
-const GLYPH_RING_GOLD_GLOW_STROKE_FACTOR = 1.6; // glow stroke width, relative to the crisp body width
 // RAP-29 ("sin truncarlos... una fuente delgada... necesita un piso legible"): at
 // GLYPH_RING_BLUE_BASE_SIZE_FRACTION=0.3, the fraction-based body/border width can get thin enough
 // to read as a hairline or vanish; these floors keep a visibly readable outline-font stroke (an

@@ -500,7 +500,7 @@ function captureRingCounts(page) {
   return calls;
 }
 
-test("the blue glyph ring adds its extra glyphs up to the most that fit without ink touching at its inner radius, and gold is unchanged", function () {
+test("the blue glyph ring adds its extra glyphs up to the most that fit without ink touching at its inner radius, and the gold ring is tripled (T11)", function () {
   var page = loadPage({ innerWidth: 1000, innerHeight: 800 });
   var calls = captureRingCounts(page);
   assert.strictEqual(calls.length, 2, "test setup sanity: expected one gold and one blue ring draw, saw " + calls.length);
@@ -518,7 +518,8 @@ test("the blue glyph ring adds its extra glyphs up to the most that fit without 
   while (sandbox.glyphRingLinearGapAtRadius(blue.innerRadius, blueCeiling + 1, blueWidth) >= 0) blueCeiling++;
   var expectedBlue = Math.min(blueBase + 50, blueCeiling);
 
-  assert.strictEqual(calls[0].count, goldBase, "expected the gold ring count to stay at its base " + goldBase);
+  // T11: the gold ring is 3x the standard count (goldBase), in thin strokes that fit at that count.
+  assert.strictEqual(calls[0].count, 3 * goldBase, "expected the gold ring count to be 3 x its base " + goldBase);
   assert.strictEqual(calls[1].count, expectedBlue,
     "expected the blue ring to hold " + expectedBlue + " glyphs (base " + blueBase + " + 50, capped at " + blueCeiling + "), saw " + calls[1].count);
   assert.ok(sandbox.glyphRingLinearGapAtRadius(blue.innerRadius, calls[1].count, blueWidth) >= 0,
@@ -588,7 +589,7 @@ test("mini occludes the background under the whole raphael ring system: a destin
   assert.ok(captured.call.falloff > captured.call.solid && captured.call.falloff <= rim * 1.10, "expected a short soft edge just outside the rim, got " + captured.call.falloff);
 });
 
-test("mini stamps no glow under the gold glyphs (the blue ring is unchanged); the full page still stamps the gold glow", function () {
+test("no glow under the gold glyphs in either variant: none baked, none stamped (the blue ring is unchanged)", function () {
   function glowArgs(page) {
     var calls = [];
     var original = page.sandbox.drawOutlineGlyphRing;
@@ -598,17 +599,15 @@ test("mini stamps no glow under the gold glyphs (the blue ring is unchanged); th
     };
     page.sandbox.render(0);
     page.sandbox.render(100);
-    return calls;
+    return { calls: calls, page: page };
   }
-  var mini = glowArgs(loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }));
-  var miniGold = mini.filter(function (c, i) { return i % 2 === 0; }); // gold first, blue second, every frame
-  var miniBlue = mini.filter(function (c, i) { return i % 2 === 1; });
-  assert.ok(miniGold.length >= 2 && miniBlue.length >= 2);
-  miniGold.forEach(function (c) { assert.ok(!c.glow || c.glow.length === 0, "mini must not stamp the gold glow sprites"); });
-  miniBlue.forEach(function (c) { assert.strictEqual(c.glow, undefined, "the blue ring never had a glow"); });
-  var full = glowArgs(loadPage({ innerWidth: 1000, innerHeight: 500 }));
-  var fullGold = full.filter(function (c, i) { return i % 2 === 0; });
-  fullGold.forEach(function (c) { assert.ok(c.glow && c.glow.length === c.count, "the full page must still stamp one glow sprite per gold glyph"); });
+  [{ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }, { innerWidth: 1000, innerHeight: 500 }].forEach(function (options) {
+    var got = glowArgs(loadPage(options));
+    assert.ok(got.calls.length >= 4, "expected gold and blue ring draws over two frames");
+    got.calls.forEach(function (c) { assert.strictEqual(c.glow, undefined, "no glow sprites may be stamped for any ring"); });
+    var sprites = vm.runInContext("sprites", got.page.sandbox);
+    assert.strictEqual("outlineGlyphsGoldGlow" in sprites, false, "no gold glow sprites may be baked");
+  });
 });
 
 test("the mini hexadecagon's rendered stroke equals the shared mini polygon width (which the processing octagon also uses)", function () {
@@ -638,7 +637,7 @@ function ringSpriteStats(page) {
   function stats(list) {
     return { count: list.length, ratios: list.map(function (g) { return g.hh / g.hw; }), hw: list[0].hw, hh: list[0].hh };
   }
-  return { gold: stats(sprites.outlineGlyphsGold), blue: stats(sprites.outlineGlyphs), glow: sprites.outlineGlyphsGoldGlow.length };
+  return { gold: stats(sprites.outlineGlyphsGold), blue: stats(sprites.outlineGlyphs), glow: (sprites.outlineGlyphsGoldGlow || []).length, hasGlowKey: "outlineGlyphsGoldGlow" in sprites };
 }
 
 test("mini glyphs are tall strokes: blue and gold height:width >= 3", function () {
@@ -660,10 +659,10 @@ test("mini gold ring has 3x the glyphs the standard sizing rule gives at that sc
     vm.runInContext("GLYPH_RING_GAP_PX", sb) * scale);
   assert.strictEqual(stats.gold.count, 3 * fullRuleCount,
     "expected " + (3 * fullRuleCount) + " gold glyphs (3 x " + fullRuleCount + "), got " + stats.gold.count);
-  assert.strictEqual(stats.glow, 0, "mini bakes no gold glyph glow sprites (T2k)");
+  assert.strictEqual(stats.glow, 0, "no gold glyph glow sprites are baked (T2k/T11)");
   // evenly spaced and never overlapping, even at the tighter inner radius
   // (ink width, not the sprite canvas: the canvas is rounded up to whole pixels)
-  var width = (gold.outerRadius - gold.innerRadius) * vm.runInContext("MINI_GOLD_BASE_SIZE_FRACTION", sb);
+  var width = (gold.outerRadius - gold.innerRadius) * vm.runInContext("GLYPH_RING_GOLD_SLIM_SIZE_FRACTION", sb);
   var linearGap = (2 * Math.PI / stats.gold.count) * gold.innerRadius - width;
   assert.ok(linearGap > 0, "gold glyphs must not overlap at the inner radius, gap " + linearGap.toFixed(2));
   assert.strictEqual(sb.goldGlyphRingDrawParams(0).count, stats.gold.count, "the see-through hook must draw the same gold count");
@@ -677,21 +676,31 @@ test("mini gold ring count is capped at the most that fit when 3x the standard r
   // Wide glyphs: the tripled standard count no longer fits, so goldGlyphRingCount must take the cap branch.
   var wide = thickness * 1.5;
   var standard = sb.glyphRingCountForRing(gold, thickness * vm.runInContext("GLYPH_RING_GOLD_BASE_SIZE_FRACTION", sb), sb.glyphRingGapPx());
-  var fits = sb.glyphRingCountForRing(gold, wide, vm.runInContext("MINI_GOLD_MIN_GAP_PX", sb));
+  var fits = sb.glyphRingCountForRing(gold, wide, vm.runInContext("GLYPH_RING_GOLD_MIN_GAP_FRACTION", sb) * wide);
   assert.ok(fits < 3 * standard, "test setup: expected the cap to bind, fits " + fits + " vs 3 x " + standard);
   var count = sb.goldGlyphRingCount(gold, wide);
   assert.strictEqual(count, fits, "expected the count capped at what fits (" + fits + "), got " + count);
   assert.ok(sb.glyphRingLinearGapAtRadius(gold.innerRadius, count, wide) >= 0, "the capped glyphs must not overlap at the inner radius");
 });
 
-test("the full variant's glyph rings are unchanged (1920x1080: gold 35 at 16x21.5, blue 92 at 13.5x42.5)", function () {
+test("the full variant gets the same gold ring: 3x the standard count in thin tall strokes, no glow; the blue ring is unchanged (1920x1080)", function () {
   var page = loadPage({ innerWidth: 1920, innerHeight: 1080 });
+  var sb = page.sandbox;
   var stats = ringSpriteStats(page);
-  assert.strictEqual(stats.gold.count, 35);
+  var gold = sb.glyphRingAnnuli(sb.coreRadius(1080))[1];
+  var thickness = gold.outerRadius - gold.innerRadius;
+  // the standard (pre-T11) rule: 0.5-wide glyphs with the 20px gap -> 35 at this size
+  var standard = sb.glyphRingCountForRing(gold, thickness * vm.runInContext("GLYPH_RING_GOLD_BASE_SIZE_FRACTION", sb), vm.runInContext("GLYPH_RING_GAP_PX", sb));
+  assert.strictEqual(standard, 35, "test setup: the standard gold count at 1920x1080 is 35");
+  assert.strictEqual(stats.gold.count, 3 * standard, "expected " + (3 * standard) + " gold glyphs in the full scene, got " + stats.gold.count);
+  assert.strictEqual(stats.glow, 0, "the full scene bakes no gold glow sprites");
+  var width = thickness * vm.runInContext("GLYPH_RING_GOLD_SLIM_SIZE_FRACTION", sb);
+  assert.ok(sb.glyphRingLinearGapAtRadius(gold.innerRadius, stats.gold.count, width) > 0, "the full gold glyphs must not overlap at the inner radius");
+  assert.ok(Math.min.apply(null, stats.gold.ratios) >= 3, "the full gold glyphs must be tall strokes, worst ratio " + Math.min.apply(null, stats.gold.ratios));
+  // blue ring: exactly as before
   assert.strictEqual(stats.blue.count, 92);
-  assert.ok(Math.abs(stats.gold.hw - 16) < 0.01 && Math.abs(stats.gold.hh - 21.5) < 0.01, "gold sprite " + stats.gold.hw + "x" + stats.gold.hh);
   assert.ok(Math.abs(stats.blue.hw - 13.5) < 0.01 && Math.abs(stats.blue.hh - 42.5) < 0.01, "blue sprite " + stats.blue.hw + "x" + stats.blue.hh);
-  assert.strictEqual(page.sandbox.goldGlyphRingDrawParams(0).count, 35);
+  assert.strictEqual(sb.goldGlyphRingDrawParams(0).count, stats.gold.count, "the see-through hook must draw the same gold count");
 });
 
 // ---- mini-scene-window T2e: gold nebula (mini only) and independently rotating rays ---------------------

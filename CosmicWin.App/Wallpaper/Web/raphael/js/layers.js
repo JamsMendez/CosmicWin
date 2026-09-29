@@ -385,8 +385,8 @@ function goldGlyphRingDrawParams(progress) {
   const r = coreRadius(Math.min(W, H));
   const annuli = glyphRingAnnuli(r);
   const gold = annuli[1];
-  const targetWidth = (gold.outerRadius - gold.innerRadius) * goldGlyphBaseSizeFraction();
-  const bounds = glyphRingGlyphBounds(gold, goldGlyphBaseSizeFraction());
+  const targetWidth = (gold.outerRadius - gold.innerRadius) * GLYPH_RING_GOLD_SLIM_SIZE_FRACTION;
+  const bounds = glyphRingGlyphBounds(gold, GLYPH_RING_GOLD_SLIM_SIZE_FRACTION);
   return {
     radius: (gold.innerRadius + gold.outerRadius) / 2,
     count: goldGlyphRingCount(gold, targetWidth),
@@ -406,7 +406,7 @@ function drawGlyphRings(cx, cy, progress) {
   // circumference at bake time — glyphRingCountFromCircumference, glyph-rings.js), so it's read
   // here from the actual baked sprite array length, always in sync with what was baked.
   const gold = annuli[1];
-  drawOutlineGlyphRing(cx, cy, (gold.innerRadius + gold.outerRadius) / 2, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED, isMiniVariant ? undefined : sprites.outlineGlyphsGoldGlow);
+  drawOutlineGlyphRing(cx, cy, (gold.innerRadius + gold.outerRadius) / 2, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED);
 
   const blue = annuli[3];
   drawOutlineGlyphRing(cx, cy, (blue.innerRadius + blue.outerRadius) / 2, sprites.outlineGlyphs.length, sprites.outlineGlyphs, progress * TAU * GLYPH_RING_BLUE_ROTATION_SPEED);
@@ -415,7 +415,7 @@ function drawGlyphRings(cx, cy, progress) {
 // RAP-13/21/26: both rings' glyphs are pre-baked outline-font sprites (js/sprites.js's
 // paintTransformedOutlineGlyph, built in buildSprites); this only positions and stamps them, same
 // angular layout glyphs.js's drawGlyphRing uses (even spacing, tangential orientation).
-function drawOutlineGlyphRing(cx, cy, radius, count, spriteSet, rotation, glowSpriteSet) {
+function drawOutlineGlyphRing(cx, cy, radius, count, spriteSet, rotation) {
   for (let i = 0; i < count; i++) {
     const angle = rotation + (i / count) * TAU;
     const x = cx + Math.cos(angle) * radius;
@@ -423,15 +423,6 @@ function drawOutlineGlyphRing(cx, cy, radius, count, spriteSet, rotation, glowSp
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(glyphRingOrientationAngle(angle));
-    // RAP-34: the gold-glyph glow sprite (baked once, js/sprites.js) is stamped BENEATH the crisp
-    // outline glyph with additive 'screen' compositing so the warm halo never dulls the readable
-    // outline itself. Only the gold ring receives a glowSpriteSet; the blue ring passes none.
-    if (glowSpriteSet) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      stampSprite(glowSpriteSet[i], 1, 1);
-      ctx.restore();
-    }
     stampSprite(spriteSet[i], 1, 1);
     ctx.restore();
   }

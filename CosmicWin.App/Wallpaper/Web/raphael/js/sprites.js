@@ -1,7 +1,7 @@
 // html-wallpaper-demo D6b: copied verbatim from docs/great-sage/background-raphael/js/sprites.js
 // (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
 // only this header comment was added, the source's own header/body follow unchanged. The gold ring's
-// PRE-BAKED sprites this file builds (outlineGlyphsGold/outlineGlyphsGoldGlow) stamp straight onto the
+// PRE-BAKED sprites this file builds (outlineGlyphsGold/outlineGlyphs) stamp straight onto the
 // module-global `ctx` (stampSprite below) -- see js/see-through-hook.js's own header remarks for why
 // the shared alert overlay's hook cannot reuse this path, and reuses js/glyphs.js's
 // context-parameterized drawGlyphRing instead.
@@ -156,44 +156,6 @@ function paintTransformedOutlineGlyph(g, k, strokes, bodyWidth, borderWidth, bor
     drawTransformedGlyph(g, scaled, 0, 0, 0, op.color, op.width, dotRadiusPx * k);
   }
   g.globalCompositeOperation = 'source-over';
-}
-
-// RAP-34 (user feedback: "los caracteres amarillos deben tener efecto de luz") — bakes a warm gold
-// halo for one glyph: a SEPARATE, wider, blurred stroke pass of the SAME transformed glyph strokes,
-// painted at BAKE time only (never per frame — same rule paintFeatherVariant's blurred pass already
-// follows). Stamped BENEATH the crisp outline glyph with 'screen' compositing by the caller.
-function paintGlyphGlow(g, k, strokes, bodyWidth, glowColor, blurPx, dotRadiusPx) {
-  const glowWidth = bodyWidth * GLYPH_RING_GOLD_GLOW_STROKE_FACTOR;
-  g.filter = `blur(${blurPx * k}px)`;
-  drawTransformedGlyph(g, strokes, 0, 0, 0, glowColor, glowWidth * k, dotRadiusPx * k);
-  g.filter = 'none';
-}
-
-// Mirrors buildOutlineRingSprites' per-glyph fit (same targetWidth/targetHeight/bodyWidth/count
-// derivation, so glow sprite[i] lines up with the crisp sprite[i] at the same ring position) but
-// bakes paintGlyphGlow instead, with extra canvas padding (glowBlurPx * 3) so the baked blur itself
-// is never clipped by the sprite canvas edge (RAP-29's "no ink outside canvas" lesson).
-function buildOutlineRingGlowSprites(annulus, baseSizeFraction, strokeWidthFraction, glowColor, glowBlurPx) {
-  const thickness = annulus.outerRadius - annulus.innerRadius;
-  const targetWidth = thickness * baseSizeFraction;
-  const targetHeight = thickness - 2 * glyphRingEdgeMarginPx();
-  const bodyWidth = Math.max(targetWidth * strokeWidthFraction, GLYPH_RING_BODY_WIDTH_FLOOR_PX);
-  const dotRadiusPx = bodyWidth * 0.55;
-  const count = goldGlyphRingCount(annulus, targetWidth);
-  const pad = glowBlurPx * 3;
-  return Array.from({ length: count }, (_, i) => {
-    const strokes = RING_GLYPH_POOL[i % RING_GLYPH_POOL.length];
-    const bounds = ringGlyphRenderedBounds(strokes);
-    const rawHalfWidth = (bounds.maxX - bounds.minX) / 2;
-    const rawHalfHeight = (bounds.maxY - bounds.minY) / 2;
-    const { scaleX, scaleY } = glyphRingFitScale(rawHalfWidth, rawHalfHeight, targetWidth, targetHeight, bodyWidth);
-    const scaled = transformStrokesForRing(strokes, scaleX, scaleY);
-    const transformed = clampRingDotPositions(scaled, targetWidth / 2, targetHeight / 2, dotRadiusPx);
-    const extent = glyphRingFitExtent(rawHalfWidth, rawHalfHeight, scaleX, scaleY, bodyWidth);
-    return bakeSprite(extent.halfWidth + pad, extent.halfHeight + pad,
-      (g, k) => paintGlyphGlow(g, k, transformed, bodyWidth, glowColor, glowBlurPx, dotRadiusPx),
-      RING_SPRITE_MAX_DIM);
-  });
 }
 
 // Builds one ring's outline-font glyph sprites: every glyph independently fit (glyphRingFitScale)
@@ -372,9 +334,7 @@ function buildSprites() {
       const radius = W * flare.radius;
       return bakeRainbowRing(radius, radius * 0.56, FLARE_RING_WIDTH, FLARE_RING_DIFFUSION);
     }),
-    outlineGlyphsGold: buildOutlineRingSprites(ringAnnuli[1], goldGlyphBaseSizeFraction(), GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_BORDER_COLOR, GLYPH_RING_GOLD_INTERIOR_COLOR),
-    // T2k: mini draws the gold glyphs without their glow, so it bakes no glow sprites.
-    outlineGlyphsGoldGlow: isMiniVariant ? [] : buildOutlineRingGlowSprites(ringAnnuli[1], goldGlyphBaseSizeFraction(), GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_GLOW_COLOR, GLYPH_RING_GOLD_GLOW_BLUR_PX),
+    outlineGlyphsGold: buildOutlineRingSprites(ringAnnuli[1], GLYPH_RING_GOLD_SLIM_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_BORDER_COLOR, GLYPH_RING_GOLD_INTERIOR_COLOR),
     outlineGlyphs: buildOutlineRingSprites(ringAnnuli[3], GLYPH_RING_BLUE_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_BLUE, GLYPH_RING_BLUE_BORDER_COLOR, GLYPH_RING_BLUE_INTERIOR_COLOR, GLYPH_RING_BLUE_EXTRA_COUNT),
     featherSharp: FEATHER_VARIANTS.map((variant) =>
       bakeSprite(FEATHER_SPRITE_REFERENCE_LENGTH * 1.05, FEATHER_SPRITE_REFERENCE_LENGTH * 0.5,
@@ -397,9 +357,6 @@ function buildSprites() {
   }
   if (sprites.outlineGlyphsGold.length < 1 || sprites.outlineGlyphs.length < 1) {
     throw new Error('Outline-glyph sprite baking must produce at least one sprite per ring.');
-  }
-  if (!isMiniVariant && sprites.outlineGlyphsGoldGlow.length !== sprites.outlineGlyphsGold.length) {
-    throw new Error('The gold-glyph glow sprite set must have exactly one glow sprite per gold glyph.');
   }
   if (sprites.featherSharp.length !== FEATHER_VARIANT_COUNT || sprites.featherBlurred.length !== FEATHER_VARIANT_COUNT ||
       sprites.featherGoldMask.length !== FEATHER_VARIANT_COUNT) {
