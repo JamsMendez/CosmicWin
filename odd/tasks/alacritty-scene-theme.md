@@ -51,5 +51,10 @@ Forecast ~350 authored lines. Strategy: ask-on-risk. Branch `feat/alacritty-scen
   (node harness timeout), which fails identically on base 67a0aae. Parent spot check: Alacritty|HttpSceneSwitch 39 passed.
 - Actual size ~635 authored lines (over forecast, mostly tests).
 
+- Review: medium, consent granted, lens review-reliability, APPROVED and acknowledged (lineage
+  review-cfb3712ab20baf29, authority burned). Advisory follow-ups (not blocking): startup write in
+  WireProduction untested (WARNING); relative alacritty-theme-file path not rejected; startup writes even
+  when no html scene layer exists.
+
 ## Next step
-Native review of the slice; user adds the import to alacritty.toml and sets the key; hardware check.
+Optional follow-ups above; user adds the import to alacritty.toml and sets the key; hardware check.
