@@ -56,5 +56,10 @@ Forecast ~350 authored lines. Strategy: ask-on-risk. Branch `feat/alacritty-scen
   WireProduction untested (WARNING); relative alacritty-theme-file path not rejected; startup writes even
   when no html scene layer exists.
 
+- Hardware 2026-09-28: branch build launched (non-elevated), startup wrote processing; HTTP cycle
+  idle/raphael/explorer/processing each rewrote cosmicwin-scene.toml with the right header/bg; no
+  terminal-theme-failed trace; settings.conf kept alacritty-theme-file across scene persists. User's
+  alacritty.toml now imports ["astrodark.toml", "cosmicwin-scene.toml"].
+
 ## Next step
-Optional follow-ups above; user adds the import to alacritty.toml and sets the key; hardware check.
+Maintainer visual check in Alacritty; optional follow-ups above; user adds the import to alacritty.toml and sets the key; hardware check.
