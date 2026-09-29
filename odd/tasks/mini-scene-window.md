@@ -81,6 +81,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - mini-corner -> mini-position
   (route: delegated writer, parallel with T2h)
 - [x] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
+- [ ] T2j Processing/raphael mini: dark occluding base disc under the structure (same mechanism as T2i) (maintainer 2026-09-29: check explorer and the rest) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -280,6 +281,13 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   inter-ring gaps and outside the disc stay transparent. RED 2 per scene + 1 (hollow) -> GREEN idle 18, explorer 19,
   processing 38, raphael 20; full suite 0 failed. Text-background previews (red/white terminal text, like
   docs/z-index.png): no text reads through any band.
+- Review slice d6e0c93..(T2i+docs) (high, 9 files, 179 lines): APPROVED, acknowledged (lineage
+  review-01475e2654422c64). Suggestions only (-> T8): fullMiniOnly naming, idle comment mentions the explorer tint,
+  test title, gap winding unproved, explorer order unasserted. docs/z-index.png (maintainer's reference photo) added
+  to .git/info/exclude so the review preflight has no untracked files; the file is untouched.
+- Live check after T2i (PID 11500): explorer occludes; processing and raphael let background text/icons through -> T2j.
+  Settings migration confirmed live: HTTP on the legacy port 43811 -> 202; the Alt+M persist rewrote settings.conf to
+  the 12 new keys with the values kept.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
