@@ -160,24 +160,36 @@ function drawBrushStroke(context, x0, y0, x1, y1, peakHalfWidth, wobbleAmp, wobb
   context.fill();
 }
 
-// mini-scene-window T2g: CONSTELLATION_DOT_RADIUS / CONSTELLATION_LINE_WIDTH are absolute px sizes tuned
-// on the real screen (3440x1440: the maintainer's monitor; sceneBasis is 877 there and at any 1440-tall
-// screen), where this ring is ~63px thick. The ?variant=mini window draws the same ring ~5-6x smaller, so
-// the same px made the dots blobs. In mini both scale by (this ring's thickness) / (its thickness in the
-// full scene at that reference screen), never below MINI_CONSTELLATION_MIN_PX. The full variant returns
-// the tunables untouched. This ring is baked into the ring cache (buildRingCaches), so the cache picks the
-// mini sizes up automatically. isMiniVariant comes from shared/js/render-loop.js (resolved at call time).
+// mini-scene-window T2g/T2h: absolute px sizes (CONSTELLATION_DOT_RADIUS, CONSTELLATION_LINE_WIDTH, and the
+// hieroglyph band's HIEROGLYPH_STROKE_PX) are tuned on the real screen (3440x1440: the maintainer's monitor;
+// sceneBasis is ~877 there and at any 1440-tall screen), where the constellation ring is ~63px thick. The
+// ?variant=mini window draws the same rings about 6x smaller (ratio ~0.17 at 288px), so the same px made the
+// dots blobs and the glyph strokes dense hatching. In mini each is scaled by (that ring's thickness) / (its
+// thickness in the full scene at that reference screen), never below MINI_CONSTELLATION_MIN_PX. The full
+// variant returns the tunables untouched. These rings are baked into the ring cache (buildRingCaches), so the
+// cache picks the mini sizes up automatically. isMiniVariant comes from shared/js/render-loop.js (resolved
+// at call time).
 const MINI_CONSTELLATION_REFERENCE_SCREEN = { width: 3440, height: 1440 };
 const MINI_CONSTELLATION_MIN_PX = 0.5;
 
-function constellationDetailSizes(boxSize) {
-  if (!isMiniVariant) return { dotRadius: CONSTELLATION_DOT_RADIUS, lineWidth: CONSTELLATION_LINE_WIDTH };
-  const referenceBox = (CONSTELLATION_RING_OUTER_RADIUS_FRACTION - CONSTELLATION_RING_INNER_RADIUS_FRACTION) *
+// `box` is the ring's thickness in px; `thicknessFraction` is that ring's thickness as a fraction of the basis.
+function miniDetailRatio(box, thicknessFraction) {
+  const referenceBox = thicknessFraction *
     sceneBasis(MINI_CONSTELLATION_REFERENCE_SCREEN.width, MINI_CONSTELLATION_REFERENCE_SCREEN.height);
-  const ratio = boxSize / referenceBox;
+  return box / referenceBox;
+}
+
+// `px` unchanged in the full variant; scaled by the mini ratio (with the floor) in mini.
+function miniDetailPx(px, box, thicknessFraction) {
+  if (!isMiniVariant) return px;
+  return Math.max(MINI_CONSTELLATION_MIN_PX, px * miniDetailRatio(box, thicknessFraction));
+}
+
+function constellationDetailSizes(boxSize) {
+  const fraction = CONSTELLATION_RING_OUTER_RADIUS_FRACTION - CONSTELLATION_RING_INNER_RADIUS_FRACTION;
   return {
-    dotRadius: Math.max(MINI_CONSTELLATION_MIN_PX, CONSTELLATION_DOT_RADIUS * ratio),
-    lineWidth: Math.max(MINI_CONSTELLATION_MIN_PX, CONSTELLATION_LINE_WIDTH * ratio),
+    dotRadius: miniDetailPx(CONSTELLATION_DOT_RADIUS, boxSize, fraction),
+    lineWidth: miniDetailPx(CONSTELLATION_LINE_WIDTH, boxSize, fraction),
   };
 }
 
@@ -245,11 +257,16 @@ function drawConstellationRing(context, cx, cy, innerRadius, outerRadius, rotati
 
 // --- Ring 4: hieroglyph band (two rows of bold small glyphs, enclosed by thin circular lines,
 // with short radial dividers boxing small groups) -------------------------------------------
+// The hieroglyph band's glyph stroke width in px (full: 1.6; mini: scaled with the band, see miniDetailPx above).
+const HIEROGLYPH_STROKE_PX = 1.6;
+
 function drawHieroglyphBand(context, cx, cy, innerRadius, outerRadius, rotation) {
   const bandThickness = outerRadius - innerRadius;
   // Rows sit evenly inside the band, each with margin to the inner/outer enclosing lines.
   const rowGap = bandThickness / (HIEROGLYPH_BAND_ROW_COUNT + 1);
   const glyphSize = rowGap * 0.72; // bold, small glyphs sized to fill most of their row
+  const glyphStrokePx = miniDetailPx(HIEROGLYPH_STROKE_PX, bandThickness,
+    HIEROGLYPH_BAND_OUTER_RADIUS_FRACTION - HIEROGLYPH_BAND_INNER_RADIUS_FRACTION);
   for (let row = 0; row < HIEROGLYPH_BAND_ROW_COUNT; row++) {
     const radius = innerRadius + rowGap * (row + 1);
     const pool = glyphTextRun(HIEROGLYPH_GLYPH_COUNT, row * 37);
@@ -260,7 +277,7 @@ function drawHieroglyphBand(context, cx, cy, innerRadius, outerRadius, rotation)
       const tangential = angle + Math.PI / 2;
       const brightness = verticalLightBrightness(angle);
       const color = applyBrightness(HIEROGLYPH_GLYPH_COLOR, brightness);
-      drawHieroglyph(context, pool[i], x, y, glyphSize, tangential, color, 1.6);
+      drawHieroglyph(context, pool[i], x, y, glyphSize, tangential, color, glyphStrokePx);
     }
   }
 

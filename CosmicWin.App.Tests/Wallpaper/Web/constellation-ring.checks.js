@@ -108,73 +108,142 @@ function checkTunablesMatchTwin(sceneDir, twinScene) {
   assert.deepStrictEqual(own, twin, "this scene's CONSTELLATION_* tunables differ from the " + twinScene + " scene's");
 }
 
-// mini-scene-window T2g: the constellation dots and brush-stroke lines are absolute px sizes
-// (CONSTELLATION_DOT_RADIUS, CONSTELLATION_LINE_WIDTH), so in the ~5x smaller mini ring they read as
-// blobs. Mini scales both by (this ring's thickness) / (its thickness in the full scene at the reference
-// screen, 3440x1440), with a 0.5px floor; the full variant keeps the exact values.
-function constellationSizes(page, boxSize) {
-  return page.sandbox.constellationDetailSizes(boxSize);
-}
+// mini-scene-window T2g/T2h: the constellation dots and brush-stroke lines (CONSTELLATION_DOT_RADIUS,
+// CONSTELLATION_LINE_WIDTH) and the hieroglyph band's glyph stroke (HIEROGLYPH_STROKE_PX) are absolute px
+// sizes, so in the ~6x smaller mini ring they read as blobs / dense hatching. Mini scales each by
+// (that ring's thickness) / (its thickness in the full scene at the 3440x1440 reference screen), with a
+// MINI_CONSTELLATION_MIN_PX floor; the full variant keeps the exact tunables.
 
-// Records the dot radius (in px, i.e. arc radius x the box scale) drawConstellationRing really draws.
-function drawnDotRadiiPx(page, boxSize) {
+function cfg(page, name) { return vm.runInContext(name, page.sandbox); }
+
+// A recording 2D context that keeps a real save()/restore() stack of the current scale factor. Every
+// arc()/lineWidth is recorded together with the scale in force, so a test can tell what was drawn
+// inside a scale(boxSize) block (the dots: radius in box units) from arcs at scale 1 (boundary lines).
+function makeRecordingContext() {
   var scaleFactor = 1;
-  var radii = [];
+  var stack = [];
+  var arcs = [];
   var context = new Proxy({}, {
     get: function (target, prop) {
-      if (prop === "scale") return function (sx) { scaleFactor = sx; };
-      if (prop === "arc") return function (x, y, r) { radii.push(r * scaleFactor); };
+      if (prop === "save") return function () { stack.push(scaleFactor); };
+      if (prop === "restore") return function () { scaleFactor = stack.length ? stack.pop() : 1; };
+      if (prop === "scale") return function (sx) { scaleFactor *= sx; };
+      if (prop === "arc") return function (x, y, r) { arcs.push({ radius: r, scale: scaleFactor }); };
       return function () {};
     },
     set: function () { return true; },
   });
-  page.sandbox.drawConstellationRing(context, 0, 0, 100, 100 + boxSize, 0);
-  // arcs with a radius drawn under the box scale are the dots; the 1px boundary arcs run at scale 1 with radius ~100
-  return radii.filter(function (r, i) { return r < boxSize; });
+  return { context: context, arcs: arcs };
+}
+
+// The dot radius in px that drawConstellationRing really draws: arcs recorded while the box scale
+// (== boxSize) is in force. The circular boundary arcs are drawn after restore(), at scale 1.
+function drawnDotRadiiPx(page, boxSize) {
+  var rec = makeRecordingContext();
+  page.sandbox.drawConstellationRing(rec.context, 0, 0, 100, 100 + boxSize, 0);
+  return rec.arcs
+    .filter(function (a) { return Math.abs(a.scale - boxSize) < 1e-6; }) // (100 + boxSize) - 100 is not exactly boxSize
+    .map(function (a) { return a.radius * a.scale; });
+}
+
+// The stroke width in px drawHieroglyphBand passes to drawHieroglyph for its glyphs.
+function drawnHieroglyphStrokesPx(page, bandThickness) {
+  var widths = [];
+  var original = page.sandbox.drawHieroglyph;
+  page.sandbox.drawHieroglyph = function (context, strokes, x, y, size, angle, color, lineWidth) { widths.push(lineWidth); };
+  try {
+    page.sandbox.drawHieroglyphBand(makeRecordingContext().context, 0, 0, 100, 100 + bandThickness, 0);
+  } finally {
+    page.sandbox.drawHieroglyph = original;
+  }
+  return widths;
 }
 
 function checkConstellationDetailScale(loadPage) {
-  var cfg = function (page, name) { return vm.runInContext(name, page.sandbox); };
-
   var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
   var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
   var dot = cfg(full, "CONSTELLATION_DOT_RADIUS");
   var line = cfg(full, "CONSTELLATION_LINE_WIDTH");
+  var floor = cfg(full, "MINI_CONSTELLATION_MIN_PX");
   var thickness = cfg(full, "CONSTELLATION_RING_OUTER_RADIUS_FRACTION") - cfg(full, "CONSTELLATION_RING_INNER_RADIUS_FRACTION");
+  var reference = cfg(full, "MINI_CONSTELLATION_REFERENCE_SCREEN");
 
-  // the ring thickness in the mini window, and in the full scene at the 3440x1440 reference screen
+  // the ring thickness in the mini window, and in the full scene at the reference screen
   var miniBox = thickness * mini.sandbox.miniSceneBasis(288, 288);
-  var referenceBox = thickness * full.sandbox.sceneBasis(3440, 1440);
+  var referenceBox = thickness * full.sandbox.sceneBasis(reference.width, reference.height);
   var ratio = miniBox / referenceBox;
-  assert.ok(ratio > 0.1 && ratio < 0.25, "expected the mini ring to be ~1/6 of the reference ring, ratio " + ratio);
+  assert.ok(ratio > 0 && ratio < 1, "the mini ring must be smaller than the reference ring, ratio " + ratio);
 
-  var expectedDot = Math.max(0.5, dot * ratio);
-  var expectedLine = Math.max(0.5, line * ratio);
-  var sizes = constellationSizes(mini, miniBox);
-  assert.ok(Math.abs(sizes.dotRadius - expectedDot) < 1e-9, "mini dot radius " + sizes.dotRadius + ", expected " + expectedDot);
-  assert.ok(Math.abs(sizes.lineWidth - expectedLine) < 1e-9, "mini line width " + sizes.lineWidth + ", expected " + expectedLine);
-  assert.ok(sizes.dotRadius < dot / 4, "the mini dots must be far smaller than the full 2.75px, got " + sizes.dotRadius);
-  // floor: a tiny ring never makes the dots vanish
-  var tiny = constellationSizes(mini, 1);
-  assert.ok(tiny.dotRadius >= 0.5 && tiny.lineWidth >= 0.5, "expected the 0.5px floor, got " + JSON.stringify(tiny));
-  // the dots actually drawn use that radius
+  // below the floor: the 288px window (dot*ratio and line*ratio are both under it)
+  assert.ok(dot * ratio < floor && line * ratio < floor, "expected the 288px mini ring to sit under the floor");
+  var sizes = mini.sandbox.constellationDetailSizes(miniBox);
+  assert.strictEqual(sizes.dotRadius, floor, "mini dot radius must be the floor " + floor + ", got " + sizes.dotRadius);
+  assert.strictEqual(sizes.lineWidth, floor, "mini line width must be the floor " + floor + ", got " + sizes.lineWidth);
+  var tiny = mini.sandbox.constellationDetailSizes(1);
+  assert.ok(tiny.dotRadius >= floor && tiny.lineWidth >= floor, "a tiny ring must never drop under the floor, got " + JSON.stringify(tiny));
+
+  // ABOVE the floor: a ring 90% of the reference ring, where the proportional branch decides the value
+  var bigBox = referenceBox * 0.9;
+  var bigRatio = bigBox / referenceBox;
+  assert.ok(dot * bigRatio > floor && line * bigRatio > floor, "expected the big ring to be above the floor");
+  var big = mini.sandbox.constellationDetailSizes(bigBox);
+  assert.ok(Math.abs(big.dotRadius - dot * bigRatio) < 1e-9, "proportional dot radius " + big.dotRadius + ", expected " + dot * bigRatio);
+  assert.ok(Math.abs(big.lineWidth - line * bigRatio) < 1e-9, "proportional line width " + big.lineWidth + ", expected " + line * bigRatio);
+  drawnDotRadiiPx(mini, bigBox).forEach(function (r) {
+    assert.ok(Math.abs(r - dot * bigRatio) < 1e-9, "drawn dot radius " + r + ", expected " + dot * bigRatio);
+  });
+
+  // the dots actually drawn in the 288px ring use the floored radius
   var drawn = drawnDotRadiiPx(mini, miniBox);
   assert.ok(drawn.length > 0, "expected constellation dots to be drawn");
-  drawn.forEach(function (r) { assert.ok(Math.abs(r - expectedDot) < 1e-9, "drawn dot radius " + r + ", expected " + expectedDot); });
+  drawn.forEach(function (r) { assert.ok(Math.abs(r - sizes.dotRadius) < 1e-9, "drawn dot radius " + r + ", expected " + sizes.dotRadius); });
 
   // full: unchanged, whatever the ring size
-  [40, 63, 120].forEach(function (box) {
-    var f = constellationSizes(full, box);
+  [40, miniBox, referenceBox].forEach(function (box) {
+    var f = full.sandbox.constellationDetailSizes(box);
     assert.strictEqual(f.dotRadius, dot, "the full dot radius must stay " + dot);
     assert.strictEqual(f.lineWidth, line, "the full line width must stay " + line);
   });
-  var fullDrawn = drawnDotRadiiPx(full, 63);
+  var fullDrawn = drawnDotRadiiPx(full, referenceBox);
   assert.ok(fullDrawn.length > 0);
   fullDrawn.forEach(function (r) { assert.ok(Math.abs(r - dot) < 1e-9, "the full drawn dot radius must stay " + dot + ", got " + r); });
+}
+
+// The hieroglyph band's glyph stroke follows the same ratio and floor, and the full stroke stays 1.6.
+function checkHieroglyphStrokeScale(loadPage) {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var stroke = cfg(full, "HIEROGLYPH_STROKE_PX");
+  var floor = cfg(full, "MINI_CONSTELLATION_MIN_PX");
+  var reference = cfg(full, "MINI_CONSTELLATION_REFERENCE_SCREEN");
+  var bandFraction = cfg(full, "HIEROGLYPH_BAND_OUTER_RADIUS_FRACTION") - cfg(full, "HIEROGLYPH_BAND_INNER_RADIUS_FRACTION");
+  var referenceBand = bandFraction * full.sandbox.sceneBasis(reference.width, reference.height);
+  var miniBand = bandFraction * mini.sandbox.miniSceneBasis(288, 288);
+
+  // 288px: under the floor
+  assert.ok(stroke * (miniBand / referenceBand) < floor, "expected the 288px band stroke to sit under the floor");
+  var miniWidths = drawnHieroglyphStrokesPx(mini, miniBand);
+  assert.ok(miniWidths.length > 0, "expected hieroglyphs to be drawn");
+  miniWidths.forEach(function (w) { assert.strictEqual(w, floor, "mini hieroglyph stroke " + w + ", expected the floor " + floor); });
+
+  // above the floor: proportional
+  var bigBand = referenceBand * 0.9;
+  assert.ok(stroke * 0.9 > floor);
+  drawnHieroglyphStrokesPx(mini, bigBand).forEach(function (w) {
+    assert.ok(Math.abs(w - stroke * 0.9) < 1e-9, "proportional hieroglyph stroke " + w + ", expected " + stroke * 0.9);
+  });
+
+  // full: unchanged at any band size
+  [miniBand, referenceBand].forEach(function (band) {
+    var widths = drawnHieroglyphStrokesPx(full, band);
+    assert.ok(widths.length > 0);
+    widths.forEach(function (w) { assert.strictEqual(w, stroke, "the full hieroglyph stroke must stay " + stroke + ", got " + w); });
+  });
 }
 
 module.exports = {
   checkConstellationTable: checkConstellationTable,
   checkTunablesMatchTwin: checkTunablesMatchTwin,
   checkConstellationDetailScale: checkConstellationDetailScale,
+  checkHieroglyphStrokeScale: checkHieroglyphStrokeScale,
 };

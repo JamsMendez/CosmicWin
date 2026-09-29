@@ -614,6 +614,10 @@ test("mini scales the constellation dots and lines with the ring (floor 0.5px); 
   constellationRingChecks.checkConstellationDetailScale(loadPage);
 });
 
+test("mini scales the hieroglyph band's glyph stroke with the ring (floor, proportional above it); the full variant keeps 1.6px", function () {
+  constellationRingChecks.checkHieroglyphStrokeScale(loadPage);
+});
+
 test("the stylesheet makes the mini page transparent", function () {
   miniVariantChecks.checkMiniStylesheet(sceneDir);
 });
