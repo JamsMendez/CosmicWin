@@ -25,6 +25,8 @@ uniform float u_warp;
 uniform float u_thickness;
 uniform float u_scale;
 uniform float u_intensity;
+// mini-scene-window T2b: 1.0 in the ?variant=mini corner window, 0.0 otherwise (full scene unchanged).
+uniform float u_mini;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(41.71, 289.13))) * 43758.5453);
@@ -108,6 +110,18 @@ void main() {
   vec3 color = mix(limeEmerald, emerald, smoothstep(0.35, 0.65, screenRadius));
   color = mix(color, outerBlue, smoothstep(0.85, 1.15, boundary));
   color *= mix(1.0, 0.8, smoothstep(1.1, 1.7, screenRadius));
+  if (u_mini > 0.5) {
+    // Mini: the page is see-through, so the nebula must never reach the window edge (that would
+    // reveal the rectangle). Green palette only (the shader's own limeEmerald -> emerald, no blue
+    // outer band), premultiplied alpha = density, faded to 0 by 0.9 of the half-side (45% of the side
+    // from the center) so every edge and corner pixel is fully transparent.
+    vec3 green = mix(limeEmerald, emerald, smoothstep(0.35, 0.65, screenRadius));
+    float squareRadius = length(2.0 * gl_FragCoord.xy - u_resolution) / min(u_resolution.x, u_resolution.y);
+    float fade = 1.0 - smoothstep(0.5, 0.9, squareRadius);
+    float alpha = clamp(density * u_intensity * fade, 0.0, 1.0);
+    gl_FragColor = vec4(green * alpha, alpha);
+    return;
+  }
   gl_FragColor = vec4(color * density * u_intensity, 1.0);
 }`;
 
@@ -124,7 +138,8 @@ function initializeNebulaRenderer() {
   if (!nebulaCanvas || !window.WebGLRenderingContext) return;
   try {
     const gl = nebulaCanvas.getContext('webgl', {
-      alpha: false,
+      // Mini needs a real alpha channel (see-through window); the full page keeps the opaque buffer.
+      alpha: isMiniVariant,
       antialias: false,
       depth: false,
       stencil: false,
@@ -159,6 +174,7 @@ function initializeNebulaRenderer() {
       thickness: gl.getUniformLocation(program, 'u_thickness'),
       scale: gl.getUniformLocation(program, 'u_scale'),
       intensity: gl.getUniformLocation(program, 'u_intensity'),
+      mini: gl.getUniformLocation(program, 'u_mini'),
     };
     resizeNebula();
   } catch (_) {
@@ -176,9 +192,9 @@ function resizeNebula() {
 function renderNebula(ms) {
   if (!nebulaRenderer) return;
   try {
-    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity } = nebulaRenderer;
+    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity, mini } = nebulaRenderer;
     gl.viewport(0, 0, nebulaCanvas.width, nebulaCanvas.height);
-    gl.clearColor(0, 0, 0, 1);
+    gl.clearColor(0, 0, 0, isMiniVariant ? 0 : 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(program);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -193,6 +209,7 @@ function renderNebula(ms) {
     gl.uniform1f(thickness, NEBULA_THICKNESS);
     gl.uniform1f(scale, NEBULA_SCALE);
     gl.uniform1f(intensity, NEBULA_INTENSITY);
+    gl.uniform1f(mini, isMiniVariant ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   } catch (_) {
     nebulaRenderer = null;
@@ -237,4 +254,5 @@ function resize() {
 window.addEventListener('resize', resize, { passive: true });
 document.addEventListener('fullscreenchange', resize);
 resize();
-initializeNebulaRenderer();
+// initializeNebulaRenderer() now runs from main.js (right before the first frame): it needs
+// isMiniVariant (shared/js/render-loop.js), which loads after this file.

@@ -333,6 +333,12 @@ function sceneBasis(W, H) {
 // sceneBasis() fits it to a landscape screen instead, off-center by CENTER_X_FRACTION).
 const MINI_EDGE_MARGIN_PX = 4;
 
+// The basis the composition is actually drawn with: the mini fit in the mini variant, else the full one.
+// (isMiniVariant comes from shared/js/render-loop.js, resolved at call time.)
+function activeSceneBasis() {
+  return isMiniVariant ? miniSceneBasis(W, H) : sceneBasis(W, H);
+}
+
 function miniSceneBasis(W, H) {
   const room = Math.min(W, H) / 2 - MINI_EDGE_MARGIN_PX;
   return Math.max(SCENE_BASIS_MIN_PX, room / DISC_BORDER_OUTER_RADIUS_FRACTION);
@@ -430,6 +436,10 @@ const CHROMATIC_GLOW_INTENSITY = 2.2; // alpha multiplier applied to every inter
 // 2026-09-27: doubled (3.5 -> 7) per the maintainer, the fan base still read too thin after the
 // chroma-width fix; the tip is unchanged, so the fan keeps thinning toward the Earth.
 const CHROMATIC_GLOW_BASE_WIDTH_SCALE = 7; // ellipse x-radius multiplier at the bottom sample (t=0)
+// mini-scene-window T2b: alpha multiplier on the fan in the mini variant. The fan is additive ('lighter')
+// and faint by design (it glows against black); on a see-through window there is no dark backdrop to
+// build contrast against, so the mini fan is boosted to read on its own. Never used by the full scene.
+const MINI_CHROMATIC_GLOW_GAIN = 4;
 
 // --- IDL-8 animation tunables ----------------------------------------------------------------
 // Every speed/direction below is user-tunable; defaults are deliberately slow (this is a desktop

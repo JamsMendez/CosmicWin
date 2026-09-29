@@ -96,6 +96,29 @@ function loadPage(options) {
   var ctx2d = make2dContext();
   var sceneCanvas = makeCanvasElement(ctx2d);
   var nebulaCanvasElement = makeCanvasElement(ctx2d);
+  // mini-scene-window T2b: with options.fakeWebGl the #nebula canvas hands out a recording fake 'webgl'
+  // context (context attributes, clearColor and uniform1f calls), so the mini-only alpha handling in
+  // nebula.js is observable without a GPU. The shader math itself is verified in the headless preview.
+  var gl = { contextAttributes: null, clearColorCalls: [], uniformCalls: {} };
+  if (options.fakeWebGl) {
+    var fakeGl = new Proxy({}, {
+      get: function (target, prop) {
+        if (prop === "COMPILE_STATUS" || prop === "LINK_STATUS") return prop;
+        if (prop === "getShaderParameter" || prop === "getProgramParameter") return function () { return true; };
+        if (prop === "getUniformLocation") return function (program, name) { return { name: name }; };
+        if (prop === "clearColor") return function () { gl.clearColorCalls.push(Array.prototype.slice.call(arguments)); };
+        if (prop === "uniform1f") {
+          return function (location, value) { gl.uniformCalls[location && location.name] = value; };
+        }
+        if (typeof prop === "string" && /^[A-Z_0-9]+$/.test(prop)) return 1;
+        return function () { return {}; };
+      },
+    });
+    nebulaCanvasElement.getContext = function (type, attributes) {
+      gl.contextAttributes = attributes;
+      return fakeGl;
+    };
+  }
   var postedMessages = [];
   // D2b (R4-render-loop-no-fault-isolation): records every scheduleFrame(render) call, so a test can
   // prove the loop keeps scheduling frames across a throw instead of dying on the spot.
@@ -124,7 +147,7 @@ function loadPage(options) {
     devicePixelRatio: options.devicePixelRatio || 1,
     // No WebGLRenderingContext global -- initializeNebulaRenderer (nebula.js) bails out before ever
     // touching a 'webgl' context, exactly like a browser with WebGL disabled would.
-    WebGLRenderingContext: undefined,
+    WebGLRenderingContext: options.fakeWebGl ? function () {} : undefined,
     requestAnimationFrame: function (callback) { requestAnimationFrameCalls.push(callback); },
     addEventListener: function () { /* "resize" only; never fired here */ },
     chrome: options.withWebview
@@ -172,6 +195,7 @@ function loadPage(options) {
   }
 
   return {
+    gl: gl,
     sandbox: sandbox,
     postedMessages: postedMessages,
     fillStyleHistory: ctx2d.__fillStyleHistory,
@@ -709,10 +733,11 @@ test("the scene variant parses from the URL: default full, mini recognized, garb
   miniVariantChecks.checkVariantParse(sharedDir);
 });
 
-test("mini draws only its kept layers, on a transparent canvas, with no nebula, and still renders the alert overlay", function () {
+test("mini draws only its kept layers (plus the green nebula), on a transparent canvas, and still renders the alert overlay", function () {
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "render",
+    keepNebula: true,
     keep: ["drawSegmentedSphere", "drawAtomicOrbits", "drawOrbitBlocks", "drawCentralOctagon", "drawTriangularPrism", "drawPerspectiveRays", "drawCentralCore"],
     drop: ["drawSoftOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette"],
   });
@@ -728,8 +753,23 @@ test("the full variant still draws every layer", function () {
   });
 });
 
-test("the stylesheet makes the mini page transparent and hides #nebula", function () {
-  miniVariantChecks.checkMiniStylesheet(sceneDir, true);
+test("the nebula's alpha handling is mini-only: alpha context, alpha-0 clear and u_mini=1 in mini; opaque, alpha-1 clear and u_mini=0 in the full page", function () {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini", fakeWebGl: true });
+  mini.sandbox.render(0);
+  assert.strictEqual(mini.gl.contextAttributes && mini.gl.contextAttributes.alpha, true, "mini needs a WebGL context with alpha");
+  assert.strictEqual(mini.gl.clearColorCalls.length >= 1, true, "expected renderNebula to clear");
+  assert.strictEqual(mini.gl.clearColorCalls[0][3], 0, "mini must clear the nebula buffer to alpha 0");
+  assert.strictEqual(mini.gl.uniformCalls.u_mini, 1, "mini must switch the shader's edge-fade branch on");
+
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500, fakeWebGl: true });
+  full.sandbox.render(0);
+  assert.strictEqual(full.gl.contextAttributes && full.gl.contextAttributes.alpha, false, "the full page keeps the opaque WebGL buffer");
+  assert.strictEqual(full.gl.clearColorCalls[0][3], 1, "the full page still clears the nebula to opaque black");
+  assert.strictEqual(full.gl.uniformCalls.u_mini, 0, "the full page must leave the shader's mini branch off");
+});
+
+test("the stylesheet makes the mini page and #nebula transparent", function () {
+  miniVariantChecks.checkMiniStylesheet(sceneDir, "transparent");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

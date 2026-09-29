@@ -399,7 +399,7 @@ function chromaticGlowColorAt(t) {
 // as it rises.
 function chromaticGlowSampleRadius(t) {
   const screenRadius = Math.min(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
-  const tipRadius = sceneBasis(W, H) * CHROMATIC_GLOW_RADIUS_FRACTION;
+  const tipRadius = activeSceneBasis() * CHROMATIC_GLOW_RADIUS_FRACTION;
   return mix(screenRadius, tipRadius, t);
 }
 
@@ -461,7 +461,7 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
     context.translate(cx, y);
     context.scale(widthScale, 1);
     const gradient = context.createRadialGradient(0, 0, 0, 0, 0, radius);
-    gradient.addColorStop(0, `rgba(${r},${g},${b},${(a * flow * alphaScale).toFixed(3)})`);
+    gradient.addColorStop(0, `rgba(${r},${g},${b},${(Math.min(1, a * flow * alphaScale * (isMiniVariant ? MINI_CHROMATIC_GLOW_GAIN : 1))).toFixed(3)})`);
     gradient.addColorStop(1, 'rgba(0,0,0,0)');
     context.fillStyle = gradient;
     context.beginPath();
@@ -471,8 +471,8 @@ function drawChromaticGlowAnimated(context, cx, earthCy, earthRadius, timeSecond
   }
   context.restore();
 
-  const sparkSize = GLOW_SPARK_SIZE_FRACTION * sceneBasis(W, H);
-  const jitterRange = GLOW_SPARK_HORIZONTAL_JITTER_FRACTION * sceneBasis(W, H);
+  const sparkSize = GLOW_SPARK_SIZE_FRACTION * activeSceneBasis();
+  const jitterRange = GLOW_SPARK_HORIZONTAL_JITTER_FRACTION * activeSceneBasis();
   // IDL-13: the rise distance is now derived (baseY - earthCy) instead of a fixed fraction of H,
   // so a spark always rises exactly to the Earth's horizontal middle line regardless of
   // resolution/aspect ratio; GLOW_SPARK_LIFETIME_SECONDS/_SPAWN_INTERVAL_SECONDS (config.js) are
@@ -547,9 +547,10 @@ function renderFrame(nowMs) {
     // plain min(W, H); the Earth's own center is derived from it too (below) so it keeps the SAME
     // position relative to the ring center (cx, cy) as the composition shrinks/grows, instead of
     // staying pinned to a fixed fraction of H.
-    const basis = isMiniVariant ? miniSceneBasis(W, H) : sceneBasis(W, H);
-    const earthCx = cx + EARTH_CENTER_X_OFFSET_FRACTION * basis;
-    const earthCy = cy + EARTH_CENTER_Y_OFFSET_FRACTION * basis;
+    const basis = activeSceneBasis();
+    // Mini puts the planet at the exact ring center; the full scene keeps it offset above it.
+    const earthCx = isMiniVariant ? cx : cx + EARTH_CENTER_X_OFFSET_FRACTION * basis;
+    const earthCy = isMiniVariant ? cy : cy + EARTH_CENTER_Y_OFFSET_FRACTION * basis;
 
     // Rebuild on a basis (CSS-pixel) size change OR a DPR change (e.g. dragging the window to a
     // display with a different scale factor) — DPR affects only the caches' backing-store pixel
@@ -592,11 +593,10 @@ function renderFrame(nowMs) {
     // screenshot; left running, it never moved, which reads as a static prop rather than part of
     // the animation. The only sparks now are the ones emitted by the chromatic glow below, which
     // rise, brighten, and fade, and never cross above the Earth's horizontal middle (earthCy).
-    // Mini keeps only the central ring: no chromatic glow/sparks, no vignette.
-    if (!isMiniVariant) {
-      drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
-      drawVignette(ctx);
-    }
+    // Mini keeps the chroma fan and its sparks (additive 'lighter' gradients, no fill: safe on a
+    // transparent canvas) but drops the vignette.
+    drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
+    if (!isMiniVariant) drawVignette(ctx);
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

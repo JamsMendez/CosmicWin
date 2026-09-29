@@ -129,9 +129,15 @@ function checkMiniLayers(options) {
     assert.strictEqual(typeof page.sandbox[name], "function", "expected the kept layer " + name + " to exist");
     assert.ok(counts[name] >= 1, "mini must still draw " + name + " (ran " + counts[name] + " times)");
   });
-  options.drop.concat(["renderNebula"]).forEach(function (name) {
+  options.drop.forEach(function (name) {
     assert.strictEqual(counts[name] || 0, 0, "mini must NOT run " + name + " (ran " + counts[name] + " times)");
   });
+  // The nebula is a mini layer only where the scene says so (processing: green, edge-faded).
+  if (options.keepNebula) {
+    assert.ok(counts.renderNebula >= 1, "mini must still call renderNebula (ran " + counts.renderNebula + " times)");
+  } else {
+    assert.strictEqual(counts.renderNebula || 0, 0, "mini must NOT run renderNebula (ran " + counts.renderNebula + " times)");
+  }
   assert.ok(counts.renderAlertOverlay >= 1, "mini must still call renderAlertOverlay (ran " + counts.renderAlertOverlay + " times)");
 
   assert.ok(clears.some(function (args) { return coversCanvas(args, size.innerWidth, size.innerHeight); }),
@@ -182,13 +188,17 @@ function checkFullLayers(options) {
 }
 
 // Stylesheet: the mini class makes the page transparent (and hides #nebula where the scene has one).
-function checkMiniStylesheet(sceneDir, hasNebula) {
+// nebulaMode: "hidden" (display: none), "transparent" (background: transparent) or absent (no nebula).
+function checkMiniStylesheet(sceneDir, nebulaMode) {
   var css = fs.readFileSync(path.join(sceneDir, "styles.css"), "utf8");
   var block = /html\.scene-mini,\s*html\.scene-mini body,\s*html\.scene-mini #scene\s*\{([^}]*)\}/.exec(css);
   assert.ok(block, "expected an html.scene-mini rule covering html, body and #scene");
   assert.ok(/background:\s*transparent/.test(block[1]), "expected the mini rule to set background: transparent");
-  if (hasNebula) {
+  if (nebulaMode === "hidden") {
     assert.ok(/html\.scene-mini #nebula\s*\{[^}]*display:\s*none/.test(css), "expected html.scene-mini #nebula to be display: none");
+  } else if (nebulaMode === "transparent") {
+    assert.ok(/html\.scene-mini #nebula\s*\{[^}]*background:\s*transparent/.test(css), "expected html.scene-mini #nebula to be background: transparent");
+    assert.ok(!/html\.scene-mini #nebula\s*\{[^}]*display:\s*none/.test(css), "expected the mini #nebula to stay displayed");
   }
 }
 

@@ -57,8 +57,9 @@ function render(ms) {
 
   try {
     const sceneMs = alertSceneMs(ms);
-    // Mini has no #nebula WebGL background (the page must stay transparent).
-    if (!isMiniVariant) renderNebula(sceneMs);
+    // Mini renders the nebula too: transparent WebGL buffer, green only, faded out well before the
+    // window edges (see the u_mini branch in nebula.js).
+    renderNebula(sceneMs);
     p = animationProgress(sceneMs);
     const phase = p * TAU;
     const pulse = octagonPulse(sceneMs);
@@ -113,4 +114,5 @@ function render(ms) {
   scheduleFrame(render);
 }
 
+initializeNebulaRenderer();
 scheduleFrame(render);

@@ -543,8 +543,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawBlueRingTint", "drawRisingSparks"],
-    drop: ["drawStarfield", "drawEarth", "drawChromaticGlowAnimated", "drawBlueLayer", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
+    drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
     fit: function (page) {
       // The ring is centered in the square and its disc border fills most of it (>= 90% of the
       // half-side), with a margin so the outer edge is never clipped.
@@ -554,7 +554,16 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
         borderCalls.push({ cx: cx, cy: cy, outerRadius: outerRadius });
         return original.apply(this, arguments);
       };
+      var earthCalls = [];
+      var originalEarth = page.sandbox.drawEarth;
+      page.sandbox.drawEarth = function (context, cx, cy) {
+        earthCalls.push({ cx: cx, cy: cy });
+        return originalEarth.apply(this, arguments);
+      };
       page.sandbox.renderFrame(200);
+      assert.strictEqual(earthCalls.length, 1, "expected one drawEarth call");
+      assert.ok(Math.abs(earthCalls[0].cx - 144) < 1e-6 && Math.abs(earthCalls[0].cy - 144) < 1e-6,
+        "expected the mini planet at the exact ring center (144, 144), got (" + earthCalls[0].cx + ", " + earthCalls[0].cy + ")");
       assert.strictEqual(borderCalls.length, 1, "expected one drawDiscBorder call");
       var call = borderCalls[0];
       assert.ok(Math.abs(call.cx - 144) < 1e-6 && Math.abs(call.cy - 144) < 1e-6,
@@ -569,14 +578,34 @@ test("the full variant still draws every layer and its opaque background", funct
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawRisingSparks"],
-    drop: ["drawStarfield", "drawEarth", "drawChromaticGlowAnimated", "drawBlueLayer", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawRisingSparks"],
+    drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
     hasBackgroundFill: true,
   });
 });
 
+test("the full variant keeps the planet above the ring center, exactly where it always sat", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var earthCalls = [];
+  var originalEarth = page.sandbox.drawEarth;
+  page.sandbox.drawEarth = function (context, cx, cy) {
+    earthCalls.push({ cx: cx, cy: cy });
+    return originalEarth.apply(this, arguments);
+  };
+  page.sandbox.renderFrame(0);
+  assert.strictEqual(earthCalls.length, 1, "expected one drawEarth call");
+  var basis = page.sandbox.sceneBasis(1000, 500);
+  var ringCx = 1000 * vm.runInContext("CENTER_X_FRACTION", page.sandbox);
+  var ringCy = 500 * vm.runInContext("CENTER_Y_FRACTION", page.sandbox);
+  var expectedCx = ringCx + vm.runInContext("EARTH_CENTER_X_OFFSET_FRACTION", page.sandbox) * basis;
+  var expectedCy = ringCy + vm.runInContext("EARTH_CENTER_Y_OFFSET_FRACTION", page.sandbox) * basis;
+  assert.ok(Math.abs(earthCalls[0].cx - expectedCx) < 1e-6 && Math.abs(earthCalls[0].cy - expectedCy) < 1e-6,
+    "expected the full planet at (" + expectedCx + ", " + expectedCy + "), got (" + earthCalls[0].cx + ", " + earthCalls[0].cy + ")");
+  assert.ok(earthCalls[0].cy < ringCy, "expected the full planet above the ring center");
+});
+
 test("the stylesheet makes the mini page transparent", function () {
-  miniVariantChecks.checkMiniStylesheet(sceneDir, false);
+  miniVariantChecks.checkMiniStylesheet(sceneDir);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

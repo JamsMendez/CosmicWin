@@ -64,5 +64,5 @@ html.scene-mini #scene {
 }
 
 html.scene-mini #nebula {
-  display: none;
+  background: transparent;
 }

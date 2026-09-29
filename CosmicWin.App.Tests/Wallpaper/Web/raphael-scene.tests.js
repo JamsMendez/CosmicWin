@@ -550,7 +550,7 @@ test("the full variant still draws every layer", function () {
 });
 
 test("the stylesheet makes the mini page transparent and hides #nebula", function () {
-  miniVariantChecks.checkMiniStylesheet(sceneDir, true);
+  miniVariantChecks.checkMiniStylesheet(sceneDir, "hidden");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
