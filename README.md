@@ -112,24 +112,37 @@ start.
 | `border-color` | `accent` | `#RRGGBB`, or `accent` to follow Windows' own accent colour. |
 | `tiling` | `on` | Lay windows out at all; off leaves them where they open. |
 | `video-wallpaper-path` | *(blank)* | Absolute path to the imported video wallpaper. Set by the tray menu or the video HTTP route, not meant to be hand-edited. |
-| `alerts-enabled` | `on` | Accept live alert commands over the named pipe. |
-| `alert-http` | `on` | Also accept alert commands over the loopback HTTP endpoint. |
-| `alert-http-port` | `47811` | The loopback TCP port the HTTP endpoint listens on. |
-| `video-wallpaper-http` | `off` | Accept a video-wallpaper switch over the same HTTP endpoint. |
+| `alerts` | `on` | Accept live alert commands (named pipe and HTTP). |
+| `http-server` | `on` | Run the loopback HTTP server. One switch for every route: alerts, video wallpaper and wallpaper scene. |
+| `http-server-port` | `47811` | The loopback TCP port the HTTP server listens on. |
 | `gap` | `8` | Whole pixels of space around and between tiled windows and alert tiles (0–64). |
-| `wallpaper-mode` | `html` | `html` shows an animated scene wallpaper; `video` loops the configured video instead; `mini` shows no wallpaper and puts a small scene window in a screen corner (see Mini scene window, below). |
+| `wallpaper-mode` | `html` | `html` shows an animated scene wallpaper; `video` loops the configured video instead; `html-mini` shows no wallpaper and puts a small scene window at one of 8 screen positions (see Mini scene window, below). |
 | `wallpaper-scene` | `processing` | Which html scene to show: `processing`, `explorer`, `idle` or `raphael`. |
 | `wallpaper-fps` | `60` | Caps the html wallpaper's own frame rate: `30` or `60`. |
-| `wallpaper-scene-http` | `on` | Accept a wallpaper-scene switch over the same HTTP endpoint. |
-| `mini-corner` | `top-right` | Where the mini scene window sits: one of 8 positions: corners `top-left`, `top-right`, `bottom-left`, `bottom-right` or side midpoints `top-center`, `right-center`, `bottom-center`, `left-center`. Alt+M changes it. |
+| `mini-position` | `top-right` | Where the mini scene window sits: one of 8 positions: corners `top-left`, `top-right`, `bottom-left`, `bottom-right` or side midpoints `top-center`, `right-center`, `bottom-center`, `left-center`. Alt+M changes it. |
 
-Every HTTP-related key above is served by the same local HTTP server, sharing one port and one
-bearer-token file — see Alerts, below, for how that endpoint is gated.
+Every HTTP route is served by the same local HTTP server (`http-server`), sharing one port and one
+bearer-token file — see Alerts, below. Each route keeps its own mode guard (for example the video
+route answers 503 in html mode).
+
+### Migrating from older settings
+
+Older files keep working: CosmicWin still reads the old names, and the next save rewrites the file
+with only the new ones. When a file has both an old key and its replacement, the new key wins.
+
+| Old | New |
+|---|---|
+| `alerts-enabled` | `alerts` |
+| `alert-http` | `http-server` |
+| `alert-http-port` | `http-server-port` |
+| `mini-corner` | `mini-position` |
+| `wallpaper-mode = mini` | `wallpaper-mode = html-mini` |
+| `video-wallpaper-http`, `wallpaper-scene-http` | removed: ignored, the routes follow `http-server` |
 
 ## Alerts
 
 CosmicWin can flash a `warning` or `failed` alert over the desktop, for example when a build breaks.
-Alerts are on by default (`alerts-enabled = on` in `%LOCALAPPDATA%\CosmicWin\settings.conf`). Each
+Alerts are on by default (`alerts = on` in `%LOCALAPPDATA%\CosmicWin\settings.conf`). Each
 command asks for 1–16 tiles per kind (16 in total) and an optional duration of 1–60 seconds
 (default 5).
 
@@ -142,15 +155,15 @@ CosmicWinAlert.exe warning:2 failed:1 duration:5
 ### Over HTTP (localhost only)
 
 Other programs on the same PC can send the same command over HTTP. The endpoint is **on by
-default** (`alert-http = on`), loopback-only (`127.0.0.1` / `localhost`, never reachable over the
+default** (`http-server = on`), loopback-only (`127.0.0.1` / `localhost`, never reachable over the
 network) and gated by a bearer token nothing outside this machine can read. Turn it off in
 `settings.conf` and restart CosmicWin:
 
 ```ini
-alert-http = off
+http-server = off
 ```
 
-Since `alert-http` defaults to on (see Settings, above), this port is already open on a fresh install
+Since `http-server` defaults to on (see Settings, above), this port is already open on a fresh install
 unless you turn it off. On first start CosmicWin also writes a random token to
 `%LOCALAPPDATA%\CosmicWin\alert-http.token`, kept across restarts; delete the file to get a new one
 on the next start.
@@ -218,14 +231,10 @@ losing the running video.
 ### Over HTTP
 
 Another program on the same PC can also switch the video, by sending the absolute path of a video
-that is already on this PC. The route is **off by default** and independent of alerts. Turn it on in
-`settings.conf` and restart CosmicWin:
+that is already on this PC. The route is served whenever `http-server` is on (the default), and
+needs no separate switch.
 
-```ini
-video-wallpaper-http = on
-```
-
-It shares the server, port (`alert-http-port`) and token file (`alert-http.token`) with the alert
+It shares the server, port (`http-server-port`) and token file (`alert-http.token`) with the alert
 endpoint, and the same localhost-only rules apply.
 
 ```powershell
@@ -288,15 +297,11 @@ shapes, rather than a flat colour overlay. Every scene has its own hook for this
 
 Another program on the same PC can switch the scene live over HTTP, without restarting CosmicWin.
 
-The route is **on by default**, independent of the other two routes: since the html wallpaper is
+The route is served whenever `http-server` is on (the default): since the html wallpaper is
 CosmicWin's default renderer, a fresh install already accepts scene switches on this loopback-only
-port. Turn it off in `settings.conf` and restart CosmicWin:
+port. Set `http-server = off` to close the port.
 
-```ini
-wallpaper-scene-http = off
-```
-
-It shares the server, port (`alert-http-port`) and token file (`alert-http.token`) with the alert
+It shares the server, port (`http-server-port`) and token file (`alert-http.token`) with the alert
 endpoint, and the same localhost-only rules apply.
 
 ```powershell
@@ -328,20 +333,20 @@ trace.
 | 404 | The route is turned off |
 | 413 | Body larger than 256 bytes |
 | 415 | `Content-Type` is not `application/json` |
-| 503 | Not in html or mini mode (`wallpaper-mode = video`), or this CosmicWin has no scene page or mini window to switch |
+| 503 | Not in html or html-mini mode (`wallpaper-mode = video`), or this CosmicWin has no scene page or mini window to switch |
 
 ## Mini scene window
 
-Set `wallpaper-mode = mini` in `settings.conf` and restart CosmicWin to get the scene as a small
+Set `wallpaper-mode = html-mini` in `settings.conf` and restart CosmicWin to get the scene as a small
 ambient indicator instead of a wallpaper. In this mode CosmicWin starts no wallpaper host and plays
 no video, so your desktop background stays exactly as Windows has it.
 
 ```ini
-wallpaper-mode = mini
-mini-corner = top-right
+wallpaper-mode = html-mini
+mini-position = top-right
 ```
 
-- **Where.** A square window at one of 8 positions on the primary monitor (`mini-corner`: the corners
+- **Where.** A square window at one of 8 positions on the primary monitor (`mini-position`: the corners
   `top-left`, `top-right`, `bottom-left`, `bottom-right`, or the side midpoints `top-center`,
   `right-center`, `bottom-center`, `left-center`; default `top-right`). Its side is one fifth of the
   monitor's height — 288 px on a 1440 px tall screen — and it is flush with its corner or side of the work
@@ -354,7 +359,7 @@ mini-corner = top-right
   mode.
 - **Alerts** are shown inside the window, over the scene.
 - **`Alt+M`** moves it to the next of the 8 positions, clockwise (top-left, top-center,
-  top-right, right-center, bottom-right, bottom-center, bottom-left, left-center, and around) and saves the new `mini-corner`. In any other wallpaper mode the chord
+  top-right, right-center, bottom-right, bottom-center, bottom-left, left-center, and around) and saves the new `mini-position`. In any other wallpaper mode the chord
   does nothing.
 - The tray menu's video pick and the video HTTP route do nothing in this mode; both write a
   `skipped reason=mini-mode` line to the desktop trace.
@@ -372,7 +377,7 @@ mini-corner = top-right
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window there, without following it |
 | `Alt+Shift+Q` | Close the desktop you are on — Windows hands its windows to a neighbour |
-| `Alt+M` | Move the mini scene window to the next corner (only with `wallpaper-mode = mini`) |
+| `Alt+M` | Move the mini scene window to the next corner (only with `wallpaper-mode = html-mini`) |
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 
