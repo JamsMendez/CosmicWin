@@ -543,6 +543,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
+    // The blue tint (source-atop) tints whatever is already drawn: the planet and fan must come after it.
+    order: [["drawInnerRing", "drawBlueRingTint"], ["drawBlueRingTint", "drawEarth"], ["drawBlueRingTint", "drawChromaticGlowAnimated"]],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
     drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
     fit: function (page) {
@@ -569,7 +571,11 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
       assert.ok(Math.abs(call.cx - 144) < 1e-6 && Math.abs(call.cy - 144) < 1e-6,
         "expected the ring centered at (144, 144), got (" + call.cx + ", " + call.cy + ")");
       assert.ok(call.outerRadius <= 144 - 2, "expected a margin: outerRadius " + call.outerRadius + " must be <= 142");
-      assert.ok(call.outerRadius >= 144 * 0.9, "expected the ring to fill most of the square: outerRadius " + call.outerRadius);
+      // The edge fade holds alpha 1 out to MINI_EDGE_FADE_INNER of the side: the whole disc must sit inside it
+      // (never clipped by the mask) while still filling most of the square.
+      var fadeInner = page.sandbox.MINI_EDGE_FADE_INNER * 288;
+      assert.ok(call.outerRadius <= fadeInner + 1e-6, "the ring (" + call.outerRadius + ") must stay inside the fade opaque radius " + fadeInner);
+      assert.ok(call.outerRadius >= 288 * 0.36, "expected the ring to fill most of the square: outerRadius " + call.outerRadius);
     },
   });
 });

@@ -64,7 +64,7 @@ function coversCanvas(args, width, height) {
 
 // Wraps every named page-global function with a call counter (function declarations are properties
 // of the vm context's global, so reassigning them reroutes the scene's own calls).
-function spyOnFunctions(page, names) {
+function spyOnFunctions(page, names, log) {
   var counts = {};
   names.forEach(function (name) {
     counts[name] = 0;
@@ -72,6 +72,7 @@ function spyOnFunctions(page, names) {
     if (typeof original !== "function") return; // reported as "missing" by the assertions below
     page.sandbox[name] = function () {
       counts[name]++;
+      if (log) log.push(name);
       return original.apply(this, arguments);
     };
   });
@@ -116,8 +117,9 @@ function checkMiniLayers(options) {
   // fillRect would otherwise look like a full-canvas fill on the visible canvas.
   drive(page, options.frameFunction, [0]);
 
-  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula"]);
-  var counts = spyOnFunctions(page, watched);
+  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
+  var log = [];
+  var counts = spyOnFunctions(page, watched, log);
   var fills = spyOnFillRect(page);
   var clears = [];
   pageContext(page).clearRect = function () { clears.push(Array.prototype.slice.call(arguments)); };
@@ -140,18 +142,86 @@ function checkMiniLayers(options) {
   }
   assert.ok(counts.renderAlertOverlay >= 1, "mini must still call renderAlertOverlay (ran " + counts.renderAlertOverlay + " times)");
 
+  // The edge fade: once per frame, after every layer and before the (unmasked) alert overlay.
+  var frame = [];
+  var frames = 0;
+  log.forEach(function (name) {
+    if (name === "renderAlertOverlay") {
+      frames++;
+      assert.strictEqual(frame.filter(function (n) { return n === "applyMiniEdgeFade"; }).length, 1,
+        "mini must apply the edge fade exactly once per frame, got: " + frame.join(","));
+      assert.strictEqual(frame[frame.length - 1], "applyMiniEdgeFade",
+        "the edge fade must come after every scene layer and right before renderAlertOverlay, got: " + frame.join(","));
+      frame = [];
+    } else if (name !== "renderNebula") {
+      frame.push(name);
+    }
+  });
+  assert.ok(frames >= 2, "expected two overlay calls, saw " + frames);
+  (options.order || []).forEach(function (pair) {
+    var seq = log.slice(0, log.indexOf("renderAlertOverlay"));
+    assert.ok(seq.indexOf(pair[0]) >= 0 && seq.indexOf(pair[0]) < seq.indexOf(pair[1]),
+      "expected " + pair[0] + " before " + pair[1] + " in the mini frame, got: " + seq.join(","));
+  });
+  checkEdgeFadeMask(page);
+
   assert.ok(clears.some(function (args) { return coversCanvas(args, size.innerWidth, size.innerHeight); }),
     "expected the mini frame to clearRect the whole canvas");
-  // No opaque background: a full-canvas fillRect may only be a 'source-atop' tint, which cannot add
+  // No opaque background: a full-canvas fillRect may only be a 'source-atop' tint or the 'destination-in' edge fade, neither of which can add
   // pixels where the canvas is transparent (source-over/color/screen/... would paint the window).
   var opaque = fills.filter(function (call) {
-    return coversCanvas(call.args, size.innerWidth, size.innerHeight) && call.op !== "source-atop";
+    return coversCanvas(call.args, size.innerWidth, size.innerHeight) && call.op !== "source-atop" && call.op !== "destination-in";
   });
   assert.strictEqual(opaque.length, 0,
     "mini must not fill the whole canvas (found " + JSON.stringify(opaque.map(function (c) { return { op: c.op, style: String(c.style) }; })) + ")");
 
   if (options.fit) options.fit(page);
   return page;
+}
+
+// The mask itself: a destination-in fill of the whole canvas with a radial gradient centered on the
+// window, alpha 1 out to MINI_EDGE_FADE_INNER of the short side, easing to 0 at MINI_EDGE_FADE_OUTER,
+// with the context state saved and restored around it.
+function checkEdgeFadeMask(page) {
+  var side = 288;
+  var gradients = [];
+  var fills = [];
+  var depth = 0;
+  // A plain recording context (the shared 2D mock special-cases createRadialGradient, so it cannot record it).
+  var ctx = {
+    globalCompositeOperation: "source-over",
+    fillStyle: null,
+    createRadialGradient: function () {
+      var g = { args: Array.prototype.slice.call(arguments), stops: [], addColorStop: function (o, c) { g.stops.push([o, c]); } };
+      gradients.push(g);
+      return g;
+    },
+    save: function () { depth++; },
+    restore: function () { depth--; },
+    fillRect: function () { fills.push({ args: Array.prototype.slice.call(arguments), op: ctx.globalCompositeOperation, style: ctx.fillStyle }); },
+  };
+  page.sandbox.applyMiniEdgeFade(ctx, side, side);
+
+  assert.strictEqual(depth, 0, "applyMiniEdgeFade must balance save()/restore()");
+  assert.strictEqual(gradients.length, 1, "expected one radial gradient");
+  assert.strictEqual(fills.length, 1, "expected one fillRect");
+  assert.strictEqual(fills[0].op, "destination-in", "the mask must composite with destination-in");
+  assert.ok(coversCanvas(fills[0].args, side, side), "the mask must cover the whole canvas");
+  assert.strictEqual(fills[0].style, gradients[0], "the mask must be filled with the gradient");
+  var g = gradients[0].args; // x0, y0, r0, x1, y1, r1
+  assert.ok(g[0] === 144 && g[1] === 144 && g[3] === 144 && g[4] === 144, "the fade must be centered on the window");
+  var inner = page.sandbox.MINI_EDGE_FADE_INNER, outer = page.sandbox.MINI_EDGE_FADE_OUTER;
+  assert.ok(inner >= 0.38 && inner <= 0.42 && outer >= 0.46 && outer <= 0.49 && outer > inner, "unexpected fade band " + inner + ".." + outer);
+  assert.ok(Math.abs(g[5] - outer * side) < 1e-6, "the gradient must end at the outer radius");
+  var alphaOf = function (c) { return Number(/,\s*([\d.]+)\)$/.exec(c)[1]); };
+  var stops = gradients[0].stops;
+  assert.strictEqual(alphaOf(stops[0][1]), 1, "opaque at the center");
+  var lastFull = stops.filter(function (s) { return alphaOf(s[1]) === 1; }).pop();
+  assert.ok(Math.abs(lastFull[0] * outer - inner) < 1e-6, "alpha 1 must hold out to the inner radius");
+  assert.strictEqual(alphaOf(stops[stops.length - 1][1]), 0, "transparent at the outer radius");
+  assert.strictEqual(stops[stops.length - 1][0], 1);
+  var previous = 1;
+  stops.forEach(function (s) { var a = alphaOf(s[1]); assert.ok(a <= previous + 1e-9, "alpha must not increase outward"); previous = a; });
 }
 
 // (c) full: the default page still draws every layer, and still paints its own background ---------
@@ -165,10 +235,11 @@ function checkFullLayers(options) {
   // fillRect would otherwise look like a full-canvas fill on the visible canvas.
   drive(page, options.frameFunction, [0]);
 
-  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula"]);
+  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
   var counts = spyOnFunctions(page, watched);
   var fills = spyOnFillRect(page);
   drive(page, options.frameFunction, [100, 200]);
+  assert.strictEqual(counts.applyMiniEdgeFade, 0, "the full variant must never apply the mini edge fade");
 
   assert.deepStrictEqual(page.consoleErrorCalls, [], "expected no render errors in the full frame");
   options.keep.concat(options.drop).forEach(function (name) {

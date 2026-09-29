@@ -85,6 +85,9 @@ function render(ms) {
       drawFilmGrain(phase);
       drawVignette();
       drawGlyphCounters(sceneMs);
+    } else {
+      // Mini: fade everything out before the window edges (before the unmasked alert overlay below).
+      applyMiniEdgeFade(ctx, W, H);
     }
   } catch (error) {
     resetCanvasStateForFrame();

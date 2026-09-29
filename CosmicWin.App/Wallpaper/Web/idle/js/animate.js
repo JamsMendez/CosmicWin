@@ -597,6 +597,8 @@ function renderFrame(nowMs) {
     // transparent canvas) but drops the vignette.
     drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
     if (!isMiniVariant) drawVignette(ctx);
+    // Mini: fade everything out before the window edges (before the unmasked alert overlay below).
+    if (isMiniVariant) applyMiniEdgeFade(ctx, W, H);
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

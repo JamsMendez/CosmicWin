@@ -94,6 +94,37 @@ function readSceneVariantFromUrl() {
 var sceneVariant = readSceneVariantFromUrl();
 var isMiniVariant = sceneVariant === "mini";
 
+// mini-scene-window T2c: the mini edge fade. The corner window is see-through, so nothing may reach its
+// edge or the square shape shows. After the scene layers (and BEFORE the alert overlay, whose frame is
+// rectangular by design) each scene's mini frame multiplies the canvas by a radial alpha mask:
+// fully opaque out to MINI_EDGE_FADE_INNER of the short side from the center, easing to fully
+// transparent at MINI_EDGE_FADE_OUTER (so every edge pixel and corner is 0). The mini fits keep the
+// rings inside the opaque radius (see each scene's config.js). Fractions of min(W, H).
+var MINI_EDGE_FADE_INNER = 0.41;
+var MINI_EDGE_FADE_OUTER = 0.48;
+
+function applyMiniEdgeFade(context, width, height) {
+  var side = Math.min(width, height);
+  var outerRadius = side * MINI_EDGE_FADE_OUTER;
+  var span = MINI_EDGE_FADE_OUTER - MINI_EDGE_FADE_INNER;
+  var cx = width / 2;
+  var cy = height / 2;
+  var mask = context.createRadialGradient(cx, cy, 0, cx, cy, outerRadius);
+  var innerStop = MINI_EDGE_FADE_INNER / MINI_EDGE_FADE_OUTER;
+  mask.addColorStop(0, "rgba(0,0,0,1)");
+  mask.addColorStop(innerStop, "rgba(0,0,0,1)");
+  // Smoothstep-like easing over the band (1 - smoothstep at 25/50/75%).
+  [[0.25, 0.84], [0.5, 0.5], [0.75, 0.16]].forEach(function (step) {
+    mask.addColorStop(innerStop + (1 - innerStop) * step[0], "rgba(0,0,0," + step[1] + ")");
+  });
+  mask.addColorStop(1, "rgba(0,0,0,0)");
+  context.save();
+  context.globalCompositeOperation = "destination-in";
+  context.fillStyle = mask;
+  context.fillRect(0, 0, width, height);
+  context.restore();
+}
+
 // The stylesheets key the transparent page background (and the hidden #nebula canvas) off this class.
 if (isMiniVariant) {
   try { document.documentElement.classList.add("scene-mini"); } catch (classError) { /* no DOM root */ }

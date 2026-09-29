@@ -564,6 +564,9 @@ function renderFrame(nowMs) {
     drawCombinedLightingMask(ctx, cx, cy);
 
     drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
+    // Mini tints only the ring (source-atop tints everything drawn so far), so it runs BEFORE the planet
+    // and the fan: the centered planet stays untinted and readable.
+    if (isMiniVariant) drawBlueRingTint(ctx);
     drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
 
     // IDL-11: the persistent below-Earth star is removed — it only looked "fixed" in a single
@@ -574,9 +577,11 @@ function renderFrame(nowMs) {
     // Explorer variant (rising-sparks.js): tint the finished scene blue, then draw the rising sparks
     // on top so they stay white instead of being tinted along with everything else. Mini tints only
     // the ring's own pixels (drawBlueRingTint), never the transparent canvas around it.
-    if (isMiniVariant) drawBlueRingTint(ctx); else drawBlueLayer(ctx, cx, cy);
+    if (!isMiniVariant) drawBlueLayer(ctx, cx, cy);
     drawRisingSparks(ctx, timeSeconds);
     if (!isMiniVariant) drawVignette(ctx);
+    // Mini: fade everything out before the window edges (before the unmasked alert overlay below).
+    if (isMiniVariant) applyMiniEdgeFade(ctx, W, H);
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

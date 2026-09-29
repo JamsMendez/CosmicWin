@@ -96,6 +96,10 @@ function render(ms) {
     if (!isMiniVariant) {
       drawFilmGrain(phase);
       drawVignette();
+    } else {
+      // Mini: fade everything (rays, blocks, bands) out before the window edges; the nebula has its
+      // own fade in its shader. Runs before the unmasked alert overlay below.
+      applyMiniEdgeFade(ctx, W, H);
     }
   } catch (error) {
     resetCanvasStateForFrame();

@@ -38,7 +38,7 @@ const viewZoom = 1;
 // mini-scene-window T2: the mini variant magnifies the composition about its center so the gold ring
 // fills most of the small square window (the full scene's own geometry is sized for a landscape
 // screen, where the ring is only ~65% of the short side).
-const MINI_SCENE_ZOOM = 1.4;
+const MINI_SCENE_ZOOM = 1.2;
 
 // Tiempo total (en segundos) que la animación avanza antes de invertirse (ping-pong); el ciclo
 // completo dura el doble: ida + regreso. Alargarlo NO hace más lenta la animación: la repite más

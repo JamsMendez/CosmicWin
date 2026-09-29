@@ -332,7 +332,9 @@ function sceneBasis(W, H) {
 // mini-scene-window T2: the `?variant=mini` fit. The corner window is a small square, so the ring is
 // centered and its disc border is fitted to min(W, H) with a small margin (the full scene's
 // sceneBasis() fits it to a landscape screen instead, off-center by CENTER_X_FRACTION).
-const MINI_EDGE_MARGIN_PX = 4;
+// T2c: the disc border's outer radius is this fraction of the short side, kept inside the mini edge
+// fade's opaque radius (MINI_EDGE_FADE_INNER = 0.41, shared/js/render-loop.js) so the mask never clips it.
+const MINI_RING_RADIUS_FRACTION = 0.40;
 
 // The basis the composition is actually drawn with: the mini fit in the mini variant, else the full one.
 // (isMiniVariant comes from shared/js/render-loop.js, resolved at call time.)
@@ -341,7 +343,7 @@ function activeSceneBasis() {
 }
 
 function miniSceneBasis(W, H) {
-  const room = Math.min(W, H) / 2 - MINI_EDGE_MARGIN_PX;
+  const room = Math.min(W, H) * MINI_RING_RADIUS_FRACTION;
   return Math.max(SCENE_BASIS_MIN_PX, room / DISC_BORDER_OUTER_RADIUS_FRACTION);
 }
 
