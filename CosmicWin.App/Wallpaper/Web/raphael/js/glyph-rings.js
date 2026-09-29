@@ -174,3 +174,34 @@ function outlineGlyphOps(bodyWidth, borderWidth, borderColor, interiorColor) {
     { compositeOperation: 'source-over', color: interiorColor, width: interiorWidth },
   ];
 }
+
+// --- mini-scene-window T2d: mini-only glyph ring metrics (see the MINI_GOLD_* notes in config.js) ------
+// isMiniVariant comes from shared/js/render-loop.js and is resolved at CALL time (this file loads first).
+
+// The composition's scale relative to the 1920x1080 wallpaper the px constants were tuned for (~0.19 at 288px).
+function glyphRingMiniScale() {
+  return coreRadius(Math.min(W, H)) / coreRadius(1080);
+}
+
+function glyphRingEdgeMarginPx() {
+  return isMiniVariant ? GLYPH_RING_EDGE_MARGIN_PX * glyphRingMiniScale() : GLYPH_RING_EDGE_MARGIN_PX;
+}
+
+function glyphRingGapPx() {
+  return isMiniVariant ? GLYPH_RING_GAP_PX * glyphRingMiniScale() : GLYPH_RING_GAP_PX;
+}
+
+function goldGlyphBaseSizeFraction() {
+  return isMiniVariant ? MINI_GOLD_BASE_SIZE_FRACTION : GLYPH_RING_GOLD_BASE_SIZE_FRACTION;
+}
+
+// The gold ring's glyph count for glyphs `targetWidth` wide. Full: the standard rule, unchanged. Mini:
+// MINI_GOLD_COUNT_FACTOR x what the standard rule (full-size glyphs, scaled gap) gives at this scale,
+// capped at the most that fit without overlapping at the tighter inner radius.
+function goldGlyphRingCount(annulus, targetWidth) {
+  if (!isMiniVariant) return glyphRingCountForRing(annulus, targetWidth, GLYPH_RING_GAP_PX);
+  const thickness = annulus.outerRadius - annulus.innerRadius;
+  const standard = glyphRingCountForRing(annulus, thickness * GLYPH_RING_GOLD_BASE_SIZE_FRACTION, glyphRingGapPx());
+  const fits = glyphRingCountForRing(annulus, targetWidth, MINI_GOLD_MIN_GAP_PX);
+  return Math.min(MINI_GOLD_COUNT_FACTOR * standard, fits);
+}

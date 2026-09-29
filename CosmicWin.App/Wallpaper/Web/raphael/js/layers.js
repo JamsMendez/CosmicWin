@@ -385,11 +385,11 @@ function goldGlyphRingDrawParams(progress) {
   const r = coreRadius(Math.min(W, H));
   const annuli = glyphRingAnnuli(r);
   const gold = annuli[1];
-  const targetWidth = (gold.outerRadius - gold.innerRadius) * GLYPH_RING_GOLD_BASE_SIZE_FRACTION;
-  const bounds = glyphRingGlyphBounds(gold, GLYPH_RING_GOLD_BASE_SIZE_FRACTION);
+  const targetWidth = (gold.outerRadius - gold.innerRadius) * goldGlyphBaseSizeFraction();
+  const bounds = glyphRingGlyphBounds(gold, goldGlyphBaseSizeFraction());
   return {
     radius: (gold.innerRadius + gold.outerRadius) / 2,
-    count: glyphRingCountForRing(gold, targetWidth, GLYPH_RING_GAP_PX),
+    count: goldGlyphRingCount(gold, targetWidth),
     rotation: progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED,
     pool: RING_GLYPH_POOL,
     glyphSize: bounds.size,

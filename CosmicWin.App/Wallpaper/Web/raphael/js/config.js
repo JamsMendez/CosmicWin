@@ -404,6 +404,16 @@ const GLYPH_RING_GOLD_BASE_SIZE_FRACTION = 0.5;
 const GLYPH_RING_BLUE_BASE_SIZE_FRACTION = 0.25;
 const GLYPH_RING_EDGE_MARGIN_PX = 10;
 const GLYPH_RING_GAP_PX = 20;
+// mini-scene-window T2d: the two px values above (10px edge margin, 20px gap) are absolute, so at the
+// 288px mini window they ate the whole ring (blue glyph hh/hw 0.40, gold 0.33 -> short dashes). Mini
+// scales both with the composition (glyph-rings.js's glyphRingMiniScale) which keeps the full scene's
+// stretched proportions, and draws the gold ring as MINI_GOLD_COUNT_FACTOR x the glyphs the standard
+// rule gives at that scale, in thin tall strokes (MINI_GOLD_BASE_SIZE_FRACTION of the ring thickness
+// wide instead of 0.5), never closer than MINI_GOLD_MIN_GAP_PX. If the tripled count does not fit at
+// that gap, the largest count that does is used instead. The full variant never reads these.
+const MINI_GOLD_BASE_SIZE_FRACTION = 0.2;
+const MINI_GOLD_COUNT_FACTOR = 3;
+const MINI_GOLD_MIN_GAP_PX = 0.75;
 // RAP-35 (user feedback, blue ring only): "agrégale 10 caracteres más (del catálogo existente) ...
 // quiero ver si se ve más lleno el anillo aprovechando el espacio entre caracteres que sobra."
 // Extra glyphs beyond the blue ring's derived count, drawn from the same RING_GLYPH_POOL; the gap

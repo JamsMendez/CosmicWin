@@ -553,6 +553,58 @@ test("the stylesheet makes the mini page transparent and hides #nebula", functio
   miniVariantChecks.checkMiniStylesheet(sceneDir, "hidden");
 });
 
+// ---- mini-scene-window T2d: the mini glyph rings stay tall strokes, and the gold ring is denser --------
+// The px-based ring model (GLYPH_RING_EDGE_MARGIN_PX = 10, GLYPH_RING_GAP_PX = 20) collapsed the glyphs to
+// short dashes at 288px (blue hh/hw 0.40, gold 0.33). In mini those px values scale with the composition
+// and gold is drawn 3x as dense in thin vertical strokes; the full page keeps the exact same sprites.
+
+function ringSpriteStats(page) {
+  page.sandbox.render(0); // ensureSprites() bakes them
+  var sprites = vm.runInContext("sprites", page.sandbox);
+  function stats(list) {
+    return { count: list.length, ratios: list.map(function (g) { return g.hh / g.hw; }), hw: list[0].hw, hh: list[0].hh };
+  }
+  return { gold: stats(sprites.outlineGlyphsGold), blue: stats(sprites.outlineGlyphs), glow: sprites.outlineGlyphsGoldGlow.length };
+}
+
+test("mini glyphs are tall strokes: blue and gold height:width >= 3", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var stats = ringSpriteStats(page);
+  ["blue", "gold"].forEach(function (ring) {
+    var worst = Math.min.apply(null, stats[ring].ratios);
+    assert.ok(worst >= 3, ring + " mini glyphs must be at least 3x taller than wide, worst ratio " + worst.toFixed(2));
+  });
+});
+
+test("mini gold ring has 3x the glyphs the standard sizing rule gives at that scale, or the max that fits", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var sb = page.sandbox;
+  var stats = ringSpriteStats(page);
+  var gold = sb.glyphRingAnnuli(sb.coreRadius(288))[1];
+  var scale = sb.coreRadius(288) / sb.coreRadius(1080);
+  var fullRuleCount = sb.glyphRingCountForRing(gold, (gold.outerRadius - gold.innerRadius) * vm.runInContext("GLYPH_RING_GOLD_BASE_SIZE_FRACTION", sb),
+    vm.runInContext("GLYPH_RING_GAP_PX", sb) * scale);
+  assert.strictEqual(stats.gold.count, 3 * fullRuleCount,
+    "expected " + (3 * fullRuleCount) + " gold glyphs (3 x " + fullRuleCount + "), got " + stats.gold.count);
+  assert.strictEqual(stats.glow, stats.gold.count, "the gold glow sprites must match the gold glyph count");
+  // evenly spaced and never overlapping, even at the tighter inner radius
+  // (ink width, not the sprite canvas: the canvas is rounded up to whole pixels)
+  var width = (gold.outerRadius - gold.innerRadius) * vm.runInContext("MINI_GOLD_BASE_SIZE_FRACTION", sb);
+  var linearGap = (2 * Math.PI / stats.gold.count) * gold.innerRadius - width;
+  assert.ok(linearGap > 0, "gold glyphs must not overlap at the inner radius, gap " + linearGap.toFixed(2));
+  assert.strictEqual(sb.goldGlyphRingDrawParams(0).count, stats.gold.count, "the see-through hook must draw the same gold count");
+});
+
+test("the full variant's glyph rings are unchanged (1920x1080: gold 35 at 16x21.5, blue 92 at 13.5x42.5)", function () {
+  var page = loadPage({ innerWidth: 1920, innerHeight: 1080 });
+  var stats = ringSpriteStats(page);
+  assert.strictEqual(stats.gold.count, 35);
+  assert.strictEqual(stats.blue.count, 92);
+  assert.ok(Math.abs(stats.gold.hw - 16) < 0.01 && Math.abs(stats.gold.hh - 21.5) < 0.01, "gold sprite " + stats.gold.hw + "x" + stats.gold.hh);
+  assert.ok(Math.abs(stats.blue.hw - 13.5) < 0.01 && Math.abs(stats.blue.hh - 42.5) < 0.01, "blue sprite " + stats.blue.hw + "x" + stats.blue.hh);
+  assert.strictEqual(page.sandbox.goldGlyphRingDrawParams(0).count, 35);
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];
