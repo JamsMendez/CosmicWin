@@ -62,7 +62,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2b Keep chroma fan (idle, explorer) + planet (explorer), planet centered in the ring in mini; processing green nebula with radial fade clear of the edges (route: delegated writer)
 - [x] T2c Shared mini radial edge fade on all 4 scenes (before the alert overlay); explorer planet not dimmed by the tint (route: delegated writer)
 - [x] T2d Raphael mini: blue and gold glyphs stretched vertically (tall strokes, not dashes), gold glyph count x3 (mini only) (route: delegated writer)
-- [ ] T2e Explorer mini planet blue-tinted like the ring; raphael mini gold nebula faded before the edges + inclined rays rotating independently like clock hands (route: delegated writer, parallel with T3, JS only)
+- [x] T2e Explorer mini planet blue-tinted like the ring; raphael mini gold nebula faded before the edges + inclined rays rotating independently like clock hands (route: delegated writer, parallel with T3, JS only)
 - [x] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
 - [ ] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [ ] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
@@ -137,6 +137,11 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   T4 gaps: build on UI STA via CreateProduction + Show(Compute(...)); IDisplay.WorkArea Rectangle -> Rect; Show false
   on create failure (retry?); route alert queue show/hide to ShowAlert/HideAlert and do not create the wallpaper alert
   layer in mini; HTTP switch calls SwitchScene + persist; Alt+M -> MoveTo(Compute(Next)).
+- T2e 0be0c34 (scene writer, parallel with T3): explorer mini order ring, earth, blue tint, fan, sparks (planet
+  blue, fan untinted); raphael mini gold nebula (shader's own vec3(1.0,0.82,0.38)), fade smoothstep(0.75,0.98,r)
+  via u_miniFadeStart/End; inclined rays back (48 rays, alternating direction, per-ray speed 0.10-0.42 x 5, already
+  independent in the full scene). RED raphael 3 + explorer order -> GREEN raphael 19, explorer 16; Scene 63 passed,
+  full suite 0 failed (verified in a scratchpad worktree). Edge check 0 on explorer and raphael.
 
 ## Next step
 T4 + T5 together (both wire AppComposition), one writer.
