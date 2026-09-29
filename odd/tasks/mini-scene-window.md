@@ -222,6 +222,9 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - T6 rerun after T2f+T9 (Release rebuilt, PID 45756): Alt+M x8 persisted BC, BL, LC, TL, TC, TR, RC, BR in
   order; a 9th press moved to bottom-center, and the full-screen shot shows it centred on the bottom edge with the
   white idle ring. settings.conf had moved TR -> BR at 13:51 while the old build ran (one Alt+M press, likely the maintainer).
+- Review slice 2838866..(T2f+T9+docs) (high, 9 files, 220 lines): consent granted, 4 lenses, APPROVED, acknowledged
+  (lineage review-01ff429cdb886451, authority burned). Advisory suggestions only (-> T8): MiniCorner name now drifts
+  from its meaning (Settings.cs:28); Next() reaches LeftCenter implicitly (MiniWindowPlacement.cs:42-48).
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
