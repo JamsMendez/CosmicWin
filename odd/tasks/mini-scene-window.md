@@ -65,6 +65,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [ ] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
 - [ ] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [ ] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
+- [ ] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
 ## Progress / evidence
@@ -112,6 +113,17 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - T2d 7051ee9: raphael mini glyph margins/gaps scale with glyphRingMiniScale (~0.19). Blue h:w 0.40 -> 3.40,
   gold 0.33 -> 3.00; gold count 13 -> 105 (3x the 35 of the standard rule), blue 71 -> 92. Full variant pinned
   (gold 35, blue 92). RED 2 -> GREEN raphael 17/17. Both commits: Scene filter 63 passed, full non-desktop suite 0 failed.
+- Maintainer approved the 4 mini previews incl. alerts in their square frame (2026-09-29).
+- Review slice 67a0aae..563d669 (high, 31 files, 1401 lines): consent granted, 4 lenses, APPROVED, acknowledged
+  (lineage review-fef0cf6e6c8bfd60, authority burned). Reviewed boundary is now 563d669.
+  Advisory follow-ups (non-blocking):
+  - WARNING: mini mode falls through to video until wired (T4 covers it).
+  - WARNING: render-loop.js:78-81 variant comment contradicts the kept overlay.
+  - WARNING: explorer-scene.tests.js:550-578 duplicated fit check with a wrong threshold comment.
+  - Suggestions: duplicated mini basis (idle config.js), glow sprites hardwired gold count (raphael sprites.js:182),
+    stale timeout doc (IdleSceneNodeTests.cs:44), gold cap branch unproved (glyph-rings.js:205), placement accepts
+    unbounded inputs, doc scope line 19.
+  -> T7 cleanup task.
 
 ## Next step
-Maintainer visual approval of the previews, then review consent on the slice 67a0aae..HEAD, then T3.
+T3.
