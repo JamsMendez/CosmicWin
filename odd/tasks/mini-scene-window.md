@@ -130,7 +130,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   own DComp device/target/root visual; ICompositionOverlaySurface shared with Win32VideoWallpaperHost;
   WebView2MiniSceneBrowser (WebView2Mini user data, transparent bg, RasterizationScale 1, square zero-origin viewport);
   MiniSceneWindowController / IMiniSceneWindow: Show/SwitchScene/MoveTo/ShowAlert/HideAlert/Dispose; alert JSON moved
-  to AlertLayerMessages. RED: controller tests did not compile -> GREEN 19 + 2 style guards (first-run pass, guards).
+  to AlertLayerMessages. RED: controller tests did not compile -> GREEN 18 controller cases (writer reported 19; counted 18) + 2 style guards (first-run pass, guards).
   Manual: processing mini top-right 288x288 over Chrome, no black box, WindowFromPoint(center) = Chrome_WidgetWin_1,
   foreground unchanged, double Dispose clean (scratchpad minih/mini-crop.png). Only checked at 3440x1440 scale.
   Suite: App 1263, Interop 424 (3 skipped), Layout 198, Alert 13, 0 failed.
