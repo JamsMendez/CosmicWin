@@ -83,6 +83,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
 - [x] T2j Processing/raphael mini: dark occluding base disc under the structure (same mechanism as T2i) (maintainer 2026-09-29: check explorer and the rest) (route: delegated writer)
 - [x] T2k Explorer mini = idle mini + semi-transparent blue layer (original color) only over drawn components; raphael mini: no glow on gold glyphs, gold nebula alpha x1.3-1.5 (maintainer 2026-09-29) (route: delegated writer, after T2j)
+- [x] T2l Processing mini orbits too big: scale px-absolute band/block/stroke sizes (and check W-based radii) to the window; octagon thickness equal to the raphael mini hexadecagon line (maintainer 2026-09-29) (route: delegated writer)
+- [x] T11 Raphael FULL scene: triple gold glyphs + no gold glow, same as mini (maintainer 2026-09-29; out-of-mini scope change on the big wallpaper) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -305,6 +307,13 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - raphael nebula gain masked by the base inside the disc (nebula.js:280).
   - zero-size gradient stop when solid == falloff (render-loop.js:150).
   - test doc/title/order nits.
+- T2l 30b0c4a: the processing radii were already min(W,H)-based; the px-absolute detail was oversized. In mini, structurePx(px,
+  floor) scales by min(W,H)/1440 (0.2 at 288): blocks 7-19 -> 1.5-3.8px, band blur 12 -> 2.4, ray 1.45/6 -> 0.5/1.2,
+  core blur 20 -> 4. Shared MINI_POLYGON_STROKE_PX 0.75 = the raphael mini hexadecagon; processing octagon stroke matches.
+  Folding band WIDTH unchanged (already minD x 0.025). RED -> GREEN processing 40, raphael 23.
+- T11 135ce78: raphael FULL + mini share one gold ring: 3x count (35 -> 105 at 1920x1080, capped), slim tall strokes,
+  no gold glow anywhere (baker/sprites/constants removed); see-through hook matches. RED 4 -> GREEN raphael 23. Both
+  commits: Scene 78, full suite 0 failed.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
