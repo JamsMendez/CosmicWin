@@ -16,6 +16,22 @@ public enum WallpaperMode
 {
     Video,
     Html,
+
+    /// <summary>
+    /// No wallpaper host and no video: a small, always-on-top, click-through scene window sits in
+    /// <see cref="Settings.MiniCorner"/> of the work area. Wired by later tasks of
+    /// <c>odd/tasks/mini-scene-window.md</c>; the desktop background stays as Windows has it.
+    /// </summary>
+    Mini,
+}
+
+/// <summary>The work-area corner the mini scene window sits in, ordered clockwise.</summary>
+public enum MiniCorner
+{
+    TopLeft,
+    TopRight,
+    BottomRight,
+    BottomLeft,
 }
 
 /// <summary>
@@ -135,7 +151,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    bool WallpaperSceneHttpEnabled = true)
+    bool WallpaperSceneHttpEnabled = true, MiniCorner MiniCorner = MiniCorner.BottomRight)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -169,6 +185,19 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string WallpaperModeVideoValue = "video";
 
     private const string WallpaperModeHtmlValue = "html";
+
+    private const string WallpaperModeMiniValue = "mini";
+
+    /// <summary>See <see cref="CosmicWin.App.MiniCorner"/>.</summary>
+    private const string MiniCornerKey = "mini-corner";
+
+    private const string MiniCornerTopLeftValue = "top-left";
+
+    private const string MiniCornerTopRightValue = "top-right";
+
+    private const string MiniCornerBottomLeftValue = "bottom-left";
+
+    private const string MiniCornerBottomRightValue = "bottom-right";
 
     /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
     private const string WallpaperSceneKey = "wallpaper-scene";
@@ -217,6 +246,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var wallpaperScene = Default.WallpaperScene;
         var wallpaperFps = Default.WallpaperFps;
         var wallpaperSceneHttpEnabled = Default.WallpaperSceneHttpEnabled;
+        var miniCorner = Default.MiniCorner;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -306,11 +336,16 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 wallpaperSceneHttpEnabled = wallpaperSceneHttpFlag;
             }
+            else if (key.Equals(MiniCornerKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadMiniCorner(value, out var miniCornerValue))
+            {
+                miniCorner = miniCornerValue;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
             alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap, wallpaperMode,
-            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled);
+            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled, miniCorner);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -355,8 +390,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {WallpaperModeKey}: `{WallpaperModeHtmlValue}` (default) shows an animated HTML scene as the
          # desktop wallpaper; `{WallpaperModeVideoValue}` plays the configured video instead, with no
-         # HTML scene involved.
-         {WallpaperModeKey} = {(WallpaperMode == WallpaperMode.Html ? WallpaperModeHtmlValue : WallpaperModeVideoValue)}
+         # HTML scene involved; `{WallpaperModeMiniValue}` leaves the wallpaper alone and shows a small
+         # always-on-top scene window in a corner ({MiniCornerKey}).
+         {WallpaperModeKey} = {WallpaperModeValue(WallpaperMode)}
 
          # {WallpaperSceneKey}: which scene the html wallpaper ({WallpaperModeKey} = {WallpaperModeHtmlValue})
          # shows: `{WallpaperSceneProcessingValue}` (default), `{WallpaperSceneExplorerValue}`,
@@ -374,7 +410,29 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # closed.
          {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
 
+         # {MiniCornerKey}: which corner of the work area the `{WallpaperModeMiniValue}` window sits in:
+         # `{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}`, `{MiniCornerBottomLeftValue}` or
+         # `{MiniCornerBottomRightValue}` (default).
+         {MiniCornerKey} = {MiniCornerValue(MiniCorner)}
+
          """;
+
+    /// <summary>Maps a <see cref="CosmicWin.App.WallpaperMode"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
+    private static string WallpaperModeValue(WallpaperMode mode) => mode switch
+    {
+        WallpaperMode.Html => WallpaperModeHtmlValue,
+        WallpaperMode.Mini => WallpaperModeMiniValue,
+        _ => WallpaperModeVideoValue,
+    };
+
+    /// <summary>Maps a <see cref="CosmicWin.App.MiniCorner"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
+    private static string MiniCornerValue(MiniCorner corner) => corner switch
+    {
+        MiniCorner.TopLeft => MiniCornerTopLeftValue,
+        MiniCorner.TopRight => MiniCornerTopRightValue,
+        MiniCorner.BottomLeft => MiniCornerBottomLeftValue,
+        _ => MiniCornerBottomRightValue,
+    };
 
     /// <summary>Maps a <see cref="CosmicWin.App.WallpaperScene"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
     private static string WallpaperSceneValue(WallpaperScene scene) => scene switch
@@ -479,7 +537,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// D3 (html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively. Same rule as
+    /// D3 (html-wallpaper-demo): reads <c>video</c>, <c>html</c> or <c>mini</c>, case-insensitively. Same rule as
     /// every other key: anything else keeps the default rather than guessing.
     /// </summary>
     private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
@@ -492,8 +550,37 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             case WallpaperModeHtmlValue:
                 mode = WallpaperMode.Html;
                 return true;
+            case WallpaperModeMiniValue:
+                mode = WallpaperMode.Mini;
+                return true;
             default:
                 mode = WallpaperMode.Video;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads one of the four fixed corner names, case-insensitively. Same rule as every other key:
+    /// anything else keeps the default (bottom-right) rather than guessing.
+    /// </summary>
+    private static bool TryReadMiniCorner(string value, out MiniCorner corner)
+    {
+        switch (value.ToLowerInvariant())
+        {
+            case MiniCornerTopLeftValue:
+                corner = MiniCorner.TopLeft;
+                return true;
+            case MiniCornerTopRightValue:
+                corner = MiniCorner.TopRight;
+                return true;
+            case MiniCornerBottomLeftValue:
+                corner = MiniCorner.BottomLeft;
+                return true;
+            case MiniCornerBottomRightValue:
+                corner = MiniCorner.BottomRight;
+                return true;
+            default:
+                corner = MiniCorner.BottomRight;
                 return false;
         }
     }

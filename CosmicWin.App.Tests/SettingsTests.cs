@@ -910,4 +910,80 @@ public sealed class SettingsTests
         Assert.False(settings.AlertHttpEnabled);
         Assert.False(settings.VideoWallpaperHttpEnabled);
     }
+
+    [Theory]
+    [InlineData("wallpaper-mode = mini")]
+    [InlineData("wallpaper-mode=mini")]
+    [InlineData("  WALLPAPER-MODE   =   Mini  ")]
+    public void WallpaperModeIsReadAsMini_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.Equal(WallpaperMode.Mini, Settings.Parse(line).WallpaperMode);
+    }
+
+    [Fact]
+    public void SerializeThenParse_RoundTripsTheMiniWallpaperMode()
+    {
+        var original = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.Mini);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+        Assert.Contains("wallpaper-mode = mini", original.Serialize(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiniCornerDefaultsToBottomRight()
+    {
+        Assert.Equal(MiniCorner.BottomRight, Settings.Default.MiniCorner);
+        Assert.Equal(MiniCorner.BottomRight, Settings.Parse(string.Empty).MiniCorner);
+    }
+
+    [Theory]
+    [InlineData("mini-corner = top-left", MiniCorner.TopLeft)]
+    [InlineData("mini-corner=top-right", MiniCorner.TopRight)]
+    [InlineData("mini-corner = bottom-left", MiniCorner.BottomLeft)]
+    [InlineData("  MINI-CORNER  =  Bottom-Right ", MiniCorner.BottomRight)]
+    public void MiniCornerIsRead_HoweverTheLineIsSpelled(string line, MiniCorner expected)
+    {
+        Assert.Equal(expected, Settings.Parse(line).MiniCorner);
+    }
+
+    [Theory]
+    [InlineData("mini-corner = middle")]
+    [InlineData("mini-corner =")]
+    [InlineData("mini-corner")]
+    public void AnUnreadableMiniCorner_KeepsTheDefaultRatherThanGuessing(string line)
+    {
+        Assert.Equal(MiniCorner.BottomRight, Settings.Parse(line).MiniCorner);
+    }
+
+    [Theory]
+    [InlineData(MiniCorner.TopLeft)]
+    [InlineData(MiniCorner.TopRight)]
+    [InlineData(MiniCorner.BottomLeft)]
+    [InlineData(MiniCorner.BottomRight)]
+    public void SerializeThenParse_RoundTripsTheMiniCorner(MiniCorner corner)
+    {
+        var original = new Settings(FocusBorder: true, MiniCorner: corner);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheMiniCornerAndListsEachValue()
+    {
+        var serialized = Settings.Default.Serialize();
+
+        Assert.Contains("# mini-corner:", serialized, StringComparison.Ordinal);
+        Assert.Contains("mini-corner = bottom-right", serialized, StringComparison.Ordinal);
+        Assert.Contains("top-left", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MiniCornerIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("focus-border = off\nmini-corner = top-left\ntiling = off");
+
+        Assert.False(settings.FocusBorder);
+        Assert.Equal(MiniCorner.TopLeft, settings.MiniCorner);
+        Assert.False(settings.Tiling);
+    }
 }
