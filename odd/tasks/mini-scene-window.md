@@ -25,7 +25,8 @@ a wallpaper. It also makes the Alacritty per-scene theme unnecessary (that branc
   - raphael: only the circle, center and golden lines. Blue and gold glyphs read as vertical strokes; the gold
     character count is tripled (mini only, maintainer 2026-09-29).
 - The HTTP scene route switches the mini window in mini mode and persists `wallpaper-scene`.
-- Chord `Alt+M` cycles the corner clockwise (TL -> TR -> BR -> BL) and persists `mini-corner`.
+- Chord `Alt+M` cycles 8 positions clockwise (TL, top-center, TR, right-center, BR, bottom-center, BL, left-center)
+  and persists `mini-corner` (the 4 midpoints were added by the maintainer on 2026-09-29).
 
 ## Constraints
 - No wallpaper host and no video playback in mini mode. The desktop background stays as Windows has it.
@@ -67,6 +68,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [x] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
 - [x] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
+- [x] T2f Idle mini ring white like the original instead of grey; losing metallic detail is fine (maintainer 2026-09-29) (route: delegated writer)
+- [x] T9 Alt+M cycles 8 positions (corners + side midpoints, clockwise from top-left); new mini-corner values top-center/right-center/bottom-center/left-center (maintainer 2026-09-29) (route: delegated writer, parallel with T2f)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -207,6 +210,15 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - Killing the mini WebView2 browser process: recovered with a new PID and the scene came back.
   - NOT run: third-kill exhaustion, Alt+M at startup (not-ready trace), other DPI scales, user's own visual check.
   - Screenshots are in the scratchpad (t6-*.png).
+- T2f b68bf45: the idle grey came from drawCombinedLightingMask (multiply over a transparent backdrop leaves an opaque
+  grey disc); idle mini now skips it, so the ring draws white cells/dots/rims on transparent (full variant keeps it).
+  Explorer mini still applies the mask. RED 14/15 -> GREEN 15/15; Scene 95 passed; full suite 0 failed (worktree).
+  Edge check 0. Outer bands now faint; a white source-atop lift is the next step if wanted.
+- T9 4a8d752 (delegated writer): MiniCorner holds 8 clockwise positions (TL, TopCenter, TR, RightCenter, BR,
+  BottomCenter, BL, LeftCenter); new literals top-center/right-center/bottom-center/left-center; Compute centers
+  midpoints with integer math; README updated; 3 wiring tests moved to the 8-step order. TDD deviation: production
+  code was written before RED; RED confirmed afterwards by stashing (20 compile errors). Suite: App 1337, Interop 424
+  (3 skipped), Layout 198, Alert 13, 0 failed.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
