@@ -30,6 +30,10 @@ public sealed class MiniModeWiringTests
         public bool ShowResult { get; set; } = true;
         public bool SwitchResult { get; set; } = true;
         public bool ThrowOnShow { get; set; }
+        public bool BrowserAttached { get; set; } = true;
+        public bool IsReady => ShowResult && BrowserAttached && Shown.Count > 0;
+        public List<int> AlertThreads { get; } = [];
+        public List<int> HideThreads { get; } = [];
 
         public bool Show(WallpaperScene scene, int fps, Rect bounds)
         {
@@ -46,9 +50,17 @@ public sealed class MiniModeWiringTests
 
         public void MoveTo(Rect bounds) => Moves.Add(bounds);
 
-        public void ShowAlert(AlertShowRequest request) => Alerts.Add(request);
+        public void ShowAlert(AlertShowRequest request)
+        {
+            AlertThreads.Add(Environment.CurrentManagedThreadId);
+            Alerts.Add(request);
+        }
 
-        public void HideAlert() => Hides++;
+        public void HideAlert()
+        {
+            HideThreads.Add(Environment.CurrentManagedThreadId);
+            Hides++;
+        }
 
         public void Dispose() => Disposed++;
     }
@@ -626,6 +638,66 @@ public sealed class MiniModeWiringTests
 
             Assert.Empty(window.Moves);
             Assert.Empty(harness.PersistedCorners);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task AltM_MiniMode_WhenTheWindowFailedToShowOrIsNotReady_NeitherMovesNorPersistsAndTraces(
+        bool showFails, bool browserAttached)
+    {
+        var window = new FakeMiniWindow { ShowResult = !showFails, BrowserAttached = browserAttached };
+        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => harness.Trace.Lines.Contains("mini-corner cycle skipped reason=not-ready")));
+
+            Assert.Empty(window.Moves);
+            Assert.Empty(harness.PersistedCorners);
+        }
+    }
+
+    [Fact]
+    public void Alerts_MiniMode_WhenTheBrowserIsNotAttachedYet_AreHeldUntilTheWindowIsReady()
+    {
+        var window = new FakeMiniWindow { BrowserAttached = false };
+        var harness = Wire(WallpaperMode.Mini, window, alerts: true);
+        using (harness.Composition)
+        {
+            harness.AlertServer!.Send("warning:1 duration:60");
+            Assert.Empty(window.Alerts);
+
+            window.BrowserAttached = true;
+            harness.Timer.Tick();
+
+            Assert.Single(window.Alerts);
+        }
+    }
+
+    [Fact]
+    public async Task Alerts_MiniMode_ShowAndHideAlwaysRunOnTheOwningThread_EvenWhenTheTickIsOnAnother()
+    {
+        var window = new FakeMiniWindow();
+        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true, alerts: true);
+        using (harness.Composition)
+        {
+            Pump(harness);
+            harness.AlertServer!.Send("warning:1 duration:1");
+            Pump(harness);
+            var ownerThread = Assert.Single(window.AlertThreads);
+            Assert.Equal(Environment.CurrentManagedThreadId, ownerThread);
+
+            // The watch tick that ends the alert arrives on a foreign thread: the hide must be posted,
+            // not run there.
+            harness.Clock.Advance(TimeSpan.FromSeconds(2));
+            await Task.Run(harness.Timer.Tick);
+            Assert.Empty(window.HideThreads);
+
+            Pump(harness);
+
+            Assert.Equal([Environment.CurrentManagedThreadId], window.HideThreads);
         }
     }
 

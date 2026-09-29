@@ -73,4 +73,35 @@ public sealed class MiniWindowPlacementTests
     {
         Assert.Equal(expected, MiniWindowPlacement.Next(from));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-100)]
+    public void ANonPositiveMonitorHeightYieldsAnEmptyWindowAtTheCorner_NeverANegativeSide(int monitorHeight)
+    {
+        var rect = MiniWindowPlacement.Compute(WorkArea, monitorHeight, MiniCorner.BottomRight);
+
+        Assert.Equal(0, rect.Width);
+        Assert.Equal(0, rect.Height);
+        Assert.Equal(WorkArea.X + WorkArea.Width, rect.X);
+        Assert.Equal(WorkArea.Y + WorkArea.Height, rect.Y);
+    }
+
+    [Fact]
+    public void AWorkAreaSmallerThanTheSideClampsTheSideToItsShorterDimension_StayingInside()
+    {
+        var tiny = new Rect(500, 300, 200, 150);
+
+        var rect = MiniWindowPlacement.Compute(tiny, 1440, MiniCorner.BottomRight);
+
+        Assert.Equal(new Rect(500 + 200 - 150, 300, 150, 150), rect);
+    }
+
+    [Fact]
+    public void AnEmptyWorkAreaYieldsAnEmptyWindowAtItsOrigin()
+    {
+        var rect = MiniWindowPlacement.Compute(new Rect(10, 20, 0, 0), 1440, MiniCorner.TopRight);
+
+        Assert.Equal(new Rect(10, 20, 0, 0), rect);
+    }
 }

@@ -12,10 +12,14 @@ public static class MiniWindowPlacement
     /// <summary>The window's side is this fraction of the monitor's height.</summary>
     public const int SideDivisor = 5;
 
-    /// <summary>The window rectangle for <paramref name="corner"/> of <paramref name="workArea"/>.</summary>
+    /// <summary>
+    /// The window rectangle for <paramref name="corner"/> of <paramref name="workArea"/>. The side never
+    /// exceeds the work area's shorter dimension and is never negative, so a degenerate monitor height or a
+    /// tiny work area yields a smaller (possibly empty) window that still lies inside the work area.
+    /// </summary>
     public static Rect Compute(Rect workArea, int monitorHeight, MiniCorner corner)
     {
-        var side = monitorHeight / SideDivisor;
+        var side = Math.Max(0, Math.Min(monitorHeight / SideDivisor, Math.Min(workArea.Width, workArea.Height)));
         var x = corner is MiniCorner.TopRight or MiniCorner.BottomRight
             ? workArea.X + workArea.Width - side
             : workArea.X;

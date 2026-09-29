@@ -496,7 +496,7 @@ public sealed class AppComposition : IDisposable
                 miniWindowActive.Value = shown;
                 desktopTrace?.Record($"mini-window phase=startup shown={shown}");
             }
-            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            catch (Exception error) when (IsRecoverableFailure(error))
             {
                 desktopTrace?.Record($"mini-window phase=startup show-failed error={error.GetType().Name}");
             }
@@ -513,20 +513,36 @@ public sealed class AppComposition : IDisposable
             {
                 miniWindow.MoveTo(MiniPlacement(currentMiniCorner));
             }
-            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            catch (Exception error) when (IsRecoverableFailure(error))
             {
                 desktopTrace?.Record($"mini-window move-failed error={error.GetType().Name}");
             }
         }
 
         // The alert queue's renderer seam: the wallpaper alert layer's Start/End normally, the mini
-        // window's ShowAlert/HideAlert in mini mode. Both take the same AlertShowRequest.
+        // window's ShowAlert/HideAlert in mini mode. Both take the same AlertShowRequest. The mini
+        // window's members belong to its owning UI thread (they throw elsewhere), and the queue's
+        // callers are not all provably on it -- so both are always posted there, in order.
         Action<AlertShowRequest>? alertStart = miniMode
-            ? (miniWindow is null ? null : miniWindow.ShowAlert)
+            ? (miniWindow is null ? null : request => onOwningThread(() => RunMiniAlert(() => miniWindow.ShowAlert(request), "show")))
             : startAlertLayer;
         Action? alertEnd = miniMode
-            ? (miniWindow is null ? null : miniWindow.HideAlert)
+            ? (miniWindow is null ? null : () => onOwningThread(() => RunMiniAlert(miniWindow.HideAlert, "hide")))
             : endAlertLayer;
+
+        // Posted work cannot report back to the queue, so a failure is traced here instead of escaping
+        // into the dispatcher.
+        void RunMiniAlert(Action work, string what)
+        {
+            try
+            {
+                work();
+            }
+            catch (Exception error) when (IsRecoverableFailure(error))
+            {
+                desktopTrace?.Record($"mini-window alert-{what}-failed error={error.GetType().Name}");
+            }
+        }
 
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
         // never both true at once for longer than one video-wallpaper work item. Without this a
@@ -989,20 +1005,19 @@ public sealed class AppComposition : IDisposable
                 // Composition wiring only: AlertQueue.Advance and PrimaryMonitorFullscreenDetector
                 // stay exactly as they are.
                 // T4: the mini window is TOPMOST, so nothing can cover it -- unlike a wallpaper, which a
-                // fullscreen window hides -- and its own readiness is the window's Show having
-                // succeeded (a page that is not ready yet holds the alert as pending itself).
+                // fullscreen window hides -- and its own readiness is the window's IsReady: shown AND its
+                // browser attached (a page still loading holds the alert as pending itself).
                 var desktopVisible = (alertDesktopVisible?.Invoke()
                     ?? (miniMode
-                        ? miniWindowActive.Value
+                        ? miniWindowActive.Value && miniWindow is { IsReady: true }
                         : (videoWallpaperActive.Value || htmlWallpaperActive.Value)
                             && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
                     && (alertStart is null || alertRendererReady?.Invoke() != false);
                 active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
             }
 
-            // The preloaded WebView2 alert layer (webview-alert-layer) is the only renderer left --
-            // the Direct2D overlay this branched to (remove-direct2d-alert-overlay) was unwired dead
-            // code kept only for rollback. Unset only in tests that never exercise the overlay at all.
+            // alertStart is the wallpaper's preloaded WebView2 alert layer, or the mini window in mini mode
+            // (the Direct2D overlay is gone). Unset only in tests that never exercise the overlay at all.
             if (alertStart is null) return;
 
             if (ReferenceEquals(active, displayedAlert)) return;
@@ -1071,7 +1086,7 @@ public sealed class AppComposition : IDisposable
                     Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)),
                     workArea.Left, workArea.Top, workArea.Width, workArea.Height));
             }
-            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            catch (Exception ex) when (IsRecoverableFailure(ex))
             {
                 // Recorded, not swallowed, and not re-thrown into the watch tick: an escaping
                 // exception here would also skip that tick's UpdateFocusBorder call.
@@ -1081,10 +1096,12 @@ public sealed class AppComposition : IDisposable
             displayedAlert = active;
         }
 
-        // Same corruption-class exclusion as an "is fatal" filter: recoverable per-alert start
-        // failures (WebView2/COM/dispatcher-state errors) are handled, but process-corrupting
-        // ones are left to propagate rather than treated as one alert's problem.
-        static bool IsRecoverableAlertLayerFailure(Exception ex) =>
+        // The catch filter for one feature's recoverable failure (alert layer, mini window, focus border,
+        // reload gap...): WebView2/COM/dispatcher-state errors are handled and traced by the caller,
+        // while the process-corrupting types are named so they are never mistaken for one feature's
+        // problem. (The CLR cannot always deliver StackOverflow/AccessViolation to a catch at all; this
+        // filter only keeps them out of the handled class.)
+        static bool IsRecoverableFailure(Exception ex) =>
             ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 
         /// <summary>
@@ -1365,7 +1382,7 @@ public sealed class AppComposition : IDisposable
                     RearrangeEveryDisplay();
                 }
             }
-            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            catch (Exception ex) when (IsRecoverableFailure(ex))
             {
                 // T13 (alert-tile-mosaic, review R4-reload-swallow-without-trace): traced HERE, not
                 // relying on CompositionRoot.Reload's own try/catch around reloadGap?.Invoke() below
@@ -1497,12 +1514,20 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
+            // A window that failed to show, or whose browser is not attached (yet, or any more), has no
+            // corner to move: keep the configured one instead of persisting a corner nobody can see.
+            if (!miniWindowActive.Value || !miniWindow.IsReady)
+            {
+                desktopTrace?.Record("mini-corner cycle skipped reason=not-ready");
+                return;
+            }
+
             var next = MiniWindowPlacement.Next(currentMiniCorner);
             try
             {
                 miniWindow.MoveTo(MiniPlacement(next));
             }
-            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            catch (Exception error) when (IsRecoverableFailure(error))
             {
                 desktopTrace?.Record($"mini-corner cycle move-failed error={error.GetType().Name}");
                 return;
@@ -1513,7 +1538,7 @@ public sealed class AppComposition : IDisposable
             {
                 persistMiniCorner?.Invoke(next);
             }
-            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            catch (Exception error) when (IsRecoverableFailure(error))
             {
                 desktopTrace?.Record($"mini-corner cycle persist-failed error={error.GetType().Name}");
             }
@@ -1599,10 +1624,10 @@ public sealed class AppComposition : IDisposable
                         $"scene-route={wallpaperSceneHttpRouteOn}");
                 }
             }
-            // Same corruption-class exclusion IsRecoverableAlertLayerFailure already applies to a
+            // Same corruption-class exclusion IsRecoverableFailure already applies to a
             // per-alert render failure below: a bad port or a listener refusal is this server's
             // problem, not a reason to treat the whole composition as unsafe to continue.
-            catch (Exception ex) when (IsRecoverableAlertLayerFailure(ex))
+            catch (Exception ex) when (IsRecoverableFailure(ex))
             {
                 desktopTrace?.Record($"alert-http-start-failed {ex.GetType().Name}: {ex.Message}");
             }

@@ -12,7 +12,17 @@ namespace CosmicWin.App.Wallpaper;
 /// </summary>
 public interface IMiniSceneWindow : IDisposable
 {
-    /// <summary>Creates the window at <paramref name="bounds"/> and starts the scene. False if it could not be created.</summary>
+    /// <summary>
+    /// True once the browser is attached and the page can be driven (moved, switched, sent alerts). False
+    /// before that, after an attach failure, while a WebView2 process failure is being recovered, and
+    /// after dispose. The window can already be on screen (empty) while this is still false.
+    /// </summary>
+    bool IsReady { get; }
+
+    /// <summary>
+    /// Creates and places the window at <paramref name="bounds"/> and starts attaching the scene. False if the
+    /// window could not be created or placed; true only says the window exists -- see <see cref="IsReady"/>.
+    /// </summary>
     bool Show(WallpaperScene scene, int fps, Rect bounds);
 
     /// <summary>Switches scene live. The current scene again is an accepted no-op returning true.</summary>
@@ -33,6 +43,12 @@ public interface IMiniSceneBrowser : IDisposable
 {
     /// <summary>Raised when the current page finished navigating AND reported itself ready.</summary>
     event Action? Ready;
+
+    /// <summary>
+    /// Raised after the WebView2 process failed and the browser tore its controller down; the argument is a
+    /// trace line naming the failure. The owner decides whether to re-attach.
+    /// </summary>
+    event Action<string>? Failed;
 
     /// <summary>Creates a transparent composition controller on <paramref name="surface"/>. False on failure.</summary>
     Task<bool> AttachAsync(ICompositionOverlaySurface surface, DrawingRectangle viewport);
@@ -59,6 +75,10 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
     private WallpaperScene _scene;
     private int _fps;
     private DrawingRectangle _viewport;
+    // At most this many re-attaches after WebView2 process failures for the window's lifetime: a
+    // browser that keeps dying gives up (traced) instead of looping.
+    private const int MaxRecoveries = 2;
+    private int _recoveries;
     private bool _attached;
     private bool _ready;
     private string? _pendingAlert;
@@ -71,7 +91,10 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
         _browser = browser;
         _trace = trace;
         _browser.Ready += OnReady;
+        _browser.Failed += OnFailed;
     }
+
+    public bool IsReady => _attached && !_disposed;
 
     /// <summary>The real window and WebView2 (its own <c>WebView2Mini</c> user-data folder). Construct on the UI STA.</summary>
     public static MiniSceneWindowController CreateProduction(Action<string>? trace = null) =>
@@ -112,7 +135,14 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
 
         _surface = surface;
         // The window is created hidden; Place is what shows it (topmost, no activation).
-        surface.Place(ToInterop(bounds));
+        if (!surface.Place(ToInterop(bounds)))
+        {
+            _trace?.Invoke("mini-window: place failed");
+            _surface = null;
+            surface.Dispose();
+            return false;
+        }
+
         _ = AttachAsync(surface);
         return true;
     }
@@ -164,6 +194,7 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
         if (_disposed) return;
         _disposed = true;
         _browser.Ready -= OnReady;
+        _browser.Failed -= OnFailed;
         _browser.Dispose();
         _surface?.Dispose();
         _surface = null;
@@ -191,6 +222,24 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
 
         _attached = true;
         NavigateToScene();
+    }
+
+    private void OnFailed(string reason)
+    {
+        if (_disposed) return;
+        _attached = false;
+        _ready = false;
+        _trace?.Invoke($"mini-window: {reason}");
+        if (_surface is not { } surface) return;
+        if (_recoveries >= MaxRecoveries)
+        {
+            _trace?.Invoke("mini-window: recovery exhausted, staying down");
+            return;
+        }
+
+        _recoveries++;
+        _trace?.Invoke($"mini-window: recovering attempt={_recoveries}");
+        _ = AttachAsync(surface);
     }
 
     private void NavigateToScene()

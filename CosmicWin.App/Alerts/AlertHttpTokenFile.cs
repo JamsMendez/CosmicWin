@@ -297,7 +297,7 @@ public static class AlertHttpTokenFile
     /// R3-never-throws-filter: this class promises to never throw for an ordinary IO/permission/path
     /// problem, but must not silently swallow a process-corrupting exception as if it were just a
     /// failed file read or write. Same corruption-class exclusion
-    /// <c>AppComposition.IsRecoverableAlertLayerFailure</c> uses for the same reason.
+    /// <c>AppComposition.IsRecoverableFailure</c> uses for the same reason.
     /// </summary>
     private static bool IsRecoverable(Exception exception) =>
         exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);

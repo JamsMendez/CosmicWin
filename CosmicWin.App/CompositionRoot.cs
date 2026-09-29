@@ -174,7 +174,7 @@ public static class CompositionRoot
         }
     }
 
-    /// <summary>Same corruption-class exclusion as <c>AppComposition</c>'s own <c>IsRecoverableAlertLayerFailure</c> -- see its remarks.</summary>
+    /// <summary>Same corruption-class exclusion as <c>AppComposition</c>'s own <c>IsRecoverableFailure</c> -- see its remarks.</summary>
     private static bool IsRecoverable(Exception exception) =>
         exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 }

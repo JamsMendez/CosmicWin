@@ -14,6 +14,7 @@ public sealed class MiniSceneWindowControllerTests
     private sealed class FakeSurface : IMiniSceneSurface
     {
         public bool CreateResult = true;
+        public bool PlaceResult = true;
         public InteropRectangle? Created;
         public List<InteropRectangle> Placed { get; } = [];
         public int DisposeCount;
@@ -30,7 +31,7 @@ public sealed class MiniSceneWindowControllerTests
         public bool Place(InteropRectangle bounds)
         {
             Placed.Add(bounds);
-            return true;
+            return PlaceResult;
         }
 
         public object? AddCompositionOverlayVisual() => new object();
@@ -41,16 +42,20 @@ public sealed class MiniSceneWindowControllerTests
 
     private sealed class FakeBrowser : IMiniSceneBrowser
     {
-        public TaskCompletionSource<bool> AttachResult { get; } = new();
+        public TaskCompletionSource<bool> AttachResult { get; private set; } = new();
+        public int AttachCalls;
         public DrawingRectangle? AttachedViewport;
         public List<string> Navigations { get; } = [];
         public List<DrawingRectangle> Resizes { get; } = [];
         public List<string> Messages { get; } = [];
         public int DisposeCount;
         public event Action? Ready;
+        public event Action<string>? Failed;
 
         public Task<bool> AttachAsync(ICompositionOverlaySurface surface, DrawingRectangle viewport)
         {
+            // Each attach gets its own result, so a recovery attach can be completed on its own.
+            if (AttachCalls++ > 0) AttachResult = new();
             AttachedViewport = viewport;
             return AttachResult.Task;
         }
@@ -60,13 +65,16 @@ public sealed class MiniSceneWindowControllerTests
         public void PostMessage(string json) => Messages.Add(json);
         public void Dispose() => DisposeCount++;
         public void RaiseReady() => Ready?.Invoke();
+        public void RaiseFailed(string reason) => Failed?.Invoke(reason);
     }
 
-    private static (MiniSceneWindowController Controller, FakeSurface Surface, FakeBrowser Browser) Create()
+    private readonly List<string> _trace = [];
+
+    private (MiniSceneWindowController Controller, FakeSurface Surface, FakeBrowser Browser) Create()
     {
         var surface = new FakeSurface();
         var browser = new FakeBrowser();
-        return (new MiniSceneWindowController(() => surface, browser), surface, browser);
+        return (new MiniSceneWindowController(() => surface, browser, _trace.Add), surface, browser);
     }
 
     private static AlertShowRequest Alert() =>
@@ -305,5 +313,115 @@ public sealed class MiniSceneWindowControllerTests
         var request = new AlertShowRequest(["warning"], 1, 1, 0, 1000, -1, -2, -3, -4);
 
         Assert.Contains("\"workArea\":{\"left\":0,\"top\":0,\"width\":0,\"height\":0}", AlertLayerMessages.Show(request));
+    }
+
+    [Fact]
+    public void ShowReportsFailureAndReleasesTheSurfaceWhenPlacementFails()
+    {
+        var (controller, surface, browser) = Create();
+        surface.PlaceResult = false;
+
+        Assert.False(controller.Show(WallpaperScene.Idle, 60, Corner));
+
+        Assert.Null(browser.AttachedViewport);
+        Assert.Equal(1, surface.DisposeCount);
+        Assert.False(controller.IsReady);
+        Assert.Contains(_trace, line => line.Contains("place failed"));
+    }
+
+    [Fact]
+    public void IsReadyOnlyOnceTheBrowserAttached()
+    {
+        var (controller, _, browser) = Create();
+        Assert.False(controller.IsReady);
+
+        Assert.True(controller.Show(WallpaperScene.Processing, 30, Corner));
+        Assert.False(controller.IsReady);
+
+        browser.AttachResult.SetResult(true);
+        Assert.True(controller.IsReady);
+
+        controller.Dispose();
+        Assert.False(controller.IsReady);
+    }
+
+    [Fact]
+    public void IsNeverReadyWhenTheBrowserAttachFails()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+
+        browser.AttachResult.SetResult(false);
+
+        Assert.False(controller.IsReady);
+    }
+
+    [Fact]
+    public void AProcessFailureTracesReattachesOnceAndNavigatesToTheSceneCurrentAtThatMoment()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+        browser.RaiseReady();
+
+        browser.RaiseFailed("process-failed kind=Crashed");
+
+        Assert.False(controller.IsReady);
+        Assert.Contains(_trace, line => line.Contains("process-failed kind=Crashed"));
+        Assert.Equal(2, browser.AttachCalls);
+
+        controller.SwitchScene(WallpaperScene.Raphael);
+        browser.AttachResult.SetResult(true);
+
+        Assert.True(controller.IsReady);
+        Assert.Equal(
+            "https://cosmicwin-scene.example/raphael/index.html?fps=30&variant=mini", browser.Navigations[^1]);
+    }
+
+    [Fact]
+    public void RecoveryIsBoundedToTwoAttemptsThenGivesUpWithATrace()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+
+        for (var i = 0; i < 5; i++)
+        {
+            browser.RaiseFailed("process-failed");
+            if (browser.AttachCalls > 1 && !browser.AttachResult.Task.IsCompleted)
+                browser.AttachResult.SetResult(true);
+        }
+
+        Assert.Equal(3, browser.AttachCalls);
+        Assert.False(controller.IsReady);
+        Assert.Contains(_trace, line => line.Contains("recovery exhausted"));
+    }
+
+    [Fact]
+    public void AFailedRecoveryAttachStaysNotReadyAndDoesNotNavigate()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+        var navigations = browser.Navigations.Count;
+
+        browser.RaiseFailed("process-failed");
+        browser.AttachResult.SetResult(false);
+
+        Assert.False(controller.IsReady);
+        Assert.Equal(navigations, browser.Navigations.Count);
+    }
+
+    [Fact]
+    public void AProcessFailureAfterDisposeIsIgnored()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+        controller.Dispose();
+
+        browser.RaiseFailed("process-failed");
+
+        Assert.Equal(1, browser.AttachCalls);
     }
 }
