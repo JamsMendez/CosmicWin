@@ -67,6 +67,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [x] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
 - [x] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
+- [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
 ## Progress / evidence
@@ -184,6 +185,16 @@ maintainer merges/pushes (established precedent). RDD: on (global).
     - kill the mini WebView2 child: it recovers twice, and the third kill stays down.
     - Alt+M right at startup traces not-ready.
     - an early alert shows once ready.
+- Review slice fc811a5..2838866 (high, 18 files, 606 lines): consent granted, 4 lenses, APPROVED, acknowledged
+  (lineage review-d61cf33a9828d414, authority burned). Boundary now 2838866. Advisory (non-blocking, parked as T8):
+  - WARNINGs:
+    - ProcessFailed teardown ignores the failure kind (WebView2MiniSceneBrowser.cs:113-124).
+    - The source-guard finally scope is too wide (SourceGuardTests.cs:27-33).
+    - The miniRingBasis placement splits the variant comment (render-loop.js:87-94).
+  - Suggestions:
+    - IsReady vs ready naming.
+    - A failed recovery attach is silent (Controller.cs:240).
+    - The recovery budget never replenishes (Controller.cs:78).
 
 ## Next step
-Review of slice fc811a5..HEAD, then T6 hardware check.
+T6 hardware check.
