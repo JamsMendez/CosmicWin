@@ -533,8 +533,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
-    drop: ["drawStarfield", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
+    drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     fit: function (page) {
       // The ring is centered in the square, its disc border stays inside the edge fade's opaque radius
       // (so the mask never clips it) and still fills most of the square (>= 0.36 of the side).
@@ -571,8 +571,8 @@ test("the full variant still draws every layer and its opaque background", funct
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
-    drop: ["drawStarfield", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
+    drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     hasBackgroundFill: true,
   });
 });

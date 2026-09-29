@@ -584,7 +584,9 @@ function renderFrame(nowMs) {
         constellationRingStamp = { cache: ringCaches[i], cx: cx, cy: cy, angle: angle };
       }
     }
-    drawCombinedLightingMask(ctx, cx, cy);
+    // Mini skips the lighting mask: it is a multiply over the whole ring annuli, which on the see-through
+    // canvas (no black behind it) paints an opaque metallic grey instead of darkening the ring.
+    if (!isMiniVariant) drawCombinedLightingMask(ctx, cx, cy);
 
     drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
     drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
