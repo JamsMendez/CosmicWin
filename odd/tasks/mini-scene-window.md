@@ -80,7 +80,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - video-wallpaper-http and wallpaper-scene-http are removed (parsed and ignored)
   - mini-corner -> mini-position
   (route: delegated writer, parallel with T2h)
-- [ ] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
+- [x] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -275,6 +275,11 @@ maintainer merges/pushes (established precedent). RDD: on (global).
     - Parse local naming.
     - Constellation shared constants.
     - Vacuous above-floor draw assertions (constellation-ring.checks.js:192, 232).
+- T2i 3d5a82d + 34dc946: drawMiniRingBases paints MINI_RING_BASE_COLOR rgba(1,4,10,0.9) with destination-over under
+  each ring band + disc border + the hollow around the planet (last, before the edge fade; under the explorer tint);
+  inter-ring gaps and outside the disc stay transparent. RED 2 per scene + 1 (hollow) -> GREEN idle 18, explorer 19,
+  processing 38, raphael 20; full suite 0 failed. Text-background previews (red/white terminal text, like
+  docs/z-index.png): no text reads through any band.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
