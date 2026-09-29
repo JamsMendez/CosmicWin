@@ -119,6 +119,38 @@ public sealed class ActionExecutorTilingDisabledTests
         Assert.Equal(0, harness.WindowB.TryActivateCallCount);
     }
 
+    /// <summary>
+    /// Alt+M is about CosmicWin itself (the mini scene window), not the layout, so it is answered
+    /// above the layout gate: with tiling off it still reaches the composition, once per chord, and
+    /// touches no window.
+    /// </summary>
+    [Fact]
+    public async Task WithTilingOff_TheMiniCornerChordStillReachesTheComposition()
+    {
+        var harness = BuildWithTilingOff();
+        var cycles = 0;
+        harness.Executor.CycleMiniCornerRequested = () => cycles++;
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.CycleMiniCorner), CancellationToken.None);
+
+        Assert.Equal(1, cycles);
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.SetPositionCallCount);
+    }
+
+    /// <summary>With nothing wired to Alt+M (every mode but mini) the chord is a quiet no-op.</summary>
+    [Fact]
+    public async Task TheMiniCornerChord_WithNothingWired_DoesNothing()
+    {
+        var harness = BuildWithTilingOff();
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.CycleMiniCorner), CancellationToken.None);
+
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+    }
+
     /// <summary>The half the user asked to keep: walking between desktops.</summary>
     [Fact]
     public async Task WithTilingOff_TheDesktopSwitchChordStillReachesTheShell()

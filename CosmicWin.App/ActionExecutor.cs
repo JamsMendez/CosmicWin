@@ -128,6 +128,9 @@ public sealed class ActionExecutor(
     /// </remarks>
     public Action? ToggleTilingRequested { get; set; }
 
+    /// <summary>Alt+M: cycles the mini scene window to the next corner. Set by the composition, unset elsewhere.</summary>
+    public Action? CycleMiniCornerRequested { get; set; }
+
     /// <summary>
     /// When set, every mutation resolves and arranges
     /// the FOCUSED window's OWN monitor tree/work area, instead of always the primary <paramref
@@ -184,6 +187,15 @@ public sealed class ActionExecutor(
         if (action.Kind is HotkeyActionKind.ToggleTiling)
         {
             ToggleTilingRequested?.Invoke();
+            return;
+        }
+
+        // Same placement and same reason as Alt+T above: about CosmicWin itself, so answered before the
+        // layout gate and needing neither a foreground window nor a tree. Nothing wired (any mode but
+        // mini) is a quiet no-op.
+        if (action.Kind is HotkeyActionKind.CycleMiniCorner)
+        {
+            CycleMiniCornerRequested?.Invoke();
             return;
         }
 

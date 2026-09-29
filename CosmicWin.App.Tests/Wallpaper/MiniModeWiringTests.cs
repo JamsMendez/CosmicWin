@@ -122,6 +122,8 @@ public sealed class MiniModeWiringTests
         public required List<Action> Posted { get; init; }
         public required List<string> Imports { get; init; }
         public required List<WallpaperScene> PersistedScenes { get; init; }
+        public required List<MiniCorner> PersistedCorners { get; init; }
+        public required FakeKeyboardHookPlatform Platform { get; init; }
         public Func<string, bool>? SceneSwitch { get; init; }
         public Server? AlertServer { get; init; }
     }
@@ -154,13 +156,15 @@ public sealed class MiniModeWiringTests
         Server? server = null;
         var imports = new List<string>();
         var scenes = new List<WallpaperScene>();
+        var corners = new List<MiniCorner>();
+        var platform = new FakeKeyboardHookPlatform();
 
         var composition = AppComposition.Wire(
             new FakeWorkspace(),
             new TreeManager([display], display, new WindowRegistry()), new WindowRegistry(),
             new Foreground(), new ExceptionListStore(ExceptionList.Empty), new RecordingFocusTrace(),
             () => { }, timer.Schedule,
-            writer => new LowLevelKeyboardHook(writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),
+            writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             () => ExceptionList.Empty, () => { },
             controller => { tray = controller; return new Disposable(); },
             path => { imports.Add(path); return path; },
@@ -180,6 +184,7 @@ public sealed class MiniModeWiringTests
             wallpaperScene: scene,
             wallpaperFps: fps,
             miniCorner: corner,
+            persistMiniCorner: corners.Add,
             refreshDisplays: refreshDisplays,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, _, sceneHandler) =>
@@ -200,6 +205,8 @@ public sealed class MiniModeWiringTests
             Posted = posted,
             Imports = imports,
             PersistedScenes = scenes,
+            PersistedCorners = corners,
+            Platform = platform,
             SceneSwitch = sceneSwitch,
             AlertServer = server,
         };
@@ -525,6 +532,114 @@ public sealed class MiniModeWiringTests
         harness.Composition.Dispose();
 
         Assert.Equal(1, window.Disposed);
+    }
+
+    private static async Task<bool> WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        return condition();
+    }
+
+    private static async Task PressAltM(Harness harness, int expectedTotalMoves, FakeMiniWindow window)
+    {
+        Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
+        Assert.True(await WaitUntil(() => window.Moves.Count == expectedTotalMoves));
+    }
+
+    /// <summary>
+    /// T5: Alt+M walks the corners clockwise from the configured one, moving the window onto the
+    /// computed rectangle and persisting each new corner -- driven through the real hook, with tiling
+    /// still ON (the chord does not depend on it; the executor test covers tiling off).
+    /// </summary>
+    [Fact]
+    public async Task AltM_MiniMode_CyclesTopRightBottomRightBottomLeftTopLeftAndPersistsEachStep()
+    {
+        var window = new FakeMiniWindow();
+        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        using (harness.Composition)
+        {
+            await PressAltM(harness, 1, window);
+            await PressAltM(harness, 2, window);
+            await PressAltM(harness, 3, window);
+            await PressAltM(harness, 4, window);
+
+            Assert.Equal(
+                [new Rect(3152, 1112, 288, 288), new Rect(0, 1112, 288, 288),
+                 new Rect(0, 0, 288, 288), new Rect(3152, 0, 288, 288)],
+                window.Moves);
+            Assert.Equal(
+                [MiniCorner.BottomRight, MiniCorner.BottomLeft, MiniCorner.TopLeft, MiniCorner.TopRight],
+                harness.PersistedCorners);
+        }
+    }
+
+    [Fact]
+    public async Task AltM_MiniMode_PlacesOnTheWorkAreaThatIsTrueNow_NotTheOneSeenAtStartup()
+    {
+        var window = new FakeMiniWindow();
+        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        using (harness.Composition)
+        {
+            harness.Display.WorkArea = Rectangle.FromSize(0, 0, 3440, 1340);
+
+            await PressAltM(harness, 1, window);
+
+            Assert.Equal([new Rect(3152, 1052, 288, 288)], window.Moves);
+        }
+    }
+
+    [Fact]
+    public async Task AltM_MiniMode_RunsTheMoveOnTheOwningThread()
+    {
+        var window = new FakeMiniWindow();
+        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true);
+        using (harness.Composition)
+        {
+            Pump(harness);
+            Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => harness.Posted.Count > 0));
+            Assert.Empty(window.Moves);
+
+            Pump(harness);
+
+            Assert.Single(window.Moves);
+            Assert.Equal([MiniCorner.BottomRight], harness.PersistedCorners);
+        }
+    }
+
+    [Theory]
+    [InlineData(WallpaperMode.Video)]
+    [InlineData(WallpaperMode.Html)]
+    public async Task AltM_OutsideMiniMode_IsANoOpWithATrace(WallpaperMode mode)
+    {
+        var window = new FakeMiniWindow();
+        var harness = Wire(mode, window);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
+            Assert.True(await WaitUntil(() => harness.Trace.Lines.Contains("mini-corner cycle skipped reason=not-mini-mode")));
+
+            Assert.Empty(window.Moves);
+            Assert.Empty(harness.PersistedCorners);
+        }
+    }
+
+    [Fact]
+    public async Task AltM_MiniModeWithNoWindow_IsANoOp()
+    {
+        var harness = Wire(WallpaperMode.Mini, miniWindow: null);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
+            await Task.Delay(100);
+
+            Assert.Empty(harness.PersistedCorners);
+        }
     }
 
     [Fact]

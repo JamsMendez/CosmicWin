@@ -117,10 +117,11 @@ start.
 | `alert-http-port` | `47811` | The loopback TCP port the HTTP endpoint listens on. |
 | `video-wallpaper-http` | `off` | Accept a video-wallpaper switch over the same HTTP endpoint. |
 | `gap` | `8` | Whole pixels of space around and between tiled windows and alert tiles (0–64). |
-| `wallpaper-mode` | `html` | `html` shows an animated scene wallpaper; `video` loops the configured video instead. |
+| `wallpaper-mode` | `html` | `html` shows an animated scene wallpaper; `video` loops the configured video instead; `mini` shows no wallpaper and puts a small scene window in a screen corner (see Mini scene window, below). |
 | `wallpaper-scene` | `processing` | Which html scene to show: `processing`, `explorer`, `idle` or `raphael`. |
 | `wallpaper-fps` | `60` | Caps the html wallpaper's own frame rate: `30` or `60`. |
 | `wallpaper-scene-http` | `on` | Accept a wallpaper-scene switch over the same HTTP endpoint. |
+| `mini-corner` | `top-right` | Where the mini scene window sits: `top-left`, `top-right`, `bottom-left` or `bottom-right`. Alt+M changes it. |
 
 Every HTTP-related key above is served by the same local HTTP server, sharing one port and one
 bearer-token file — see Alerts, below, for how that endpoint is gated.
@@ -327,7 +328,35 @@ trace.
 | 404 | The route is turned off |
 | 413 | Body larger than 256 bytes |
 | 415 | `Content-Type` is not `application/json` |
-| 503 | Not in html mode (`wallpaper-mode = video`), or this CosmicWin has no scene page to switch |
+| 503 | Not in html or mini mode (`wallpaper-mode = video`), or this CosmicWin has no scene page or mini window to switch |
+
+## Mini scene window
+
+Set `wallpaper-mode = mini` in `settings.conf` and restart CosmicWin to get the scene as a small
+ambient indicator instead of a wallpaper. In this mode CosmicWin starts no wallpaper host and plays
+no video, so your desktop background stays exactly as Windows has it.
+
+```ini
+wallpaper-mode = mini
+mini-corner = top-right
+```
+
+- **Where.** A square window in one corner of the primary monitor (`mini-corner`: `top-left`,
+  `top-right`, `bottom-left` or `bottom-right`, default `top-right`). Its side is one fifth of the
+  monitor's height — 288 px on a 1440 px tall screen — and it is flush with the corner of the work
+  area, so it stays clear of the taskbar and follows it if the taskbar moves or resizes.
+- **Behavior.** Always on top, transparent, click-through and never focused: it does not take
+  keyboard focus, does not appear in the taskbar or Alt+Tab, and mouse clicks go to whatever is
+  underneath it.
+- **Scene.** It draws a reduced variant of `wallpaper-scene` (no background, no starfield) at
+  `wallpaper-fps`. The scene route above switches it live and saves the choice, exactly as in html
+  mode.
+- **Alerts** are shown inside the window, over the scene.
+- **`Alt+M`** moves it to the next corner, clockwise (top-left, top-right, bottom-right,
+  bottom-left, and around) and saves the new `mini-corner`. In any other wallpaper mode the chord
+  does nothing.
+- The tray menu's video pick and the video HTTP route do nothing in this mode; both write a
+  `skipped reason=mini-mode` line to the desktop trace.
 
 ## Keybindings
 
@@ -342,6 +371,7 @@ trace.
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window there, without following it |
 | `Alt+Shift+Q` | Close the desktop you are on — Windows hands its windows to a neighbour |
+| `Alt+M` | Move the mini scene window to the next corner (only with `wallpaper-mode = mini`) |
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 

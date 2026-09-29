@@ -1483,6 +1483,43 @@ public sealed class AppComposition : IDisposable
         // Wired HERE, not where the executor is built, because the controller that owns the toggle
         // does not exist yet up there.
         executor.ToggleTilingRequested = () => trayController.ToggleTiling();
+
+        // T5 (mini-scene-window): Alt+M walks the mini window clockwise to the next corner. The move
+        // and the corner bookkeeping run on the owning UI thread (the window's owner); the chord
+        // itself arrives on a pool thread. Outside mini mode there is no window and the chord is a
+        // traced no-op, so a stray press never persists a corner nobody can see.
+        void CycleMiniCorner()
+        {
+            if (!miniMode || miniWindow is null)
+            {
+                desktopTrace?.Record(
+                    $"mini-corner cycle skipped reason={(miniMode ? "no-window" : "not-mini-mode")}");
+                return;
+            }
+
+            var next = MiniWindowPlacement.Next(currentMiniCorner);
+            try
+            {
+                miniWindow.MoveTo(MiniPlacement(next));
+            }
+            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            {
+                desktopTrace?.Record($"mini-corner cycle move-failed error={error.GetType().Name}");
+                return;
+            }
+
+            currentMiniCorner = next;
+            try
+            {
+                persistMiniCorner?.Invoke(next);
+            }
+            catch (Exception error) when (IsRecoverableAlertLayerFailure(error))
+            {
+                desktopTrace?.Record($"mini-corner cycle persist-failed error={error.GetType().Name}");
+            }
+        }
+
+        executor.CycleMiniCornerRequested = () => onOwningThread(CycleMiniCorner);
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);

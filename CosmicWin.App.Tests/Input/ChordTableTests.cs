@@ -27,6 +27,7 @@ public sealed class ChordTableTests
         { ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation },
         { ModifierKeys.Alt, KeyboardKey.Q, HotkeyActionKind.CloseWindow },
         { ModifierKeys.Alt, KeyboardKey.T, HotkeyActionKind.ToggleTiling },
+        { ModifierKeys.Alt, KeyboardKey.M, HotkeyActionKind.CycleMiniCorner },
 
         // Deliberately Shift over the SAME key that closes a window, the way Shift over a desktop
         // digit turns "go there" into "send there": one modifier, one consistent meaning.
@@ -62,9 +63,32 @@ public sealed class ChordTableTests
     [InlineData(ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.O)]
     [InlineData(ModifierKeys.Shift | ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.H)]
     [InlineData(ModifierKeys.Alt, (KeyboardKey)0x50)]
+    [InlineData(ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.M)]
+    [InlineData(ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.M)]
+    [InlineData(ModifierKeys.None, KeyboardKey.M)]
     public void TryMatch_NativeUnregisteredOrSupersetChord_ReturnsFalse(
         ModifierKeys modifiers, KeyboardKey key)
     {
         Assert.False(ChordTable.Default.TryMatch(modifiers, key, out _));
+    }
+
+    /// <summary>Alt+M owns exactly one action, and no other chord on the table resolves to it.</summary>
+    [Fact]
+    public void CycleMiniCorner_IsRegisteredOnAltMOnly()
+    {
+        var matches = new List<(ModifierKeys Modifiers, KeyboardKey Key)>();
+        for (var flags = 0; flags < 8; flags++)
+        {
+            var modifiers = (ModifierKeys)flags;
+            foreach (var key in Enum.GetValues<KeyboardKey>())
+            {
+                if (ChordTable.Default.TryMatch(modifiers, key, out var action) && action.Kind == HotkeyActionKind.CycleMiniCorner)
+                {
+                    matches.Add((modifiers, key));
+                }
+            }
+        }
+
+        Assert.Equal([(ModifierKeys.Alt, KeyboardKey.M)], matches);
     }
 }
