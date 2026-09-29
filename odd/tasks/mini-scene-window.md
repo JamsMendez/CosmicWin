@@ -22,7 +22,8 @@ a wallpaper. It also makes the Alacritty per-scene theme unnecessary (that branc
   - processing: only bands, wait, octagon, orbits, center, lines + the green nebula, radially faded so it
     never reaches the window edges (edge pixels fully transparent). No background, soft oval,
     chroma fans, stars, streaks, flares, grain or vignette.
-  - raphael: only the circle, center and golden lines.
+  - raphael: only the circle, center and golden lines. Blue and gold glyphs read as vertical strokes; the gold
+    character count is tripled (mini only, maintainer 2026-09-29).
 - The HTTP scene route switches the mini window in mini mode and persists `wallpaper-scene`.
 - Chord `Alt+M` cycles the corner clockwise (TL -> TR -> BR -> BL) and persists `mini-corner`.
 
@@ -59,6 +60,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T1a Default corner `top-right` + explicit top-taskbar placement test (route: inline, mechanical)
 - [x] T2 Mini variants of the 4 scenes via `?variant=mini` + node tests + headless preview for visual approval (route: delegated writer)
 - [x] T2b Keep chroma fan (idle, explorer) + planet (explorer), planet centered in the ring in mini; processing green nebula with radial fade clear of the edges (route: delegated writer)
+- [x] T2c Shared mini radial edge fade on all 4 scenes (before the alert overlay); explorer planet not dimmed by the tint (route: delegated writer)
+- [x] T2d Raphael mini: blue and gold glyphs stretched vertically (tall strokes, not dashes), gold glyph count x3 (mini only) (route: delegated writer)
 - [ ] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
 - [ ] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [ ] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
@@ -101,6 +104,14 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   to main.js. RED (fan/planet/nebula cases failing) -> GREEN idle 15, explorer 16, processing 38, raphael 14; Scene
   filter 63 passed; full non-desktop Debug suite 0 failed. Edge check: nebula alone 0 edge pixels; full processing
   composite 4540 edge pixels because perspective rays + orbit blocks reach the edges (pre-existing, open decision).
+- T2c b739f7e: shared `applyMiniEdgeFade` (render-loop.js, destination-in radial gradient, alpha 1 to 0.41 of the
+  short side, 0 at 0.48), once per frame after layers and before the alert overlay; full variant never calls it.
+  idle/explorer disc fit 0.40 of the side; raphael MINI_SCENE_ZOOM 1.4 -> 1.2. Explorer tint now runs before
+  planet + fan (planet no longer blue). RED 4/4 mini-layer cases -> GREEN; edge check 0 differing pixels on all 4.
+  Alert overlay stays unmasked: its rectangular wash shows the window square while an alert is up (transient).
+- T2d 7051ee9: raphael mini glyph margins/gaps scale with glyphRingMiniScale (~0.19). Blue h:w 0.40 -> 3.40,
+  gold 0.33 -> 3.00; gold count 13 -> 105 (3x the 35 of the standard rule), blue 71 -> 92. Full variant pinned
+  (gold 35, blue 92). RED 2 -> GREEN raphael 17/17. Both commits: Scene filter 63 passed, full non-desktop suite 0 failed.
 
 ## Next step
-Maintainer approval of previews (open decision: fade processing rays/blocks at the edges?), review consent, T3.
+Maintainer visual approval of the previews, then review consent on the slice 67a0aae..HEAD, then T3.
