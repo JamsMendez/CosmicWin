@@ -569,23 +569,26 @@ public sealed class MiniModeWiringTests
     /// still ON (the chord does not depend on it; the executor test covers tiling off).
     /// </summary>
     [Fact]
-    public async Task AltM_MiniMode_CyclesTopRightBottomRightBottomLeftTopLeftAndPersistsEachStep()
+    public async Task AltM_MiniMode_CyclesAllEightPositionsClockwiseAndPersistsEachStep()
     {
         var window = new FakeMiniWindow();
         var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
         using (harness.Composition)
         {
-            await PressAltM(harness, 1, window);
-            await PressAltM(harness, 2, window);
-            await PressAltM(harness, 3, window);
-            await PressAltM(harness, 4, window);
+            for (var i = 1; i <= 8; i++)
+            {
+                await PressAltM(harness, i, window);
+            }
 
             Assert.Equal(
-                [new Rect(3152, 1112, 288, 288), new Rect(0, 1112, 288, 288),
-                 new Rect(0, 0, 288, 288), new Rect(3152, 0, 288, 288)],
+                [new Rect(3152, 556, 288, 288), new Rect(3152, 1112, 288, 288),
+                 new Rect(1576, 1112, 288, 288), new Rect(0, 1112, 288, 288),
+                 new Rect(0, 556, 288, 288), new Rect(0, 0, 288, 288),
+                 new Rect(1576, 0, 288, 288), new Rect(3152, 0, 288, 288)],
                 window.Moves);
             Assert.Equal(
-                [MiniCorner.BottomRight, MiniCorner.BottomLeft, MiniCorner.TopLeft, MiniCorner.TopRight],
+                [MiniCorner.RightCenter, MiniCorner.BottomRight, MiniCorner.BottomCenter, MiniCorner.BottomLeft,
+                 MiniCorner.LeftCenter, MiniCorner.TopLeft, MiniCorner.TopCenter, MiniCorner.TopRight],
                 harness.PersistedCorners);
         }
     }
@@ -601,7 +604,7 @@ public sealed class MiniModeWiringTests
 
             await PressAltM(harness, 1, window);
 
-            Assert.Equal([new Rect(3152, 1052, 288, 288)], window.Moves);
+            Assert.Equal([new Rect(3152, 526, 288, 288)], window.Moves);
         }
     }
 
@@ -620,7 +623,7 @@ public sealed class MiniModeWiringTests
             Pump(harness);
 
             Assert.Single(window.Moves);
-            Assert.Equal([MiniCorner.BottomRight], harness.PersistedCorners);
+            Assert.Equal([MiniCorner.RightCenter], harness.PersistedCorners);
         }
     }
 

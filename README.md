@@ -121,7 +121,7 @@ start.
 | `wallpaper-scene` | `processing` | Which html scene to show: `processing`, `explorer`, `idle` or `raphael`. |
 | `wallpaper-fps` | `60` | Caps the html wallpaper's own frame rate: `30` or `60`. |
 | `wallpaper-scene-http` | `on` | Accept a wallpaper-scene switch over the same HTTP endpoint. |
-| `mini-corner` | `top-right` | Where the mini scene window sits: `top-left`, `top-right`, `bottom-left` or `bottom-right`. Alt+M changes it. |
+| `mini-corner` | `top-right` | Where the mini scene window sits: one of 8 positions: corners `top-left`, `top-right`, `bottom-left`, `bottom-right` or side midpoints `top-center`, `right-center`, `bottom-center`, `left-center`. Alt+M changes it. |
 
 Every HTTP-related key above is served by the same local HTTP server, sharing one port and one
 bearer-token file — see Alerts, below, for how that endpoint is gated.
@@ -341,9 +341,10 @@ wallpaper-mode = mini
 mini-corner = top-right
 ```
 
-- **Where.** A square window in one corner of the primary monitor (`mini-corner`: `top-left`,
-  `top-right`, `bottom-left` or `bottom-right`, default `top-right`). Its side is one fifth of the
-  monitor's height — 288 px on a 1440 px tall screen — and it is flush with the corner of the work
+- **Where.** A square window at one of 8 positions on the primary monitor (`mini-corner`: the corners
+  `top-left`, `top-right`, `bottom-left`, `bottom-right`, or the side midpoints `top-center`,
+  `right-center`, `bottom-center`, `left-center`; default `top-right`). Its side is one fifth of the
+  monitor's height — 288 px on a 1440 px tall screen — and it is flush with its corner or side of the work
   area, so it stays clear of the taskbar and follows it if the taskbar moves or resizes.
 - **Behavior.** Always on top, transparent, click-through and never focused: it does not take
   keyboard focus, does not appear in the taskbar or Alt+Tab, and mouse clicks go to whatever is
@@ -352,8 +353,8 @@ mini-corner = top-right
   `wallpaper-fps`. The scene route above switches it live and saves the choice, exactly as in html
   mode.
 - **Alerts** are shown inside the window, over the scene.
-- **`Alt+M`** moves it to the next corner, clockwise (top-left, top-right, bottom-right,
-  bottom-left, and around) and saves the new `mini-corner`. In any other wallpaper mode the chord
+- **`Alt+M`** moves it to the next of the 8 positions, clockwise (top-left, top-center,
+  top-right, right-center, bottom-right, bottom-center, bottom-left, left-center, and around) and saves the new `mini-corner`. In any other wallpaper mode the chord
   does nothing.
 - The tray menu's video pick and the video HTTP route do nothing in this mode; both write a
   `skipped reason=mini-mode` line to the desktop trace.

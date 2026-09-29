@@ -941,6 +941,10 @@ public sealed class SettingsTests
     [InlineData("mini-corner=top-right", MiniCorner.TopRight)]
     [InlineData("mini-corner = bottom-left", MiniCorner.BottomLeft)]
     [InlineData("  MINI-CORNER  =  Bottom-Right ", MiniCorner.BottomRight)]
+    [InlineData("mini-corner = top-center", MiniCorner.TopCenter)]
+    [InlineData("mini-corner = right-center", MiniCorner.RightCenter)]
+    [InlineData("mini-corner = bottom-center", MiniCorner.BottomCenter)]
+    [InlineData("MINI-CORNER = Left-Center", MiniCorner.LeftCenter)]
     public void MiniCornerIsRead_HoweverTheLineIsSpelled(string line, MiniCorner expected)
     {
         Assert.Equal(expected, Settings.Parse(line).MiniCorner);
@@ -960,6 +964,10 @@ public sealed class SettingsTests
     [InlineData(MiniCorner.TopRight)]
     [InlineData(MiniCorner.BottomLeft)]
     [InlineData(MiniCorner.BottomRight)]
+    [InlineData(MiniCorner.TopCenter)]
+    [InlineData(MiniCorner.RightCenter)]
+    [InlineData(MiniCorner.BottomCenter)]
+    [InlineData(MiniCorner.LeftCenter)]
     public void SerializeThenParse_RoundTripsTheMiniCorner(MiniCorner corner)
     {
         var original = new Settings(FocusBorder: true, MiniCorner: corner);

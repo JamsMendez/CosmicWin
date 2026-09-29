@@ -65,13 +65,64 @@ public sealed class MiniWindowPlacementTests
     }
 
     [Theory]
-    [InlineData(MiniCorner.TopLeft, MiniCorner.TopRight)]
-    [InlineData(MiniCorner.TopRight, MiniCorner.BottomRight)]
-    [InlineData(MiniCorner.BottomRight, MiniCorner.BottomLeft)]
-    [InlineData(MiniCorner.BottomLeft, MiniCorner.TopLeft)]
+    [InlineData(MiniCorner.TopLeft, MiniCorner.TopCenter)]
+    [InlineData(MiniCorner.TopCenter, MiniCorner.TopRight)]
+    [InlineData(MiniCorner.TopRight, MiniCorner.RightCenter)]
+    [InlineData(MiniCorner.RightCenter, MiniCorner.BottomRight)]
+    [InlineData(MiniCorner.BottomRight, MiniCorner.BottomCenter)]
+    [InlineData(MiniCorner.BottomCenter, MiniCorner.BottomLeft)]
+    [InlineData(MiniCorner.BottomLeft, MiniCorner.LeftCenter)]
+    [InlineData(MiniCorner.LeftCenter, MiniCorner.TopLeft)]
     public void NextCyclesClockwise(MiniCorner from, MiniCorner expected)
     {
         Assert.Equal(expected, MiniWindowPlacement.Next(from));
+    }
+
+    [Fact]
+    public void TheFullCycleVisitsAllEightPositionsOnceAndReturnsToTheStart()
+    {
+        var seen = new List<MiniCorner>();
+        var current = MiniCorner.TopLeft;
+        for (var i = 0; i < 8; i++)
+        {
+            seen.Add(current);
+            current = MiniWindowPlacement.Next(current);
+        }
+
+        Assert.Equal(MiniCorner.TopLeft, current);
+        Assert.Equal(8, seen.Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData(MiniCorner.TopCenter, 100 + (2560 - 288) / 2, 50)]
+    [InlineData(MiniCorner.RightCenter, 100 + 2560 - 288, 50 + (1392 - 288) / 2)]
+    [InlineData(MiniCorner.BottomCenter, 100 + (2560 - 288) / 2, 50 + 1392 - 288)]
+    [InlineData(MiniCorner.LeftCenter, 100, 50 + (1392 - 288) / 2)]
+    public void EachMidpointIsCenteredOnItsSideAndFlushWithThatEdge(MiniCorner corner, int x, int y)
+    {
+        var rect = MiniWindowPlacement.Compute(WorkArea, 1440, corner);
+
+        Assert.Equal(new Rect(x, y, 288, 288), rect);
+    }
+
+    [Fact]
+    public void ARightCenterStaysLeftOfATaskbarDockedAtTheRight()
+    {
+        var rightTaskbarWorkArea = new Rect(0, 0, 2560 - 64, 1440);
+
+        var rect = MiniWindowPlacement.Compute(rightTaskbarWorkArea, 1440, MiniCorner.RightCenter);
+
+        Assert.Equal(new Rect(2560 - 64 - 288, (1440 - 288) / 2, 288, 288), rect);
+    }
+
+    [Fact]
+    public void ABottomCenterStopsAtABottomTaskbar()
+    {
+        var bottomTaskbarWorkArea = new Rect(0, 0, 2560, 1440 - 48);
+
+        var rect = MiniWindowPlacement.Compute(bottomTaskbarWorkArea, 1440, MiniCorner.BottomCenter);
+
+        Assert.Equal(new Rect((2560 - 288) / 2, 1440 - 48 - 288, 288, 288), rect);
     }
 
     [Theory]

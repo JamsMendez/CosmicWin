@@ -20,22 +20,32 @@ public static class MiniWindowPlacement
     public static Rect Compute(Rect workArea, int monitorHeight, MiniCorner corner)
     {
         var side = Math.Max(0, Math.Min(monitorHeight / SideDivisor, Math.Min(workArea.Width, workArea.Height)));
-        var x = corner is MiniCorner.TopRight or MiniCorner.BottomRight
-            ? workArea.X + workArea.Width - side
-            : workArea.X;
-        var y = corner is MiniCorner.BottomLeft or MiniCorner.BottomRight
-            ? workArea.Y + workArea.Height - side
-            : workArea.Y;
+        var x = corner switch
+        {
+            MiniCorner.TopRight or MiniCorner.RightCenter or MiniCorner.BottomRight => workArea.X + workArea.Width - side,
+            MiniCorner.TopCenter or MiniCorner.BottomCenter => workArea.X + (workArea.Width - side) / 2,
+            _ => workArea.X,
+        };
+        var y = corner switch
+        {
+            MiniCorner.BottomLeft or MiniCorner.BottomCenter or MiniCorner.BottomRight => workArea.Y + workArea.Height - side,
+            MiniCorner.LeftCenter or MiniCorner.RightCenter => workArea.Y + (workArea.Height - side) / 2,
+            _ => workArea.Y,
+        };
 
         return new Rect(x, y, side, side);
     }
 
-    /// <summary>The next corner, clockwise: top-left, top-right, bottom-right, bottom-left, and around.</summary>
+    /// <summary>The next position, clockwise through all eight: corners and side midpoints, and around.</summary>
     public static MiniCorner Next(MiniCorner corner) => corner switch
     {
-        MiniCorner.TopLeft => MiniCorner.TopRight,
-        MiniCorner.TopRight => MiniCorner.BottomRight,
-        MiniCorner.BottomRight => MiniCorner.BottomLeft,
+        MiniCorner.TopLeft => MiniCorner.TopCenter,
+        MiniCorner.TopCenter => MiniCorner.TopRight,
+        MiniCorner.TopRight => MiniCorner.RightCenter,
+        MiniCorner.RightCenter => MiniCorner.BottomRight,
+        MiniCorner.BottomRight => MiniCorner.BottomCenter,
+        MiniCorner.BottomCenter => MiniCorner.BottomLeft,
+        MiniCorner.BottomLeft => MiniCorner.LeftCenter,
         _ => MiniCorner.TopLeft,
     };
 }

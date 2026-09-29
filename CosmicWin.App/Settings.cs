@@ -25,13 +25,17 @@ public enum WallpaperMode
     Mini,
 }
 
-/// <summary>The work-area corner the mini scene window sits in, ordered clockwise.</summary>
+/// <summary>The work-area position the mini scene window sits in, ordered clockwise; the name is kept for compatibility though it now also holds the side midpoints.</summary>
 public enum MiniCorner
 {
     TopLeft,
+    TopCenter,
     TopRight,
+    RightCenter,
     BottomRight,
+    BottomCenter,
     BottomLeft,
+    LeftCenter,
 }
 
 /// <summary>
@@ -198,6 +202,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string MiniCornerBottomLeftValue = "bottom-left";
 
     private const string MiniCornerBottomRightValue = "bottom-right";
+    private const string MiniCornerTopCenterValue = "top-center";
+    private const string MiniCornerRightCenterValue = "right-center";
+    private const string MiniCornerBottomCenterValue = "bottom-center";
+    private const string MiniCornerLeftCenterValue = "left-center";
 
     /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
     private const string WallpaperSceneKey = "wallpaper-scene";
@@ -410,9 +418,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # closed.
          {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
 
-         # {MiniCornerKey}: which corner of the work area the `{WallpaperModeMiniValue}` window sits in:
-         # `{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}` (default), `{MiniCornerBottomLeftValue}` or
-         # `{MiniCornerBottomRightValue}`.
+         # {MiniCornerKey}: where in the work area the `{WallpaperModeMiniValue}` window sits: a corner
+         # (`{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}` (default), `{MiniCornerBottomLeftValue}`,
+         # `{MiniCornerBottomRightValue}`) or a side midpoint (`{MiniCornerTopCenterValue}`,
+         # `{MiniCornerRightCenterValue}`, `{MiniCornerBottomCenterValue}`, `{MiniCornerLeftCenterValue}`).
          {MiniCornerKey} = {MiniCornerValue(MiniCorner)}
 
          """;
@@ -431,6 +440,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         MiniCorner.TopLeft => MiniCornerTopLeftValue,
         MiniCorner.TopRight => MiniCornerTopRightValue,
         MiniCorner.BottomLeft => MiniCornerBottomLeftValue,
+        MiniCorner.TopCenter => MiniCornerTopCenterValue,
+        MiniCorner.RightCenter => MiniCornerRightCenterValue,
+        MiniCorner.BottomCenter => MiniCornerBottomCenterValue,
+        MiniCorner.LeftCenter => MiniCornerLeftCenterValue,
         _ => MiniCornerBottomRightValue,
     };
 
@@ -578,6 +591,18 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
                 return true;
             case MiniCornerBottomRightValue:
                 corner = MiniCorner.BottomRight;
+                return true;
+            case MiniCornerTopCenterValue:
+                corner = MiniCorner.TopCenter;
+                return true;
+            case MiniCornerRightCenterValue:
+                corner = MiniCorner.RightCenter;
+                return true;
+            case MiniCornerBottomCenterValue:
+                corner = MiniCorner.BottomCenter;
+                return true;
+            case MiniCornerLeftCenterValue:
+                corner = MiniCorner.LeftCenter;
                 return true;
             default:
                 corner = MiniCorner.TopRight;
