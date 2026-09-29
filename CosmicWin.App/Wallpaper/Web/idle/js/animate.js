@@ -243,6 +243,9 @@ function buildCombinedLightingMask(basis, dpr) {
 function drawMiniRingBases(context, cx, cy, basis) {
   const annuli = RING_ANIMATIONS.map((ring) => [basis * ring.cacheInnerFrac, basis * ring.cacheOuterFrac]);
   annuli.push([basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION]);
+  // The hollow around the planet, from the center out to the first ring, is part of the disc too: text must
+  // not read there either (the planet itself is opaque and sits on top).
+  annuli.unshift([0, Math.min(...annuli.map((band) => band[0]))]);
   context.save();
   context.globalCompositeOperation = 'destination-over';
   context.fillStyle = MINI_RING_BASE_COLOR;

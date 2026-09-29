@@ -290,14 +290,16 @@ function checkMiniRingBase(loadPage) {
   var expected = rings.map(function (r) { return [basis * r.cacheInnerFrac, basis * r.cacheOuterFrac]; });
   expected.push([basis * cfg(mini, "DISC_BORDER_INNER_RADIUS_FRACTION"), basis * cfg(mini, "DISC_BORDER_OUTER_RADIUS_FRACTION")]);
   expected.sort(function (a, b) { return a[0] - b[0]; });
-  assert.strictEqual(annuli.length, expected.length, "expected one base annulus per ring band plus the disc border");
+  // the hollow around the planet, out to the first ring, is part of the disc too (text must not read there)
+  expected.unshift([0, expected[0][0]]);
+  assert.strictEqual(annuli.length, expected.length, "expected the planet hollow, one base annulus per ring band and the disc border");
   annuli.forEach(function (a, k) {
     assert.ok(Math.abs(a[0] - expected[k][0]) < 1e-6 && Math.abs(a[1] - expected[k][1]) < 1e-6,
       "base annulus " + a + " must equal the band " + expected[k]);
-    assert.ok(a[0] < a[1], "each base must be a real annulus");
+    assert.ok(a[0] < a[1], "each base must be a real annulus (or the planet hollow disc)");
   });
   // Never inside the planet/inner ring and never outside the disc.
-  assert.ok(annuli[0][0] >= basis * cfg(mini, "INNER_RING_RADIUS_FRACTION") - 1e-6, "no base inside the inner ring");
+  assert.strictEqual(annuli[0][0], 0, "the innermost base is the disc around the planet, from the center");
   assert.ok(annuli[annuli.length - 1][1] <= basis * cfg(mini, "DISC_BORDER_OUTER_RADIUS_FRACTION") + 1e-6, "no base outside the disc");
   // gaps stay open: the bands are disjoint, so a radius between two non-touching bands is in no annulus
   var gaps = 0;
