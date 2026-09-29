@@ -259,6 +259,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - Maintainer question 2026-09-29: VS Code/terminal text visible over parts of idle mini. Verified z-order: the mini
   window is topmost (index 9, WS_EX_TOPMOST); the text reads THROUGH translucent ring bands (lighting mask removed
   in T2f), while the opaque alphabet cells/planet cover it -> T2i.
+- Merge 2026-09-29 (maintainer-requested): local main fast-forwarded 67a0aae -> a7c7dcf (feature through T10,
+  36 ahead of origin/main, unpushed). T2h + T10 had NOT been reviewed yet at merge time; T2i still in progress on the branch.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
