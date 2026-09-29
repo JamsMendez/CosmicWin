@@ -70,8 +70,7 @@ public sealed class HttpAlertCompositionWiringTests
 
     private static Harness Wire(
         bool alertsEnabled = true, bool httpEnabled = false, int httpPort = 47811,
-        string? token = "test-token", bool videoWallpaperHttpEnabled = false,
-        bool wallpaperSceneHttpEnabled = false,
+        string? token = "test-token",
         Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
     {
         var primary = new FakeDisplay(
@@ -123,10 +122,8 @@ public sealed class HttpAlertCompositionWiringTests
             startAlertLayer: request => events.Add(
                 $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}"),
             endAlertLayer: () => events.Add("end"),
-            alertHttpEnabled: httpEnabled,
-            alertHttpPort: httpPort,
-            videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
-            wallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled,
+            httpServerEnabled: httpEnabled,
+            httpServerPort: httpPort,
             createLocalHttpCommandServer: resolvedHttpFactory,
             loadAlertHttpToken: () =>
             {
@@ -151,102 +148,54 @@ public sealed class HttpAlertCompositionWiringTests
         }
     }
 
-    [Fact]
-    public void AlertsDisabledHttpEnabled_HttpServerNotStarted()
-    {
-        var h = Wire(alertsEnabled: false, httpEnabled: true);
-        using (h.Composition)
-        {
-            Assert.Empty(h.HttpFactoryCalls);
-            Assert.Equal(0, h.TokenLoadCalls);
-        }
-    }
-
     /// <summary>
-    /// V4 (video-wallpaper-http-endpoint), decision 2: the server now starts when AT LEAST ONE
-    /// route is on. With alerts fully disabled and only the video route on, the shared server
-    /// still starts -- this is the composition WireProduction never reached before V4, since the
-    /// HTTP server used to live entirely inside the alertsEnabled block.
+    /// The single http-server switch serves every route: with alerts fully disabled the shared
+    /// server still starts, carrying no alert handler but the video and scene handlers.
     /// </summary>
     [Fact]
-    public void VideoOnly_AlertsFullyDisabled_StartsHttpServerWithNoAlertHandlerButAVideoSwitchHandler()
+    public void ServerOn_AlertsDisabled_StartsHttpServerWithVideoAndSceneButNoAlertHandler()
     {
-        var h = Wire(alertsEnabled: false, httpEnabled: false, videoWallpaperHttpEnabled: true, httpPort: 6001);
+        var h = Wire(alertsEnabled: false, httpEnabled: true, httpPort: 6001);
         using (h.Composition)
         {
             Assert.Equal(["port=6001 token=test-token"], h.HttpFactoryCalls);
             Assert.Null(h.HttpHandler);
             Assert.NotNull(h.HttpVideoSwitchHandler);
+            Assert.NotNull(h.HttpSceneSwitchHandler);
             Assert.True(((FakeServer)h.HttpServer!).Started);
             Assert.DoesNotContain(
                 h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
             Assert.Contains(
                 h.Trace.Lines,
                 l => l == "http-server start requested port=6001 alerts-route=False video-route=True "
-                    + "scene-route=False");
-        }
-    }
-
-    [Fact]
-    public void AlertsOnly_StartsHttpServerWithAnAlertHandlerButNoVideoSwitchHandler()
-    {
-        var h = Wire(alertsEnabled: true, httpEnabled: true, videoWallpaperHttpEnabled: false, httpPort: 6002);
-        using (h.Composition)
-        {
-            Assert.NotNull(h.HttpHandler);
-            Assert.Null(h.HttpVideoSwitchHandler);
-            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6002");
-            Assert.Contains(
-                h.Trace.Lines,
-                l => l == "http-server start requested port=6002 alerts-route=True video-route=False "
-                    + "scene-route=False");
-        }
-    }
-
-    [Fact]
-    public void BothRoutesOn_StartsHttpServerWithBothHandlers()
-    {
-        var h = Wire(alertsEnabled: true, httpEnabled: true, videoWallpaperHttpEnabled: true, httpPort: 6003);
-        using (h.Composition)
-        {
-            Assert.NotNull(h.HttpHandler);
-            Assert.NotNull(h.HttpVideoSwitchHandler);
-            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6003");
-            Assert.Contains(
-                h.Trace.Lines,
-                l => l == "http-server start requested port=6003 alerts-route=True video-route=True "
-                    + "scene-route=False");
-        }
-    }
-
-    /// <summary>
-    /// S10 (wallpaper-scene-http-endpoint, follow-up): the trace line above V4 added only reported
-    /// the alerts/video routes -- proves the scene route (S4) is reported too, independently of the
-    /// other two, exactly the way S4's own gate (<c>wallpaperSceneHttpEnabled</c> alone, unrelated to
-    /// <c>alertsEnabled</c>/<c>videoWallpaperHttpEnabled</c>) already works.
-    /// </summary>
-    [Fact]
-    public void SceneRouteOn_TraceReportsIt()
-    {
-        var h = Wire(
-            alertsEnabled: false, httpEnabled: false, videoWallpaperHttpEnabled: false,
-            wallpaperSceneHttpEnabled: true, httpPort: 6004);
-        using (h.Composition)
-        {
-            Assert.NotNull(h.HttpSceneSwitchHandler);
-            Assert.Contains(
-                h.Trace.Lines,
-                l => l == "http-server start requested port=6004 alerts-route=False video-route=False "
                     + "scene-route=True");
         }
     }
 
-    /// <summary>Neither route on, alerts otherwise enabled: the shared server never starts, exactly
-    /// as before V4 -- the pipe alone is not enough to bring it up.</summary>
+    /// <summary>Server on and alerts on: all three routes are in the table, with no per-route toggles.</summary>
     [Fact]
-    public void NeitherRouteOn_HttpServerNeverStartedButPipeDoes()
+    public void ServerOn_AlertsEnabled_ServesEveryRoute()
     {
-        var h = Wire(alertsEnabled: true, httpEnabled: false, videoWallpaperHttpEnabled: false);
+        var h = Wire(alertsEnabled: true, httpEnabled: true, httpPort: 6003);
+        using (h.Composition)
+        {
+            Assert.NotNull(h.HttpHandler);
+            Assert.NotNull(h.HttpVideoSwitchHandler);
+            Assert.NotNull(h.HttpSceneSwitchHandler);
+            Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6003");
+            Assert.Contains(
+                h.Trace.Lines,
+                l => l == "http-server start requested port=6003 alerts-route=True video-route=True "
+                    + "scene-route=True");
+        }
+    }
+
+    /// <summary>Server off, alerts enabled: the shared server never starts -- the pipe alone is not
+    /// enough to bring it up.</summary>
+    [Fact]
+    public void ServerOff_HttpServerNeverStartedButPipeDoes()
+    {
+        var h = Wire(alertsEnabled: true, httpEnabled: false);
         using (h.Composition)
         {
             Assert.Empty(h.HttpFactoryCalls);

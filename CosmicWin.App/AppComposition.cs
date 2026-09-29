@@ -196,24 +196,16 @@ public sealed class AppComposition : IDisposable
         Action? disposeVideoWallpaper = null,
         bool alertsEnabled = false,
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
-        // H4 (http-alert-endpoint): a second, independent front door onto the SAME HandleAlertCommand
-        // queue the pipe above uses, gated on this flag in addition to alertsEnabled (default off:
-        // no port opened, token file never touched). createLocalHttpCommandServer mirrors
-        // createAlertCommandServer's seam; loadAlertHttpToken mirrors it for AlertHttpTokenFile.LoadOrCreate,
-        // so a wiring test never binds a real port or touches %LOCALAPPDATA%.
-        bool alertHttpEnabled = false,
-        int alertHttpPort = AlertHttpProtocol.DefaultPort,
-        // V4 (video-wallpaper-http-endpoint): the SAME server now optionally carries a second
-        // route, gated independently of alertHttpEnabled/alertsEnabled -- decision 2, "a route
-        // whose switch is off answers 404, as if it did not exist". Extends the factory seam
-        // above with a trailing handleVideoWallpaperSwitch delegate, mirroring
-        // LocalHttpCommandServer's own trailing optional constructor parameter, rather than
-        // bypassing this seam with a second one.
-        bool videoWallpaperHttpEnabled = false,
-        // S4 (wallpaper-scene-http-endpoint): extends the factory seam with a SECOND trailing
-        // delegate, mirroring how V4 added handleVideoWallpaperSwitch to it -- the scene route is
-        // gated independently of both alertHttpEnabled/alertsEnabled and videoWallpaperHttpEnabled
-        // (decision 2/S4, "a route whose switch is off answers 404, as if it did not exist").
+        // The ONE switch for the local HTTP server (settings key http-server). When on, every route
+        // is in the routing table: alerts (which additionally needs alertsEnabled -- there is no
+        // alert queue to answer through otherwise), video and scene, each keeping its own mode
+        // guard and 503 behaviour. Default off: no port opened, token file never touched.
+        // createLocalHttpCommandServer mirrors createAlertCommandServer's seam, with trailing
+        // handleVideoWallpaperSwitch and handleWallpaperSceneSwitch delegates; loadAlertHttpToken
+        // mirrors it for AlertHttpTokenFile.LoadOrCreate, so a wiring test never binds a real port
+        // or touches %LOCALAPPDATA%.
+        bool httpServerEnabled = false,
+        int httpServerPort = AlertHttpProtocol.DefaultPort,
         Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
         Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
@@ -243,11 +235,6 @@ public sealed class AppComposition : IDisposable
         // would silently turn every one of those into an html-mode test instead of what it actually
         // exercises.
         WallpaperMode wallpaperMode = WallpaperMode.Video,
-        // S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own enable switch,
-        // independent of alertHttpEnabled/videoWallpaperHttpEnabled -- see
-        // createLocalHttpCommandServer's own remarks. Off by default, same reason every other
-        // HTTP-route switch is: no route opens for a composition that never asked for it.
-        bool wallpaperSceneHttpEnabled = false,
         // The abstraction Wire operates on for the concrete WebViewAlertLayerController.SwitchScene
         // method (mirroring startAlertLayer/endAlertLayer/preloadAlertLayer above, which do the same
         // for Start/End/Preload) -- returns whether the switch was accepted for dispatch, exactly
@@ -290,7 +277,7 @@ public sealed class AppComposition : IDisposable
         // the queue's second-scale deadlines advance deterministically instead of via Thread.Sleep.
         TimeProvider? timeProvider = null,
         // T4 (mini-scene-window): the corner window that replaces the wallpaper in
-        // WallpaperMode.Mini. Wire never builds it (production builds it on the UI STA in
+        // WallpaperMode.HtmlMini. Wire never builds it (production builds it on the UI STA in
         // WireProduction, tests pass a fake); it is only ever touched in mini mode, on the owning
         // thread. Null in mini mode means "no window": nothing shows, the scene route answers 503.
         IMiniSceneWindow? miniWindow = null,
@@ -298,8 +285,8 @@ public sealed class AppComposition : IDisposable
         int wallpaperFps = 60,
         // The corner the window starts in, and the persist seam Alt+M uses (T5). Already resolved
         // from Settings before Wire is called, like every other value above.
-        MiniCorner miniCorner = MiniCorner.TopRight,
-        Action<MiniCorner>? persistMiniCorner = null)
+        MiniPosition miniPosition = MiniPosition.TopRight,
+        Action<MiniPosition>? persistMiniPosition = null)
     {
         var alertClock = timeProvider ?? TimeProvider.System;
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
@@ -467,14 +454,14 @@ public sealed class AppComposition : IDisposable
         // T4 (mini-scene-window): mini mode replaces the wallpaper entirely -- no host, no player,
         // no wallpaper alert layer -- so it has its own "is it up" signal, true once the window's
         // Show succeeded. Like the two flags above it is chosen once at Wire time, never mixed.
-        var miniMode = wallpaperMode == WallpaperMode.Mini;
+        var miniMode = wallpaperMode == WallpaperMode.HtmlMini;
         var miniWindowActive = new VolatileFlag();
-        var currentMiniCorner = miniCorner;
+        var currentMiniPosition = miniPosition;
 
         // The mini window's rectangle for the PRIMARY display right now. Read live, at the moment of
         // placement, because the taskbar can move or auto-hide after wiring (the display object
         // updates itself in place on every watch tick's refreshDisplays call).
-        Rect MiniPlacement(MiniCorner corner)
+        Rect MiniPlacement(MiniPosition corner)
         {
             var primary = treeManager.Primary;
             return MiniWindowPlacement.Compute(
@@ -492,7 +479,7 @@ public sealed class AppComposition : IDisposable
 
             try
             {
-                var shown = miniWindow.Show(wallpaperScene, wallpaperFps, MiniPlacement(currentMiniCorner));
+                var shown = miniWindow.Show(wallpaperScene, wallpaperFps, MiniPlacement(currentMiniPosition));
                 miniWindowActive.Value = shown;
                 desktopTrace?.Record($"mini-window phase=startup shown={shown}");
             }
@@ -511,7 +498,7 @@ public sealed class AppComposition : IDisposable
 
             try
             {
-                miniWindow.MoveTo(MiniPlacement(currentMiniCorner));
+                miniWindow.MoveTo(MiniPlacement(currentMiniPosition));
             }
             catch (Exception error) when (IsRecoverableFailure(error))
             {
@@ -804,7 +791,7 @@ public sealed class AppComposition : IDisposable
         /// <summary>
         /// V4: the HTTP video-wallpaper route's delegate, handed to <see
         /// cref="createLocalHttpCommandServer"/>'s <c>handleVideoWallpaperSwitch</c> parameter
-        /// when <paramref name="videoWallpaperHttpEnabled"/> is on. Never calls
+        /// when <paramref name="httpServerEnabled"/> is on. Never calls
         /// <see cref="VideoWallpaperImport.Import"/> itself, and never any import logic directly
         /// -- it goes through <see cref="SwitchVideoWallpaper"/>, the SAME serialized path the
         /// tray uses, so a concurrent tray pick and HTTP request can never race the shared
@@ -838,7 +825,7 @@ public sealed class AppComposition : IDisposable
         /// <summary>
         /// S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's delegate, handed to
         /// <see cref="createLocalHttpCommandServer"/>'s <c>handleWallpaperSceneSwitch</c> parameter
-        /// when <paramref name="wallpaperSceneHttpEnabled"/> is on. <paramref name="name"/> is
+        /// when <paramref name="httpServerEnabled"/> is on. <paramref name="name"/> is
         /// already validated against the closed allow-list by <see
         /// cref="WallpaperSceneHttpProtocol.TryValidate"/> before this runs -- <see
         /// cref="TryParseWallpaperScene"/> failing is only a defensive fallback, never expected in
@@ -874,7 +861,7 @@ public sealed class AppComposition : IDisposable
             Func<WallpaperScene, bool>? switchScene = wallpaperMode switch
             {
                 WallpaperMode.Html => switchHtmlWallpaperScene,
-                WallpaperMode.Mini => miniWindow is null ? null : miniWindow.SwitchScene,
+                WallpaperMode.HtmlMini => miniWindow is null ? null : miniWindow.SwitchScene,
                 _ => null,
             };
             if (switchScene is null)
@@ -1522,7 +1509,7 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            var next = MiniWindowPlacement.Next(currentMiniCorner);
+            var next = MiniWindowPlacement.Next(currentMiniPosition);
             try
             {
                 miniWindow.MoveTo(MiniPlacement(next));
@@ -1533,10 +1520,10 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            currentMiniCorner = next;
+            currentMiniPosition = next;
             try
             {
-                persistMiniCorner?.Invoke(next);
+                persistMiniPosition?.Invoke(next);
             }
             catch (Exception error) when (IsRecoverableFailure(error))
             {
@@ -1561,20 +1548,11 @@ public sealed class AppComposition : IDisposable
             if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
         }
 
-        // H4 (http-alert-endpoint)/V4 (video-wallpaper-http-endpoint): the shared HTTP server
-        // starts whenever AT LEAST ONE of its two routes is on -- decision 2. The alerts route
-        // additionally needs alertsEnabled (there is no alert queue to answer through otherwise,
-        // see HandleAlertCommand above); the video route needs nothing but its own flag, so this
-        // whole block -- token file included -- now runs OUTSIDE the alertsEnabled block above,
-        // unlike before V4 when the HTTP server could only ever exist nested inside it. Every
-        // alert behaviour and trace line above (the pipe, preloadAlertLayer) is untouched by this
-        // move; only the server that answers HTTP requests was ever nested unnecessarily.
-        var alertHttpRouteOn = alertsEnabled && alertHttpEnabled;
-        var videoWallpaperHttpRouteOn = videoWallpaperHttpEnabled;
-        // S4: gated on its own flag alone, exactly like the video route -- neither alertsEnabled nor
-        // videoWallpaperHttpEnabled has any bearing on whether the scene route is in the table.
-        var wallpaperSceneHttpRouteOn = wallpaperSceneHttpEnabled;
-        if (alertHttpRouteOn || videoWallpaperHttpRouteOn || wallpaperSceneHttpRouteOn)
+        // The shared HTTP server starts when http-server is on and serves every route. Only the
+        // alerts route also needs alertsEnabled (see HandleAlertCommand above); when alerts are
+        // off it is left out of the table and answers as it does for a disabled feature.
+        var alertHttpRouteOn = alertsEnabled;
+        if (httpServerEnabled)
         {
             try
             {
@@ -1597,18 +1575,18 @@ public sealed class AppComposition : IDisposable
                                 port, t, handler, diagnostic, videoSwitch,
                                 handleWallpaperSceneSwitch: sceneSwitch));
                     httpAlertServer = httpServerFactory(
-                        alertHttpPort, token,
+                        httpServerPort, token,
                         alertHttpRouteOn ? HandleAlertCommand : null,
                         message => desktopTrace?.Record(message),
-                        videoWallpaperHttpRouteOn ? HandleVideoWallpaperHttpSwitch : null,
-                        wallpaperSceneHttpRouteOn ? HandleWallpaperSceneHttpSwitch : null);
+                        HandleVideoWallpaperHttpSwitch,
+                        HandleWallpaperSceneHttpSwitch);
                     httpAlertServer.Start();
                     // H5b: Start() never throws -- a port already in use is reported by the server
                     // itself as "alert http: failed to start listening ..." through this same sink
                     // -- so these lines must not claim the endpoint is listening.
                     if (alertHttpRouteOn)
                     {
-                        desktopTrace?.Record($"alert-http start requested port={alertHttpPort}");
+                        desktopTrace?.Record($"alert-http start requested port={httpServerPort}");
                     }
 
                     // V4: which routes actually ended up in the routing table, so a trace reader
@@ -1619,9 +1597,8 @@ public sealed class AppComposition : IDisposable
                     // rather than a separate one, or a trace reader could tell a video-only start
                     // from every OTHER combination except this one.
                     desktopTrace?.Record(
-                        $"http-server start requested port={alertHttpPort} " +
-                        $"alerts-route={alertHttpRouteOn} video-route={videoWallpaperHttpRouteOn} " +
-                        $"scene-route={wallpaperSceneHttpRouteOn}");
+                        $"http-server start requested port={httpServerPort} " +
+                        $"alerts-route={alertHttpRouteOn} video-route=True scene-route=True");
                 }
             }
             // Same corruption-class exclusion IsRecoverableFailure already applies to a
@@ -2329,7 +2306,7 @@ public sealed class AppComposition : IDisposable
 
         // T4 (mini-scene-window): mini mode is not a wallpaper at all -- no host, no player, no video
         // thread and no wallpaper alert layer. The corner window below takes their place.
-        var miniMode = settings.WallpaperMode == WallpaperMode.Mini;
+        var miniMode = settings.WallpaperMode == WallpaperMode.HtmlMini;
         Win32VideoWallpaperHost? videoWallpaperHost = miniMode ? null : new Win32VideoWallpaperHost();
         MediaFoundationVideoWallpaperPlayer? videoWallpaperPlayer = miniMode ? null : new MediaFoundationVideoWallpaperPlayer();
         // Built here, on the owning UI STA (the controller records its thread and every later call must
@@ -2388,13 +2365,11 @@ public sealed class AppComposition : IDisposable
             persistVideoWallpaperPath: path => settingsStore.Update(s => s with { VideoWallpaperPath = path }),
             readVideoFileSnapshot: VideoWallpaperImport.TryReadSnapshot,
             alertsEnabled: settings.AlertsEnabled,
-            alertHttpEnabled: settings.AlertHttpEnabled,
-            alertHttpPort: settings.AlertHttpPort,
-            videoWallpaperHttpEnabled: settings.VideoWallpaperHttpEnabled,
+            httpServerEnabled: settings.HttpServerEnabled,
+            httpServerPort: settings.HttpServerPort,
             // S4 (wallpaper-scene-http-endpoint): null (no live switch to offer) when no alert layer
             // exists, exactly the same shape startAlertLayer/endAlertLayer/preloadAlertLayer below
             // already use for the SAME alertLayer collaborator.
-            wallpaperSceneHttpEnabled: settings.WallpaperSceneHttpEnabled,
             switchHtmlWallpaperScene: alertLayer is null ? null : alertLayer.SwitchScene,
             persistWallpaperScene: scene => settingsStore.Update(s => s with { WallpaperScene = scene }),
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
@@ -2435,8 +2410,8 @@ public sealed class AppComposition : IDisposable
             miniWindow: miniWindow,
             wallpaperScene: settings.WallpaperScene,
             wallpaperFps: settings.WallpaperFps,
-            miniCorner: settings.MiniCorner,
-            persistMiniCorner: corner => settingsStore.Update(s => s with { MiniCorner = corner }),
+            miniPosition: settings.MiniPosition,
+            persistMiniPosition: corner => settingsStore.Update(s => s with { MiniPosition = corner }),
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }

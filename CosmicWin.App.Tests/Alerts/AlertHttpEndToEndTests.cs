@@ -110,8 +110,8 @@ public sealed class AlertHttpEndToEndTests
             startAlertLayer: request => events.Add(
                 $"start:{string.Join(",", request.Tiles)}:{request.Columns}x{request.Rows}:gap={request.Gap}:{request.DurationMilliseconds}"),
             endAlertLayer: () => events.Add("end"),
-            alertHttpEnabled: true,
-            alertHttpPort: port,
+            httpServerEnabled: true,
+            httpServerPort: port,
             loadAlertHttpToken: () => Token,
             // createLocalHttpCommandServer left at its default (null): AppComposition.Wire's own
             // production fallback constructs a REAL LocalHttpCommandServer here, bound to a real

@@ -128,8 +128,7 @@ public sealed class SettingsFileTests : IDisposable
         var settings = SettingsFile.LoadOrCreate(Path_);
 
         Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
-        Assert.True(settings.WallpaperSceneHttpEnabled);
-        Assert.True(settings.AlertHttpEnabled);
+        Assert.True(settings.HttpServerEnabled);
         Assert.True(settings.AlertsEnabled);
     }
 
@@ -150,7 +149,7 @@ public sealed class SettingsFileTests : IDisposable
         Assert.Equal(original, File.ReadAllText(Path_), StringComparer.Ordinal);
         Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(Path_));
         Assert.False(settings.FocusBorder);
-        Assert.False(settings.AlertHttpEnabled);
+        Assert.False(settings.HttpServerEnabled);
     }
 
     /// <summary>

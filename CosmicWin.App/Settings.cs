@@ -19,14 +19,15 @@ public enum WallpaperMode
 
     /// <summary>
     /// No wallpaper host and no video: a small, always-on-top, click-through scene window sits in
-    /// <see cref="Settings.MiniCorner"/> of the work area. Wired by later tasks of
-    /// <c>odd/tasks/mini-scene-window.md</c>; the desktop background stays as Windows has it.
+    /// <see cref="Settings.MiniPosition"/> of the work area, showing the same HTML scene the
+    /// wallpaper would; the desktop background stays as Windows has it. Serialized as
+    /// <c>html-mini</c>; the legacy spelling <c>mini</c> is still read.
     /// </summary>
-    Mini,
+    HtmlMini,
 }
 
-/// <summary>The work-area position the mini scene window sits in, ordered clockwise; the name is kept for compatibility though it now also holds the side midpoints.</summary>
-public enum MiniCorner
+/// <summary>The work-area position the mini scene window sits in: four corners and four side midpoints, ordered clockwise.</summary>
+public enum MiniPosition
 {
     TopLeft,
     TopCenter,
@@ -77,26 +78,20 @@ public enum WallpaperScene
 /// way to run this app forever, not a half-configured one.
 /// </param>
 /// <param name="AlertsEnabled">
-/// Whether live alert commands are accepted over the named pipe and drawn over the video wallpaper.
+/// Whether live alert commands are accepted over the named pipe and the HTTP alerts route, and drawn
+/// over the wallpaper. Settings key <c>alerts</c> (legacy: <c>alerts-enabled</c>).
 /// </param>
-/// <param name="AlertHttpEnabled">
-/// Whether the same alert commands are also accepted over a loopback-only HTTP endpoint, next to the
-/// named pipe. ON by default since S9 (wallpaper-scene-http-endpoint, 2026-09-27, maintainer's
-/// decision: "alertas tambien debe estar prendidas") -- loopback-only (127.0.0.1 / localhost, never
-/// reachable over the network) and gated by a bearer token nothing outside this machine can read, so
-/// a fresh install opens this port as an accepted consequence, the same call S8 already made for
-/// <see cref="WallpaperSceneHttpEnabled"/>.
+/// <param name="HttpServerEnabled">
+/// The ONE switch for the local HTTP server (settings key <c>http-server</c>, legacy:
+/// <c>alert-http</c>). When on, every route is served -- <c>/v1/alerts</c>,
+/// <c>/v1/wallpaper/video</c> and <c>/v1/wallpaper/scene</c> -- each keeping its own mode guard.
+/// ON by default (maintainer's decision, S9): loopback-only (127.0.0.1 / localhost, never reachable
+/// over the network) and gated by a bearer token nothing outside this machine can read.
 /// </param>
-/// <param name="AlertHttpPort">
-/// The loopback TCP port the HTTP endpoint listens on when <see cref="AlertHttpEnabled"/> is on.
-/// Defaults to <see cref="AlertHttpProtocol.DefaultPort"/>, the same constant the endpoint itself
-/// falls back to, so an unconfigured settings file and a freshly started server agree on the port.
-/// </param>
-/// <param name="VideoWallpaperHttpEnabled">
-/// Whether a request to switch the video wallpaper is also accepted over the SAME loopback-only HTTP
-/// endpoint <see cref="AlertHttpEnabled"/> gates -- the same port and the same bearer token file, no
-/// second server. Off by default, for the same reason <see cref="AlertHttpEnabled"/> is: a settings
-/// file that has never been written must not open a network-facing route nobody asked for.
+/// <param name="HttpServerPort">
+/// The loopback TCP port the HTTP server listens on when <see cref="HttpServerEnabled"/> is on
+/// (settings key <c>http-server-port</c>, legacy: <c>alert-http-port</c>). Defaults to
+/// <see cref="AlertHttpProtocol.DefaultPort"/>, the same constant the server itself falls back to.
 /// </param>
 /// <param name="Gap">
 /// Whole pixels of space CosmicWin draws around and between tiled windows, and around and between an
@@ -121,17 +116,9 @@ public enum WallpaperScene
 /// on every real animation frame -- i.e. at the display's own refresh rate (over 60fps on any display
 /// faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a no-op default.
 /// </param>
-/// <param name="WallpaperSceneHttpEnabled">
-/// S4 (wallpaper-scene-http-endpoint): whether a request to switch the html wallpaper's SCENE is also
-/// accepted over the SAME loopback-only HTTP endpoint <see cref="AlertHttpEnabled"/> gates -- the
-/// same port and the same bearer token file, no second server. Its own key, independent of both
-/// <see cref="AlertHttpEnabled"/> and <see cref="VideoWallpaperHttpEnabled"/> (a route whose own
-/// switch is off answers 404, as if it did not exist -- the same decision <see
-/// cref="VideoWallpaperHttpEnabled"/> itself follows). ON by default since S8
-/// (wallpaper-scene-http-endpoint, 2026-09-27): the html wallpaper is now CosmicWin's default
-/// renderer and this route is its live scene control, so a fresh install opens this loopback-only
-/// port -- an accepted consequence, the same one S9 later made for <see cref="AlertHttpEnabled"/>.
-/// <see cref="VideoWallpaperHttpEnabled"/> alone still stays off until the maintainer opts in.
+/// <param name="MiniPosition">
+/// Where in the work area the <see cref="WallpaperMode.HtmlMini"/> window sits (settings key
+/// <c>mini-position</c>, legacy: <c>mini-corner</c>). Defaults to top-right.
 /// </param>
 /// <remarks>
 /// <para>
@@ -151,11 +138,11 @@ public enum WallpaperScene
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool AlertHttpEnabled = true,
-    int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
+    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool HttpServerEnabled = true,
+    int HttpServerPort = AlertHttpProtocol.DefaultPort,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    bool WallpaperSceneHttpEnabled = true, MiniCorner MiniCorner = MiniCorner.TopRight)
+    MiniPosition MiniPosition = MiniPosition.TopRight)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -173,13 +160,17 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string VideoWallpaperPathKey = "video-wallpaper-path";
 
-    private const string AlertsEnabledKey = "alerts-enabled";
+    private const string AlertsKey = "alerts";
 
-    private const string AlertHttpEnabledKey = "alert-http";
+    private const string LegacyAlertsKey = "alerts-enabled";
 
-    private const string AlertHttpPortKey = "alert-http-port";
+    private const string HttpServerKey = "http-server";
 
-    private const string VideoWallpaperHttpEnabledKey = "video-wallpaper-http";
+    private const string LegacyHttpServerKey = "alert-http";
+
+    private const string HttpServerPortKey = "http-server-port";
+
+    private const string LegacyHttpServerPortKey = "alert-http-port";
 
     private const string GapKey = "gap";
 
@@ -190,22 +181,27 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string WallpaperModeHtmlValue = "html";
 
-    private const string WallpaperModeMiniValue = "mini";
+    private const string WallpaperModeHtmlMiniValue = "html-mini";
 
-    /// <summary>See <see cref="CosmicWin.App.MiniCorner"/>.</summary>
-    private const string MiniCornerKey = "mini-corner";
+    /// <summary>Legacy spelling of <see cref="WallpaperModeHtmlMiniValue"/>, read but never written.</summary>
+    private const string LegacyWallpaperModeMiniValue = "mini";
 
-    private const string MiniCornerTopLeftValue = "top-left";
+    /// <summary>See <see cref="CosmicWin.App.MiniPosition"/>.</summary>
+    private const string MiniPositionKey = "mini-position";
 
-    private const string MiniCornerTopRightValue = "top-right";
+    private const string LegacyMiniPositionKey = "mini-corner";
 
-    private const string MiniCornerBottomLeftValue = "bottom-left";
+    private const string MiniPositionTopLeftValue = "top-left";
 
-    private const string MiniCornerBottomRightValue = "bottom-right";
-    private const string MiniCornerTopCenterValue = "top-center";
-    private const string MiniCornerRightCenterValue = "right-center";
-    private const string MiniCornerBottomCenterValue = "bottom-center";
-    private const string MiniCornerLeftCenterValue = "left-center";
+    private const string MiniPositionTopRightValue = "top-right";
+
+    private const string MiniPositionBottomLeftValue = "bottom-left";
+
+    private const string MiniPositionBottomRightValue = "bottom-right";
+    private const string MiniPositionTopCenterValue = "top-center";
+    private const string MiniPositionRightCenterValue = "right-center";
+    private const string MiniPositionBottomCenterValue = "bottom-center";
+    private const string MiniPositionLeftCenterValue = "left-center";
 
     /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
     private const string WallpaperSceneKey = "wallpaper-scene";
@@ -225,9 +221,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string WallpaperFps60Value = "60";
 
-    /// <summary>S4 (wallpaper-scene-http-endpoint): see <see cref="Settings.WallpaperSceneHttpEnabled"/>.</summary>
-    private const string WallpaperSceneHttpEnabledKey = "wallpaper-scene-http";
-
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -238,6 +231,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <remarks>
     /// The LAST assignment of a key wins. A file appended to twice is a thing that happens, and
     /// reading it as its most recent line is the only answer that matches what an editor shows.
+    /// Legacy key names (<c>alerts-enabled</c>, <c>alert-http</c>, <c>alert-http-port</c>,
+    /// <c>mini-corner</c>) are still read, but when a file carries both a legacy key and its
+    /// replacement the NEW key wins whatever the line order. <c>video-wallpaper-http</c> and
+    /// <c>wallpaper-scene-http</c> no longer exist: they are skipped like any unknown key.
     /// </remarks>
     public static Settings Parse(string content)
     {
@@ -245,16 +242,13 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var borderColor = Default.BorderColor;
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
-        var alertsEnabled = Default.AlertsEnabled;
-        var alertHttpEnabled = Default.AlertHttpEnabled;
-        var alertHttpPort = Default.AlertHttpPort;
-        var videoWallpaperHttpEnabled = Default.VideoWallpaperHttpEnabled;
+        bool? alerts = null, legacyAlerts = null, httpServer = null, legacyHttpServer = null;
+        int? httpServerPort = null, legacyHttpServerPort = null;
+        MiniPosition? miniPositionNew = null, miniPositionLegacy = null;
         var gap = Default.Gap;
         var wallpaperMode = Default.WallpaperMode;
         var wallpaperScene = Default.WallpaperScene;
         var wallpaperFps = Default.WallpaperFps;
-        var wallpaperSceneHttpEnabled = Default.WallpaperSceneHttpEnabled;
-        var miniCorner = Default.MiniCorner;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -299,25 +293,35 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 videoWallpaperPath = value;
             }
-            else if (key.Equals(AlertsEnabledKey, StringComparison.OrdinalIgnoreCase)
+            else if (key.Equals(AlertsKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadFlag(value, out var alertsFlag))
             {
-                alertsEnabled = alertsFlag;
+                alerts = alertsFlag;
             }
-            else if (key.Equals(AlertHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var alertHttpFlag))
+            else if (key.Equals(LegacyAlertsKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var legacyAlertsFlag))
             {
-                alertHttpEnabled = alertHttpFlag;
+                legacyAlerts = legacyAlertsFlag;
             }
-            else if (key.Equals(AlertHttpPortKey, StringComparison.OrdinalIgnoreCase)
+            else if (key.Equals(HttpServerKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var httpServerFlag))
+            {
+                httpServer = httpServerFlag;
+            }
+            else if (key.Equals(LegacyHttpServerKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var legacyHttpServerFlag))
+            {
+                legacyHttpServer = legacyHttpServerFlag;
+            }
+            else if (key.Equals(HttpServerPortKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadPort(value, out var port))
             {
-                alertHttpPort = port;
+                httpServerPort = port;
             }
-            else if (key.Equals(VideoWallpaperHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var videoWallpaperHttpFlag))
+            else if (key.Equals(LegacyHttpServerPortKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadPort(value, out var legacyPort))
             {
-                videoWallpaperHttpEnabled = videoWallpaperHttpFlag;
+                legacyHttpServerPort = legacyPort;
             }
             else if (key.Equals(GapKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadGap(value, out var gapValue))
@@ -339,21 +343,26 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 wallpaperFps = wallpaperFpsValue;
             }
-            else if (key.Equals(WallpaperSceneHttpEnabledKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var wallpaperSceneHttpFlag))
+            else if (key.Equals(MiniPositionKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadMiniPosition(value, out var miniPositionValue))
             {
-                wallpaperSceneHttpEnabled = wallpaperSceneHttpFlag;
+                miniPositionNew = miniPositionValue;
             }
-            else if (key.Equals(MiniCornerKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadMiniCorner(value, out var miniCornerValue))
+            else if (key.Equals(LegacyMiniPositionKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadMiniPosition(value, out var legacyMiniPositionValue))
             {
-                miniCorner = miniCornerValue;
+                miniPositionLegacy = legacyMiniPositionValue;
             }
+            // video-wallpaper-http and wallpaper-scene-http: per-route toggles that no longer exist.
+            // Deliberately no branch -- the line is skipped like any other unknown key.
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
-            alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap, wallpaperMode,
-            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled, miniCorner);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath,
+            alerts ?? legacyAlerts ?? Default.AlertsEnabled,
+            httpServer ?? legacyHttpServer ?? Default.HttpServerEnabled,
+            httpServerPort ?? legacyHttpServerPort ?? Default.HttpServerPort,
+            gap, wallpaperMode, wallpaperScene, wallpaperFps,
+            miniPositionNew ?? miniPositionLegacy ?? Default.MiniPosition);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -374,23 +383,18 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # or blank for none.
          {VideoWallpaperPathKey} = {VideoWallpaperPath ?? ""}
 
-         # {AlertsEnabledKey}: on to accept live alert commands, off to ignore the alert pipe.
-         {AlertsEnabledKey} = {(AlertsEnabled ? "on" : "off")}
+         # {AlertsKey}: on to accept live alert commands (named pipe and HTTP), off to ignore them.
+         {AlertsKey} = {(AlertsEnabled ? "on" : "off")}
 
-         # {AlertHttpEnabledKey}: on (default) to also accept alert commands over a local,
-         # loopback-only HTTP endpoint (127.0.0.1 / localhost only -- never reachable over the
-         # network), off to leave it closed. Its bearer token lives in
-         # %LOCALAPPDATA%\CosmicWin\alert-http.token, created automatically the first time the
-         # endpoint starts.
-         {AlertHttpEnabledKey} = {(AlertHttpEnabled ? "on" : "off")}
+         # {HttpServerKey}: on (default) to run the local HTTP server that serves every route
+         # (alerts, video wallpaper, wallpaper scene). Loopback-only (127.0.0.1 / localhost, never
+         # reachable over the network); its bearer token lives in
+         # %LOCALAPPDATA%\CosmicWin\alert-http.token, created the first time the server starts.
+         # Off to leave the port closed.
+         {HttpServerKey} = {(HttpServerEnabled ? "on" : "off")}
 
-         # {AlertHttpPortKey}: the loopback TCP port the HTTP endpoint listens on when {AlertHttpEnabledKey} is on.
-         {AlertHttpPortKey} = {AlertHttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}
-
-         # {VideoWallpaperHttpEnabledKey}: on to also accept a request to switch the video wallpaper
-         # over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates -- the same port and
-         # the same alert-http.token bearer token file, off to leave that route closed.
-         {VideoWallpaperHttpEnabledKey} = {(VideoWallpaperHttpEnabled ? "on" : "off")}
+         # {HttpServerPortKey}: the loopback TCP port the HTTP server listens on when {HttpServerKey} is on.
+         {HttpServerPortKey} = {HttpServerPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          # {GapKey}: whole pixels of space around and between tiled windows, and around and between
          # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
@@ -398,8 +402,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {WallpaperModeKey}: `{WallpaperModeHtmlValue}` (default) shows an animated HTML scene as the
          # desktop wallpaper; `{WallpaperModeVideoValue}` plays the configured video instead, with no
-         # HTML scene involved; `{WallpaperModeMiniValue}` leaves the wallpaper alone and shows a small
-         # always-on-top scene window in a corner ({MiniCornerKey}).
+         # HTML scene involved; `{WallpaperModeHtmlMiniValue}` leaves the wallpaper alone and shows a small
+         # always-on-top scene window ({MiniPositionKey}).
          {WallpaperModeKey} = {WallpaperModeValue(WallpaperMode)}
 
          # {WallpaperSceneKey}: which scene the html wallpaper ({WallpaperModeKey} = {WallpaperModeHtmlValue})
@@ -412,17 +416,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # the display's own refresh rate.
          {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {WallpaperSceneHttpEnabledKey}: on (default) to also accept a request to switch the html
-         # wallpaper's SCENE over the SAME loopback-only HTTP endpoint {AlertHttpEnabledKey} gates --
-         # the same port and the same alert-http.token bearer token file, off to leave that route
-         # closed.
-         {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
-
-         # {MiniCornerKey}: where in the work area the `{WallpaperModeMiniValue}` window sits: a corner
-         # (`{MiniCornerTopLeftValue}`, `{MiniCornerTopRightValue}` (default), `{MiniCornerBottomLeftValue}`,
-         # `{MiniCornerBottomRightValue}`) or a side midpoint (`{MiniCornerTopCenterValue}`,
-         # `{MiniCornerRightCenterValue}`, `{MiniCornerBottomCenterValue}`, `{MiniCornerLeftCenterValue}`).
-         {MiniCornerKey} = {MiniCornerValue(MiniCorner)}
+         # {MiniPositionKey}: where in the work area the `{WallpaperModeHtmlMiniValue}` window sits: a corner
+         # (`{MiniPositionTopLeftValue}`, `{MiniPositionTopRightValue}` (default), `{MiniPositionBottomLeftValue}`,
+         # `{MiniPositionBottomRightValue}`) or a side midpoint (`{MiniPositionTopCenterValue}`,
+         # `{MiniPositionRightCenterValue}`, `{MiniPositionBottomCenterValue}`, `{MiniPositionLeftCenterValue}`).
+         {MiniPositionKey} = {MiniPositionValue(MiniPosition)}
 
          """;
 
@@ -430,21 +428,21 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private static string WallpaperModeValue(WallpaperMode mode) => mode switch
     {
         WallpaperMode.Html => WallpaperModeHtmlValue,
-        WallpaperMode.Mini => WallpaperModeMiniValue,
+        WallpaperMode.HtmlMini => WallpaperModeHtmlMiniValue,
         _ => WallpaperModeVideoValue,
     };
 
-    /// <summary>Maps a <see cref="CosmicWin.App.MiniCorner"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
-    private static string MiniCornerValue(MiniCorner corner) => corner switch
+    /// <summary>Maps a <see cref="CosmicWin.App.MiniPosition"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
+    private static string MiniPositionValue(MiniPosition corner) => corner switch
     {
-        MiniCorner.TopLeft => MiniCornerTopLeftValue,
-        MiniCorner.TopRight => MiniCornerTopRightValue,
-        MiniCorner.BottomLeft => MiniCornerBottomLeftValue,
-        MiniCorner.TopCenter => MiniCornerTopCenterValue,
-        MiniCorner.RightCenter => MiniCornerRightCenterValue,
-        MiniCorner.BottomCenter => MiniCornerBottomCenterValue,
-        MiniCorner.LeftCenter => MiniCornerLeftCenterValue,
-        _ => MiniCornerBottomRightValue,
+        MiniPosition.TopLeft => MiniPositionTopLeftValue,
+        MiniPosition.TopRight => MiniPositionTopRightValue,
+        MiniPosition.BottomLeft => MiniPositionBottomLeftValue,
+        MiniPosition.TopCenter => MiniPositionTopCenterValue,
+        MiniPosition.RightCenter => MiniPositionRightCenterValue,
+        MiniPosition.BottomCenter => MiniPositionBottomCenterValue,
+        MiniPosition.LeftCenter => MiniPositionLeftCenterValue,
+        _ => MiniPositionBottomRightValue,
     };
 
     /// <summary>Maps a <see cref="CosmicWin.App.WallpaperScene"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
@@ -550,7 +548,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// D3 (html-wallpaper-demo): reads <c>video</c>, <c>html</c> or <c>mini</c>, case-insensitively. Same rule as
+    /// D3 (html-wallpaper-demo): reads <c>video</c>, <c>html</c>, <c>html-mini</c> or the legacy <c>mini</c>, case-insensitively. Same rule as
     /// every other key: anything else keeps the default rather than guessing.
     /// </summary>
     private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
@@ -563,8 +561,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             case WallpaperModeHtmlValue:
                 mode = WallpaperMode.Html;
                 return true;
-            case WallpaperModeMiniValue:
-                mode = WallpaperMode.Mini;
+            case WallpaperModeHtmlMiniValue or LegacyWallpaperModeMiniValue:
+                mode = WallpaperMode.HtmlMini;
                 return true;
             default:
                 mode = WallpaperMode.Video;
@@ -576,36 +574,36 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// Reads one of the four fixed corner names, case-insensitively. Same rule as every other key:
     /// anything else keeps the default (top-right) rather than guessing.
     /// </summary>
-    private static bool TryReadMiniCorner(string value, out MiniCorner corner)
+    private static bool TryReadMiniPosition(string value, out MiniPosition corner)
     {
         switch (value.ToLowerInvariant())
         {
-            case MiniCornerTopLeftValue:
-                corner = MiniCorner.TopLeft;
+            case MiniPositionTopLeftValue:
+                corner = MiniPosition.TopLeft;
                 return true;
-            case MiniCornerTopRightValue:
-                corner = MiniCorner.TopRight;
+            case MiniPositionTopRightValue:
+                corner = MiniPosition.TopRight;
                 return true;
-            case MiniCornerBottomLeftValue:
-                corner = MiniCorner.BottomLeft;
+            case MiniPositionBottomLeftValue:
+                corner = MiniPosition.BottomLeft;
                 return true;
-            case MiniCornerBottomRightValue:
-                corner = MiniCorner.BottomRight;
+            case MiniPositionBottomRightValue:
+                corner = MiniPosition.BottomRight;
                 return true;
-            case MiniCornerTopCenterValue:
-                corner = MiniCorner.TopCenter;
+            case MiniPositionTopCenterValue:
+                corner = MiniPosition.TopCenter;
                 return true;
-            case MiniCornerRightCenterValue:
-                corner = MiniCorner.RightCenter;
+            case MiniPositionRightCenterValue:
+                corner = MiniPosition.RightCenter;
                 return true;
-            case MiniCornerBottomCenterValue:
-                corner = MiniCorner.BottomCenter;
+            case MiniPositionBottomCenterValue:
+                corner = MiniPosition.BottomCenter;
                 return true;
-            case MiniCornerLeftCenterValue:
-                corner = MiniCorner.LeftCenter;
+            case MiniPositionLeftCenterValue:
+                corner = MiniPosition.LeftCenter;
                 return true;
             default:
-                corner = MiniCorner.TopRight;
+                corner = MiniPosition.TopRight;
                 return false;
         }
     }

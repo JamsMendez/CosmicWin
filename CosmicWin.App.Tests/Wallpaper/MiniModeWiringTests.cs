@@ -134,7 +134,7 @@ public sealed class MiniModeWiringTests
         public required List<Action> Posted { get; init; }
         public required List<string> Imports { get; init; }
         public required List<WallpaperScene> PersistedScenes { get; init; }
-        public required List<MiniCorner> PersistedCorners { get; init; }
+        public required List<MiniPosition> PersistedCorners { get; init; }
         public required FakeKeyboardHookPlatform Platform { get; init; }
         public Func<string, bool>? SceneSwitch { get; init; }
         public Server? AlertServer { get; init; }
@@ -147,7 +147,7 @@ public sealed class MiniModeWiringTests
     private static Harness Wire(
         WallpaperMode mode,
         IMiniSceneWindow? miniWindow = null,
-        MiniCorner corner = MiniCorner.TopRight,
+        MiniPosition corner = MiniPosition.TopRight,
         WallpaperScene scene = WallpaperScene.Raphael,
         int fps = 30,
         bool queueOwningThread = false,
@@ -168,7 +168,7 @@ public sealed class MiniModeWiringTests
         Server? server = null;
         var imports = new List<string>();
         var scenes = new List<WallpaperScene>();
-        var corners = new List<MiniCorner>();
+        var corners = new List<MiniPosition>();
         var platform = new FakeKeyboardHookPlatform();
 
         var composition = AppComposition.Wire(
@@ -189,14 +189,14 @@ public sealed class MiniModeWiringTests
             videoWallpaperPath: videoPath,
             scheduleVideoWallpaperWork: work => work(),
             wallpaperMode: mode,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             switchHtmlWallpaperScene: htmlSwitch,
             persistWallpaperScene: scenes.Add,
             miniWindow: miniWindow,
             wallpaperScene: scene,
             wallpaperFps: fps,
-            miniCorner: corner,
-            persistMiniCorner: corners.Add,
+            miniPosition: corner,
+            persistMiniPosition: corners.Add,
             refreshDisplays: refreshDisplays,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, _, sceneHandler) =>
@@ -236,16 +236,16 @@ public sealed class MiniModeWiringTests
     }
 
     [Theory]
-    [InlineData(MiniCorner.TopRight, 3152, 0)]
-    [InlineData(MiniCorner.TopLeft, 0, 0)]
-    [InlineData(MiniCorner.BottomLeft, 0, 1112)]
-    [InlineData(MiniCorner.BottomRight, 3152, 1112)]
+    [InlineData(MiniPosition.TopRight, 3152, 0)]
+    [InlineData(MiniPosition.TopLeft, 0, 0)]
+    [InlineData(MiniPosition.BottomLeft, 0, 1112)]
+    [InlineData(MiniPosition.BottomRight, 3152, 1112)]
     public void Startup_MiniMode_ShowsTheWindowInTheConfiguredCornerOfThePrimaryWorkArea(
-        MiniCorner corner, int x, int y)
+        MiniPosition corner, int x, int y)
     {
         var window = new FakeMiniWindow();
 
-        using var composition = Wire(WallpaperMode.Mini, window, corner).Composition;
+        using var composition = Wire(WallpaperMode.HtmlMini, window, corner).Composition;
 
         var shown = Assert.Single(window.Shown);
         Assert.Equal(WallpaperScene.Raphael, shown.Scene);
@@ -258,7 +258,7 @@ public sealed class MiniModeWiringTests
     {
         var window = new FakeMiniWindow();
 
-        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, queueOwningThread: true);
         using (harness.Composition)
         {
             Assert.Empty(window.Shown);
@@ -274,7 +274,7 @@ public sealed class MiniModeWiringTests
     {
         var window = new FakeMiniWindow { ShowResult = false };
 
-        var harness = Wire(WallpaperMode.Mini, window);
+        var harness = Wire(WallpaperMode.HtmlMini, window);
         using (harness.Composition)
         {
             harness.Timer.Tick();
@@ -292,7 +292,7 @@ public sealed class MiniModeWiringTests
     {
         var window = new FakeMiniWindow { ThrowOnShow = true };
 
-        var harness = Wire(WallpaperMode.Mini, window);
+        var harness = Wire(WallpaperMode.HtmlMini, window);
         using (harness.Composition)
         {
             Assert.Contains(harness.Trace.Lines, line =>
@@ -326,7 +326,7 @@ public sealed class MiniModeWiringTests
         var player = new Player();
         var window = new FakeMiniWindow();
 
-        var harness = Wire(WallpaperMode.Mini, window, host: host, player: player,
+        var harness = Wire(WallpaperMode.HtmlMini, window, host: host, player: player,
             videoPath: typeof(MiniModeWiringTests).Assembly.Location);
         using (harness.Composition)
         {
@@ -361,7 +361,7 @@ public sealed class MiniModeWiringTests
         var player = withCollaborators ? new Player() : null;
         var window = new FakeMiniWindow();
 
-        var harness = Wire(WallpaperMode.Mini, window, host: host, player: player);
+        var harness = Wire(WallpaperMode.HtmlMini, window, host: host, player: player);
         using (harness.Composition)
         {
             harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
@@ -377,7 +377,7 @@ public sealed class MiniModeWiringTests
     public void HttpSceneSwitch_MiniMode_AcceptsAtOnceThenSwitchesAndPersistsOnTheOwningThread()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, queueOwningThread: true);
         using (harness.Composition)
         {
             Pump(harness);
@@ -400,7 +400,7 @@ public sealed class MiniModeWiringTests
     public void HttpSceneSwitch_MiniMode_WhenTheWindowRefuses_DoesNotPersist()
     {
         var window = new FakeMiniWindow { SwitchResult = false };
-        var harness = Wire(WallpaperMode.Mini, window);
+        var harness = Wire(WallpaperMode.HtmlMini, window);
         using (harness.Composition)
         {
             Assert.True(harness.SceneSwitch!("explorer"));
@@ -413,7 +413,7 @@ public sealed class MiniModeWiringTests
     [Fact]
     public void HttpSceneSwitch_MiniModeWithNoWindow_ReturnsFalse()
     {
-        var harness = Wire(WallpaperMode.Mini, miniWindow: null);
+        var harness = Wire(WallpaperMode.HtmlMini, miniWindow: null);
         using (harness.Composition)
         {
             Assert.False(harness.SceneSwitch!("idle"));
@@ -453,7 +453,7 @@ public sealed class MiniModeWiringTests
     public void Alerts_MiniMode_AreRoutedToTheMiniWindowAndHiddenWhenTheyExpire()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, alerts: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, alerts: true);
         using (harness.Composition)
         {
             Assert.Equal(AlertPipeProtocol.OkReply, harness.AlertServer!.Send("warning:1 duration:1"));
@@ -475,7 +475,7 @@ public sealed class MiniModeWiringTests
         // A window that never came up must not be told to show alerts it cannot draw: the queue keeps
         // them pending (desktop not visible), exactly as html mode does before its host attaches.
         var window = new FakeMiniWindow { ShowResult = false };
-        var harness = Wire(WallpaperMode.Mini, window, alerts: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, alerts: true);
         using (harness.Composition)
         {
             harness.AlertServer!.Send("warning:1 duration:1");
@@ -503,7 +503,7 @@ public sealed class MiniModeWiringTests
     {
         var window = new FakeMiniWindow();
         var changes = new Queue<IReadOnlyList<IDisplay>>();
-        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.BottomRight,
+        var harness = Wire(WallpaperMode.HtmlMini, window, MiniPosition.BottomRight,
             refreshDisplays: () => changes.Count > 0 ? changes.Dequeue() : []);
         using (harness.Composition)
         {
@@ -539,7 +539,7 @@ public sealed class MiniModeWiringTests
     public void Dispose_MiniMode_DisposesTheWindow()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window);
+        var harness = Wire(WallpaperMode.HtmlMini, window);
 
         harness.Composition.Dispose();
 
@@ -572,7 +572,7 @@ public sealed class MiniModeWiringTests
     public async Task AltM_MiniMode_CyclesAllEightPositionsClockwiseAndPersistsEachStep()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        var harness = Wire(WallpaperMode.HtmlMini, window, MiniPosition.TopRight);
         using (harness.Composition)
         {
             for (var i = 1; i <= 8; i++)
@@ -587,8 +587,8 @@ public sealed class MiniModeWiringTests
                  new Rect(1576, 0, 288, 288), new Rect(3152, 0, 288, 288)],
                 window.Moves);
             Assert.Equal(
-                [MiniCorner.RightCenter, MiniCorner.BottomRight, MiniCorner.BottomCenter, MiniCorner.BottomLeft,
-                 MiniCorner.LeftCenter, MiniCorner.TopLeft, MiniCorner.TopCenter, MiniCorner.TopRight],
+                [MiniPosition.RightCenter, MiniPosition.BottomRight, MiniPosition.BottomCenter, MiniPosition.BottomLeft,
+                 MiniPosition.LeftCenter, MiniPosition.TopLeft, MiniPosition.TopCenter, MiniPosition.TopRight],
                 harness.PersistedCorners);
         }
     }
@@ -597,7 +597,7 @@ public sealed class MiniModeWiringTests
     public async Task AltM_MiniMode_PlacesOnTheWorkAreaThatIsTrueNow_NotTheOneSeenAtStartup()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        var harness = Wire(WallpaperMode.HtmlMini, window, MiniPosition.TopRight);
         using (harness.Composition)
         {
             harness.Display.WorkArea = Rectangle.FromSize(0, 0, 3440, 1340);
@@ -612,7 +612,7 @@ public sealed class MiniModeWiringTests
     public async Task AltM_MiniMode_RunsTheMoveOnTheOwningThread()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, queueOwningThread: true);
         using (harness.Composition)
         {
             Pump(harness);
@@ -623,7 +623,7 @@ public sealed class MiniModeWiringTests
             Pump(harness);
 
             Assert.Single(window.Moves);
-            Assert.Equal([MiniCorner.RightCenter], harness.PersistedCorners);
+            Assert.Equal([MiniPosition.RightCenter], harness.PersistedCorners);
         }
     }
 
@@ -651,7 +651,7 @@ public sealed class MiniModeWiringTests
         bool showFails, bool browserAttached)
     {
         var window = new FakeMiniWindow { ShowResult = !showFails, BrowserAttached = browserAttached };
-        var harness = Wire(WallpaperMode.Mini, window, MiniCorner.TopRight);
+        var harness = Wire(WallpaperMode.HtmlMini, window, MiniPosition.TopRight);
         using (harness.Composition)
         {
             Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
@@ -666,7 +666,7 @@ public sealed class MiniModeWiringTests
     public void Alerts_MiniMode_WhenTheBrowserIsNotAttachedYet_AreHeldUntilTheWindowIsReady()
     {
         var window = new FakeMiniWindow { BrowserAttached = false };
-        var harness = Wire(WallpaperMode.Mini, window, alerts: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, alerts: true);
         using (harness.Composition)
         {
             harness.AlertServer!.Send("warning:1 duration:60");
@@ -683,7 +683,7 @@ public sealed class MiniModeWiringTests
     public async Task Alerts_MiniMode_ShowAndHideAlwaysRunOnTheOwningThread_EvenWhenTheTickIsOnAnother()
     {
         var window = new FakeMiniWindow();
-        var harness = Wire(WallpaperMode.Mini, window, queueOwningThread: true, alerts: true);
+        var harness = Wire(WallpaperMode.HtmlMini, window, queueOwningThread: true, alerts: true);
         using (harness.Composition)
         {
             Pump(harness);
@@ -707,7 +707,7 @@ public sealed class MiniModeWiringTests
     [Fact]
     public async Task AltM_MiniModeWithNoWindow_IsANoOp()
     {
-        var harness = Wire(WallpaperMode.Mini, miniWindow: null);
+        var harness = Wire(WallpaperMode.HtmlMini, miniWindow: null);
         using (harness.Composition)
         {
             Assert.True(harness.Platform.Raise(KeyboardKey.M, isKeyDown: true, ModifierKeys.Alt));
@@ -726,7 +726,7 @@ public sealed class MiniModeWiringTests
         var body = source[start..];
 
         Assert.Contains("MiniSceneWindowController.CreateProduction(", body);
-        Assert.Contains("settings.WallpaperMode == WallpaperMode.Mini", body);
+        Assert.Contains("settings.WallpaperMode == WallpaperMode.HtmlMini", body);
         // The host, the player, the alert layer and the video thread exist only outside mini mode.
         Assert.Matches(@"videoWallpaperHost\s*=\s*miniMode\s*\?\s*null", body);
         Assert.Matches(@"videoWallpaperPlayer\s*=\s*miniMode\s*\?\s*null", body);

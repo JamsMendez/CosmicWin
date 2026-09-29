@@ -7,7 +7,7 @@ using DrawingRectangle = System.Drawing.Rectangle;
 namespace CosmicWin.App.Wallpaper;
 
 /// <summary>
-/// The mini scene window (<see cref="WallpaperMode.Mini"/>): a small, square, always-on-top,
+/// The mini scene window (<see cref="WallpaperMode.HtmlMini"/>): a small, square, always-on-top,
 /// click-through, see-through window showing the <c>?variant=mini</c> scene page.
 /// </summary>
 public interface IMiniSceneWindow : IDisposable

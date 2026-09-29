@@ -1,3 +1,5 @@
+using CosmicWin.Interop;
+
 namespace CosmicWin.App.Tests;
 
 /// <summary>
@@ -281,7 +283,7 @@ public sealed class SettingsTests
     }
 
     [Theory]
-    [InlineData("alerts-enabled = off")]
+    [InlineData("alerts = off")]
     [InlineData("alerts-enabled=off")]
     [InlineData("  ALERTS-ENABLED   =   Off  ")]
     [InlineData("alerts-enabled = false")]
@@ -325,8 +327,8 @@ public sealed class SettingsTests
     {
         var serialized = new Settings(FocusBorder: true, AlertsEnabled: false).Serialize();
 
-        Assert.Contains("# alerts-enabled:", serialized, StringComparison.Ordinal);
-        Assert.Contains("alerts-enabled = off", serialized, StringComparison.Ordinal);
+        Assert.Contains("# alerts:", serialized, StringComparison.Ordinal);
+        Assert.Contains("alerts = off", serialized, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -338,19 +340,19 @@ public sealed class SettingsTests
     [Fact]
     public void AlertHttpIsOn_UnlessTheFileSaysOtherwise()
     {
-        Assert.True(Settings.Default.AlertHttpEnabled);
-        Assert.True(Settings.Parse(string.Empty).AlertHttpEnabled);
+        Assert.True(Settings.Default.HttpServerEnabled);
+        Assert.True(Settings.Parse(string.Empty).HttpServerEnabled);
     }
 
     [Theory]
-    [InlineData("alert-http = on")]
+    [InlineData("http-server = on")]
     [InlineData("alert-http=on")]
     [InlineData("  ALERT-HTTP   =   On  ")]
     [InlineData("alert-http = true")]
     [InlineData("alert-http = 1")]
     public void AlertHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
     {
-        Assert.True(Settings.Parse(line).AlertHttpEnabled);
+        Assert.True(Settings.Parse(line).HttpServerEnabled);
     }
 
     [Theory]
@@ -359,7 +361,7 @@ public sealed class SettingsTests
     [InlineData("alert-http = 0")]
     public void AlertHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
     {
-        Assert.False(Settings.Parse(line).AlertHttpEnabled);
+        Assert.False(Settings.Parse(line).HttpServerEnabled);
     }
 
     [Theory]
@@ -368,7 +370,7 @@ public sealed class SettingsTests
     [InlineData("alert-http")]
     public void AnUnreadableAlertHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.True(Settings.Parse(line).AlertHttpEnabled);
+        Assert.True(Settings.Parse(line).HttpServerEnabled);
     }
 
     [Theory]
@@ -376,7 +378,7 @@ public sealed class SettingsTests
     [InlineData(false)]
     public void SerializeThenParse_RoundTripsTheAlertHttpSwitch(bool alertHttpEnabled)
     {
-        var original = new Settings(FocusBorder: true, AlertHttpEnabled: alertHttpEnabled);
+        var original = new Settings(FocusBorder: true, HttpServerEnabled: alertHttpEnabled);
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
@@ -389,12 +391,12 @@ public sealed class SettingsTests
     [Fact]
     public void AlertHttpPortDefaultsToTheProtocolConstant()
     {
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Default.AlertHttpPort);
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(string.Empty).AlertHttpPort);
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Default.HttpServerPort);
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(string.Empty).HttpServerPort);
     }
 
     [Theory]
-    [InlineData("alert-http-port = 8080")]
+    [InlineData("http-server-port = 8080")]
     [InlineData("alert-http-port=8080")]
     [InlineData("  ALERT-HTTP-PORT   =   8080  ")]
     [InlineData("alert-http-port = 1")]
@@ -403,7 +405,7 @@ public sealed class SettingsTests
     {
         var expected = int.Parse(line.Split('=')[1].Trim());
 
-        Assert.Equal(expected, Settings.Parse(line).AlertHttpPort);
+        Assert.Equal(expected, Settings.Parse(line).HttpServerPort);
     }
 
     /// <summary>
@@ -419,7 +421,7 @@ public sealed class SettingsTests
     [InlineData("alert-http-port")]
     public void AnInvalidAlertHttpPort_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(line).AlertHttpPort);
+        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(line).HttpServerPort);
     }
 
     [Theory]
@@ -428,7 +430,7 @@ public sealed class SettingsTests
     [InlineData(65535)]
     public void SerializeThenParse_RoundTripsTheAlertHttpPort(int port)
     {
-        var original = new Settings(FocusBorder: true, AlertHttpPort: port);
+        var original = new Settings(FocusBorder: true, HttpServerPort: port);
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
@@ -436,12 +438,12 @@ public sealed class SettingsTests
     [Fact]
     public void Serialize_IncludesTheAlertHttpSwitchAndPortWithComments()
     {
-        var serialized = new Settings(FocusBorder: true, AlertHttpEnabled: true, AlertHttpPort: 8080).Serialize();
+        var serialized = new Settings(FocusBorder: true, HttpServerEnabled: true, HttpServerPort: 8080).Serialize();
 
-        Assert.Contains("# alert-http:", serialized, StringComparison.Ordinal);
-        Assert.Contains("alert-http = on", serialized, StringComparison.Ordinal);
-        Assert.Contains("# alert-http-port:", serialized, StringComparison.Ordinal);
-        Assert.Contains("alert-http-port = 8080", serialized, StringComparison.Ordinal);
+        Assert.Contains("# http-server:", serialized, StringComparison.Ordinal);
+        Assert.Contains("http-server = on", serialized, StringComparison.Ordinal);
+        Assert.Contains("# http-server-port:", serialized, StringComparison.Ordinal);
+        Assert.Contains("http-server-port = 8080", serialized, StringComparison.Ordinal);
     }
 
     /// <summary>The comment tells the user where the token lives and that the endpoint never leaves the machine.</summary>
@@ -461,94 +463,10 @@ public sealed class SettingsTests
         var settings = Settings.Parse("focus-border = off\nalert-http = on\nalert-http-port = 9999");
 
         Assert.False(settings.FocusBorder);
-        Assert.True(settings.AlertHttpEnabled);
-        Assert.Equal(9999, settings.AlertHttpPort);
+        Assert.True(settings.HttpServerEnabled);
+        Assert.Equal(9999, settings.HttpServerPort);
     }
 
-    /// <summary>
-    /// Off unless the file says otherwise, for the same reason <see cref="Settings.AlertHttpEnabled"/>
-    /// is: a settings file that has never been written must not open a route nobody asked for.
-    /// </summary>
-    [Fact]
-    public void VideoWallpaperHttpIsOff_UnlessTheFileSaysOtherwise()
-    {
-        Assert.False(Settings.Default.VideoWallpaperHttpEnabled);
-        Assert.False(Settings.Parse(string.Empty).VideoWallpaperHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("video-wallpaper-http = on")]
-    [InlineData("video-wallpaper-http=on")]
-    [InlineData("  VIDEO-WALLPAPER-HTTP   =   On  ")]
-    [InlineData("video-wallpaper-http = true")]
-    [InlineData("video-wallpaper-http = 1")]
-    public void VideoWallpaperHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.True(Settings.Parse(line).VideoWallpaperHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("video-wallpaper-http = off")]
-    [InlineData("video-wallpaper-http = false")]
-    [InlineData("video-wallpaper-http = 0")]
-    public void VideoWallpaperHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.False(Settings.Parse(line).VideoWallpaperHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("video-wallpaper-http = perhaps")]
-    [InlineData("video-wallpaper-http =")]
-    [InlineData("video-wallpaper-http")]
-    public void AnUnreadableVideoWallpaperHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.False(Settings.Parse(line).VideoWallpaperHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void SerializeThenParse_RoundTripsTheVideoWallpaperHttpSwitch(bool videoWallpaperHttpEnabled)
-    {
-        var original = new Settings(FocusBorder: true, VideoWallpaperHttpEnabled: videoWallpaperHttpEnabled);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    [Fact]
-    public void Serialize_IncludesTheVideoWallpaperHttpSwitchAndComment()
-    {
-        var serialized = new Settings(FocusBorder: true, VideoWallpaperHttpEnabled: true).Serialize();
-
-        Assert.Contains("# video-wallpaper-http:", serialized, StringComparison.Ordinal);
-        Assert.Contains("video-wallpaper-http = on", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>The comment tells the user this route shares the alert-http port and token file.</summary>
-    [Fact]
-    public void TheVideoWallpaperHttpComment_NamesTheSharedPortAndTokenFile()
-    {
-        var serialized = new Settings(FocusBorder: true).Serialize();
-        var lines = serialized.Split('\n');
-        var commentIndex = Array.FindIndex(
-            lines, line => line.Contains("video-wallpaper-http:", StringComparison.Ordinal));
-        var comment = string.Join('\n', lines.Skip(commentIndex).TakeWhile(
-            line => line.TrimStart().StartsWith('#')));
-
-        Assert.Contains("port", comment, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("alert-http", comment, StringComparison.Ordinal);
-    }
-
-    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
-    [Fact]
-    public void VideoWallpaperHttpIsReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse("focus-border = off\nvideo-wallpaper-http = on\nalert-http = off");
-
-        Assert.False(settings.FocusBorder);
-        Assert.True(settings.VideoWallpaperHttpEnabled);
-        Assert.False(settings.AlertHttpEnabled);
-    }
 
     /// <summary>
     /// T5 (alert-tile-mosaic, maintainer decision 2026-09-26): <see cref="TreeArranger.DefaultGap"/>
@@ -837,117 +755,44 @@ public sealed class SettingsTests
         Assert.False(settings.Tiling);
     }
 
-    /// <summary>
-    /// S8 (wallpaper-scene-http-endpoint, 2026-09-27): on unless the file says otherwise -- the html
-    /// wallpaper is now CosmicWin's default renderer and this route is its live scene control, so a
-    /// fresh install opens this loopback-only port. Its own key, independent of both
-    /// <c>alert-http</c> and <c>video-wallpaper-http</c>, which stay off by default.
-    /// </summary>
-    [Fact]
-    public void WallpaperSceneHttpIsOn_UnlessTheFileSaysOtherwise()
-    {
-        Assert.True(Settings.Default.WallpaperSceneHttpEnabled);
-        Assert.True(Settings.Parse(string.Empty).WallpaperSceneHttpEnabled);
-    }
 
     [Theory]
-    [InlineData("wallpaper-scene-http = on")]
-    [InlineData("wallpaper-scene-http=on")]
-    [InlineData("  WALLPAPER-SCENE-HTTP   =   On  ")]
-    [InlineData("wallpaper-scene-http = true")]
-    [InlineData("wallpaper-scene-http = 1")]
-    public void WallpaperSceneHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.True(Settings.Parse(line).WallpaperSceneHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("wallpaper-scene-http = off")]
-    [InlineData("wallpaper-scene-http = false")]
-    [InlineData("wallpaper-scene-http = 0")]
-    public void WallpaperSceneHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.False(Settings.Parse(line).WallpaperSceneHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("wallpaper-scene-http = perhaps")]
-    [InlineData("wallpaper-scene-http =")]
-    [InlineData("wallpaper-scene-http")]
-    public void AnUnreadableWallpaperSceneHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.True(Settings.Parse(line).WallpaperSceneHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void SerializeThenParse_RoundTripsTheWallpaperSceneHttpSwitch(bool wallpaperSceneHttpEnabled)
-    {
-        var original = new Settings(FocusBorder: true, WallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    [Fact]
-    public void Serialize_IncludesTheWallpaperSceneHttpSwitchAndComment()
-    {
-        var serialized = new Settings(FocusBorder: true, WallpaperSceneHttpEnabled: true).Serialize();
-
-        Assert.Contains("# wallpaper-scene-http:", serialized, StringComparison.Ordinal);
-        Assert.Contains("wallpaper-scene-http = on", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
-    [Fact]
-    public void WallpaperSceneHttpIsReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse(
-            "focus-border = off\nwallpaper-scene-http = on\nalert-http = off\nvideo-wallpaper-http = off");
-
-        Assert.False(settings.FocusBorder);
-        Assert.True(settings.WallpaperSceneHttpEnabled);
-        Assert.False(settings.AlertHttpEnabled);
-        Assert.False(settings.VideoWallpaperHttpEnabled);
-    }
-
-    [Theory]
-    [InlineData("wallpaper-mode = mini")]
+    [InlineData("wallpaper-mode = html-mini")]
     [InlineData("wallpaper-mode=mini")]
     [InlineData("  WALLPAPER-MODE   =   Mini  ")]
     public void WallpaperModeIsReadAsMini_HoweverTheLineIsSpelled(string line)
     {
-        Assert.Equal(WallpaperMode.Mini, Settings.Parse(line).WallpaperMode);
+        Assert.Equal(WallpaperMode.HtmlMini, Settings.Parse(line).WallpaperMode);
     }
 
     [Fact]
     public void SerializeThenParse_RoundTripsTheMiniWallpaperMode()
     {
-        var original = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.Mini);
+        var original = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.HtmlMini);
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
-        Assert.Contains("wallpaper-mode = mini", original.Serialize(), StringComparison.Ordinal);
+        Assert.Contains("wallpaper-mode = html-mini", original.Serialize(), StringComparison.Ordinal);
     }
 
     [Fact]
     public void MiniCornerDefaultsToTopRight()
     {
-        Assert.Equal(MiniCorner.TopRight, Settings.Default.MiniCorner);
-        Assert.Equal(MiniCorner.TopRight, Settings.Parse(string.Empty).MiniCorner);
+        Assert.Equal(MiniPosition.TopRight, Settings.Default.MiniPosition);
+        Assert.Equal(MiniPosition.TopRight, Settings.Parse(string.Empty).MiniPosition);
     }
 
     [Theory]
-    [InlineData("mini-corner = top-left", MiniCorner.TopLeft)]
-    [InlineData("mini-corner=top-right", MiniCorner.TopRight)]
-    [InlineData("mini-corner = bottom-left", MiniCorner.BottomLeft)]
-    [InlineData("  MINI-CORNER  =  Bottom-Right ", MiniCorner.BottomRight)]
-    [InlineData("mini-corner = top-center", MiniCorner.TopCenter)]
-    [InlineData("mini-corner = right-center", MiniCorner.RightCenter)]
-    [InlineData("mini-corner = bottom-center", MiniCorner.BottomCenter)]
-    [InlineData("MINI-CORNER = Left-Center", MiniCorner.LeftCenter)]
-    public void MiniCornerIsRead_HoweverTheLineIsSpelled(string line, MiniCorner expected)
+    [InlineData("mini-corner = top-left", MiniPosition.TopLeft)]
+    [InlineData("mini-corner=top-right", MiniPosition.TopRight)]
+    [InlineData("mini-corner = bottom-left", MiniPosition.BottomLeft)]
+    [InlineData("  MINI-CORNER  =  Bottom-Right ", MiniPosition.BottomRight)]
+    [InlineData("mini-corner = top-center", MiniPosition.TopCenter)]
+    [InlineData("mini-corner = right-center", MiniPosition.RightCenter)]
+    [InlineData("mini-corner = bottom-center", MiniPosition.BottomCenter)]
+    [InlineData("MINI-CORNER = Left-Center", MiniPosition.LeftCenter)]
+    public void MiniCornerIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
     {
-        Assert.Equal(expected, Settings.Parse(line).MiniCorner);
+        Assert.Equal(expected, Settings.Parse(line).MiniPosition);
     }
 
     [Theory]
@@ -956,21 +801,21 @@ public sealed class SettingsTests
     [InlineData("mini-corner")]
     public void AnUnreadableMiniCorner_KeepsTheDefaultRatherThanGuessing(string line)
     {
-        Assert.Equal(MiniCorner.TopRight, Settings.Parse(line).MiniCorner);
+        Assert.Equal(MiniPosition.TopRight, Settings.Parse(line).MiniPosition);
     }
 
     [Theory]
-    [InlineData(MiniCorner.TopLeft)]
-    [InlineData(MiniCorner.TopRight)]
-    [InlineData(MiniCorner.BottomLeft)]
-    [InlineData(MiniCorner.BottomRight)]
-    [InlineData(MiniCorner.TopCenter)]
-    [InlineData(MiniCorner.RightCenter)]
-    [InlineData(MiniCorner.BottomCenter)]
-    [InlineData(MiniCorner.LeftCenter)]
-    public void SerializeThenParse_RoundTripsTheMiniCorner(MiniCorner corner)
+    [InlineData(MiniPosition.TopLeft)]
+    [InlineData(MiniPosition.TopRight)]
+    [InlineData(MiniPosition.BottomLeft)]
+    [InlineData(MiniPosition.BottomRight)]
+    [InlineData(MiniPosition.TopCenter)]
+    [InlineData(MiniPosition.RightCenter)]
+    [InlineData(MiniPosition.BottomCenter)]
+    [InlineData(MiniPosition.LeftCenter)]
+    public void SerializeThenParse_RoundTripsTheMiniCorner(MiniPosition corner)
     {
-        var original = new Settings(FocusBorder: true, MiniCorner: corner);
+        var original = new Settings(FocusBorder: true, MiniPosition: corner);
 
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
@@ -980,8 +825,8 @@ public sealed class SettingsTests
     {
         var serialized = Settings.Default.Serialize();
 
-        Assert.Contains("# mini-corner:", serialized, StringComparison.Ordinal);
-        Assert.Contains("mini-corner = top-right", serialized, StringComparison.Ordinal);
+        Assert.Contains("# mini-position:", serialized, StringComparison.Ordinal);
+        Assert.Contains("mini-position = top-right", serialized, StringComparison.Ordinal);
         Assert.Contains("top-left", serialized, StringComparison.Ordinal);
         Assert.Contains("bottom-right", serialized, StringComparison.Ordinal);
     }
@@ -992,7 +837,144 @@ public sealed class SettingsTests
         var settings = Settings.Parse("focus-border = off\nmini-corner = top-left\ntiling = off");
 
         Assert.False(settings.FocusBorder);
-        Assert.Equal(MiniCorner.TopLeft, settings.MiniCorner);
+        Assert.Equal(MiniPosition.TopLeft, settings.MiniPosition);
         Assert.False(settings.Tiling);
+    }
+
+    // ---- T10: normalized keys, with migration of the legacy ones ----
+
+    [Fact]
+    public void Defaults_AreUnchangedByTheKeyNormalization()
+    {
+        var d = Settings.Default;
+
+        Assert.True(d.FocusBorder);
+        Assert.True(d.Tiling);
+        Assert.True(d.AlertsEnabled);
+        Assert.True(d.HttpServerEnabled);
+        Assert.Equal(AlertHttpProtocol.DefaultPort, d.HttpServerPort);
+        Assert.Equal(WallpaperMode.Html, d.WallpaperMode);
+        Assert.Equal(WallpaperScene.Processing, d.WallpaperScene);
+        Assert.Equal(60, d.WallpaperFps);
+        Assert.Equal(MiniPosition.TopRight, d.MiniPosition);
+        Assert.Equal(d, Settings.Parse(string.Empty));
+    }
+
+    [Fact]
+    public void EachNewKey_IsParsed()
+    {
+        var settings = Settings.Parse(
+            "alerts = off\nhttp-server = off\nhttp-server-port = 5555\n"
+            + "wallpaper-mode = html-mini\nmini-position = bottom-left");
+
+        Assert.False(settings.AlertsEnabled);
+        Assert.False(settings.HttpServerEnabled);
+        Assert.Equal(5555, settings.HttpServerPort);
+        Assert.Equal(WallpaperMode.HtmlMini, settings.WallpaperMode);
+        Assert.Equal(MiniPosition.BottomLeft, settings.MiniPosition);
+    }
+
+    [Fact]
+    public void EachLegacyAlias_IsStillParsed()
+    {
+        var settings = Settings.Parse(
+            "alerts-enabled = off\nalert-http = off\nalert-http-port = 5556\n"
+            + "wallpaper-mode = mini\nmini-corner = left-center");
+
+        Assert.False(settings.AlertsEnabled);
+        Assert.False(settings.HttpServerEnabled);
+        Assert.Equal(5556, settings.HttpServerPort);
+        Assert.Equal(WallpaperMode.HtmlMini, settings.WallpaperMode);
+        Assert.Equal(MiniPosition.LeftCenter, settings.MiniPosition);
+    }
+
+    [Theory]
+    [InlineData("alerts = off\nalerts-enabled = on")]
+    [InlineData("alerts-enabled = on\nalerts = off")]
+    public void NewAlertsKeyWins_InEitherLineOrder(string content)
+    {
+        Assert.False(Settings.Parse(content).AlertsEnabled);
+    }
+
+    [Theory]
+    [InlineData("http-server = off\nalert-http = on")]
+    [InlineData("alert-http = on\nhttp-server = off")]
+    public void NewHttpServerKeyWins_InEitherLineOrder(string content)
+    {
+        Assert.False(Settings.Parse(content).HttpServerEnabled);
+    }
+
+    [Theory]
+    [InlineData("http-server-port = 6001\nalert-http-port = 7001")]
+    [InlineData("alert-http-port = 7001\nhttp-server-port = 6001")]
+    public void NewHttpServerPortKeyWins_InEitherLineOrder(string content)
+    {
+        Assert.Equal(6001, Settings.Parse(content).HttpServerPort);
+    }
+
+    [Theory]
+    [InlineData("mini-position = top-left\nmini-corner = bottom-right")]
+    [InlineData("mini-corner = bottom-right\nmini-position = top-left")]
+    public void NewMiniPositionKeyWins_InEitherLineOrder(string content)
+    {
+        Assert.Equal(MiniPosition.TopLeft, Settings.Parse(content).MiniPosition);
+    }
+
+    [Fact]
+    public void AnUnreadableNewKey_DoesNotShadowAReadableLegacyOne()
+    {
+        var settings = Settings.Parse("http-server = perhaps\nalert-http = off");
+
+        Assert.False(settings.HttpServerEnabled);
+    }
+
+    [Theory]
+    [InlineData("video-wallpaper-http = off")]
+    [InlineData("wallpaper-scene-http = off")]
+    [InlineData("video-wallpaper-http = on\nwallpaper-scene-http = on")]
+    public void RemovedPerRouteKeys_AreAcceptedAndIgnored(string content)
+    {
+        Assert.Equal(Settings.Default, Settings.Parse(content));
+    }
+
+    [Fact]
+    public void Serialize_WritesOnlyTheNewKeys()
+    {
+        var text = Settings.Default.Serialize();
+        var keys = text.Split('\n')
+            .Where(line => !line.TrimStart().StartsWith('#') && line.Contains('='))
+            .Select(line => line[..line.IndexOf('=')].Trim())
+            .ToArray();
+
+        Assert.Equal(
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "http-server",
+             "http-server-port", "gap", "wallpaper-mode", "wallpaper-scene", "wallpaper-fps", "mini-position"],
+            keys);
+        foreach (var legacy in new[] { "alerts-enabled", "alert-http =", "alert-http-port", "video-wallpaper-http",
+                     "wallpaper-scene-http", "mini-corner" })
+        {
+            Assert.DoesNotContain(legacy, text, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>The maintainer's real-world legacy file shape survives a save unchanged in meaning.</summary>
+    [Fact]
+    public void LegacyRealWorldFile_RoundTripsThroughSerializeToTheSameEffectiveSettings()
+    {
+        var legacy = Settings.Parse(
+            "alerts-enabled=on\nalert-http=on\nalert-http-port=43811\nvideo-wallpaper-http=on\n"
+            + "wallpaper-mode=mini\nwallpaper-scene=idle\nwallpaper-fps=60\nwallpaper-scene-http=on\n"
+            + "mini-corner=top-right");
+
+        var reparsed = Settings.Parse(legacy.Serialize());
+
+        Assert.Equal(legacy, reparsed);
+        Assert.Equal(43811, reparsed.HttpServerPort);
+        Assert.Equal(WallpaperMode.HtmlMini, reparsed.WallpaperMode);
+        Assert.Equal(WallpaperScene.Idle, reparsed.WallpaperScene);
+        Assert.Equal(MiniPosition.TopRight, reparsed.MiniPosition);
+        Assert.True(reparsed.AlertsEnabled);
+        Assert.True(reparsed.HttpServerEnabled);
+        Assert.Equal(60, reparsed.WallpaperFps);
     }
 }

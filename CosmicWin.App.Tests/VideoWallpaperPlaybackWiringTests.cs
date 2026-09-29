@@ -182,11 +182,9 @@ public sealed class VideoWallpaperPlaybackWiringTests
         Action? disposeVideoWallpaper = null,
         Action<string>? persistVideoWallpaperPath = null,
         Func<TimeSpan, Action, IDisposable>? scheduleReconcile = null,
-        bool videoWallpaperHttpEnabled = false,
+        bool httpServerEnabled = false,
         Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null,
         WallpaperMode wallpaperMode = WallpaperMode.Video,
-        // S4 (wallpaper-scene-http-endpoint).
-        bool wallpaperSceneHttpEnabled = false,
         Func<WallpaperScene, bool>? switchHtmlWallpaperScene = null,
         Action<WallpaperScene>? persistWallpaperScene = null,
         Action<Action>? scheduleOnOwningThread = null)
@@ -224,10 +222,9 @@ public sealed class VideoWallpaperPlaybackWiringTests
             disposeVideoWallpaper: disposeVideoWallpaper,
             videoWallpaperPath: videoWallpaperPath,
             persistVideoWallpaperPath: persistVideoWallpaperPath,
-            videoWallpaperHttpEnabled: videoWallpaperHttpEnabled,
+            httpServerEnabled: httpServerEnabled,
             wallpaperMode: wallpaperMode,
             readVideoFileSnapshot: readVideoFileSnapshot,
-            wallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled,
             switchHtmlWallpaperScene: switchHtmlWallpaperScene,
             persistWallpaperScene: persistWallpaperScene,
             loadAlertHttpToken: () => "test-token",
@@ -886,7 +883,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
     [Fact]
     public void HttpSwitch_WithNoHostOrPlayer_ReturnsFalse()
     {
-        var harness = Wire(videoWallpaperHttpEnabled: true);
+        var harness = Wire(httpServerEnabled: true);
         using (harness.Composition)
         {
             Assert.NotNull(harness.HandleVideoWallpaperHttpSwitch);
@@ -908,7 +905,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
     {
         var queued = new Queue<Action>();
 
-        var harness = Wire(scheduleVideoWallpaperWork: queued.Enqueue, videoWallpaperHttpEnabled: true);
+        var harness = Wire(scheduleVideoWallpaperWork: queued.Enqueue, httpServerEnabled: true);
         using (harness.Composition)
         {
             var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
@@ -934,7 +931,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var player = new FakeVideoWallpaperPlayer();
 
         var harness = Wire(
-            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperHttpEnabled: true);
+            videoWallpaperHost: host, videoWallpaperPlayer: player, httpServerEnabled: true);
         using (harness.Composition)
         {
             var accepted = harness.HandleVideoWallpaperHttpSwitch!(@"C:\Users\me\Videos\clip.mp4");
@@ -969,7 +966,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player,
             scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
-            persistVideoWallpaperPath: persisted.Add, videoWallpaperHttpEnabled: true,
+            persistVideoWallpaperPath: persisted.Add, httpServerEnabled: true,
             wallpaperMode: WallpaperMode.Html,
             importVideoWallpaper: path => { importCalls++; return path; });
         using (harness.Composition)
@@ -1037,20 +1034,6 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
     // ---- S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's own handler ----
 
-    /// <summary>The scene route is gated by its OWN key, independent of the video route.</summary>
-    [Fact]
-    public void WallpaperSceneHttpDisabled_NullSceneDelegatePassedToTheFactory()
-    {
-        // videoWallpaperHttpEnabled forces the shared HTTP server to actually start (and the factory
-        // to actually run) so this proves the SCENE delegate specifically is null, not merely that
-        // nothing was captured because the server never started.
-        var harness = Wire(wallpaperSceneHttpEnabled: false, videoWallpaperHttpEnabled: true);
-        using (harness.Composition)
-        {
-            Assert.Null(harness.HandleWallpaperSceneHttpSwitch);
-        }
-    }
-
     /// <summary>
     /// Html mode, a valid scene name, both collaborators wired: the delegate accepts (true) WITHOUT
     /// running the switch inline -- same non-blocking contract as the video route -- and only runs it
@@ -1068,7 +1051,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Html,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             switchHtmlWallpaperScene: scene => { switched = scene; return true; },
             persistWallpaperScene: scene => persisted = scene);
@@ -1100,7 +1083,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Video,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             switchHtmlWallpaperScene: _ => { switchCalls++; return true; });
         using (harness.Composition)
@@ -1123,7 +1106,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
     [Fact]
     public void HttpSceneSwitch_HtmlModeWithNoSwitchDelegateWired_ReturnsFalse()
     {
-        var harness = Wire(wallpaperMode: WallpaperMode.Html, wallpaperSceneHttpEnabled: true);
+        var harness = Wire(wallpaperMode: WallpaperMode.Html, httpServerEnabled: true);
         using (harness.Composition)
         {
             var accepted = harness.HandleWallpaperSceneHttpSwitch!("idle");
@@ -1146,7 +1129,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Html,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             switchHtmlWallpaperScene: _ => { switchCalls++; return true; });
         using (harness.Composition)
@@ -1170,7 +1153,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Html,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             switchHtmlWallpaperScene: _ => false,
             persistWallpaperScene: _ => persistCalls++);
@@ -1207,7 +1190,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Html,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             desktopTrace: trace,
             switchHtmlWallpaperScene: _ => throw new InvalidOperationException("boom"),
@@ -1244,7 +1227,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
         var harness = Wire(
             wallpaperMode: WallpaperMode.Html,
-            wallpaperSceneHttpEnabled: true,
+            httpServerEnabled: true,
             scheduleOnOwningThread: posted.Add,
             desktopTrace: trace,
             switchHtmlWallpaperScene: scene => { switched = scene; return true; },
@@ -1287,7 +1270,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player,
             scheduleVideoWallpaperWork: queued.Enqueue, importVideoWallpaper: _ => imported,
-            desktopTrace: trace, videoWallpaperHttpEnabled: true);
+            desktopTrace: trace, httpServerEnabled: true);
         using (harness.Composition)
         {
             // Clears the "http-server start requested" line construction itself just traced, so
@@ -1335,7 +1318,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: previousPath,
             scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
-            persistVideoWallpaperPath: persisted.Add, videoWallpaperHttpEnabled: true,
+            persistVideoWallpaperPath: persisted.Add, httpServerEnabled: true,
             importVideoWallpaper: _ => throw new IOException("sharing violation"));
         using (harness.Composition)
         {
@@ -1371,7 +1354,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player,
             scheduleVideoWallpaperWork: queued.Enqueue, desktopTrace: trace,
-            videoWallpaperHttpEnabled: true);
+            httpServerEnabled: true);
         using (harness.Composition)
         {
             harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\tray.mp4");
@@ -1419,7 +1402,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
             scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true, readVideoFileSnapshot: _ => constantSnapshot);
+            httpServerEnabled: true, readVideoFileSnapshot: _ => constantSnapshot);
         using (harness.Composition)
         {
             // Startup queued its own activation work item ahead of anything this test posts.
@@ -1465,7 +1448,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 return p;
             },
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true,
+            httpServerEnabled: true,
             readVideoFileSnapshot: _ => new VideoWallpaperImport.VideoFileSnapshot(1, 1, 1, 1));
         using (harness.Composition)
         {
@@ -1511,7 +1494,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             },
             persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
             scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true, readVideoFileSnapshot: _ => null);
+            httpServerEnabled: true, readVideoFileSnapshot: _ => null);
         using (harness.Composition)
         {
             // Startup queued its own activation work item ahead of anything this test posts.
@@ -1570,7 +1553,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
                 return imported;
             },
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true,
+            httpServerEnabled: true,
             readVideoFileSnapshot: path =>
             {
                 queriedPaths.Add(path);
@@ -1625,7 +1608,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true,
+            httpServerEnabled: true,
             readVideoFileSnapshot: _ => snapshots.Count > 0 ? snapshots.Dequeue() : null);
         using (harness.Composition)
         {
@@ -1662,7 +1645,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true,
+            httpServerEnabled: true,
             readVideoFileSnapshot: _ => new VideoWallpaperImport.VideoFileSnapshot(1, 1, player.TryPlayCallCount, 100));
         using (harness.Composition)
         {
@@ -1699,7 +1682,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
             desktopTrace: trace, scheduleVideoWallpaperWork: queued.Enqueue,
-            videoWallpaperHttpEnabled: true,
+            httpServerEnabled: true,
             readVideoFileSnapshot: _ =>
             {
                 reads++;
