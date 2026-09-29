@@ -113,6 +113,11 @@ public enum WallpaperScene
 /// port -- an accepted consequence, the same one S9 later made for <see cref="AlertHttpEnabled"/>.
 /// <see cref="VideoWallpaperHttpEnabled"/> alone still stays off until the maintainer opts in.
 /// </param>
+/// <param name="AlacrittyThemeFile">
+/// Opt-in. Absolute path of the Alacritty colours file CosmicWin writes for the html wallpaper's
+/// current scene; empty (the default) means off. Read once at startup, so the path is fixed for the
+/// life of the process.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -135,7 +140,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     int AlertHttpPort = AlertHttpProtocol.DefaultPort, bool VideoWallpaperHttpEnabled = false,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
     WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    bool WallpaperSceneHttpEnabled = true)
+    bool WallpaperSceneHttpEnabled = true, string AlacrittyThemeFile = "")
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -191,6 +196,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <summary>S4 (wallpaper-scene-http-endpoint): see <see cref="Settings.WallpaperSceneHttpEnabled"/>.</summary>
     private const string WallpaperSceneHttpEnabledKey = "wallpaper-scene-http";
 
+    /// <summary>See <see cref="Settings.AlacrittyThemeFile"/>.</summary>
+    private const string AlacrittyThemeFileKey = "alacritty-theme-file";
+
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -217,6 +225,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var wallpaperScene = Default.WallpaperScene;
         var wallpaperFps = Default.WallpaperFps;
         var wallpaperSceneHttpEnabled = Default.WallpaperSceneHttpEnabled;
+        var alacrittyThemeFile = Default.AlacrittyThemeFile;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -306,11 +315,16 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 wallpaperSceneHttpEnabled = wallpaperSceneHttpFlag;
             }
+            else if (key.Equals(AlacrittyThemeFileKey, StringComparison.OrdinalIgnoreCase))
+            {
+                // A blank value is the default (off), so it needs no branch of its own.
+                alacrittyThemeFile = value;
+            }
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, alertsEnabled,
             alertHttpEnabled, alertHttpPort, videoWallpaperHttpEnabled, gap, wallpaperMode,
-            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled);
+            wallpaperScene, wallpaperFps, wallpaperSceneHttpEnabled, alacrittyThemeFile);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -373,6 +387,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # the same port and the same alert-http.token bearer token file, off to leave that route
          # closed.
          {WallpaperSceneHttpEnabledKey} = {(WallpaperSceneHttpEnabled ? "on" : "off")}
+
+         # {AlacrittyThemeFileKey}: absolute path of an Alacritty colours file CosmicWin writes (and
+         # OWNS, overwriting it) each time the html wallpaper scene changes, so terminal text stays
+         # legible over the scene; blank (default) to leave Alacritty alone. See the README.
+         {AlacrittyThemeFileKey} = {AlacrittyThemeFile}
 
          """;
 

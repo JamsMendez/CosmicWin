@@ -910,4 +910,47 @@ public sealed class SettingsTests
         Assert.False(settings.AlertHttpEnabled);
         Assert.False(settings.VideoWallpaperHttpEnabled);
     }
+
+    [Fact]
+    public void NoAlacrittyThemeFile_IsTheDefault_AndMeansOff()
+    {
+        Assert.Equal(string.Empty, Settings.Default.AlacrittyThemeFile);
+        Assert.Equal(string.Empty, Settings.Parse(string.Empty).AlacrittyThemeFile);
+    }
+
+    [Theory]
+    [InlineData("alacritty-theme-file = C:\\t\\scene.toml")]
+    [InlineData("alacritty-theme-file=C:\\t\\scene.toml")]
+    [InlineData("  ALACRITTY-THEME-FILE   =   C:\\t\\scene.toml  ")]
+    public void AnAlacrittyThemeFileIsRead_HoweverTheLineIsSpelled(string line)
+    {
+        Assert.Equal("C:\\t\\scene.toml", Settings.Parse(line).AlacrittyThemeFile);
+    }
+
+    [Theory]
+    [InlineData("alacritty-theme-file =")]
+    [InlineData("alacritty-theme-file =    ")]
+    public void ABlankAlacrittyThemeFile_MeansOff(string line)
+    {
+        Assert.Equal(string.Empty, Settings.Parse(line).AlacrittyThemeFile);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("C:\\Users\\me\\AppData\\Roaming\\alacritty\\cosmicwin-scene.toml")]
+    public void SerializeThenParse_RoundTripsTheAlacrittyThemeFile(string path)
+    {
+        var original = new Settings(FocusBorder: true, AlacrittyThemeFile: path);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheAlacrittyThemeFileKeyAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, AlacrittyThemeFile: "C:\\t\\s.toml").Serialize();
+
+        Assert.Contains("# alacritty-theme-file:", serialized, StringComparison.Ordinal);
+        Assert.Contains("alacritty-theme-file = C:\\t\\s.toml", serialized, StringComparison.Ordinal);
+    }
 }
