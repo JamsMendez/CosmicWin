@@ -108,4 +108,73 @@ function checkTunablesMatchTwin(sceneDir, twinScene) {
   assert.deepStrictEqual(own, twin, "this scene's CONSTELLATION_* tunables differ from the " + twinScene + " scene's");
 }
 
-module.exports = { checkConstellationTable: checkConstellationTable, checkTunablesMatchTwin: checkTunablesMatchTwin };
+// mini-scene-window T2g: the constellation dots and brush-stroke lines are absolute px sizes
+// (CONSTELLATION_DOT_RADIUS, CONSTELLATION_LINE_WIDTH), so in the ~5x smaller mini ring they read as
+// blobs. Mini scales both by (this ring's thickness) / (its thickness in the full scene at the reference
+// screen, 3440x1440), with a 0.5px floor; the full variant keeps the exact values.
+function constellationSizes(page, boxSize) {
+  return page.sandbox.constellationDetailSizes(boxSize);
+}
+
+// Records the dot radius (in px, i.e. arc radius x the box scale) drawConstellationRing really draws.
+function drawnDotRadiiPx(page, boxSize) {
+  var scaleFactor = 1;
+  var radii = [];
+  var context = new Proxy({}, {
+    get: function (target, prop) {
+      if (prop === "scale") return function (sx) { scaleFactor = sx; };
+      if (prop === "arc") return function (x, y, r) { radii.push(r * scaleFactor); };
+      return function () {};
+    },
+    set: function () { return true; },
+  });
+  page.sandbox.drawConstellationRing(context, 0, 0, 100, 100 + boxSize, 0);
+  // arcs with a radius drawn under the box scale are the dots; the 1px boundary arcs run at scale 1 with radius ~100
+  return radii.filter(function (r, i) { return r < boxSize; });
+}
+
+function checkConstellationDetailScale(loadPage) {
+  var cfg = function (page, name) { return vm.runInContext(name, page.sandbox); };
+
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var dot = cfg(full, "CONSTELLATION_DOT_RADIUS");
+  var line = cfg(full, "CONSTELLATION_LINE_WIDTH");
+  var thickness = cfg(full, "CONSTELLATION_RING_OUTER_RADIUS_FRACTION") - cfg(full, "CONSTELLATION_RING_INNER_RADIUS_FRACTION");
+
+  // the ring thickness in the mini window, and in the full scene at the 3440x1440 reference screen
+  var miniBox = thickness * mini.sandbox.miniSceneBasis(288, 288);
+  var referenceBox = thickness * full.sandbox.sceneBasis(3440, 1440);
+  var ratio = miniBox / referenceBox;
+  assert.ok(ratio > 0.1 && ratio < 0.25, "expected the mini ring to be ~1/6 of the reference ring, ratio " + ratio);
+
+  var expectedDot = Math.max(0.5, dot * ratio);
+  var expectedLine = Math.max(0.5, line * ratio);
+  var sizes = constellationSizes(mini, miniBox);
+  assert.ok(Math.abs(sizes.dotRadius - expectedDot) < 1e-9, "mini dot radius " + sizes.dotRadius + ", expected " + expectedDot);
+  assert.ok(Math.abs(sizes.lineWidth - expectedLine) < 1e-9, "mini line width " + sizes.lineWidth + ", expected " + expectedLine);
+  assert.ok(sizes.dotRadius < dot / 4, "the mini dots must be far smaller than the full 2.75px, got " + sizes.dotRadius);
+  // floor: a tiny ring never makes the dots vanish
+  var tiny = constellationSizes(mini, 1);
+  assert.ok(tiny.dotRadius >= 0.5 && tiny.lineWidth >= 0.5, "expected the 0.5px floor, got " + JSON.stringify(tiny));
+  // the dots actually drawn use that radius
+  var drawn = drawnDotRadiiPx(mini, miniBox);
+  assert.ok(drawn.length > 0, "expected constellation dots to be drawn");
+  drawn.forEach(function (r) { assert.ok(Math.abs(r - expectedDot) < 1e-9, "drawn dot radius " + r + ", expected " + expectedDot); });
+
+  // full: unchanged, whatever the ring size
+  [40, 63, 120].forEach(function (box) {
+    var f = constellationSizes(full, box);
+    assert.strictEqual(f.dotRadius, dot, "the full dot radius must stay " + dot);
+    assert.strictEqual(f.lineWidth, line, "the full line width must stay " + line);
+  });
+  var fullDrawn = drawnDotRadiiPx(full, 63);
+  assert.ok(fullDrawn.length > 0);
+  fullDrawn.forEach(function (r) { assert.ok(Math.abs(r - dot) < 1e-9, "the full drawn dot radius must stay " + dot + ", got " + r); });
+}
+
+module.exports = {
+  checkConstellationTable: checkConstellationTable,
+  checkTunablesMatchTwin: checkTunablesMatchTwin,
+  checkConstellationDetailScale: checkConstellationDetailScale,
+};

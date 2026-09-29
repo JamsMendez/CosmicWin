@@ -160,9 +160,31 @@ function drawBrushStroke(context, x0, y0, x1, y1, peakHalfWidth, wobbleAmp, wobb
   context.fill();
 }
 
+// mini-scene-window T2g: CONSTELLATION_DOT_RADIUS / CONSTELLATION_LINE_WIDTH are absolute px sizes tuned
+// on the real screen (3440x1440: the maintainer's monitor; sceneBasis is 877 there and at any 1440-tall
+// screen), where this ring is ~63px thick. The ?variant=mini window draws the same ring ~5-6x smaller, so
+// the same px made the dots blobs. In mini both scale by (this ring's thickness) / (its thickness in the
+// full scene at that reference screen), never below MINI_CONSTELLATION_MIN_PX. The full variant returns
+// the tunables untouched. This ring is baked into the ring cache (buildRingCaches), so the cache picks the
+// mini sizes up automatically. isMiniVariant comes from shared/js/render-loop.js (resolved at call time).
+const MINI_CONSTELLATION_REFERENCE_SCREEN = { width: 3440, height: 1440 };
+const MINI_CONSTELLATION_MIN_PX = 0.5;
+
+function constellationDetailSizes(boxSize) {
+  if (!isMiniVariant) return { dotRadius: CONSTELLATION_DOT_RADIUS, lineWidth: CONSTELLATION_LINE_WIDTH };
+  const referenceBox = (CONSTELLATION_RING_OUTER_RADIUS_FRACTION - CONSTELLATION_RING_INNER_RADIUS_FRACTION) *
+    sceneBasis(MINI_CONSTELLATION_REFERENCE_SCREEN.width, MINI_CONSTELLATION_REFERENCE_SCREEN.height);
+  const ratio = boxSize / referenceBox;
+  return {
+    dotRadius: Math.max(MINI_CONSTELLATION_MIN_PX, CONSTELLATION_DOT_RADIUS * ratio),
+    lineWidth: Math.max(MINI_CONSTELLATION_MIN_PX, CONSTELLATION_LINE_WIDTH * ratio),
+  };
+}
+
 function drawConstellationRing(context, cx, cy, innerRadius, outerRadius, rotation) {
   const midRadius = (innerRadius + outerRadius) / 2;
   const boxSize = outerRadius - innerRadius; // each normalized figure fills exactly this thickness at most
+  const detail = constellationDetailSizes(boxSize);
   for (let i = 0; i < CONSTELLATION_COUNT; i++) {
     const angle = rotation + (i / CONSTELLATION_COUNT) * TAU;
     const x = cx + Math.cos(angle) * midRadius;
@@ -178,7 +200,7 @@ function drawConstellationRing(context, cx, cy, innerRadius, outerRadius, rotati
     context.translate(x, y);
     context.rotate(tangential);
     context.scale(boxSize, boxSize);
-    const peakHalfWidth = (CONSTELLATION_LINE_WIDTH / boxSize) / 2;
+    const peakHalfWidth = (detail.lineWidth / boxSize) / 2;
     for (const seg of segments) {
       const [x0, y0] = points[seg.from];
       const [x1, y1] = points[seg.to];
@@ -195,7 +217,7 @@ function drawConstellationRing(context, cx, cy, innerRadius, outerRadius, rotati
     context.fillStyle = dotColor;
     for (const [px, py] of points) {
       context.beginPath();
-      context.arc(px, py, CONSTELLATION_DOT_RADIUS / boxSize, 0, TAU);
+      context.arc(px, py, detail.dotRadius / boxSize, 0, TAU);
       context.fill();
     }
     context.restore();

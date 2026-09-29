@@ -610,6 +610,10 @@ test("the full variant keeps the planet above the ring center, exactly where it 
   assert.ok(earthCalls[0].cy < ringCy, "expected the full planet above the ring center");
 });
 
+test("mini scales the constellation dots and lines with the ring (floor 0.5px); the full variant keeps 2.75px / 2.5px", function () {
+  constellationRingChecks.checkConstellationDetailScale(loadPage);
+});
+
 test("the stylesheet makes the mini page transparent", function () {
   miniVariantChecks.checkMiniStylesheet(sceneDir);
 });
