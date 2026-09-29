@@ -64,8 +64,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2d Raphael mini: blue and gold glyphs stretched vertically (tall strokes, not dashes), gold glyph count x3 (mini only) (route: delegated writer)
 - [x] T2e Explorer mini planet blue-tinted like the ring; raphael mini gold nebula faded before the edges + inclined rays rotating independently like clock hands (route: delegated writer, parallel with T3, JS only)
 - [x] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
-- [ ] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
-- [ ] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
+- [x] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
+- [x] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
 - [ ] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -142,6 +142,15 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   via u_miniFadeStart/End; inclined rays back (48 rays, alternating direction, per-ray speed 0.10-0.42 x 5, already
   independent in the full scene). RED raphael 3 + explorer order -> GREEN raphael 19, explorer 16; Scene 63 passed,
   full suite 0 failed (verified in a scratchpad worktree). Edge check 0 on explorer and raphael.
+- T4 3f2d07b (delegated writer): mini startup builds the window on the STA, Show posted to the UI thread at
+  Compute(primary work area, bounds height, MiniCorner); no host/player/wallpaper alert layer; video pick/HTTP video
+  skipped in mini (trace reason=mini-mode, /v1/wallpaper/video 503); HTTP scene switch + persist in mini; alert queue
+  routed to ShowAlert/HideAlert (fullscreen-coverage check ignored in mini, ready only after Show succeeded);
+  ReconcileOnce display change -> MoveTo; Show failure traced, no retry. RED 16/25 -> GREEN 25/25.
+- T5 0c92d47: KeyboardKey.M + CycleMiniCorner, Alt+M before the tiling gate, Next -> MoveTo -> persist mini-corner;
+  outside mini traces skipped. README documents mini mode, mini-corner and Alt+M. RED 9 -> GREEN 97.
+  Suite after T5: App 1301, Interop 424 (3 skipped), Layout 198, Alert 13, 0 failed. Parent spot check: MiniMode|ChordTable 77 passed.
+  WireProduction mini path only covered by a source-text guard (real Win32/WebView2).
 
 ## Next step
-T4 + T5 together (both wire AppComposition), one writer.
+Review of slice 563d669..HEAD (RDD), then T7 cleanup, then T6 hardware check.
