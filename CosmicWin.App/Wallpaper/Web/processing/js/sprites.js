@@ -119,14 +119,14 @@ const glowCache = new Map();
 function paintGlowRect(g, k, style, width, height) {
   const w = width * k;
   const h = height * k;
-  g.filter = `blur(${style.blur / 2 * k}px)`;
+  g.filter = `blur(${structurePx(style.blur, 1) / 2 * k}px)`;
   g.fillStyle = `rgb(${style.color})`;
   g.strokeStyle = g.fillStyle;
   if (!style.lineWidth) {
     g.fillRect(-w / 2, -h / 2, w, h);
     return;
   }
-  g.lineWidth = style.lineWidth * k;
+  g.lineWidth = structurePx(style.lineWidth, 0.5) * k;
   g.strokeRect(-w / 2, -h / 2, w, h);
   if (style.grid) {
     const grid = griddedRectangleInternalLineCoordinates({ width: w, height: h });
@@ -151,7 +151,7 @@ function glowSprite(name, width, height) {
     const style = GLOW_STYLES[name];
     const bucketWidth = GLOW_BUCKET_BASE * GLOW_BUCKET_RATIO ** step;
     const bucketHeight = bucketWidth * height / width;
-    const pad = style.blur * 1.5 + (style.lineWidth || 0);
+    const pad = structurePx(style.blur, 1) * 1.5 + structurePx(style.lineWidth || 0, 0.5);
     entry = {
       bucketWidth,
       sprite: bakeSprite(bucketWidth / 2 + pad, bucketHeight / 2 + pad,

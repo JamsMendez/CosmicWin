@@ -17,10 +17,10 @@ function drawGlowSegments(segments, width, alpha, blur = 8) {
   if (segments.length === 0) return;
   ctx.save();
   ctx.strokeStyle = `rgba(${CENTRAL_RAY_STROKE_COLOR},${alpha})`;
-  ctx.lineWidth = width;
+  ctx.lineWidth = structurePx(width, 0.5);
   ctx.lineCap = 'round';
   ctx.shadowColor = CENTRAL_RAY_GLOW_COLOR;
-  ctx.shadowBlur = blur;
+  ctx.shadowBlur = structurePx(blur, 1);
   ctx.beginPath();
   for (const [x1, y1, x2, y2] of segments) {
     ctx.moveTo(x1, y1);
@@ -177,7 +177,7 @@ function drawFoldingBand(cx, cy, rx, ry, rot, width, foldPhase) {
     ctx.fill();
 
     ctx.strokeStyle = `rgba(18,36,44,${0.08 + (1 - front) * 0.22})`;
-    ctx.lineWidth = Math.max(0.75, width * 0.045);
+    ctx.lineWidth = Math.max(structurePx(0.75, 0.4), width * 0.045);
     ctx.beginPath();
     ctx.moveTo(a.right[0], a.right[1]);
     ctx.lineTo(b.right[0], b.right[1]);
@@ -185,8 +185,8 @@ function drawFoldingBand(cx, cy, rx, ry, rot, width, foldPhase) {
   }
 
   ctx.shadowColor = 'rgba(255,255,255,0.78)';
-  ctx.shadowBlur = 12;
-  ctx.lineWidth = Math.max(1.15, width * 0.11);
+  ctx.shadowBlur = structurePx(12, 1);
+  ctx.lineWidth = Math.max(structurePx(1.15, 0.5), width * 0.11);
   ctx.strokeStyle = 'rgb(255,255,255)';
   ctx.beginPath();
   ctx.moveTo(points[0].left[0], points[0].left[1]);
@@ -452,7 +452,7 @@ function drawSolidSquareSpherePiece(x, y, dimensions, state) {
   ctx.fillStyle = `rgba(255,255,255,${fillAlpha})`;
   ctx.fillRect(-dimensions.width / 2, -dimensions.height / 2, dimensions.width, dimensions.height);
   ctx.strokeStyle = `rgba(255,255,255,${strokeAlpha})`;
-  ctx.lineWidth = 1.0;
+  ctx.lineWidth = structurePx(1.0, 0.5);
   ctx.strokeRect(-dimensions.width / 2, -dimensions.height / 2, dimensions.width, dimensions.height);
   ctx.restore();
 }
@@ -465,7 +465,7 @@ function drawOutlineRectangleSpherePiece(x, y, dimensions, state) {
   stampGlow('outline-stroke', dimensions.width, dimensions.height, SEGMENTED_SPHERE_GLOW_ALPHA * strokeAlpha);
   ctx.globalAlpha = 1;
   ctx.strokeStyle = `rgba(218,250,255,${strokeAlpha})`;
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = structurePx(0.8, 0.5);
   ctx.strokeRect(-dimensions.width / 2, -dimensions.height / 2, dimensions.width, dimensions.height);
   ctx.restore();
 }
@@ -502,7 +502,7 @@ function drawGriddedRectangleSpherePiece(x, y, dimensions, state) {
   ctx.fillStyle = `rgba(255,255,255,${fillAlpha})`;
   ctx.fillRect(grid.left, grid.top, dimensions.width, dimensions.height);
   ctx.strokeStyle = `rgba(255,255,255,${strokeAlpha})`;
-  ctx.lineWidth = 0.72;
+  ctx.lineWidth = structurePx(0.72, 0.5);
   ctx.strokeRect(grid.left, grid.top, dimensions.width, dimensions.height);
   ctx.beginPath();
   for (const xCoordinate of grid.vertical) {
@@ -553,7 +553,7 @@ function orbitBlockState(cx, cy, phase, block) {
     y: cy + localX * planeSin + localY * planeCos,
     angle,
     front,
-    size: block.size * (0.90 + front * 0.74),
+    size: structurePx(block.size, 1.5) * (0.90 + front * 0.74),
     opacity: 0.50 + front * 0.40,
     rotation: angle + ring.planeTilt + block.tilt,
   };
@@ -655,7 +655,10 @@ function drawCentralOctagon(cx, cy, progress, pulse) {
   const r = Math.min(W, H) * 0.168;
   const rot = progress * TAU * 0.18;
   const pulseStroke = 1 + pulse * 0.72;
-  const pulseBlur = 20 + pulse * 18;
+  // Mini: the octagon's line is exactly MINI_POLYGON_STROKE_PX thick (as thin as raphael's hexadecagon); its
+  // chroma copies, offsets and glow keep their full-scene proportions to that stroke.
+  const miniK = isMiniVariant ? MINI_POLYGON_STROKE_PX / 5.1 : 1;
+  const pulseBlur = (20 + pulse * 18) * miniK;
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(rot);
@@ -663,11 +666,11 @@ function drawCentralOctagon(cx, cy, progress, pulse) {
   ctx.lineJoin = 'round';
 
   for (const [offset, color] of [
-    [-2.1, 'rgba(40,220,255,0.20)'],
-    [ 2.1, 'rgba(255,72,120,0.16)'],
+    [-2.1 * miniK, 'rgba(40,220,255,0.20)'],
+    [ 2.1 * miniK, 'rgba(255,72,120,0.16)'],
   ]) {
     ctx.strokeStyle = color;
-    ctx.lineWidth = 6.8 * pulseStroke;
+    ctx.lineWidth = 6.8 * miniK * pulseStroke;
     ctx.beginPath();
     for (let i = 0; i < 8; i++) {
       const a = -Math.PI / 2 + i * TAU / 8;
@@ -681,7 +684,7 @@ function drawCentralOctagon(cx, cy, progress, pulse) {
   }
 
   ctx.strokeStyle = 'rgba(255,255,244,0.95)';
-  ctx.lineWidth = 5.1 * pulseStroke;
+  ctx.lineWidth = 5.1 * miniK * pulseStroke;
   ctx.shadowColor = 'rgba(255,255,245,0.90)';
   ctx.shadowBlur = pulseBlur;
   ctx.beginPath();
@@ -701,7 +704,7 @@ function drawTriangularPrism(cx, cy, progress) {
   // Tetrahedron / triangular pyramid: all four faces are triangles.
   // The established function name is retained for the render call site.
   const state = tetrahedronState(progress);
-  const safeMargin = Math.max(14, Math.min(W, H) * 0.035);
+  const safeMargin = Math.max(structurePx(14, 3), Math.min(W, H) * 0.035);
   const xLimit = Math.max(1, Math.min(cx, W - cx) - safeMargin);
   const yLimit = Math.max(1, Math.min(cy, H - cy) - safeMargin);
   const maxProjectedX = Math.max(...state.vertices.map((v) => Math.abs(v[0]) * perspectiveScale(v[2])));
@@ -718,11 +721,11 @@ function drawTriangularPrism(cx, cy, progress) {
 
   // Aberración cromática sutil.
   for (const [offX, offY, color] of [
-    [-1.7, 0.6, 'rgba(40,220,255,0.22)'],
-    [ 1.7,-0.6, 'rgba(255,72,120,0.18)'],
+    [-structurePx(1.7, 0.3), structurePx(0.6, 0.1), 'rgba(40,220,255,0.22)'],
+    [ structurePx(1.7, 0.3), -structurePx(0.6, 0.1), 'rgba(255,72,120,0.18)'],
   ]) {
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3.8;
+    ctx.lineWidth = structurePx(3.8, 0.5);
     for (const [a, b] of edges) {
       ctx.beginPath();
       ctx.moveTo(pts[a][0] + offX, pts[a][1] + offY);
@@ -732,11 +735,11 @@ function drawTriangularPrism(cx, cy, progress) {
   }
 
   ctx.strokeStyle = 'rgba(255,255,244,0.88)';
-  ctx.lineWidth = 3.2;
+  ctx.lineWidth = structurePx(3.2, 0.5);
   for (const [a, b] of edges) {
     const depthAlpha = clamp01((pts[a][2] + pts[b][2]) * 0.46);
     const edgeAlpha = 0.54 + depthAlpha * 0.40;
-    stampGlowLine('prism-edge', 3.2, 14 / 3.2, pts[a][0], pts[a][1], pts[b][0], pts[b][1], 0.68 * 0.88 * edgeAlpha);
+    stampGlowLine('prism-edge', structurePx(3.2, 0.5), 14 / 3.2, pts[a][0], pts[a][1], pts[b][0], pts[b][1], 0.68 * 0.88 * edgeAlpha);
     ctx.globalAlpha = edgeAlpha;
     ctx.beginPath();
     ctx.moveTo(pts[a][0], pts[a][1]);
@@ -815,7 +818,7 @@ function drawCentralCore(cx, cy, phase) {
 
   ctx.fillStyle = 'rgba(255,255,245,0.96)';
   ctx.shadowColor = 'rgba(255,255,245,0.80)';
-  ctx.shadowBlur = 20;
+  ctx.shadowBlur = structurePx(20, 1);
   ctx.beginPath();
   ctx.arc(cx, cy, r * 0.88, 0, TAU);
   ctx.fill();

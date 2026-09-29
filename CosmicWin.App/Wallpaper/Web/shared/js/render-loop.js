@@ -140,6 +140,12 @@ function applyMiniEdgeFade(context, width, height) {
 // fills ONE dark disc (the scenes' own #01040a background at MINI_SCENE_BASE_ALPHA) beneath everything already
 // drawn (destination-over: it never lightens, tints or dims the bright content), solid out to solidRadius and
 // falling to 0 at falloffRadius, so there is no hard circular edge. Drawn last, right before the edge fade.
+// mini-scene-window T2l: the line thickness of the mini central polygons, so processing's octagon reads as thin
+// as raphael's hexadecagon. Measured: raphael mini's gold ring stroke is coreRadius(288)=40 * 0.012 * 1.3 = 0.624px
+// at rest, drawn magnified by MINI_SCENE_ZOOM 1.2 = 0.749px on screen; both scenes' tests assert their polygon
+// against this one number.
+var MINI_POLYGON_STROKE_PX = 0.75;
+
 var MINI_SCENE_BASE_RGB = "1,4,10";
 var MINI_SCENE_BASE_ALPHA = 0.9;
 

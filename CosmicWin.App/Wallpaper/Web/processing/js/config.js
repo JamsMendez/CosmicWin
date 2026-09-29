@@ -185,6 +185,22 @@ const FOREGROUND_INCLINED_RAY_SPEED = 5;
 // Máxima cantidad de segmentos por trazo luminoso compartido. Mantenerlo positivo limita el trabajo
 // de sombra por lote sin conectar rayos independientes entre sí.
 const FOREGROUND_INCLINED_RAY_BATCH_SIZE = 128;
+// mini-scene-window T2l: the structure's radii already follow min(W, H) (bands minD*0.385, orbit blocks
+// minD*0.205, octagon minD*0.168, ...), but its stroke widths, glow blurs and orbit block sizes are absolute
+// px tuned on the real screen (3440x1440, short side 1440). In the ?variant=mini window those px are ~5x too
+// big for the ~5x smaller structure (thick, glowing bands and 7-19px orbit squares). In mini every fixed px
+// value goes through structurePx(): scaled by min(W, H) / 1440 with a small floor so hairlines never vanish.
+// The full variant returns the value untouched. isMiniVariant comes from shared/js/render-loop.js.
+const MINI_STRUCTURE_REFERENCE_SHORT_SIDE = 1440;
+
+function miniStructureScale() {
+  return Math.min(W, H) / MINI_STRUCTURE_REFERENCE_SHORT_SIDE;
+}
+
+function structurePx(px, floor = 0) {
+  return isMiniVariant ? Math.max(floor, px * miniStructureScale()) : px;
+}
+
 const ORBIT_BLOCK_RING_COUNT = 2;
 const ORBIT_BLOCK_COUNT = ORBIT_BLOCK_RING_COUNTS.reduce((total, count) => total + count, 0);
 

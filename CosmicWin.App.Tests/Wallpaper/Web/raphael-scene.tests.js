@@ -65,6 +65,7 @@ const SCRIPT_FILES = [
 // (e, f) translation components, exactly reproduces what a real canvas's current transform would
 // report at each spied call.
 function make2dContext() {
+  var lineWidthHistory = [];
   var slots = {};
   var fillStyleHistory = [];
   var gradient = { addColorStop: function () {} };
@@ -92,11 +93,13 @@ function make2dContext() {
         if (prop === "setTransform") {
           return function (a, b, c, d, e, f) { tx = e || 0; ty = f || 0; };
         }
-        if (prop in slots) return slots[prop];
+        if (prop === "__lineWidthHistory") return lineWidthHistory;
+      if (prop in slots) return slots[prop];
         return function () { /* no-op: beginPath/rect/clip/fill/drawImage/ellipse/arc/rotate/scale/... */ };
       },
       set: function (target, prop, value) {
         slots[prop] = value;
+      if (prop === "lineWidth") lineWidthHistory.push(value);
         if (prop === "fillStyle") fillStyleHistory.push(value);
         return true;
       },
@@ -606,6 +609,18 @@ test("mini stamps no glow under the gold glyphs (the blue ring is unchanged); th
   var full = glowArgs(loadPage({ innerWidth: 1000, innerHeight: 500 }));
   var fullGold = full.filter(function (c, i) { return i % 2 === 0; });
   fullGold.forEach(function (c) { assert.ok(c.glow && c.glow.length === c.count, "the full page must still stamp one glow sprite per gold glyph"); });
+});
+
+test("the mini hexadecagon's rendered stroke equals the shared mini polygon width (which the processing octagon also uses)", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var c = vm.runInContext("ctx", page.sandbox);
+  c.__lineWidthHistory.length = 0;
+  page.sandbox.drawGoldenHexadecagon(144, 144, 0, 0);
+  var history = c.__lineWidthHistory.slice();
+  var core = history[history.length - 1]; // the main ring stroke (chromatic copies come first)
+  var rendered = core * vm.runInContext("MINI_SCENE_ZOOM", page.sandbox); // drawn inside the mini zoom transform
+  var shared = vm.runInContext("MINI_POLYGON_STROKE_PX", page.sandbox);
+  assert.ok(Math.abs(rendered - shared) < 0.05, "mini hexadecagon stroke " + rendered + "px must equal MINI_POLYGON_STROKE_PX " + shared);
 });
 
 test("the stylesheet makes the mini page and #nebula transparent", function () {

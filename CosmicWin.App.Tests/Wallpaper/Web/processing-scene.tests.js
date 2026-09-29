@@ -59,6 +59,9 @@ const SCRIPT_FILES = [
 function make2dContext() {
   var slots = {};
   var fillStyleHistory = [];
+  // T2l: line widths and shadow blurs the scene sets, so the px-absolute detail sizes can be observed.
+  var lineWidthHistory = [];
+  var shadowBlurHistory = [];
   var gradient = { addColorStop: function () {} };
   return new Proxy({}, {
     get: function (target, prop) {
@@ -69,12 +72,16 @@ function make2dContext() {
         return function () { return gradient; };
       }
       if (prop === "__fillStyleHistory") return fillStyleHistory;
+      if (prop === "__lineWidthHistory") return lineWidthHistory;
+      if (prop === "__shadowBlurHistory") return shadowBlurHistory;
       if (prop in slots) return slots[prop];
       return function () { /* no-op: save/restore/beginPath/rect/clip/fill/drawImage/ellipse/... */ };
     },
     set: function (target, prop, value) {
       slots[prop] = value;
       if (prop === "fillStyle") fillStyleHistory.push(value);
+      if (prop === "lineWidth") lineWidthHistory.push(value);
+      if (prop === "shadowBlur") shadowBlurHistory.push(value);
       return true;
     },
   });
@@ -779,6 +786,86 @@ test("mini occludes the background under the whole processing structure: a desti
   assert.ok(captured.call.solid >= minD * 0.30 && captured.call.solid < widestBand, "solid radius " + captured.call.solid + " must cover the core of the structure and stay inside the widest orbit " + widestBand);
   assert.ok(captured.call.falloff >= widestBand * 0.95 && captured.call.falloff <= minD * 0.41, "the soft edge must end at about the orbits' extent (" + widestBand + ") and inside the window fade, got " + captured.call.falloff);
   assert.ok(captured.call.falloff > captured.call.solid, "expected a soft falloff band");
+});
+
+// ---- mini-scene-window T2l: the processing structure's radii already follow min(W, H), but its stroke widths,
+// glow blurs and orbit block sizes were absolute px, so the 288px mini drew a thick, glowing structure in a
+// small box. In mini each fixed px value scales by min(W, H) / 1440 (the short side of the 3440x1440 reference
+// screen, where the full scene was tuned) with a small floor; the full variant keeps every value.
+
+function pxHistory(page, name, run) {
+  var c = vm.runInContext("ctx", page.sandbox);
+  c[name].length = 0;
+  run();
+  return c[name].slice();
+}
+
+test("mini scales the processing structure's fixed px sizes by min(W,H)/1440 with a floor; the full variant keeps them", function () {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var S = 288 / vm.runInContext("MINI_STRUCTURE_REFERENCE_SHORT_SIDE", mini.sandbox);
+  assert.ok(Math.abs(S - 0.2) < 1e-9, "the 288px mini must be 0.2 of the 1440px reference, got " + S);
+  var near = function (a, b, label) { assert.ok(Math.abs(a - b) < 1e-9, label + ": got " + a + ", expected " + b); };
+
+  // the helper: unchanged in full, scaled with a floor in mini
+  assert.strictEqual(full.sandbox.structurePx(12, 1), 12);
+  near(mini.sandbox.structurePx(12, 1), 12 * S, "structurePx above the floor");
+  assert.strictEqual(mini.sandbox.structurePx(1.45, 0.5), 0.5, "structurePx must honor the floor");
+
+  // orbit blocks: 7..19px squares in the full scene (before the depth scale), 1.5px floor in mini
+  var block = { ring: 0, phase: 0, radialJitter: 1, size: 12, tilt: 0 };
+  var fullState = full.sandbox.orbitBlockState(0, 0, 0, block);
+  var miniState = mini.sandbox.orbitBlockState(0, 0, 0, block);
+  var depth = 0.90 + fullState.front * 0.74;
+  near(fullState.size, 12 * depth, "full block size");
+  near(miniState.size, 12 * S * depth, "mini block size");
+  var smallest = mini.sandbox.orbitBlockState(0, 0, 0, { ring: 0, phase: 0, radialJitter: 1, size: 7, tilt: 0 });
+  near(smallest.size, 1.5 * (0.90 + smallest.front * 0.74), "the smallest mini block keeps the 1.5px floor");
+
+  // octagon: 6.8px / 5.1px strokes, 20px blur at rest
+  var octagon = function (page) {
+    var widths = pxHistory(page, "__lineWidthHistory", function () { page.sandbox.drawCentralOctagon(144, 144, 0, 0); });
+    var blurs = pxHistory(page, "__shadowBlurHistory", function () { page.sandbox.drawCentralOctagon(144, 144, 0, 0); });
+    return { widths: widths, blurs: blurs };
+  };
+  var f = octagon(full);
+  assert.deepStrictEqual(f.widths, [6.8, 6.8, 5.1], "the full octagon strokes must stay 6.8/6.8/5.1");
+  assert.deepStrictEqual(f.blurs, [20], "the full octagon blur must stay 20");
+  // T2l: the mini octagon's line is exactly as thick as raphael's mini hexadecagon (MINI_POLYGON_STROKE_PX);
+  // its chroma copies and glow keep their full-scene proportions to it, so the glow does not re-thicken it.
+  var polygonPx = vm.runInContext("MINI_POLYGON_STROKE_PX", mini.sandbox);
+  var k = polygonPx / 5.1;
+  var m = octagon(mini);
+  near(m.widths[2], polygonPx, "mini octagon stroke equals the shared polygon width");
+  near(m.widths[0], 6.8 * k, "mini octagon chroma stroke keeps its 6.8:5.1 proportion");
+  near(m.blurs[0], 20 * k, "mini octagon glow scales with the stroke");
+
+  // folding bands: 12px shadow blur, 1.15px minimum edge
+  var band = function (page) {
+    return pxHistory(page, "__shadowBlurHistory", function () { page.sandbox.drawFoldingBand(144, 144, 100, 60, 0, 7.2, 0.3); });
+  };
+  assert.ok(band(full).indexOf(12) >= 0, "the full band blur must stay 12");
+  near(band(mini).filter(function (v) { return v > 0; })[0], 12 * S, "mini band blur");
+
+  // rays / core rays go through drawGlowSegments: 1.45px width, 6px blur
+  var rays = function (page) {
+    var segs = [[0, 0, 50, 50]];
+    return {
+      widths: pxHistory(page, "__lineWidthHistory", function () { page.sandbox.drawGlowSegments(segs, 1.45, 0.5, 6); }),
+      blurs: pxHistory(page, "__shadowBlurHistory", function () { page.sandbox.drawGlowSegments(segs, 1.45, 0.5, 6); }),
+    };
+  };
+  assert.deepStrictEqual(rays(full).widths, [1.45]);
+  assert.deepStrictEqual(rays(full).blurs, [6]);
+  assert.strictEqual(rays(mini).widths[0], 0.5, "the mini ray width keeps the 0.5px floor");
+  near(rays(mini).blurs[0], 6 * S, "mini ray blur");
+
+  // central core glow: 20px shadow blur
+  var core = function (page) {
+    return pxHistory(page, "__shadowBlurHistory", function () { page.sandbox.drawCentralCore(144, 144, 0); }).filter(function (v) { return v > 0; });
+  };
+  assert.ok(core(full).indexOf(20) >= 0, "the full core blur must stay 20");
+  assert.ok(core(mini).some(function (v) { return Math.abs(v - 20 * S) < 1e-9; }), "the mini core blur must scale");
 });
 
 test("the stylesheet makes the mini page and #nebula transparent", function () {
