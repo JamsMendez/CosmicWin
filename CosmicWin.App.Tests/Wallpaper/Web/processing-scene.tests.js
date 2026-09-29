@@ -737,6 +737,7 @@ test("mini draws only its kept layers (plus the green nebula), on a transparent 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "render",
+    miniOnly: ["drawMiniSceneBase"],
     keepNebula: true,
     keep: ["drawSegmentedSphere", "drawAtomicOrbits", "drawOrbitBlocks", "drawCentralOctagon", "drawTriangularPrism", "drawPerspectiveRays", "drawCentralCore"],
     drop: ["drawSoftOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette"],
@@ -747,6 +748,7 @@ test("the full variant still draws every layer", function () {
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "render",
+    miniOnly: ["drawMiniSceneBase"],
     keep: ["drawSegmentedSphere", "drawAtomicOrbits", "drawOrbitBlocks", "drawCentralOctagon", "drawTriangularPrism", "drawPerspectiveRays", "drawCentralCore"],
     drop: ["drawSoftOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette"],
     hasBackgroundFill: false,
@@ -766,6 +768,17 @@ test("the nebula's alpha handling is mini-only: alpha context, alpha-0 clear and
   assert.strictEqual(full.gl.contextAttributes && full.gl.contextAttributes.alpha, false, "the full page keeps the opaque WebGL buffer");
   assert.strictEqual(full.gl.clearColorCalls[0][3], 1, "the full page still clears the nebula to opaque black");
   assert.strictEqual(full.gl.uniformCalls.u_mini, 0, "the full page must leave the shader's mini branch off");
+});
+
+test("mini occludes the background under the whole processing structure: a destination-over base disc sized to the orbits, soft edge, none in the full variant", function () {
+  miniVariantChecks.checkMiniSceneBaseFunction(loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }));
+  var captured = miniVariantChecks.captureMiniSceneBaseArgs(loadPage, "render");
+  var minD = 288;
+  var widestBand = captured.page.sandbox.foldingBandParameters(0).reduce(function (m, b) { return Math.max(m, b[0], b[1]); }, 0);
+  assert.ok(Math.abs(captured.call.cx - 288 * 0.505) < 1e-6 && Math.abs(captured.call.cy - 288 * 0.515) < 1e-6, "the base must be centered on the structure");
+  assert.ok(captured.call.solid >= minD * 0.30 && captured.call.solid < widestBand, "solid radius " + captured.call.solid + " must cover the core of the structure and stay inside the widest orbit " + widestBand);
+  assert.ok(captured.call.falloff >= widestBand * 0.95 && captured.call.falloff <= minD * 0.41, "the soft edge must end at about the orbits' extent (" + widestBand + ") and inside the window fade, got " + captured.call.falloff);
+  assert.ok(captured.call.falloff > captured.call.solid, "expected a soft falloff band");
 });
 
 test("the stylesheet makes the mini page and #nebula transparent", function () {

@@ -230,6 +230,67 @@ function checkEdgeFadeMask(page) {
   stops.forEach(function (s) { var a = alphaOf(s[1]); assert.ok(a <= previous + 1e-9, "alpha must not increase outward"); previous = a; });
 }
 
+// mini-scene-window T2j: processing and raphael draw ONE occluding dark base disc beneath the whole mini scene,
+// so text and icons of windows behind the topmost mini window cannot read through the structure. Shared
+// function in shared/js/render-loop.js: destination-over (beneath everything already drawn), a radial
+// gradient solid (alpha in [0.85, 0.95]) out to solidRadius that falls to 0 at falloffRadius, no hard edge.
+function checkMiniSceneBaseFunction(page) {
+  var gradients = [];
+  var fills = [];
+  var depth = 0;
+  var ctx = {
+    globalCompositeOperation: "source-over",
+    fillStyle: null,
+    createRadialGradient: function () {
+      var g = { args: Array.prototype.slice.call(arguments), stops: [], addColorStop: function (o, c) { g.stops.push([o, c]); } };
+      gradients.push(g);
+      return g;
+    },
+    save: function () { depth++; },
+    restore: function () { depth--; },
+    beginPath: function () {},
+    arc: function (x, y, r) { ctx.lastArc = [x, y, r]; },
+    fill: function () { fills.push({ op: ctx.globalCompositeOperation, style: ctx.fillStyle, arc: ctx.lastArc }); },
+  };
+  page.sandbox.drawMiniSceneBase(ctx, 100, 120, 80, 96);
+
+  assert.strictEqual(depth, 0, "drawMiniSceneBase must balance save()/restore()");
+  assert.strictEqual(gradients.length, 1);
+  assert.strictEqual(fills.length, 1);
+  assert.strictEqual(fills[0].op, "destination-over", "the base must be drawn beneath the frame (destination-over)");
+  assert.strictEqual(fills[0].style, gradients[0]);
+  var g = gradients[0].args; // x0, y0, r0, x1, y1, r1
+  assert.ok(g[0] === 100 && g[1] === 120 && g[3] === 100 && g[4] === 120, "the base must be centered on the scene");
+  assert.strictEqual(g[5], 96, "the gradient ends at the falloff radius");
+  assert.ok(fills[0].arc[0] === 100 && fills[0].arc[1] === 120 && fills[0].arc[2] === 96, "the filled disc must reach the falloff radius");
+  var alphaOf = function (c) { return Number(/,\s*([\d.]+)\)$/.exec(c)[1]); };
+  var stops = gradients[0].stops;
+  var solid = stops.filter(function (s) { return alphaOf(s[1]) > 0.5; });
+  assert.ok(solid.length >= 2, "expected a solid core");
+  solid.forEach(function (s) {
+    var a = alphaOf(s[1]);
+    assert.ok(a >= 0.85 && a <= 0.95, "the base alpha must hide what is behind it (0.85-0.95), got " + a);
+  });
+  assert.ok(Math.abs(solid[solid.length - 1][0] - 80 / 96) < 1e-9, "the base must stay solid out to the solid radius");
+  assert.strictEqual(alphaOf(stops[stops.length - 1][1]), 0, "the base must fall to 0 at the falloff radius (no hard edge)");
+  assert.strictEqual(stops[stops.length - 1][0], 1);
+}
+
+// Runs one mini frame and returns the (solidRadius, falloffRadius, cx, cy) the scene passed to drawMiniSceneBase.
+function captureMiniSceneBaseArgs(loadPage, frameFunction) {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  page.sandbox[frameFunction](0);
+  var calls = [];
+  var original = page.sandbox.drawMiniSceneBase;
+  page.sandbox.drawMiniSceneBase = function (context, cx, cy, solidRadius, falloffRadius) {
+    calls.push({ cx: cx, cy: cy, solid: solidRadius, falloff: falloffRadius });
+    return original.apply(this, arguments);
+  };
+  page.sandbox[frameFunction](100);
+  assert.strictEqual(calls.length, 1, "expected one drawMiniSceneBase call per mini frame");
+  return { page: page, call: calls[0] };
+}
+
 // (c) full: the default page still draws every layer, and still paints its own background ---------
 // options: { loadPage, frameFunction, keep[], drop[], hasBackgroundFill }
 function checkFullLayers(options) {
@@ -285,6 +346,8 @@ function checkMiniStylesheet(sceneDir, nebulaMode) {
 
 module.exports = {
   checkVariantParse: checkVariantParse,
+  checkMiniSceneBaseFunction: checkMiniSceneBaseFunction,
+  captureMiniSceneBaseArgs: captureMiniSceneBaseArgs,
   checkMiniLayers: checkMiniLayers,
   checkFullLayers: checkFullLayers,
   checkMiniStylesheet: checkMiniStylesheet,

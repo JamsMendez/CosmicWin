@@ -99,6 +99,9 @@ function render(ms) {
     } else {
       // Mini: fade everything (rays, blocks, bands) out before the window edges; the nebula has its
       // own fade in its shader. Runs before the unmasked alert overlay below.
+      // Occlude the background under the whole structure: solid to 0.32 of the short side, easing to 0 at
+      // 0.40 (about the widest orbit, 0.385), inside the window fade's opaque radius (0.41).
+      drawMiniSceneBase(ctx, cx, cy, Math.min(W, H) * 0.32, Math.min(W, H) * 0.40);
       applyMiniEdgeFade(ctx, W, H);
     }
   } catch (error) {

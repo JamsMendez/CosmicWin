@@ -556,6 +556,7 @@ test("mini draws only its kept layers (plus the gold nebula and the rays), on a 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "render",
+    miniOnly: ["drawMiniSceneBase"],
     keepNebula: true,
     keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawPerspectiveRays", "drawCentralCore"],
     drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
@@ -566,10 +567,22 @@ test("the full variant still draws every layer", function () {
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "render",
+    miniOnly: ["drawMiniSceneBase"],
     keep: ["drawGlyphRings", "drawGoldenHexadecagon", "drawPerspectiveRays", "drawCentralCore"],
     drop: ["drawFeathers", "drawSoftOvalFields", "drawCircularOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette", "drawGlyphCounters"],
     hasBackgroundFill: false,
   });
+});
+
+test("mini occludes the background under the whole raphael ring system: a destination-over base disc out to the outer glyph ring's rim (zoomed), short soft edge, none in the full variant", function () {
+  miniVariantChecks.checkMiniSceneBaseFunction(loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }));
+  var captured = miniVariantChecks.captureMiniSceneBaseArgs(loadPage, "render");
+  var sb = captured.page.sandbox;
+  var zoom = vm.runInContext("MINI_SCENE_ZOOM", sb);
+  var rim = sb.glyphRingAnnuli(sb.coreRadius(288))[3].outerRadius * zoom; // the outer glyph ring's outer edge, as drawn
+  assert.ok(Math.abs(captured.call.cx - 288 * 0.505) < 1e-6 && Math.abs(captured.call.cy - 288 * 0.515) < 1e-6, "the base must be centered on the ring system");
+  assert.ok(captured.call.solid >= rim - 1e-6 && captured.call.solid <= rim * 1.02, "solid radius " + captured.call.solid + " must reach the outer rim " + rim);
+  assert.ok(captured.call.falloff > captured.call.solid && captured.call.falloff <= rim * 1.10, "expected a short soft edge just outside the rim, got " + captured.call.falloff);
 });
 
 test("the stylesheet makes the mini page and #nebula transparent", function () {

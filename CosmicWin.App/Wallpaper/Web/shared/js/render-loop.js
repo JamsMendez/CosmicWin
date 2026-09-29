@@ -135,6 +135,29 @@ function applyMiniEdgeFade(context, width, height) {
   context.restore();
 }
 
+// mini-scene-window T2j: the occluding base of the processing and raphael mini scenes. The mini window is
+// topmost and see-through, so text and icons of the windows behind it read through the scene's structure. This
+// fills ONE dark disc (the scenes' own #01040a background at MINI_SCENE_BASE_ALPHA) beneath everything already
+// drawn (destination-over: it never lightens, tints or dims the bright content), solid out to solidRadius and
+// falling to 0 at falloffRadius, so there is no hard circular edge. Drawn last, right before the edge fade.
+var MINI_SCENE_BASE_RGB = "1,4,10";
+var MINI_SCENE_BASE_ALPHA = 0.9;
+
+function drawMiniSceneBase(context, cx, cy, solidRadius, falloffRadius) {
+  var fade = context.createRadialGradient(cx, cy, 0, cx, cy, falloffRadius);
+  var solid = "rgba(" + MINI_SCENE_BASE_RGB + "," + MINI_SCENE_BASE_ALPHA + ")";
+  fade.addColorStop(0, solid);
+  fade.addColorStop(solidRadius / falloffRadius, solid);
+  fade.addColorStop(1, "rgba(" + MINI_SCENE_BASE_RGB + ",0)");
+  context.save();
+  context.globalCompositeOperation = "destination-over";
+  context.fillStyle = fade;
+  context.beginPath();
+  context.arc(cx, cy, falloffRadius, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+}
+
 // The stylesheets key the transparent page background (and the hidden #nebula canvas) off this class.
 if (isMiniVariant) {
   try { document.documentElement.classList.add("scene-mini"); } catch (classError) { /* no DOM root */ }
