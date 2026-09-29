@@ -66,7 +66,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
 - [x] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [x] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
-- [ ] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
+- [x] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
 ## Progress / evidence
@@ -164,6 +164,26 @@ maintainer merges/pushes (established precedent). RDD: on (global).
     - stale 288 comment (WebView2MiniSceneBrowser.cs:59).
     - stale renderer comment (AppComposition.cs:1007).
     - partial attach leak (WebView2MiniSceneBrowser.cs:57-68).
+- T7 922ef05 + 8d4f604 (delegated writer):
+  - IMiniSceneWindow.IsReady (true only after the browser attached): drives the alert queue and Alt+M
+    (skipped reason=not-ready).
+  - Show false + dispose on a Place failure.
+  - WebView2 ProcessFailed -> release + re-attach + re-navigate, capped at 2 per window lifetime ("recovery exhausted").
+  - AttachAsync cleans up in finally.
+  - Mini ShowAlert/HideAlert always posted to the owning thread (pool-thread test).
+  - IsRecoverableAlertLayerFailure renamed to IsRecoverableFailure.
+  - Shared miniRingBasis.
+  - Placement side clamped to the work area's short side and >= 0.
+  - Raphael gold cap test.
+  - Stale comments fixed.
+  - Skipped sprites.js:182: already derived from goldGlyphRingCount and covered by a test.
+  - RED: 10 compile errors + 7 failures -> GREEN. The browser source guards and the cap test only passed as guards.
+  - Suite: App 1318, Interop 424 (3 skipped), Layout 198, Alert 13, 0 failed.
+  - Parent spot check: Mini* 81 passed.
+  - T6 watch items:
+    - kill the mini WebView2 child: it recovers twice, and the third kill stays down.
+    - Alt+M right at startup traces not-ready.
+    - an early alert shows once ready.
 
 ## Next step
-T7 cleanup (both reviews' follow-ups), then T6 hardware check.
+Review of slice fc811a5..HEAD, then T6 hardware check.
