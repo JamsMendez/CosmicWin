@@ -373,7 +373,8 @@ function buildSprites() {
       return bakeRainbowRing(radius, radius * 0.56, FLARE_RING_WIDTH, FLARE_RING_DIFFUSION);
     }),
     outlineGlyphsGold: buildOutlineRingSprites(ringAnnuli[1], goldGlyphBaseSizeFraction(), GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_BORDER_COLOR, GLYPH_RING_GOLD_INTERIOR_COLOR),
-    outlineGlyphsGoldGlow: buildOutlineRingGlowSprites(ringAnnuli[1], goldGlyphBaseSizeFraction(), GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_GLOW_COLOR, GLYPH_RING_GOLD_GLOW_BLUR_PX),
+    // T2k: mini draws the gold glyphs without their glow, so it bakes no glow sprites.
+    outlineGlyphsGoldGlow: isMiniVariant ? [] : buildOutlineRingGlowSprites(ringAnnuli[1], goldGlyphBaseSizeFraction(), GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD, GLYPH_RING_GOLD_GLOW_COLOR, GLYPH_RING_GOLD_GLOW_BLUR_PX),
     outlineGlyphs: buildOutlineRingSprites(ringAnnuli[3], GLYPH_RING_BLUE_BASE_SIZE_FRACTION, GLYPH_RING_STROKE_WIDTH_FRACTION_BLUE, GLYPH_RING_BLUE_BORDER_COLOR, GLYPH_RING_BLUE_INTERIOR_COLOR, GLYPH_RING_BLUE_EXTRA_COUNT),
     featherSharp: FEATHER_VARIANTS.map((variant) =>
       bakeSprite(FEATHER_SPRITE_REFERENCE_LENGTH * 1.05, FEATHER_SPRITE_REFERENCE_LENGTH * 0.5,
@@ -397,7 +398,7 @@ function buildSprites() {
   if (sprites.outlineGlyphsGold.length < 1 || sprites.outlineGlyphs.length < 1) {
     throw new Error('Outline-glyph sprite baking must produce at least one sprite per ring.');
   }
-  if (sprites.outlineGlyphsGoldGlow.length !== sprites.outlineGlyphsGold.length) {
+  if (!isMiniVariant && sprites.outlineGlyphsGoldGlow.length !== sprites.outlineGlyphsGold.length) {
     throw new Error('The gold-glyph glow sprite set must have exactly one glow sprite per gold glyph.');
   }
   if (sprites.featherSharp.length !== FEATHER_VARIANT_COUNT || sprites.featherBlurred.length !== FEATHER_VARIANT_COUNT ||

@@ -585,6 +585,29 @@ test("mini occludes the background under the whole raphael ring system: a destin
   assert.ok(captured.call.falloff > captured.call.solid && captured.call.falloff <= rim * 1.10, "expected a short soft edge just outside the rim, got " + captured.call.falloff);
 });
 
+test("mini stamps no glow under the gold glyphs (the blue ring is unchanged); the full page still stamps the gold glow", function () {
+  function glowArgs(page) {
+    var calls = [];
+    var original = page.sandbox.drawOutlineGlyphRing;
+    page.sandbox.drawOutlineGlyphRing = function (cx, cy, radius, count, spriteSet, rotation, glowSpriteSet) {
+      calls.push({ count: count, glow: glowSpriteSet });
+      return original.apply(this, arguments);
+    };
+    page.sandbox.render(0);
+    page.sandbox.render(100);
+    return calls;
+  }
+  var mini = glowArgs(loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }));
+  var miniGold = mini.filter(function (c, i) { return i % 2 === 0; }); // gold first, blue second, every frame
+  var miniBlue = mini.filter(function (c, i) { return i % 2 === 1; });
+  assert.ok(miniGold.length >= 2 && miniBlue.length >= 2);
+  miniGold.forEach(function (c) { assert.ok(!c.glow || c.glow.length === 0, "mini must not stamp the gold glow sprites"); });
+  miniBlue.forEach(function (c) { assert.strictEqual(c.glow, undefined, "the blue ring never had a glow"); });
+  var full = glowArgs(loadPage({ innerWidth: 1000, innerHeight: 500 }));
+  var fullGold = full.filter(function (c, i) { return i % 2 === 0; });
+  fullGold.forEach(function (c) { assert.ok(c.glow && c.glow.length === c.count, "the full page must still stamp one glow sprite per gold glyph"); });
+});
+
 test("the stylesheet makes the mini page and #nebula transparent", function () {
   miniVariantChecks.checkMiniStylesheet(sceneDir, "transparent");
 });
@@ -622,7 +645,7 @@ test("mini gold ring has 3x the glyphs the standard sizing rule gives at that sc
     vm.runInContext("GLYPH_RING_GAP_PX", sb) * scale);
   assert.strictEqual(stats.gold.count, 3 * fullRuleCount,
     "expected " + (3 * fullRuleCount) + " gold glyphs (3 x " + fullRuleCount + "), got " + stats.gold.count);
-  assert.strictEqual(stats.glow, stats.gold.count, "the gold glow sprites must match the gold glyph count");
+  assert.strictEqual(stats.glow, 0, "mini bakes no gold glyph glow sprites (T2k)");
   // evenly spaced and never overlapping, even at the tighter inner radius
   // (ink width, not the sprite canvas: the canvas is rounded up to whole pixels)
   var width = (gold.outerRadius - gold.innerRadius) * vm.runInContext("MINI_GOLD_BASE_SIZE_FRACTION", sb);
@@ -667,6 +690,8 @@ test("the mini nebula is gold, alpha-only and uses the wider edge fade; the full
   // Wider than processing's (0.5..0.9): still fully transparent at the window edge (r = 1) and corners.
   assert.strictEqual(mini.gl.uniformCalls.u_miniFadeStart, 0.75);
   assert.strictEqual(mini.gl.uniformCalls.u_miniFadeEnd, 0.98);
+  // T2k: the mini nebula alpha is boosted ~1.4x; the fade above still brings it to exactly 0 at the edge.
+  assert.ok(mini.gl.uniformCalls.u_miniGain >= 1.3 && mini.gl.uniformCalls.u_miniGain <= 1.5, "expected the mini nebula gain 1.3-1.5, got " + mini.gl.uniformCalls.u_miniGain);
   assert.ok(mini.gl.uniformCalls.u_miniFadeEnd < 1, "the nebula alpha must reach 0 before the window edge");
 
   var full = loadPage({ innerWidth: 1000, innerHeight: 500, fakeWebGl: true });
@@ -674,6 +699,7 @@ test("the mini nebula is gold, alpha-only and uses the wider edge fade; the full
   assert.strictEqual(full.gl.contextAttributes && full.gl.contextAttributes.alpha, false, "the full page keeps the opaque WebGL buffer");
   assert.strictEqual(full.gl.clearColorCalls[0][3], 1, "the full page still clears the nebula to opaque black");
   assert.strictEqual(full.gl.uniformCalls.u_mini, 0, "the full page must leave the shader's mini branch off");
+  assert.strictEqual(full.gl.uniformCalls.u_miniGain, 1, "the full page must not boost the nebula");
 });
 
 test("the perspective rays rotate independently: each has its own signed angular speed, both directions present, and the angles diverge over time", function () {

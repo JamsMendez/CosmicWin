@@ -406,7 +406,7 @@ function drawGlyphRings(cx, cy, progress) {
   // circumference at bake time — glyphRingCountFromCircumference, glyph-rings.js), so it's read
   // here from the actual baked sprite array length, always in sync with what was baked.
   const gold = annuli[1];
-  drawOutlineGlyphRing(cx, cy, (gold.innerRadius + gold.outerRadius) / 2, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED, sprites.outlineGlyphsGoldGlow);
+  drawOutlineGlyphRing(cx, cy, (gold.innerRadius + gold.outerRadius) / 2, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED, isMiniVariant ? undefined : sprites.outlineGlyphsGoldGlow);
 
   const blue = annuli[3];
   drawOutlineGlyphRing(cx, cy, (blue.innerRadius + blue.outerRadius) / 2, sprites.outlineGlyphs.length, sprites.outlineGlyphs, progress * TAU * GLYPH_RING_BLUE_ROTATION_SPEED);

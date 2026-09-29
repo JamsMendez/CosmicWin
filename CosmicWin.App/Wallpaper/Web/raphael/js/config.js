@@ -44,6 +44,8 @@ const MINI_SCENE_ZOOM = 1.2;
 // the edges, but it is 0 at 0.98, so every edge and corner pixel stays fully transparent.
 const MINI_NEBULA_FADE_START = 0.75;
 const MINI_NEBULA_FADE_END = 0.98;
+// T2k: the mini nebula alpha is boosted (about 1.4x its previous density); the fade above still reaches 0 at the edge.
+const MINI_NEBULA_GAIN = 1.4;
 
 // Tiempo total (en segundos) que la animación avanza antes de invertirse (ping-pong); el ciclo
 // completo dura el doble: ida + regreso. Alargarlo NO hace más lenta la animación: la repite más

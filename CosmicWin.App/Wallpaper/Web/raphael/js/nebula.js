@@ -40,6 +40,8 @@ uniform float u_goldZoneNoiseScale;
 uniform float u_mini;
 uniform float u_miniFadeStart;
 uniform float u_miniFadeEnd;
+// T2k: alpha gain of the mini nebula (1.0 in the full page, which never reads it).
+uniform float u_miniGain;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(41.71, 289.13))) * 43758.5453);
@@ -153,7 +155,7 @@ void main() {
     // the half-side so every edge and corner pixel is fully transparent.
     float squareRadius = length(2.0 * gl_FragCoord.xy - u_resolution) / min(u_resolution.x, u_resolution.y);
     float fade = 1.0 - smoothstep(u_miniFadeStart, u_miniFadeEnd, squareRadius);
-    float alpha = clamp(density * u_intensity + goldZone, 0.0, 1.0) * fade;
+    float alpha = clamp((density * u_intensity + goldZone) * u_miniGain, 0.0, 1.0) * fade;
     gl_FragColor = vec4(gold * alpha, alpha);
     return;
   }
@@ -225,6 +227,7 @@ function initializeNebulaRenderer() {
       mini: gl.getUniformLocation(program, 'u_mini'),
       miniFadeStart: gl.getUniformLocation(program, 'u_miniFadeStart'),
       miniFadeEnd: gl.getUniformLocation(program, 'u_miniFadeEnd'),
+      miniGain: gl.getUniformLocation(program, 'u_miniGain'),
     };
     resizeNebula();
   } catch (_) {
@@ -242,7 +245,7 @@ function resizeNebula() {
 function renderNebula(ms) {
   if (!nebulaRenderer) return;
   try {
-    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity, goldBandWidth, goldBandIntensity, goldWispThreshold, goldWispIntensity, coreRadiusPx, goldZoneExtent, goldZoneIntensity, goldZoneNoiseScale, mini, miniFadeStart, miniFadeEnd } = nebulaRenderer;
+    const { gl, program, buffer, position, resolution, rotation, drift, warp, thickness, scale, intensity, goldBandWidth, goldBandIntensity, goldWispThreshold, goldWispIntensity, coreRadiusPx, goldZoneExtent, goldZoneIntensity, goldZoneNoiseScale, mini, miniFadeStart, miniFadeEnd, miniGain } = nebulaRenderer;
     gl.viewport(0, 0, nebulaCanvas.width, nebulaCanvas.height);
     gl.clearColor(0, 0, 0, isMiniVariant ? 0 : 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -274,6 +277,7 @@ function renderNebula(ms) {
     gl.uniform1f(mini, isMiniVariant ? 1 : 0);
     gl.uniform1f(miniFadeStart, MINI_NEBULA_FADE_START);
     gl.uniform1f(miniFadeEnd, MINI_NEBULA_FADE_END);
+    gl.uniform1f(miniGain, isMiniVariant ? MINI_NEBULA_GAIN : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   } catch (_) {
     nebulaRenderer = null;

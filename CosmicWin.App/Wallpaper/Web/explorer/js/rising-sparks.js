@@ -111,6 +111,7 @@ function drawRisingSparks(context, timeSeconds) {
 function drawBlueRingTint(context) {
   context.save();
   context.globalCompositeOperation = 'source-atop';
+  context.globalAlpha = MINI_BLUE_TINT_ALPHA;
   context.fillStyle = BLUE_LAYER_TINT_COLOR;
   context.fillRect(0, 0, W, H);
   context.restore();

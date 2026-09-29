@@ -547,8 +547,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
     // The blue tint (source-atop) tints whatever is already drawn: ring AND planet come before it, the
     // chroma fan (and the sparks) after it, so the fan stays untinted.
     order: [["drawInnerRing", "drawEarth"], ["drawEarth", "drawBlueRingTint"], ["drawBlueRingTint", "drawChromaticGlowAnimated"], ["drawChromaticGlowAnimated", "drawRisingSparks"]],
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
-    drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
+    drop: ["drawStarfield", "drawBlueLayer", "drawVignette", "drawCombinedLightingMask"],
     fit: function (page) {
       // The ring is centered in the square, its disc border stays inside the edge fade's opaque radius
       // (so the mask never clips it) and still fills most of the square (>= 0.36 of the side).
@@ -586,8 +586,8 @@ test("the full variant still draws every layer and its opaque background", funct
     loadPage: loadPage,
     frameFunction: "renderFrame",
     miniOnly: ["drawMiniRingBases"],
-    keep: ["drawDiscBorder", "drawCachedRingContent", "drawCombinedLightingMask", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawRisingSparks"],
-    drop: ["drawStarfield", "drawBlueLayer", "drawVignette"],
+    keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawRisingSparks"],
+    drop: ["drawStarfield", "drawBlueLayer", "drawVignette", "drawCombinedLightingMask"],
     hasBackgroundFill: true,
   });
 });
@@ -622,6 +622,36 @@ test("mini scales the hieroglyph band's glyph stroke with the ring (floor, propo
 
 test("mini draws an occluding dark base under every ring band (destination-over, band radii only); the full variant draws none", function () {
   constellationRingChecks.checkMiniRingBase(loadPage);
+});
+
+test("explorer mini tints with the full scene's blue at partial alpha, source-atop over the drawn pixels only; the full blue layer keeps its own fill", function () {
+  var page = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var recorded = [];
+  var state = { op: "source-over", alpha: 1, style: null };
+  var context = new Proxy({}, {
+    get: function (target, prop) {
+      if (prop === "fillRect") return function (x, y, w, h) { recorded.push({ op: state.op, alpha: state.alpha, style: state.style, rect: [x, y, w, h] }); };
+      if (prop === "globalCompositeOperation") return state.op;
+      if (prop === "globalAlpha") return state.alpha;
+      return function () {};
+    },
+    set: function (target, prop, value) {
+      if (prop === "globalCompositeOperation") state.op = value;
+      if (prop === "globalAlpha") state.alpha = value;
+      if (prop === "fillStyle") state.style = value;
+      return true;
+    },
+  });
+  page.sandbox.drawBlueRingTint(context);
+  assert.strictEqual(recorded.length, 1, "expected one tint fill");
+  var tint = recorded[0];
+  var full = vm.runInContext("BLUE_LAYER_TINT_COLOR", page.sandbox);
+  assert.strictEqual(tint.style, full, "the tint must use the full scene's own BLUE_LAYER_TINT_COLOR");
+  assert.strictEqual(tint.op, "source-atop", "the tint must only touch pixels that are already drawn");
+  var colorAlpha = Number(/,\s*([\d.]+)\)$/.exec(full)[1]);
+  var effective = colorAlpha * tint.alpha;
+  assert.ok(effective >= 0.3 && effective <= 0.5, "the effective tint alpha must be partial (0.3-0.5) so the white detail reads through, got " + effective);
+  assert.ok(tint.rect[2] >= 288 && tint.rect[3] >= 288);
 });
 
 test("the stylesheet makes the mini page transparent", function () {

@@ -588,7 +588,8 @@ function renderFrame(nowMs) {
       const angle = RING_ANIMATIONS[i].speed * timeSeconds;
       drawCachedRingContent(ctx, ringCaches[i], cx, cy, angle);
     }
-    drawCombinedLightingMask(ctx, cx, cy);
+    // Mini skips the lighting mask (like idle): its multiply paints an opaque grey over the see-through canvas.
+    if (!isMiniVariant) drawCombinedLightingMask(ctx, cx, cy);
 
     drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
     drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);

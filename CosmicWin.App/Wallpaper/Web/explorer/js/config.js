@@ -535,6 +535,9 @@ const STARFIELD_TWINKLE_PERIOD_SECONDS = 6; // one full brighten/dim cycle, offs
 // Blue layer: a 'color' blend tints the monochrome scene blue, then a 'screen' radial glow
 // lifts the center (behind the Earth) toward cyan-blue, fading out toward the edges.
 const BLUE_LAYER_TINT_COLOR = 'rgba(25, 120, 175, 0.75)';
+// T2k: the mini variant lays the SAME blue over the drawn pixels only, at this share of its own alpha
+// (0.75 x 0.55 = ~0.41 effective) so the white ring detail reads through instead of a solid blue fill.
+const MINI_BLUE_TINT_ALPHA = 0.55;
 const BLUE_LAYER_GLOW_COLOR = 'rgba(40, 120, 200, 0.30)';
 const BLUE_LAYER_GLOW_RADIUS_FRACTION = 0.75; // of max(W, H)
 
