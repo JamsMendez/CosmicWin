@@ -295,6 +295,16 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - T2k 2bdae45: explorer mini = idle mini (mask skipped) + BLUE_LAYER_TINT_COLOR source-atop at globalAlpha 0.55 (planet
   tinted, fan/sparks after the tint); raphael mini: no gold glyph glow (not baked in mini), nebula u_miniGain 1.4.
   RED explorer 2 + raphael 3 -> GREEN explorer 20, raphael 22. Both: Scene 78, full suite 0 failed; previews edge 0.
+- Live check after T2j+T2k (PID 37912): explorer shows the white idle detail with an alpha blue wash; processing
+  and raphael sit on dark discs; raphael gold ticks have no glow.
+- Review slice 3ae30aa..(T2j+T2k+docs) (high, 15 files, 218 lines): APPROVED, acknowledged (lineage
+  review-9741a92083e38a9f). Suggestions only (-> T8):
+  - duplicated mini glow gate (raphael sprites.js:376).
+  - processing inline geometry constants (main.js:102).
+  - raphael magic annulus index (main.js:95).
+  - raphael nebula gain masked by the base inside the disc (nebula.js:280).
+  - zero-size gradient stop when solid == falloff (render-loop.js:150).
+  - test doc/title/order nits.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
