@@ -81,7 +81,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - mini-corner -> mini-position
   (route: delegated writer, parallel with T2h)
 - [x] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
-- [ ] T2j Processing/raphael mini: dark occluding base disc under the structure (same mechanism as T2i) (maintainer 2026-09-29: check explorer and the rest) (route: delegated writer)
+- [x] T2j Processing/raphael mini: dark occluding base disc under the structure (same mechanism as T2i) (maintainer 2026-09-29: check explorer and the rest) (route: delegated writer)
+- [x] T2k Explorer mini = idle mini + semi-transparent blue layer (original color) only over drawn components; raphael mini: no glow on gold glyphs, gold nebula alpha x1.3-1.5 (maintainer 2026-09-29) (route: delegated writer, after T2j)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -288,6 +289,12 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - Live check after T2i (PID 11500): explorer occludes; processing and raphael let background text/icons through -> T2j.
   Settings migration confirmed live: HTTP on the legacy port 43811 -> 202; the Alt+M persist rewrote settings.conf to
   the 12 new keys with the values kept.
+- T2j 23c6542: shared drawMiniSceneBase (destination-over dark disc rgba(1,4,10,0.9), solid then soft falloff);
+  processing solid 0.32 / falloff 0.40 of the side; raphael solid = the outer glyph ring edge x zoom (112.8px), falloff
+  +6%. RED 2 per scene -> GREEN processing 39, raphael 21. The nebulae show at ~10% inside the disc.
+- T2k 2bdae45: explorer mini = idle mini (mask skipped) + BLUE_LAYER_TINT_COLOR source-atop at globalAlpha 0.55 (planet
+  tinted, fan/sparks after the tint); raphael mini: no gold glyph glow (not baked in mini), nebula u_miniGain 1.4.
+  RED explorer 2 + raphael 3 -> GREEN explorer 20, raphael 22. Both: Scene 78, full suite 0 failed; previews edge 0.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
