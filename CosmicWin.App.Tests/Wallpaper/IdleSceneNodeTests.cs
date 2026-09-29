@@ -41,7 +41,7 @@ public sealed class IdleSceneNodeTests
     /// sandbox realm under Node; idle-scene.tests.js calls loadPage() 5 times (~25-30s observed),
     /// so this keeps the same generous 90s budget explorer's own harness uses.
     /// </summary>
-    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(240); // was 90: the mini-variant cases add 2 page loads, and a page load can cost ~8s on a busy machine
 
     [RequiresNodeFact]
     public void IdleSceneHarness_PassesAgainstTheRealShippedPage()

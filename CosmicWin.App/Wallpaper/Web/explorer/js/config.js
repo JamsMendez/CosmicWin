@@ -329,6 +329,16 @@ function sceneBasis(W, H) {
   return Math.max(SCENE_BASIS_MIN_PX, Math.min(Math.min(W, H), fittedBasis));
 }
 
+// mini-scene-window T2: the `?variant=mini` fit. The corner window is a small square, so the ring is
+// centered and its disc border is fitted to min(W, H) with a small margin (the full scene's
+// sceneBasis() fits it to a landscape screen instead, off-center by CENTER_X_FRACTION).
+const MINI_EDGE_MARGIN_PX = 4;
+
+function miniSceneBasis(W, H) {
+  const room = Math.min(W, H) / 2 - MINI_EDGE_MARGIN_PX;
+  return Math.max(SCENE_BASIS_MIN_PX, room / DISC_BORDER_OUTER_RADIUS_FRACTION);
+}
+
 const STARFIELD_INNER_RADIUS_FRACTION = 0.792; // stars begin just beyond the stone disc border (IDL-12: was 0.78)
 const STARFIELD_COUNT = 420; // sparse, deterministic distant stars
 // IDL-13: raised noticeably on user request ("stars should read brighter") — size 0.5/1.8 ->

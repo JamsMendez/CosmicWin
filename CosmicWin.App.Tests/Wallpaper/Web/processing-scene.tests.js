@@ -25,6 +25,7 @@ const path = require("path");
 const assert = require("assert");
 const { URLSearchParams } = require("url");
 
+const miniVariantChecks = require(path.join(__dirname, "mini-variant.checks.js"));
 const sceneDir = process.argv[2];
 if (!sceneDir) {
   console.error("usage: node processing-scene.tests.js <path-to-wallpaper-processing-directory>");
@@ -700,6 +701,35 @@ test("shared render loop: after a simulated 500ms hitch, the schedule resyncs in
   assert.ok(drawnInWindow <= 2,
     "expected at most 1-2 draws in the 5 real frames right after the hitch (back to pace, not a " +
     "catch-up burst), saw " + drawnInWindow);
+});
+
+// ---- mini-scene-window T2: `?variant=mini` (checks shared via mini-variant.checks.js) -------------
+
+test("the scene variant parses from the URL: default full, mini recognized, garbage falls back to full", function () {
+  miniVariantChecks.checkVariantParse(sharedDir);
+});
+
+test("mini draws only its kept layers, on a transparent canvas, with no nebula, and still renders the alert overlay", function () {
+  miniVariantChecks.checkMiniLayers({
+    loadPage: loadPage,
+    frameFunction: "render",
+    keep: ["drawSegmentedSphere", "drawAtomicOrbits", "drawOrbitBlocks", "drawCentralOctagon", "drawTriangularPrism", "drawPerspectiveRays", "drawCentralCore"],
+    drop: ["drawSoftOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette"],
+  });
+});
+
+test("the full variant still draws every layer", function () {
+  miniVariantChecks.checkFullLayers({
+    loadPage: loadPage,
+    frameFunction: "render",
+    keep: ["drawSegmentedSphere", "drawAtomicOrbits", "drawOrbitBlocks", "drawCentralOctagon", "drawTriangularPrism", "drawPerspectiveRays", "drawCentralCore"],
+    drop: ["drawSoftOvalFields", "drawStars", "drawRadialStreaks", "drawLensFlares", "drawChromaticSideLoops", "drawFilmGrain", "drawVignette"],
+    hasBackgroundFill: false,
+  });
+});
+
+test("the stylesheet makes the mini page transparent and hides #nebula", function () {
+  miniVariantChecks.checkMiniStylesheet(sceneDir, true);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

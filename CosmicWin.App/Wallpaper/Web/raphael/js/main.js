@@ -47,7 +47,8 @@ function render(ms) {
     // share the scene's own try/catch -- a throw here must only fail this frame's "scene" stage, never
     // skip scheduleFrame(render) entirely.
     const sceneMs = alertSceneMs(ms);
-    renderNebula(sceneMs);
+    // Mini has no #nebula WebGL background (the page must stay transparent).
+    if (!isMiniVariant) renderNebula(sceneMs);
     p = animationProgress(sceneMs);
     const phase = p * TAU;
     const pulse = hexadecagonPulse(sceneMs);
@@ -56,29 +57,35 @@ function render(ms) {
     ctx.clearRect(0, 0, W, H);
 
     // No zoom UI on the wallpaper (D6b, same as D2): viewZoom is a constant 1 (see config.js).
-    const zoom = viewZoom;
+    const zoom = isMiniVariant ? MINI_SCENE_ZOOM : viewZoom;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(zoom, zoom);
     ctx.translate(-cx, -cy);
 
-    drawFeathers(cx, cy, p, phase);
-    drawSoftOvalFields(cx, cy, phase);
-    drawCircularOvalFields(cx, cy, phase);
-    drawStars(cx, cy, p, phase);
-    drawRadialStreaks(cx, cy, p);
-    drawLensFlares(cx, cy, phase);
-    drawChromaticSideLoops(phase);
+    // Mini keeps only the gold glyph ring, the golden hexadecagon and the central core: no feathers,
+    // ovals, stars, streaks, flares, chroma loops, perspective rays, grain, vignette or counters.
+    if (!isMiniVariant) {
+      drawFeathers(cx, cy, p, phase);
+      drawSoftOvalFields(cx, cy, phase);
+      drawCircularOvalFields(cx, cy, phase);
+      drawStars(cx, cy, p, phase);
+      drawRadialStreaks(cx, cy, p);
+      drawLensFlares(cx, cy, phase);
+      drawChromaticSideLoops(phase);
+    }
     drawGlyphRings(cx, cy, p);
     drawGoldenHexadecagon(cx, cy, p, pulse);
-    drawPerspectiveRays(cx, cy, phase);
+    if (!isMiniVariant) drawPerspectiveRays(cx, cy, phase);
     drawCentralCore(cx, cy, phase, pulse);
 
     ctx.restore();
 
-    drawFilmGrain(phase);
-    drawVignette();
-    drawGlyphCounters(sceneMs);
+    if (!isMiniVariant) {
+      drawFilmGrain(phase);
+      drawVignette();
+      drawGlyphCounters(sceneMs);
+    }
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

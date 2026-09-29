@@ -521,13 +521,15 @@ function renderFrame(nowMs) {
     if (animationStartMs === null) animationStartMs = sceneMs;
     timeSeconds = (sceneMs - animationStartMs) / 1000;
 
-    const cx = W * CENTER_X_FRACTION;
-    const cy = H * CENTER_Y_FRACTION;
+    // mini-scene-window T2: the mini variant centers the ring in its square viewport and fits it to
+    // min(W, H) (config.js's miniSceneBasis); the full scene keeps its own fit unchanged.
+    const cx = isMiniVariant ? W / 2 : W * CENTER_X_FRACTION;
+    const cy = isMiniVariant ? H / 2 : H * CENTER_Y_FRACTION;
     // Full-circle fit (2026-09-27): basis is fit to the screen (see config.js's sceneBasis), not a
     // plain min(W, H); the Earth's own center is derived from it too (below) so it keeps the SAME
     // position relative to the ring center (cx, cy) as the composition shrinks/grows, instead of
     // staying pinned to a fixed fraction of H.
-    const basis = sceneBasis(W, H);
+    const basis = isMiniVariant ? miniSceneBasis(W, H) : sceneBasis(W, H);
     const earthCx = cx + EARTH_CENTER_X_OFFSET_FRACTION * basis;
     const earthCy = cy + EARTH_CENTER_Y_OFFSET_FRACTION * basis;
 
@@ -539,13 +541,16 @@ function renderFrame(nowMs) {
     if (!ringCaches || ringCacheBasis !== basis || ringCacheDpr !== DPR) buildRingCaches(cx, cy, basis, DPR);
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = BACKGROUND_COLOR;
-    ctx.fillRect(0, 0, W, H);
+    // Mini: the canvas stays fully transparent (no background fill).
+    if (!isMiniVariant) {
+      ctx.fillStyle = BACKGROUND_COLOR;
+      ctx.fillRect(0, 0, W, H);
+    }
 
     const earthRadius = basis * EARTH_RADIUS_FRACTION;
     const earthLongitude = EARTH_LONGITUDE + (EARTH_ROTATION_DEGREES_PER_SECOND * Math.PI / 180) * timeSeconds;
 
-    drawStarfield(ctx, cx, cy, basis * STARFIELD_INNER_RADIUS_FRACTION, timeSeconds);
+    if (!isMiniVariant) drawStarfield(ctx, cx, cy, basis * STARFIELD_INNER_RADIUS_FRACTION, timeSeconds);
     drawDiscBorder(ctx, cx, cy, basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION);
 
     // IDL-12 perf: draw every ring's (unlit) rotated content first, then apply ONE combined
@@ -558,18 +563,20 @@ function renderFrame(nowMs) {
     drawCombinedLightingMask(ctx, cx, cy);
 
     drawInnerRing(ctx, cx, cy, basis * INNER_RING_RADIUS_FRACTION);
-    drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
+    // Mini is "just the ring" (plus sparks): no Earth.
+    if (!isMiniVariant) drawEarth(ctx, earthCx, earthCy, earthRadius, earthLongitude, timeSeconds);
 
     // IDL-11: the persistent below-Earth star is removed — it only looked "fixed" in a single
     // screenshot; left running, it never moved, which reads as a static prop rather than part of
     // the animation. The only sparks now are the ones emitted by the chromatic glow below, which
     // rise, brighten, and fade, and never cross above the Earth's horizontal middle (earthCy).
-    drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
+    if (!isMiniVariant) drawChromaticGlowAnimated(ctx, cx, earthCy, earthRadius, timeSeconds);
     // Explorer variant (rising-sparks.js): tint the finished scene blue, then draw the rising sparks
-    // on top so they stay white instead of being tinted along with everything else.
-    drawBlueLayer(ctx, cx, cy);
+    // on top so they stay white instead of being tinted along with everything else. Mini tints only
+    // the ring's own pixels (drawBlueRingTint), never the transparent canvas around it.
+    if (isMiniVariant) drawBlueRingTint(ctx); else drawBlueLayer(ctx, cx, cy);
     drawRisingSparks(ctx, timeSeconds);
-    drawVignette(ctx);
+    if (!isMiniVariant) drawVignette(ctx);
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

@@ -31,5 +31,13 @@ function sceneSeeThroughLayer(g, sceneW, sceneH, progress) {
   var cx = sceneW * 0.505;
   var cy = sceneH * 0.515;
   var gold = goldGlyphRingDrawParams(progress);
+  // mini-scene-window T2: the mini scene is magnified about its center (main.js), so the letters'
+  // see-through ring must be too or it would sit inside the drawn ring instead of on it.
+  var zoom = isMiniVariant ? MINI_SCENE_ZOOM : 1;
+  g.save();
+  g.translate(cx, cy);
+  g.scale(zoom, zoom);
+  g.translate(-cx, -cy);
   drawGlyphRing(g, gold.pool, cx, cy, gold.radius, gold.count, gold.glyphSize, 0, gold.rotation, "rgb(255,255,255)", gold.lineWidth);
+  g.restore();
 }

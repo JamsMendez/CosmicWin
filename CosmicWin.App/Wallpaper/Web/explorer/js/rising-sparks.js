@@ -105,6 +105,17 @@ function drawRisingSparks(context, timeSeconds) {
   context.restore();
 }
 
+// mini-scene-window T2: the mini variant's blue ring. drawBlueLayer's 'color' fill paints an opaque
+// blue wherever the backdrop is transparent (and its 'screen' glow paints the whole canvas), which
+// would fill the see-through window; 'source-atop' only tints pixels the ring already drew.
+function drawBlueRingTint(context) {
+  context.save();
+  context.globalCompositeOperation = 'source-atop';
+  context.fillStyle = BLUE_LAYER_TINT_COLOR;
+  context.fillRect(0, 0, W, H);
+  context.restore();
+}
+
 // Blue wash over the finished monochrome composition: 'color' keeps each pixel's luminance but
 // takes the tint's hue/saturation, then a centered 'screen' glow brightens the middle.
 function drawBlueLayer(context, cx, cy) {

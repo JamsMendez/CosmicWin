@@ -57,7 +57,8 @@ function render(ms) {
 
   try {
     const sceneMs = alertSceneMs(ms);
-    renderNebula(sceneMs);
+    // Mini has no #nebula WebGL background (the page must stay transparent).
+    if (!isMiniVariant) renderNebula(sceneMs);
     p = animationProgress(sceneMs);
     const phase = p * TAU;
     const pulse = octagonPulse(sceneMs);
@@ -72,11 +73,15 @@ function render(ms) {
     ctx.scale(zoom, zoom);
     ctx.translate(-cx, -cy);
 
-    drawSoftOvalFields(cx, cy, phase);
-    drawStars(cx, cy, p, phase);
-    drawRadialStreaks(cx, cy, p);
-    drawLensFlares(cx, cy, phase);
-    drawChromaticSideLoops(phase);
+    // Mini keeps only the structure (sphere bands, orbits, octagon, prism, rays, core): none of the
+    // background layers (soft ovals, stars, streaks, flares, chroma loops), grain or vignette.
+    if (!isMiniVariant) {
+      drawSoftOvalFields(cx, cy, phase);
+      drawStars(cx, cy, p, phase);
+      drawRadialStreaks(cx, cy, p);
+      drawLensFlares(cx, cy, phase);
+      drawChromaticSideLoops(phase);
+    }
     drawSegmentedSphere(cx, cy, p);
     drawAtomicOrbits(cx, cy, p);
     drawOrbitBlocks(cx, cy, phase);
@@ -87,8 +92,10 @@ function render(ms) {
 
     ctx.restore();
 
-    drawFilmGrain(phase);
-    drawVignette();
+    if (!isMiniVariant) {
+      drawFilmGrain(phase);
+      drawVignette();
+    }
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

@@ -54,3 +54,15 @@ body {
   display: block;
   background: transparent;
 }
+
+/* mini-scene-window T2: `?variant=mini` (shared/js/render-loop.js adds html.scene-mini). The corner
+   window is see-through, so every layer of the page must be transparent. */
+html.scene-mini,
+html.scene-mini body,
+html.scene-mini #scene {
+  background: transparent;
+}
+
+html.scene-mini #nebula {
+  display: none;
+}

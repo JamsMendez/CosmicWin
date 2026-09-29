@@ -44,7 +44,7 @@ public sealed class ExplorerSceneNodeTests
     /// measured at roughly 5-6s per loadPage() call, and explorer-scene.tests.js deliberately calls
     /// it only 4 times (~20-25s observed), but this budget leaves real margin for a slower machine.
     /// </summary>
-    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(240); // was 90: the mini-variant cases add 2 page loads, and a page load can cost ~8s on a busy machine
 
     [RequiresNodeFact]
     public void ExplorerSceneHarness_PassesAgainstTheRealShippedPage()

@@ -75,6 +75,30 @@ function readWallpaperFpsFromUrl() {
 
 var wallpaperFrameIntervalMs = 1000 / readWallpaperFpsFromUrl();
 
+// mini-scene-window T2: the scene variant, read once at load from the same query/hash params as fps
+// (`?variant=mini`). "mini" is the small always-on-top corner window: transparent page, no background
+// layers, no alert overlay, composition fitted to the (square) viewport. Anything other than the
+// literal "mini" -- a missing param or garbage -- is "full", i.e. the unchanged wallpaper rendering.
+//
+// Reads BOTH location.search and location.hash (parseParams() only reads the hash when one exists), so
+// `index.html?variant=mini#tiles=failed` -- the manual alert hash API -- still selects the mini variant.
+function readSceneVariantFromUrl() {
+  try {
+    var raw = String(location.search || "").replace(/^[#?]/, "") + "&" + String(location.hash || "").replace(/^[#?]/, "");
+    return new URLSearchParams(raw).get("variant") === "mini" ? "mini" : "full";
+  } catch (parseError) {
+    return "full";
+  }
+}
+
+var sceneVariant = readSceneVariantFromUrl();
+var isMiniVariant = sceneVariant === "mini";
+
+// The stylesheets key the transparent page background (and the hidden #nebula canvas) off this class.
+if (isMiniVariant) {
+  try { document.documentElement.classList.add("scene-mini"); } catch (classError) { /* no DOM root */ }
+}
+
 // html-wallpaper-demo D6d hardening (three review lenses WARNING, post-merge): the FIRST cut of this
 // throttle (dc47db5) skipped a frame whenever less than one interval had passed since the last DRAWN
 // frame's own rAF timestamp -- i.e. "draw 1 of every N real display frames", where N depends on the
