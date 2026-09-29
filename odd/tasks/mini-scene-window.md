@@ -231,6 +231,12 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   2.75 -> 0.5, line 2.5 -> 0.5 at 288px. The ring cache bakes via the same function. RED 1+1 -> GREEN idle 16,
   explorer 17; Scene 95; full suite 0 failed. Other px-absolute details found, not changed: hieroglyph band 1.6px
   strokes (dense white hatching, next candidate), 1-1.5px hairlines. Caution: the edge check also passes on a blank render.
+- T2g live check: Release rebuilt, PID 36372; 2x zoom of the idle window shows thin constellation lines + small dots.
+- Review slice 7e56fce..c3ff4f0 (high, 6 files, 137 lines): consent granted, 4 lenses, APPROVED, acknowledged
+  (lineage review-2dbdaeb063a0a643). Advisory (-> T8), all in constellation-ring.checks.js unless noted:
+  - WARNING: the dot probe comment is misleading (120-133).
+  - WARNING: the mini proportional branch is unproved, because the tests only hit the floor (151-156).
+  - Suggestions: hardcoded tunables (156), proxy scale not restored (124-133), shrink-factor wording (idle rings.js:163).
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
