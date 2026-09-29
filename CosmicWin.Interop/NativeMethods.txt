@@ -130,3 +130,6 @@ IDCompositionTarget
 IDCompositionVisual
 IDCompositionTransform
 D2D_MATRIX_3X2_F
+
+SetLayeredWindowAttributes
+LAYERED_WINDOW_ATTRIBUTES_FLAGS

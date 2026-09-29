@@ -70,7 +70,7 @@ namespace CosmicWin.Interop.Win32;
 /// caller or another lock.
 /// </para>
 /// </remarks>
-public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
+public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompositionOverlaySurface
 {
     /// <summary>Class-name prefix; each instance appends <c>-{guid}</c>. Internal so
     /// <see cref="PrimaryMonitorFullscreenDetector"/> can recognise the host as the wallpaper itself.</summary>

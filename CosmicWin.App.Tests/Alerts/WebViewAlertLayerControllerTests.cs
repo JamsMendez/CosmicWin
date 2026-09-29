@@ -99,11 +99,9 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.True(start >= 0, "expected a private void PostShow(AlertShowRequest request) method");
         var next = source.IndexOf("\n    private", start + 1, StringComparison.Ordinal);
         var body = source[start..(next > 0 ? next : source.Length)];
-        Assert.Contains("workArea", body);
-        Assert.Contains("request.WorkAreaLeft", body);
-        Assert.Contains("request.WorkAreaTop", body);
-        Assert.Contains("request.WorkAreaWidth", body);
-        Assert.Contains("request.WorkAreaHeight", body);
+        // The JSON itself now lives in AlertLayerMessages (shared with the mini scene window) and is
+        // asserted behaviorally in MiniSceneWindowControllerTests.
+        Assert.Contains("AlertLayerMessages.Show(request)", body);
     }
 
     private static string ReadControllerSource([CallerFilePath] string testFilePath = "") =>
@@ -169,7 +167,7 @@ public sealed class WebViewAlertLayerControllerTests
         var body = source[start..next];
         Assert.DoesNotContain("TearDown(", body);
         Assert.Contains("PostWebMessageAsJson", body);
-        Assert.Contains("type\\\":\\\"hide", body); // the JSON literal's escaped quotes, as they appear in source
+        Assert.Contains("AlertLayerMessages.Hide", body);
         Assert.Contains("IsVisible = false", body);
     }
 

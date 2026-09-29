@@ -3,6 +3,7 @@ using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
+using ICompositionOverlaySurface = CosmicWin.Interop.ICompositionOverlaySurface;
 using CosmicWin.Interop.Win32;
 using Microsoft.Web.WebView2.Core;
 using Windows.Win32;
@@ -33,7 +34,7 @@ namespace CosmicWin.App.Alerts;
 /// </remarks>
 public sealed class WebViewAlertLayerController : IDisposable
 {
-    private readonly Win32VideoWallpaperHost _host;
+    private readonly ICompositionOverlaySurface _host;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _poll;
     private readonly Action<string>? _trace;
@@ -76,7 +77,7 @@ public sealed class WebViewAlertLayerController : IDisposable
     // separately-traced timings).
     private Stopwatch? _navigateStopwatch;
 
-    public WebViewAlertLayerController(Win32VideoWallpaperHost host, Action<string>? trace = null,
+    public WebViewAlertLayerController(ICompositionOverlaySurface host, Action<string>? trace = null,
         Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
         WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60)
     {
@@ -200,7 +201,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (_controller is null) return;
         try
         {
-            _controller.CoreWebView2.PostWebMessageAsJson("{\"type\":\"hide\"}");
+            _controller.CoreWebView2.PostWebMessageAsJson(AlertLayerMessages.Hide);
             // D3: in html wallpaper mode the page IS the wallpaper and must stay visible permanently
             // once ready -- End() still tells the page to hide its own alert overlay above, it just
             // never hides the WebView2 layer itself. Video mode is unchanged.
@@ -217,19 +218,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (_controller is null) return;
         try
         {
-            var tilesJson = string.Join(",", request.Tiles.Select(tile => $"\"{tile}\""));
-            // T7 (alert-tile-mosaic): workArea is physical pixels, RELATIVE to the layer surface (see
-            // AlertLayerWorkArea) -- all zero when it could not be read, which the page already
-            // treats as "lay out on the whole canvas instead". Clamped defensively to >= 0 here too:
-            // this alert must never fail just because a caller handed it a bad rect.
-            var workAreaJson = "{\"left\":" + Math.Max(0, request.WorkAreaLeft)
-                + ",\"top\":" + Math.Max(0, request.WorkAreaTop)
-                + ",\"width\":" + Math.Max(0, request.WorkAreaWidth)
-                + ",\"height\":" + Math.Max(0, request.WorkAreaHeight) + "}";
-            _controller.CoreWebView2.PostWebMessageAsJson(
-                $"{{\"type\":\"show\",\"tiles\":[{tilesJson}],\"columns\":{request.Columns},"
-                + $"\"rows\":{request.Rows},\"gap\":{request.Gap},\"workArea\":{workAreaJson},"
-                + $"\"duration\":{request.DurationMilliseconds}}}");
+            _controller.CoreWebView2.PostWebMessageAsJson(AlertLayerMessages.Show(request));
             _controller.IsVisible = true;
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-show", ex)); }
@@ -520,8 +509,9 @@ public sealed class WebViewAlertLayerController : IDisposable
     /// class remarks) since both call sites need to build the identical URL. Internal so
     /// <c>WebViewAlertLayerControllerTests</c> can exercise it directly.
     /// </summary>
-    internal static string SceneUrl(WallpaperScene scene, int fps) =>
-        $"https://cosmicwin-scene.example/{SceneFolderName(scene)}/index.html?fps={fps}";
+    internal static string SceneUrl(WallpaperScene scene, int fps, string? variant = null) =>
+        $"https://cosmicwin-scene.example/{SceneFolderName(scene)}/index.html?fps={fps}"
+        + (variant is null ? "" : $"&variant={variant}");
 
     public void Dispose()
     {
