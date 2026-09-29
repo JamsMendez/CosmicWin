@@ -27,7 +27,7 @@ public static class AlacrittySceneThemeFile
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            onDiagnostic?.Invoke("alacritty-theme-failed: path is blank");
+            onDiagnostic?.Invoke("alacritty-theme-failed error=BlankPath");
             return false;
         }
 
@@ -46,7 +46,8 @@ public static class AlacrittySceneThemeFile
             exception is IOException or UnauthorizedAccessException or ArgumentException
                 or NotSupportedException or SecurityException)
         {
-            onDiagnostic?.Invoke($"alacritty-theme-failed: {exception.GetType().Name}: {exception.Message}");
+            // Type name only, never Message: the same rule the desktop trace follows elsewhere.
+            onDiagnostic?.Invoke($"alacritty-theme-failed error={exception.GetType().Name}");
             return false;
         }
     }

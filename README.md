@@ -121,6 +121,7 @@ start.
 | `wallpaper-scene` | `processing` | Which html scene to show: `processing`, `explorer`, `idle` or `raphael`. |
 | `wallpaper-fps` | `60` | Caps the html wallpaper's own frame rate: `30` or `60`. |
 | `wallpaper-scene-http` | `on` | Accept a wallpaper-scene switch over the same HTTP endpoint. |
+| `alacritty-theme-file` | *(blank)* | Opt in to the Alacritty scene theme: absolute path of a colours file CosmicWin writes on every scene change (see Alacritty scene theme, below). |
 
 Every HTTP-related key above is served by the same local HTTP server, sharing one port and one
 bearer-token file — see Alerts, below, for how that endpoint is gated.
@@ -328,6 +329,39 @@ trace.
 | 413 | Body larger than 256 bytes |
 | 415 | `Content-Type` is not `application/json` |
 | 503 | Not in html mode (`wallpaper-mode = video`), or this CosmicWin has no scene page to switch |
+
+### Alacritty scene theme
+
+Opt-in. A translucent Alacritty (`opacity` 0.85–0.90) lets the scene bleed through its background, so
+a bright highlight can drag your usual theme's text below readable contrast. When
+`alacritty-theme-file` is set, CosmicWin writes a colours file tuned to the current scene, at startup
+and after every successful scene switch.
+
+1. In `settings.conf`, set the path (the folder is created if needed):
+
+   ```
+   alacritty-theme-file = C:\Users\<you>\AppData\Roaming\alacritty\cosmicwin-scene.toml
+   ```
+
+2. In `alacritty.toml`, add that file **last** in `import`, after any theme import, so it overrides
+   the colours:
+
+   ```toml
+   [general]
+   import = [
+       "C:/Users/<you>/AppData/Roaming/alacritty/your-theme.toml",
+       "C:/Users/<you>/AppData/Roaming/alacritty/cosmicwin-scene.toml",
+   ]
+   ```
+
+3. Keep `live_config_reload = true` so a scene change repaints open terminals.
+
+It only runs in html mode, and CosmicWin never edits `alacritty.toml`. The colours file is entirely
+CosmicWin's: it is overwritten on every scene change (and left alone when the content is
+identical), so do not edit it. Each palette keeps a dark background, a light foreground and a raised
+bright black, because legibility is decided by luminance rather than hue; the tests check them
+against each scene's brightest colours at 0.85 opacity (foreground at least 7:1, every other text
+colour except black at least 4.5:1). The path is read at startup, so changing it needs a restart.
 
 ## Keybindings
 

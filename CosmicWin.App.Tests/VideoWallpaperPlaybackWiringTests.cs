@@ -189,7 +189,8 @@ public sealed class VideoWallpaperPlaybackWiringTests
         bool wallpaperSceneHttpEnabled = false,
         Func<WallpaperScene, bool>? switchHtmlWallpaperScene = null,
         Action<WallpaperScene>? persistWallpaperScene = null,
-        Action<Action>? scheduleOnOwningThread = null)
+        Action<Action>? scheduleOnOwningThread = null,
+        Action<WallpaperScene>? applyTerminalSceneTheme = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -230,6 +231,7 @@ public sealed class VideoWallpaperPlaybackWiringTests
             wallpaperSceneHttpEnabled: wallpaperSceneHttpEnabled,
             switchHtmlWallpaperScene: switchHtmlWallpaperScene,
             persistWallpaperScene: persistWallpaperScene,
+            applyTerminalSceneTheme: applyTerminalSceneTheme,
             loadAlertHttpToken: () => "test-token",
             createLocalHttpCommandServer: (_, _, _, _, videoSwitch, sceneSwitch) =>
             {
@@ -1262,6 +1264,86 @@ public sealed class VideoWallpaperPlaybackWiringTests
             Assert.Null(exception);
             Assert.Equal(WallpaperScene.Raphael, switched);
             Assert.Contains("wallpaper-scene-http persist-failed error=IOException", trace.Lines);
+        }
+    }
+
+    /// <summary>A successful scene switch also syncs the opt-in terminal palette for the NEW scene.</summary>
+    [Fact]
+    public void HttpSceneSwitch_Success_AppliesTheTerminalThemeForTheNewScene()
+    {
+        var posted = new List<Action>();
+        WallpaperScene? applied = null;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: _ => true,
+            applyTerminalSceneTheme: scene => applied = scene);
+        using (harness.Composition)
+        {
+            Assert.True(harness.HandleWallpaperSceneHttpSwitch!("explorer"));
+            Assert.Null(applied);
+
+            posted[^1]();
+
+            Assert.Equal(WallpaperScene.Explorer, applied);
+        }
+    }
+
+    /// <summary>A switch that fails (false or throws) leaves the terminal palette where it was.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HttpSceneSwitch_Failure_DoesNotApplyTheTerminalTheme(bool switchThrows)
+    {
+        var posted = new List<Action>();
+        var applyCalls = 0;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            switchHtmlWallpaperScene: _ => switchThrows ? throw new InvalidOperationException("boom") : false,
+            applyTerminalSceneTheme: _ => applyCalls++);
+        using (harness.Composition)
+        {
+            Assert.True(harness.HandleWallpaperSceneHttpSwitch!("idle"));
+
+            posted[^1]();
+
+            Assert.Equal(0, applyCalls);
+        }
+    }
+
+    /// <summary>
+    /// The palette is a nicety: a throwing seam neither escapes the posted work nor blocks the
+    /// persist, and is traced by type name only, under its own tag.
+    /// </summary>
+    [Fact]
+    public void HttpSceneSwitch_WhenTheTerminalThemeThrows_StillPersistsAndReports()
+    {
+        var posted = new List<Action>();
+        var trace = new RecordingDesktopTrace();
+        WallpaperScene? persisted = null;
+
+        var harness = Wire(
+            wallpaperMode: WallpaperMode.Html,
+            wallpaperSceneHttpEnabled: true,
+            scheduleOnOwningThread: posted.Add,
+            desktopTrace: trace,
+            switchHtmlWallpaperScene: _ => true,
+            persistWallpaperScene: scene => persisted = scene,
+            applyTerminalSceneTheme: _ => throw new IOException("locked"));
+        using (harness.Composition)
+        {
+            Assert.True(harness.HandleWallpaperSceneHttpSwitch!("raphael"));
+
+            var exception = Record.Exception(() => posted[^1]());
+
+            Assert.Null(exception);
+            Assert.Equal(WallpaperScene.Raphael, persisted);
+            Assert.Contains("wallpaper-scene-http terminal-theme-failed error=IOException", trace.Lines);
         }
     }
 

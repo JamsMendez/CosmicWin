@@ -9,6 +9,7 @@ using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
 using CosmicWin.App.Input;
 using CosmicWin.App.Startup;
+using CosmicWin.App.Terminal;
 using CosmicWin.App.Tray;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
@@ -258,6 +259,10 @@ public sealed class AppComposition : IDisposable
         // never touches real disk. Production (WireProduction) saves the scene into settings.conf,
         // exactly like the video route persists its own path.
         Action<WallpaperScene>? persistWallpaperScene = null,
+        // Opt-in terminal palette sync (alacritty-theme-file): called with the new scene after a
+        // SUCCESSFUL html scene switch, on the owning thread, next to persistWallpaperScene. Unset
+        // (every test, and production when the setting is blank or the mode is video) does nothing.
+        Action<WallpaperScene>? applyTerminalSceneTheme = null,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -806,6 +811,18 @@ public sealed class AppComposition : IDisposable
                 {
                     desktopTrace?.Record(
                         $"wallpaper-scene-http persist-failed error={error.GetType().Name}");
+                }
+
+                // Its own guard and tag, like the persist above: the palette is a nicety, so its
+                // failure must never read as a switch or persist failure, nor block either.
+                try
+                {
+                    applyTerminalSceneTheme?.Invoke(scene);
+                }
+                catch (Exception error)
+                {
+                    desktopTrace?.Record(
+                        $"wallpaper-scene-http terminal-theme-failed error={error.GetType().Name}");
                 }
             });
 
@@ -2165,6 +2182,20 @@ public sealed class AppComposition : IDisposable
             "CosmicWinVideoWallpaperHost",
             onWorkFailed: errorType => desktopTrace.Record($"video-wallpaper-thread work-failed error={errorType}"));
 
+        // Opt-in (alacritty-theme-file) and html-only: a video wallpaper has no scene to match. The
+        // path is fixed for the process lifetime (settings are read once). TryWrite never throws for
+        // an IO/permission/path problem and reports it through the trace, so startup is never
+        // blocked by a terminal palette.
+        Action<WallpaperScene>? applyTerminalSceneTheme = null;
+        if (settings.WallpaperMode == WallpaperMode.Html
+            && !string.IsNullOrWhiteSpace(settings.AlacrittyThemeFile))
+        {
+            var themePath = settings.AlacrittyThemeFile;
+            applyTerminalSceneTheme = scene =>
+                AlacrittySceneThemeFile.TryWrite(themePath, scene, desktopTrace.Record);
+            applyTerminalSceneTheme(settings.WallpaperScene);
+        }
+
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
@@ -2205,6 +2236,7 @@ public sealed class AppComposition : IDisposable
             wallpaperSceneHttpEnabled: settings.WallpaperSceneHttpEnabled,
             switchHtmlWallpaperScene: alertLayer is null ? null : alertLayer.SwitchScene,
             persistWallpaperScene: scene => settingsStore.Update(s => s with { WallpaperScene = scene }),
+            applyTerminalSceneTheme: applyTerminalSceneTheme,
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
