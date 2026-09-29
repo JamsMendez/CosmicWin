@@ -195,6 +195,18 @@ maintainer merges/pushes (established precedent). RDD: on (global).
     - IsReady vs ready naming.
     - A failed recovery attach is silent (Controller.cs:240).
     - The recovery budget never replenishes (Controller.cs:78).
+- T6 hardware run 2026-09-29 (agent-driven, Release build of 2838866+, elevated session, 3440x1440, right-docked
+  taskbar):
+  - The old instance (alacritty-branch build, PID 14240) was stopped. settings.conf was backed up to the scratchpad
+    and wallpaper-mode set to mini.
+  - Startup: processing mini top-right, transparent over Chrome, left of the vertical taskbar.
+  - HTTP scene raphael/idle: 202 and persisted (wallpaper-scene = idle).
+  - Alt+M (synthetic keybd_event): TR->BR->BL->TL->TR, each step persisted mini-corner; bottom-right sits flush
+    against the taskbar.
+  - Alert 2 failed + 1 warning: 202 and shown inside the window.
+  - Killing the mini WebView2 browser process: recovered with a new PID and the scene came back.
+  - NOT run: third-kill exhaustion, Alt+M at startup (not-ready trace), other DPI scales, user's own visual check.
+  - Screenshots are in the scratchpad (t6-*.png).
 
 ## Next step
-T6 hardware check.
+Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
