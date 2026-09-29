@@ -70,6 +70,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T7 Review follow-ups cleanup (comments, duplicated fit check, stale docs) (route: delegated writer)
 - [x] T2f Idle mini ring white like the original instead of grey; losing metallic detail is fine (maintainer 2026-09-29) (route: delegated writer)
 - [x] T9 Alt+M cycles 8 positions (corners + side midpoints, clockwise from top-left); new mini-corner values top-center/right-center/bottom-center/left-center (maintainer 2026-09-29) (route: delegated writer, parallel with T2f)
+- [x] T2g Idle/explorer mini constellation dots and lines scale with the ring (CONSTELLATION_DOT_RADIUS 2.75 px and line width are absolute, so they blob at 288px) (maintainer 2026-09-29) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -225,6 +226,11 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - Review slice 2838866..(T2f+T9+docs) (high, 9 files, 220 lines): consent granted, 4 lenses, APPROVED, acknowledged
   (lineage review-01ff429cdb886451, authority burned). Advisory suggestions only (-> T8): MiniCorner name now drifts
   from its meaning (Settings.cs:28); Next() reaches LeftCenter implicitly (MiniWindowPlacement.cs:42-48).
+- T2g 259ac58: constellationDetailSizes(boxSize) in idle/explorer rings.js scales dot radius and line width in mini
+  by mini ring thickness / full ring thickness at the 3440x1440 reference (~10.5/63 = 0.166), floor 0.5px: dot
+  2.75 -> 0.5, line 2.5 -> 0.5 at 288px. The ring cache bakes via the same function. RED 1+1 -> GREEN idle 16,
+  explorer 17; Scene 95; full suite 0 failed. Other px-absolute details found, not changed: hieroglyph band 1.6px
+  strokes (dense white hatching, next candidate), 1-1.5px hairlines. Caution: the edge check also passes on a blank render.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
