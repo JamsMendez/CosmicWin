@@ -261,6 +261,20 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   in T2f), while the opaque alphabet cells/planet cover it -> T2i.
 - Merge 2026-09-29 (maintainer-requested): local main fast-forwarded 67a0aae -> a7c7dcf (feature through T10,
   36 ahead of origin/main, unpushed). T2h + T10 had NOT been reviewed yet at merge time; T2i still in progress on the branch.
+- Review slice 7d6da89..(T2h+T10+docs) (high, 18 files, 1420 lines): consent granted, 4 lenses, APPROVED,
+  acknowledged (lineage review-6aeecd7541c7fe4d). Post-merge review: these commits were already in local main.
+  Advisory (-> T8):
+  - WARNINGs:
+    - Video route is now always on with the server (AppComposition.cs:1581).
+    - Legacy route semantics shift: old video/scene-http off no longer closes those routes (AppComposition.cs:1551).
+    - Legacy alert-http=off now also drops the scene route (Settings.cs:361).
+    - The trace prints hardcoded route flags (AppComposition.cs:1600).
+  - Suggestions:
+    - Stale test names.
+    - mini-corner tests cover only the legacy key.
+    - Parse local naming.
+    - Constellation shared constants.
+    - Vacuous above-floor draw assertions (constellation-ring.checks.js:192, 232).
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
