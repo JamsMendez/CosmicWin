@@ -17,9 +17,10 @@ a wallpaper. It also makes the Alacritty per-scene theme unnecessary (that branc
   work area, so it stays clear of the taskbar.
 - Topmost, never takes focus, not in taskbar/Alt+Tab, click-through, transparent background.
 - Mini scene variants (same pages, `?variant=mini`): no background, no alert overlay.
-  - idle: only the central ring (disc/rings), no starfield/vignette/black fill.
-  - explorer: only the blue ring + sparks.
-  - processing: only bands, wait, octagon, orbits, center, lines. No nebula, background, soft oval,
+  - idle: the central ring (disc/rings) + chroma fan + planet CENTERED in the ring; no starfield/vignette/black fill.
+  - explorer: the blue ring + sparks + chroma fan + planet CENTERED in the ring.
+  - processing: only bands, wait, octagon, orbits, center, lines + the green nebula, radially faded so it
+    never reaches the window edges (edge pixels fully transparent). No background, soft oval,
     chroma fans, stars, streaks, flares, grain or vignette.
   - raphael: only the circle, center and golden lines.
 - The HTTP scene route switches the mini window in mini mode and persists `wallpaper-scene`.
@@ -57,6 +58,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T1 Settings `mini` mode + `mini-corner`; pure placement math + corner cycle (route: delegated writer)
 - [x] T1a Default corner `top-right` + explicit top-taskbar placement test (route: inline, mechanical)
 - [x] T2 Mini variants of the 4 scenes via `?variant=mini` + node tests + headless preview for visual approval (route: delegated writer)
+- [x] T2b Keep chroma fan (idle, explorer) + planet (explorer), planet centered in the ring in mini; processing green nebula with radial fade clear of the edges (route: delegated writer)
 - [ ] T3 Mini window host: topmost/noactivate/click-through DComp popup + transparent WebView2 controller (route: delegated writer)
 - [ ] T4 Wiring: mini mode in WireProduction, HTTP scene switch + persist (route: delegated writer)
 - [ ] T5 Chord `Alt+M` cycle corner + persist; README keybindings/settings (route: delegated writer)
@@ -88,6 +90,17 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   wash covers the whole square, failed shake (scale 1.18) clips at the window edge. Nebula WebGL context still created.
 - T1a 919406c (inline): default corner top-right. RED 4 failed (default) -> GREEN 297 passed (Mini|Settings).
   Top- and right-docked taskbar placement tests passed on first run: guard tests, behavior already used the work area.
+- Preview feedback 2026-09-29: idle/explorer mini must keep the chroma fan, explorer must keep the planet, and in
+  mini the planet sits at the exact ring center (full variant keeps it higher). T2 reopened as T2b (same writer).
+- Review of slice 67a0aae..df0cb88 (high, 960 lines): consent envelope relayed, maintainer answered with scope
+  feedback instead of a choice -> neither invocation run; re-relay on the corrected candidate. `nul` added to
+  .git/info/exclude (the intended-untracked selection JSON was rejected as invalid_request, same as last session).
+- T2b 252e0e8 (same writer): idle+explorer mini keep chroma fan (additive `lighter`, MINI_CHROMATIC_GLOW_GAIN 4,
+  activeSceneBasis) and planet at exact ring center (144,144); processing mini keeps the green part of the nebula,
+  premultiplied alpha, smoothstep(0.5,0.9,r) fade, WebGL alpha:true + alpha-0 clear in mini only; nebula init moved
+  to main.js. RED (fan/planet/nebula cases failing) -> GREEN idle 15, explorer 16, processing 38, raphael 14; Scene
+  filter 63 passed; full non-desktop Debug suite 0 failed. Edge check: nebula alone 0 edge pixels; full processing
+  composite 4540 edge pixels because perspective rays + orbit blocks reach the edges (pre-existing, open decision).
 
 ## Next step
-Maintainer visual approval of mini previews + alert look, then T3.
+Maintainer approval of previews (open decision: fade processing rays/blocks at the edges?), review consent, T3.
