@@ -71,6 +71,16 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2f Idle mini ring white like the original instead of grey; losing metallic detail is fine (maintainer 2026-09-29) (route: delegated writer)
 - [x] T9 Alt+M cycles 8 positions (corners + side midpoints, clockwise from top-left); new mini-corner values top-center/right-center/bottom-center/left-center (maintainer 2026-09-29) (route: delegated writer, parallel with T2f)
 - [x] T2g Idle/explorer mini constellation dots and lines scale with the ring (CONSTELLATION_DOT_RADIUS 2.75 px and line width are absolute, so they blob at 288px) (maintainer 2026-09-29) (route: delegated writer)
+- [x] T2h Idle/explorer mini hieroglyph band strokes scale with the ring like the constellation dots + T2g test advisories (route: delegated writer)
+- [x] T10 Normalize settings keys (maintainer 2026-09-29), with migration (maintainer chose to migrate; the old keys are parsed as aliases, the new key wins, and Serialize writes only the new keys; defaults unchanged). Mapping:
+  - wallpaper-mode html|html-mini|video (`mini` is an alias)
+  - alerts-enabled -> alerts
+  - alert-http -> http-server (one switch for all routes)
+  - alert-http-port -> http-server-port
+  - video-wallpaper-http and wallpaper-scene-http are removed (parsed and ignored)
+  - mini-corner -> mini-position
+  (route: delegated writer, parallel with T2h)
+- [ ] T2i Idle/explorer mini: dark occluding base under each ring band so text behind never reads through a band; gaps between rings stay transparent (maintainer 2026-09-29, seen with VS Code/terminal text) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -237,6 +247,18 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   - WARNING: the dot probe comment is misleading (120-133).
   - WARNING: the mini proportional branch is unproved, because the tests only hit the floor (151-156).
   - Suggestions: hardcoded tunables (156), proxy scale not restored (124-133), shrink-factor wording (idle rings.js:163).
+- T2h 569e403: miniDetailRatio/miniDetailPx helpers in rings.js; HIEROGLYPH_STROKE_PX 1.6 -> 0.5 floor in mini;
+  T2g test advisories fixed (probe scale stack, above-floor case at 90%, derived expectations). RED 1+1 -> GREEN
+  idle 17, explorer 18; Scene 95; full suite 0 failed; previews non-blank (pixel count) + edge 0.
+- T10 4008996 + a7c7dcf: keys now focus-border, border-color, tiling, video-wallpaper-path, alerts, http-server,
+  http-server-port, gap, wallpaper-mode (html|html-mini|video), wallpaper-scene, wallpaper-fps, mini-position;
+  legacy aliases parsed, the new key wins in either order, removed per-route toggles ignored; README migration note;
+  removed 17 tests tied to the removed toggles. TDD deviation: no separate RED run (tests updated after the code;
+  compile failures + 4 serialize failures were the only pre-GREEN signal). Suite 0 failed; parent spot check
+  Settings|MiniMode|HttpAlertComposition 255 passed. Diff +533/-633 (mostly renames/removed tests).
+- Maintainer question 2026-09-29: VS Code/terminal text visible over parts of idle mini. Verified z-order: the mini
+  window is topmost (index 9, WS_EX_TOPMOST); the text reads THROUGH translucent ring bands (lighting mask removed
+  in T2f), while the opaque alphabet cells/planet cover it -> T2i.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
