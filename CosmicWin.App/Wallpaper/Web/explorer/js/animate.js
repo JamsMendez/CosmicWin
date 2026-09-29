@@ -227,6 +227,30 @@ function buildCombinedLightingMask(basis, dpr) {
   combinedLightingMask = { canvas, size, radius };
 }
 
+// mini-scene-window T2i: the mini window is topmost and see-through, so text from windows behind it reads
+// through the ring bands (only the alphabet cells and the planet are opaque). In mini every ring band gets an
+// occluding dark base (MINI_RING_BASE_COLOR, the scene's own #01040a at alpha 0.9) so no band sits "under"
+// the text. It covers exactly each band's own annulus (its cache extent, plus the disc border), so the gaps
+// between rings and everything outside the disc stay see-through. It is drawn LAST with destination-over,
+// i.e. beneath everything already drawn: it never lightens, tints or dims the ring content, the planet, the
+// explorer's blue tint (source-atop) or the fan, and needs no cache or rotation handling (the bands are circles).
+function drawMiniRingBases(context, cx, cy, basis) {
+  const annuli = RING_ANIMATIONS.map((ring) => [basis * ring.cacheInnerFrac, basis * ring.cacheOuterFrac]);
+  annuli.push([basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION]);
+  context.save();
+  context.globalCompositeOperation = 'destination-over';
+  context.fillStyle = MINI_RING_BASE_COLOR;
+  context.beginPath();
+  for (const [innerRadius, outerRadius] of annuli) {
+    context.moveTo(cx + outerRadius, cy);
+    context.arc(cx, cy, outerRadius, 0, TAU);
+    context.moveTo(cx + innerRadius, cy);
+    context.arc(cx, cy, innerRadius, 0, TAU, true);
+  }
+  context.fill();
+  context.restore();
+}
+
 // Draws one cached ring's content, rotated by `angle`. The screen-fixed combined lighting mask
 // (see buildCombinedLightingMask) is applied separately, once, after every ring's content has
 // been drawn (see renderFrame) — not per ring. `cache.content` is centered at (cache.radius,
@@ -580,8 +604,12 @@ function renderFrame(nowMs) {
     if (!isMiniVariant) drawBlueLayer(ctx, cx, cy);
     drawRisingSparks(ctx, timeSeconds);
     if (!isMiniVariant) drawVignette(ctx);
-    // Mini: fade everything out before the window edges (before the unmasked alert overlay below).
-    if (isMiniVariant) applyMiniEdgeFade(ctx, W, H);
+    // Mini: occlude the background under the ring bands, then fade everything out before the window edges
+    // (both before the unmasked alert overlay below).
+    if (isMiniVariant) {
+      drawMiniRingBases(ctx, cx, cy, basis);
+      applyMiniEdgeFade(ctx, W, H);
+    }
   } catch (error) {
     resetCanvasStateForFrame();
     reportRenderError("scene", error);

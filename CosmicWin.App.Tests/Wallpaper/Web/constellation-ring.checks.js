@@ -241,7 +241,75 @@ function checkHieroglyphStrokeScale(loadPage) {
   });
 }
 
+// mini-scene-window T2i: in mini every ring band gets an occluding dark base so text from windows behind the
+// topmost mini window cannot read through the bands. The base is drawn under the finished frame
+// (destination-over, so it never tints or dims what is drawn) and covers exactly each band's own annulus, so
+// the gaps between rings and everything outside the disc stay see-through.
+function checkMiniRingBase(loadPage) {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var sb = mini.sandbox;
+  var basis = sb.miniSceneBasis(288, 288);
+  var color = cfg(mini, "MINI_RING_BASE_COLOR");
+  var alpha = Number(/,\s*([\d.]+)\)$/.exec(color)[1]);
+  assert.ok(alpha >= 0.85 && alpha <= 0.95, "the base alpha must hide text behind it (0.85-0.95), got " + alpha);
+
+  var arcs = [];
+  var ops = [];
+  var fills = [];
+  var state = { op: "source-over", style: null };
+  var context = new Proxy({}, {
+    get: function (target, prop) {
+      if (prop === "arc") return function (x, y, r) { arcs.push({ x: x, y: y, r: r }); };
+      if (prop === "fill") return function () { fills.push({ op: state.op, style: state.style }); };
+      if (prop === "globalCompositeOperation") return state.op;
+      if (prop === "fillStyle") return state.style;
+      return function () {};
+    },
+    set: function (target, prop, value) {
+      if (prop === "globalCompositeOperation") state.op = value;
+      if (prop === "fillStyle") state.style = value;
+      return true;
+    },
+  });
+  sb.drawMiniRingBases(context, 144, 144, basis);
+
+  assert.ok(fills.length >= 1, "expected the base to be filled");
+  fills.forEach(function (f) {
+    assert.strictEqual(f.op, "destination-over", "the base must be drawn destination-over (beneath the frame), got " + f.op);
+    assert.strictEqual(f.style, color, "the base must use MINI_RING_BASE_COLOR");
+  });
+  arcs.forEach(function (a) { assert.ok(a.x === 144 && a.y === 144, "the base annuli must be centered on the ring"); });
+
+  // arcs come as (outer, inner) pairs, one pair per band
+  assert.strictEqual(arcs.length % 2, 0, "expected outer/inner arc pairs");
+  var annuli = [];
+  for (var i = 0; i < arcs.length; i += 2) annuli.push([arcs[i + 1].r, arcs[i].r]);
+  annuli.sort(function (a, b) { return a[0] - b[0]; });
+
+  var rings = cfg(mini, "RING_ANIMATIONS");
+  var expected = rings.map(function (r) { return [basis * r.cacheInnerFrac, basis * r.cacheOuterFrac]; });
+  expected.push([basis * cfg(mini, "DISC_BORDER_INNER_RADIUS_FRACTION"), basis * cfg(mini, "DISC_BORDER_OUTER_RADIUS_FRACTION")]);
+  expected.sort(function (a, b) { return a[0] - b[0]; });
+  assert.strictEqual(annuli.length, expected.length, "expected one base annulus per ring band plus the disc border");
+  annuli.forEach(function (a, k) {
+    assert.ok(Math.abs(a[0] - expected[k][0]) < 1e-6 && Math.abs(a[1] - expected[k][1]) < 1e-6,
+      "base annulus " + a + " must equal the band " + expected[k]);
+    assert.ok(a[0] < a[1], "each base must be a real annulus");
+  });
+  // Never inside the planet/inner ring and never outside the disc.
+  assert.ok(annuli[0][0] >= basis * cfg(mini, "INNER_RING_RADIUS_FRACTION") - 1e-6, "no base inside the inner ring");
+  assert.ok(annuli[annuli.length - 1][1] <= basis * cfg(mini, "DISC_BORDER_OUTER_RADIUS_FRACTION") + 1e-6, "no base outside the disc");
+  // gaps stay open: the bands are disjoint, so a radius between two non-touching bands is in no annulus
+  var gaps = 0;
+  for (var g = 0; g + 1 < annuli.length; g++) {
+    assert.ok(annuli[g][1] <= annuli[g + 1][0] + 1e-6, "base annuli must not overlap");
+    if (annuli[g + 1][0] - annuli[g][1] > 1e-6) gaps++;
+  }
+  assert.ok(gaps >= 1, "expected at least one see-through gap between the ring bases");
+}
+
 module.exports = {
+  checkMiniRingBase: checkMiniRingBase,
   checkConstellationTable: checkConstellationTable,
   checkTunablesMatchTwin: checkTunablesMatchTwin,
   checkConstellationDetailScale: checkConstellationDetailScale,

@@ -117,7 +117,8 @@ function checkMiniLayers(options) {
   // fillRect would otherwise look like a full-canvas fill on the visible canvas.
   drive(page, options.frameFunction, [0]);
 
-  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
+  var miniOnly = options.miniOnly || [];
+  var watched = options.keep.concat(options.drop, miniOnly, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
   var log = [];
   var counts = spyOnFunctions(page, watched, log);
   var fills = spyOnFillRect(page);
@@ -133,6 +134,11 @@ function checkMiniLayers(options) {
   });
   options.drop.forEach(function (name) {
     assert.strictEqual(counts[name] || 0, 0, "mini must NOT run " + name + " (ran " + counts[name] + " times)");
+  });
+  // mini-only layers run in mini (and never in the full variant, see checkFullLayers)
+  miniOnly.forEach(function (name) {
+    assert.strictEqual(typeof page.sandbox[name], "function", "expected the mini-only layer " + name + " to exist");
+    assert.ok(counts[name] >= 1, "mini must run " + name + " (ran " + counts[name] + " times)");
   });
   // The nebula is a mini layer only where the scene says so (processing: green, edge-faded).
   if (options.keepNebula) {
@@ -235,10 +241,14 @@ function checkFullLayers(options) {
   // fillRect would otherwise look like a full-canvas fill on the visible canvas.
   drive(page, options.frameFunction, [0]);
 
-  var watched = options.keep.concat(options.drop, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
+  var fullMiniOnly = options.miniOnly || [];
+  var watched = options.keep.concat(options.drop, fullMiniOnly, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
   var counts = spyOnFunctions(page, watched);
   var fills = spyOnFillRect(page);
   drive(page, options.frameFunction, [100, 200]);
+  fullMiniOnly.forEach(function (name) {
+    assert.strictEqual(counts[name], 0, "the full variant must never run the mini-only layer " + name + " (ran " + counts[name] + " times)");
+  });
   assert.strictEqual(counts.applyMiniEdgeFade, 0, "the full variant must never apply the mini edge fade");
 
   assert.deepStrictEqual(page.consoleErrorCalls, [], "expected no render errors in the full frame");

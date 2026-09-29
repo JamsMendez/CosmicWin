@@ -533,6 +533,7 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
   miniVariantChecks.checkMiniLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
+    miniOnly: ["drawMiniRingBases"],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
     drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     fit: function (page) {
@@ -571,6 +572,7 @@ test("the full variant still draws every layer and its opaque background", funct
   miniVariantChecks.checkFullLayers({
     loadPage: loadPage,
     frameFunction: "renderFrame",
+    miniOnly: ["drawMiniRingBases"],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
     drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     hasBackgroundFill: true,
@@ -603,6 +605,10 @@ test("mini scales the constellation dots and lines with the ring (floor 0.5px); 
 
 test("mini scales the hieroglyph band's glyph stroke with the ring (floor, proportional above it); the full variant keeps 1.6px", function () {
   constellationRingChecks.checkHieroglyphStrokeScale(loadPage);
+});
+
+test("mini draws an occluding dark base under every ring band (destination-over, band radii only); the full variant draws none", function () {
+  constellationRingChecks.checkMiniRingBase(loadPage);
 });
 
 test("the stylesheet makes the mini page transparent", function () {

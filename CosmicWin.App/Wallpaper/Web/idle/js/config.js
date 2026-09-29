@@ -334,6 +334,9 @@ function sceneBasis(W, H) {
 // T2c: the disc border's outer radius is this fraction of the short side, kept inside the mini edge
 // fade's opaque radius (MINI_EDGE_FADE_INNER = 0.41, shared/js/render-loop.js) so the mask never clips it.
 const MINI_RING_RADIUS_FRACTION = 0.40;
+// T2i: the occluding base drawn under every mini ring band (see animate.js's drawMiniRingBases): the scene's own
+// background #01040a at alpha 0.9, enough that white text behind the topmost window cannot be read through a band.
+const MINI_RING_BASE_COLOR = 'rgba(1,4,10,0.9)';
 
 // The basis the composition is actually drawn with: the mini fit in the mini variant, else the full one.
 // (isMiniVariant comes from shared/js/render-loop.js, resolved at call time.)
