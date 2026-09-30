@@ -317,6 +317,13 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   commits: Scene 78, full suite 0 failed.
 - T2m c06df99: MINI_FOLDING_BAND_WIDTH_FACTOR 0.35 on foldingBandParameters widths (mini only): 7.2/6.6/5.2 ->
   2.52/2.32/1.81px at 288; radii/rotation/fold phase unchanged; the see-through hook follows. RED 1 -> GREEN processing 41.
+- Live check after T2m (PID 47172): processing mini bands read as slim rings.
+- Review slice 66c1731..(T2l+T11+T2m+docs) (high, 11 files, 379 lines): APPROVED, acknowledged (lineage
+  review-9e2ed2835e62e688). Advisory (-> T8):
+  - WARNINGs: the glow cache uses an implicit viewport (processing sprites.js:154); the polygon stroke comment is split
+    (render-loop.js:143).
+  - Suggestions: octagon magic 5.1, orphan RAP-34 comment, misleading sprites header, untested structurePx sites,
+    vacuous glow-arg assertion, test proxy indentation.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
