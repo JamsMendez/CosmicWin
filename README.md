@@ -175,7 +175,7 @@ The scene as a small ambient indicator instead of a wallpaper. In this mode Cosm
 wallpaper host and plays no video, so your desktop background stays exactly as Windows has it.
 
 <!-- Video de Wallpaper Mini: paste the GitHub user-attachments URL on the empty line below, alone on its line. -->
-
+https://github.com/user-attachments/assets/322fadb4-812d-4c5a-b594-8b2ad5d30b50
 
 ```ini
 wallpaper-mode = html-mini
