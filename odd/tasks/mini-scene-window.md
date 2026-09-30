@@ -85,6 +85,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2k Explorer mini = idle mini + semi-transparent blue layer (original color) only over drawn components; raphael mini: no glow on gold glyphs, gold nebula alpha x1.3-1.5 (maintainer 2026-09-29) (route: delegated writer, after T2j)
 - [x] T2l Processing mini orbits too big: scale px-absolute band/block/stroke sizes (and check W-based radii) to the window; octagon thickness equal to the raphael mini hexadecagon line (maintainer 2026-09-29) (route: delegated writer)
 - [x] T11 Raphael FULL scene: triple gold glyphs + no gold glow, same as mini (maintainer 2026-09-29; out-of-mini scope change on the big wallpaper) (route: delegated writer)
+- [x] T2m Processing mini: thin the two white folding bands (~7px -> ~2.5px at 288), radii unchanged (maintainer 2026-09-29) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
 - [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
@@ -314,6 +315,8 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - T11 135ce78: raphael FULL + mini share one gold ring: 3x count (35 -> 105 at 1920x1080, capped), slim tall strokes,
   no gold glow anywhere (baker/sprites/constants removed); see-through hook matches. RED 4 -> GREEN raphael 23. Both
   commits: Scene 78, full suite 0 failed.
+- T2m c06df99: MINI_FOLDING_BAND_WIDTH_FACTOR 0.35 on foldingBandParameters widths (mini only): 7.2/6.6/5.2 ->
+  2.52/2.32/1.81px at 288; radii/rotation/fold phase unchanged; the see-through hook follows. RED 1 -> GREEN processing 41.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
