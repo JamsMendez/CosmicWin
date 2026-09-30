@@ -98,3 +98,9 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
   T2 commit: 51a5d6b. Checks: build 0 errors; Interop.Tests 458 passed/42 skipped (desktop-gated); Layout 198, Alert 13, App.Tests: the writer's "14 passed, testhost hangs" was its 120 s tool timeout, not a hang.
   Parent re-run, `dotnet test CosmicWin.App.Tests --blame-hang-timeout 5m`: 1317 passed, 6 skipped
   (desktop-gated), 0 failed, 3 m 45 s, exit 0.
+- Review (RDD, medium, 967 lines, consent granted): lineage review-4ab1fded09ef6185, lens
+  review-reliability, APPROVED and acknowledged (authority burned) on candidate tree a06a2d3 (fe5f3bb).
+  Advisory, non-blocking follow-ups: R3-create-retry-nonidempotent (a retried CreateDesktop after
+  0x800706BE could create two desktops), R3-empty-reconnect-reason (reconnect-failed message can be
+  empty), R3-static-seam-parallel-tests (static factory seam in the Queries tests vs xUnit parallel
+  classes).
