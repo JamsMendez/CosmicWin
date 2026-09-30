@@ -174,6 +174,9 @@ shapes, rather than a flat colour overlay. Every scene has its own hook for this
 The scene as a small ambient indicator instead of a wallpaper. In this mode CosmicWin starts no
 wallpaper host and plays no video, so your desktop background stays exactly as Windows has it.
 
+<!-- Video de Wallpaper Mini: paste the GitHub user-attachments URL on the empty line below, alone on its line. -->
+
+
 ```ini
 wallpaper-mode = html-mini
 mini-position = top-right
