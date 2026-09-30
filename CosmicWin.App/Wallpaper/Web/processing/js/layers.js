@@ -753,10 +753,11 @@ function foldingBandParameters(progress) {
   const minD = Math.min(W, H);
   const phase = progress * TAU;
   const [outerBandSpeed, middleBandSpeed, innerBandSpeed] = FOLDING_BAND_SPEEDS;
+  const thin = isMiniVariant ? MINI_FOLDING_BAND_WIDTH_FACTOR : 1; // T2m: mini bands are thinner, nothing else changes
   return [
-    [minD * 0.385, minD * 0.255, -0.76 + phase * outerBandSpeed, minD * 0.025, phase * outerBandSpeed],
-    [minD * 0.235, minD * 0.365,  0.36 + phase * middleBandSpeed, minD * 0.023, phase * middleBandSpeed + 0.9],
-    [minD * 0.315, minD * 0.225,  0.10 + phase * innerBandSpeed, minD * 0.018, phase * innerBandSpeed + 1.8],
+    [minD * 0.385, minD * 0.255, -0.76 + phase * outerBandSpeed, minD * 0.025 * thin, phase * outerBandSpeed],
+    [minD * 0.235, minD * 0.365,  0.36 + phase * middleBandSpeed, minD * 0.023 * thin, phase * middleBandSpeed + 0.9],
+    [minD * 0.315, minD * 0.225,  0.10 + phase * innerBandSpeed, minD * 0.018 * thin, phase * innerBandSpeed + 1.8],
   ];
 }
 

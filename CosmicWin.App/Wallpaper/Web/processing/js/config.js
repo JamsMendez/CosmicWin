@@ -201,6 +201,12 @@ function structurePx(px, floor = 0) {
   return isMiniVariant ? Math.max(floor, px * miniStructureScale()) : px;
 }
 
+// T2m: the two white folding bands (the "orbits") are minD*0.025 / 0.023 / 0.018 wide, ~7px at 288, far too thick
+// in the small window. Mini multiplies those widths by this factor (2.5px for the widest at 288); the band radii,
+// folding and animation are untouched, and the full scene multiplies by exactly 1. It is a factor on the
+// proportional widths rather than structurePx, because the widths are minD-relative already (not fixed px).
+const MINI_FOLDING_BAND_WIDTH_FACTOR = 0.35;
+
 const ORBIT_BLOCK_RING_COUNT = 2;
 const ORBIT_BLOCK_COUNT = ORBIT_BLOCK_RING_COUNTS.reduce((total, count) => total + count, 0);
 

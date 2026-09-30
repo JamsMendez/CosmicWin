@@ -868,6 +868,31 @@ test("mini scales the processing structure's fixed px sizes by min(W,H)/1440 wit
   assert.ok(core(mini).some(function (v) { return Math.abs(v - 20 * S) < 1e-9; }), "the mini core blur must scale");
 });
 
+// ---- mini-scene-window T2m: the two white folding bands ("orbits", drawAtomicOrbits) are minD*0.025 wide -- about
+// 7px at 288, far too thick in the small window. Mini thins every band by MINI_FOLDING_BAND_WIDTH_FACTOR; radii,
+// folding and animation are untouched, and the full scene keeps its exact widths.
+
+test("mini thins the folding bands to ~2.5px at 288 (radii unchanged); the full widths stay minD * 0.025/0.023/0.018", function () {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var fullWidths = [0.025, 0.023, 0.018];
+  full.sandbox.foldingBandParameters(0.3).forEach(function (b, i) {
+    assert.strictEqual(b[3], 500 * fullWidths[i], "the full band " + i + " width must stay minD * " + fullWidths[i]);
+  });
+  var miniBands = mini.sandbox.foldingBandParameters(0.3);
+  var reference = full.sandbox.foldingBandParameters(0.3);
+  var widest = Math.max.apply(null, miniBands.map(function (b) { return b[3]; }));
+  assert.ok(widest >= 2 && widest <= 3, "the widest mini band must be 2-3px at 288, got " + widest);
+  var factor = vm.runInContext("MINI_FOLDING_BAND_WIDTH_FACTOR", mini.sandbox);
+  miniBands.forEach(function (b, i) {
+    assert.ok(Math.abs(b[3] - 288 * fullWidths[i] * factor) < 1e-9, "mini band " + i + " width must be the full proportion times the factor");
+    // radii, rotation and fold phase are exactly the full scene's proportions
+    assert.ok(Math.abs(b[0] - 288 * (reference[i][0] / 500)) < 1e-9 && Math.abs(b[1] - 288 * (reference[i][1] / 500)) < 1e-9, "mini band " + i + " radii must stay proportional to the full ones");
+    assert.strictEqual(b[2], reference[i][2], "the band rotation must not change");
+    assert.strictEqual(b[4], reference[i][4], "the band fold phase must not change");
+  });
+});
+
 test("the stylesheet makes the mini page and #nebula transparent", function () {
   miniVariantChecks.checkMiniStylesheet(sceneDir, "transparent");
 });
