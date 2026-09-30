@@ -287,7 +287,8 @@ needs a restart; the HTTP route below exists for switching the scene without one
 Four scenes ship, chosen by `wallpaper-scene` in `settings.conf`: `processing` (the default),
 `explorer`, `idle` and `raphael`. `wallpaper-fps` caps the scene's own frame rate at `30` or `60`
 (default `60`); before this setting existed the scene drew uncapped, at the display's own refresh
-rate.
+rate. In `raphael`, the gold glyph ring carries three times as many characters as the standard ring
+rule gives, drawn as thin upright strokes with no glow, in both the wallpaper and the mini window.
 
 Alerts render through the same preloaded WebView2 layer as the scene itself: each `warning`/`failed`
 tile's letters are see-through, showing the running scene's own animation moving inside the letter
@@ -330,7 +331,7 @@ trace.
 | 202 | Accepted; the switch runs on the UI thread. Body `ok` |
 | 400 | Bad JSON, unknown field, or a scene name that is not one of the four |
 | 401 / 403 / 405 | As for alerts |
-| 404 | The route is turned off |
+| 404 | Unknown path (every route is served while `http-server` is on; with it off the port is closed) |
 | 413 | Body larger than 256 bytes |
 | 415 | `Content-Type` is not `application/json` |
 | 503 | Not in html or html-mini mode (`wallpaper-mode = video`), or this CosmicWin has no scene page or mini window to switch |
@@ -354,10 +355,22 @@ mini-position = top-right
 - **Behavior.** Always on top, transparent, click-through and never focused: it does not take
   keyboard focus, does not appear in the taskbar or Alt+Tab, and mouse clicks go to whatever is
   underneath it.
-- **Scene.** It draws a reduced variant of `wallpaper-scene` (no background, no starfield) at
-  `wallpaper-fps`. The scene route above switches it live and saves the choice, exactly as in html
-  mode.
-- **Alerts** are shown inside the window, over the scene.
+- **Scene.** It draws a reduced variant of `wallpaper-scene` at `wallpaper-fps`, with no background:
+  - `idle`: the white ring disc with its alphabet, constellation and hieroglyph bands, the planet
+    centered in the ring, and the chroma fan below it.
+  - `explorer`: the same ring as `idle` under a semi-transparent blue layer that tints only the ring
+    and planet, plus the rising sparks.
+  - `processing`: the folding bands, orbit blocks, octagon, sphere, rays and core, scaled to the
+    window, over a soft green nebula.
+  - `raphael`: the blue and gold glyph rings, the gold polygon and the core with its rotating rays,
+    over a gold nebula.
+
+  Fine details (constellation dots, glyph strokes, polygon lines) are scaled to the window instead of
+  keeping their wallpaper pixel size. A dark base sits under the rings and structure, so windows
+  behind the mini window never read through it, while the gaps between rings stay see-through.
+  Everything fades out before the window's edges, so its square shape never shows. The scene route
+  above switches it live and saves the choice, exactly as in html mode.
+- **Alerts** are shown inside the window, over the scene, even while another app is fullscreen.
 - **`Alt+M`** moves it to the next of the 8 positions, clockwise (top-left, top-center,
   top-right, right-center, bottom-right, bottom-center, bottom-left, left-center, and around) and saves the new `mini-position`. In any other wallpaper mode the chord
   does nothing.
@@ -377,7 +390,7 @@ mini-position = top-right
 | `Alt+1`..`Alt+9` | Go to that virtual desktop, creating desktops until it exists |
 | `Alt+Shift+1`..`Alt+Shift+9` | Send the focused window there, without following it |
 | `Alt+Shift+Q` | Close the desktop you are on — Windows hands its windows to a neighbour |
-| `Alt+M` | Move the mini scene window to the next corner (only with `wallpaper-mode = html-mini`) |
+| `Alt+M` | Move the mini scene window to the next of its 8 positions, clockwise (only with `wallpaper-mode = html-mini`) |
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 
