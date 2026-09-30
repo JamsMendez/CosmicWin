@@ -58,7 +58,7 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
 
 - [x] T1: `Win32NativeVirtualDesktops` reconnects on a disconnect HRESULT and retries once
   (injectable resolver seam, tests with a fake). Route: delegated writer.
-- [ ] T2: `Win32VirtualDesktopQueries` drops and recreates its static manager on a disconnect and
+- [x] T2: `Win32VirtualDesktopQueries` drops and recreates its static manager on a disconnect and
   retries once. Route: same delegated writer.
 - [ ] T3: Hardware check: CosmicWin running, `Stop-Process -Name explorer -Force`, then Alt+N and
   a new window are tiled; trace shows no `0x800706BA` after the reconnect. Route: inline.
@@ -85,4 +85,14 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
   `SwitchTo_reconnects...` (switched Guid.Empty), `MoveWindowTo_reconnects_when_the_disconnect_is_a_returned_hresult`
   (false), `A_shell_that_is_still_dead...` and `A_reconnect_that_cannot_resolve...` (1 resolve, expected 2).
   GREEN: 21/21 after implementing `IsDisconnect`.
+  T1 commit: 9251d55.
+- T2 (route: same delegated writer): seam = `internal static UseFactoryForTests(Func<IVirtualDesktopManager?>?)`
+  on `Win32VirtualDesktopQueries` (public static API unchanged); one private `Invoke` handles thrown
+  and returned (`hr < 0`) disconnects, drops `_manager`, recreates, retries once.
+  RED (observed, `Win32VirtualDesktopQueriesReconnectTests`, seam present, no retry): 7 of 9 failed:
+  `TryGetWindowDesktopId_reconnects_once_and_answers` (thrown True/False, returned False),
+  `TryIsWindowOnCurrentDesktop_reconnects_once_and_answers` (x2, False),
+  `A_shell_that_is_still_dead...`, `A_reconnect_that_cannot_create...`, `The_recreated_manager_is_kept...`
+  (factory called 1 time, expected 2). The 2 non-disconnect tests passed (no reconnect, as required).
+  GREEN: 9/9 after adding `Invoke`.
 
