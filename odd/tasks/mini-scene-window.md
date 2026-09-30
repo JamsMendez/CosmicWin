@@ -324,6 +324,11 @@ maintainer merges/pushes (established precedent). RDD: on (global).
     (render-loop.js:143).
   - Suggestions: octagon magic 5.1, orphan RAP-34 comment, misleading sprites header, untested structurePx sites,
     vacuous glow-arg assertion, test proxy indentation.
+- README updated (inline, 1 file): per-scene mini contents, detail scaling, dark base occlusion, edge fade, alerts
+  over fullscreen apps, the raphael 3x gold ring without glow, a 404 row that matches the single http-server switch
+  (verified LocalHttpCommandServer.cs:369), and Alt+M "8 positions".
+- Merge 2026-09-29 (maintainer-requested): local main fast-forwarded a7c7dcf -> branch HEAD (T2i through T2m, T11,
+  README). Every slice reviewed and acknowledged. Unpushed.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
