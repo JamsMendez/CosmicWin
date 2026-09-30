@@ -95,4 +95,4 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
   `A_shell_that_is_still_dead...`, `A_reconnect_that_cannot_create...`, `The_recreated_manager_is_kept...`
   (factory called 1 time, expected 2). The 2 non-disconnect tests passed (no reconnect, as required).
   GREEN: 9/9 after adding `Invoke`.
-
+  T2 commit: 51a5d6b. Checks: build 0 errors; Interop.Tests 458 passed/42 skipped (desktop-gated); Layout 198, Alert 13, App.Tests 14 passed (App.Tests testhost does not exit after passing; pending T3 hardware check).
