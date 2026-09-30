@@ -24,29 +24,60 @@ namespace CosmicWin.Interop.Win32.VirtualDesktops;
 /// from an HWND through <c>IApplicationViewCollection</c> — another undocumented interface, and
 /// therefore another vtable to verify before it may be called.
 /// </para>
+/// <para>
+/// <b>The shell objects are proxies into <c>explorer.exe</c> and die with it.</b> After an Explorer
+/// restart every call through the cached proxies fails with an RPC disconnect HRESULT (seen on
+/// hardware: <c>0x800706BA</c>), which used to read as "zero desktops" until CosmicWin was
+/// restarted. A call that fails that way now re-resolves the objects and is retried once; see
+/// <see cref="ShellDisconnect"/>. The probe is deliberately NOT re-run: the same build's vtable does
+/// not change across a restart.
+/// </para>
 /// </remarks>
 internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
 {
-    private IVirtualDesktopManagerInternal? _internalManager;
-    private IVirtualDesktopManager? _documentedManager;
-    private IApplicationViewCollection? _views;
+    /// <summary>The three shell objects one resolution yields. Replaced as a unit on reconnect.</summary>
+    /// <param name="Internal">The undocumented desktop manager.</param>
+    /// <param name="Documented">The documented manager, or <see langword="null"/> if it would not create.</param>
+    /// <param name="Views">The view collection, or <see langword="null"/>; its absence disables moving only.</param>
+    internal sealed record ShellManagers(
+        IVirtualDesktopManagerInternal Internal,
+        IVirtualDesktopManager? Documented,
+        IApplicationViewCollection? Views);
+
+    /// <summary>Resolves the shell objects afresh. Returns <see langword="null"/> with a reason on failure.</summary>
+    internal delegate ShellManagers? ManagerResolver(out string? error);
+
+    private readonly Func<bool> _probe;
+    private readonly ManagerResolver _resolver;
+    private ShellManagers? _managers;
     private bool? _available;
+
+    public Win32NativeVirtualDesktops()
+        : this(() => VirtualDesktopProbe.Run().Supported, ResolveFromShell)
+    {
+    }
+
+    /// <param name="probe">
+    /// The once-only vtable gate. Injected so tests need no live shell; production runs
+    /// <see cref="VirtualDesktopProbe"/>. It is NEVER re-run on a reconnect: a restart of Explorer
+    /// on the same build does not change the vtable.
+    /// </param>
+    /// <param name="resolver">How to obtain the shell objects, at first use and again on reconnect.</param>
+    internal Win32NativeVirtualDesktops(Func<bool> probe, ManagerResolver resolver)
+    {
+        _probe = probe;
+        _resolver = resolver;
+    }
 
     /// <summary>Why the last call failed. Never thrown, always readable, cleared on success.</summary>
     public string? LastError { get; private set; }
 
-    public bool IsAvailable => _available ??= VirtualDesktopProbe.Run().Supported && TryResolveManagers();
+    public bool IsAvailable => _available ??= _probe() && TryConnect();
 
-    public IReadOnlyList<Guid> GetDesktopIds()
-    {
-        if (_internalManager is not { } manager)
+    public IReadOnlyList<Guid> GetDesktopIds() =>
+        TryInvoke<IReadOnlyList<Guid>>("GetDesktopIds", shell =>
         {
-            return [];
-        }
-
-        try
-        {
-            manager.GetDesktops(out var desktops);
+            shell.Internal.GetDesktops(out var desktops);
             desktops.GetCount(out var count);
 
             var ids = new List<Guid>(count);
@@ -58,41 +89,17 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
             }
 
             return ids;
-        }
-        catch (Exception ex) when (IsInteropFailure(ex))
-        {
-            return [];
-        }
-    }
+        }, []);
 
-    public Guid GetCurrentDesktopId()
-    {
-        if (_internalManager is not { } manager)
-        {
-            return Guid.Empty;
-        }
+    public Guid GetCurrentDesktopId() =>
+        TryInvoke("GetCurrentDesktop", shell => shell.Internal.GetCurrentDesktop().GetId(), Guid.Empty);
 
-        try
+    public void CreateDesktop() =>
+        TryInvoke("CreateDesktop", shell =>
         {
-            return manager.GetCurrentDesktop().GetId();
-        }
-        catch (Exception ex) when (IsInteropFailure(ex))
-        {
-            return Guid.Empty;
-        }
-    }
-
-    public void CreateDesktop()
-    {
-        try
-        {
-            _internalManager?.CreateDesktop();
-        }
-        catch (Exception ex) when (IsInteropFailure(ex))
-        {
-            LastError = $"CreateDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
-        }
-    }
+            shell.Internal.CreateDesktop();
+            return true;
+        }, false);
 
     /// <summary>
     /// Windows' own <c>Win+Ctrl+F4</c>, not the internal <c>RemoveDesktop</c> slot.
@@ -115,17 +122,12 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         ShellDesktopShortcuts.SendCloseDesktop();
     }
 
-    public void SwitchTo(Guid desktopId)
-    {
-        if (_internalManager is not { } manager)
-        {
-            return;
-        }
-
-        try
+    public void SwitchTo(Guid desktopId) =>
+        TryInvoke("SwitchDesktop", shell =>
         {
             // Resolved through the enumeration rather than FindDesktop, which is still an unverified
             // slot holder -- one verified path is worth more than a shorter unverified one.
+            var manager = shell.Internal;
             var iid = typeof(IVirtualDesktop).GUID;
             manager.GetDesktops(out var desktops);
             desktops.GetCount(out var count);
@@ -138,17 +140,13 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
                 {
                     manager.SwitchDesktop(desktop);
                     LastError = null;
-                    return;
+                    return true;
                 }
             }
 
             LastError = $"SwitchDesktop: {desktopId} was not in the enumeration of {count}.";
-        }
-        catch (Exception ex) when (IsInteropFailure(ex))
-        {
-            LastError = $"SwitchDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
-        }
-    }
+            return false;
+        }, false);
 
     /// <summary>
     /// Moves a window between desktops through the INTERNAL manager.
@@ -162,35 +160,91 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
     /// </remarks>
     public bool MoveWindowTo(nint windowHandle, Guid desktopId)
     {
-        if (_internalManager is not { } manager || _views is not { } views)
+        if (_managers is null)
         {
             LastError = "The shell's view collection was never resolved; moving windows is unavailable.";
             return false;
         }
 
-        try
+        return TryInvoke("MoveViewToDesktop", shell =>
         {
+            if (shell.Views is not { } views)
+            {
+                LastError = "The shell's view collection was never resolved; moving windows is unavailable.";
+                return false;
+            }
+
             var hr = views.GetViewForHwnd(windowHandle, out var view);
+
+            // A dead shell answers through the return value here, not an exception: surface it as
+            // one so the single reconnect path in TryInvoke sees both shapes.
+            if (ShellDisconnect.IsDisconnect(hr))
+            {
+                throw new COMException($"GetViewForHwnd(0x{windowHandle:X})", hr);
+            }
+
             if (hr < 0 || view is null)
             {
                 LastError = $"GetViewForHwnd(0x{windowHandle:X}): HRESULT 0x{hr:X8}";
                 return false;
             }
 
-            if (!TryFindDesktop(manager, desktopId, out var desktop))
+            if (!TryFindDesktop(shell.Internal, desktopId, out var desktop))
             {
                 LastError = $"MoveViewToDesktop: {desktopId} was not in the enumeration.";
                 return false;
             }
 
-            manager.MoveViewToDesktop(view, desktop);
+            shell.Internal.MoveViewToDesktop(view, desktop);
             LastError = null;
             return true;
+        }, false);
+    }
+
+    /// <summary>
+    /// Runs one shell call; on a disconnect-class failure drops the dead proxies, re-resolves them
+    /// and retries THAT call once.
+    /// </summary>
+    /// <remarks>
+    /// At most one reconnect and one retry per call: a shell that is still down must cost one failed
+    /// resolve, not a loop. Only a disconnect HRESULT triggers it -- any other failure is a real
+    /// answer from a live shell and is reported as before. Never throws; a failure that survives the
+    /// retry is reported in <see cref="LastError"/> and says a reconnect was attempted.
+    /// </remarks>
+    private T TryInvoke<T>(string operation, Func<ShellManagers, T> call, T fallback)
+    {
+        if (_managers is not { } shell)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            return call(shell);
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
-            LastError = $"MoveViewToDesktop: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
-            return false;
+            if (!ShellDisconnect.IsDisconnect(ex.HResult))
+            {
+                LastError = $"{operation}: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
+                return fallback;
+            }
+
+            if (!TryConnect())
+            {
+                LastError = $"{operation}: {ex.GetType().Name} 0x{ex.HResult:X8}; reconnect failed: {LastError}";
+                return fallback;
+            }
+
+            try
+            {
+                return call(_managers!);
+            }
+            catch (Exception retry) when (IsInteropFailure(retry))
+            {
+                LastError = $"{operation}: {retry.GetType().Name} 0x{retry.HResult:X8} {retry.Message} (after reconnect)";
+                return fallback;
+            }
         }
     }
 
@@ -219,14 +273,32 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         return false;
     }
 
-    private bool TryResolveManagers()
+    /// <summary>
+    /// Swaps in freshly resolved managers. On failure the old ones are kept, so the next call that
+    /// fails the same way tries again once Explorer is back.
+    /// </summary>
+    private bool TryConnect()
     {
+        var resolved = _resolver(out var error);
+        if (resolved is null)
+        {
+            LastError = error;
+            return false;
+        }
+
+        _managers = resolved;
+        return true;
+    }
+
+    private static ShellManagers? ResolveFromShell(out string? error)
+    {
+        error = null;
         try
         {
             var shellType = Type.GetTypeFromCLSID(ShellComGuids.ImmersiveShell, throwOnError: false);
             if (shellType is null || Activator.CreateInstance(shellType) is not IShellServiceProvider shell)
             {
-                return false;
+                return null;
             }
 
             var service = ShellComGuids.VirtualDesktopManagerInternal;
@@ -234,13 +306,14 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
             var hr = shell.QueryService(ref service, ref iid, out var instance);
             if (hr < 0 || instance == IntPtr.Zero)
             {
-                LastError = $"QueryService(VirtualDesktopManagerInternal): 0x{hr:X8}";
-                return false;
+                error = $"QueryService(VirtualDesktopManagerInternal): 0x{hr:X8}";
+                return null;
             }
 
+            IVirtualDesktopManagerInternal internalManager;
             try
             {
-                _internalManager = (IVirtualDesktopManagerInternal)Marshal.GetObjectForIUnknown(instance);
+                internalManager = (IVirtualDesktopManagerInternal)Marshal.GetObjectForIUnknown(instance);
             }
             finally
             {
@@ -248,19 +321,20 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
             }
 
             var documentedType = Type.GetTypeFromCLSID(ShellComGuids.VirtualDesktopManager, throwOnError: false);
-            _documentedManager = documentedType is null
+            var documented = documentedType is null
                 ? null
                 : Activator.CreateInstance(documentedType) as IVirtualDesktopManager;
 
             // The view collection is a SERVICE on the same shell object, queried by its own
             // interface id. Its absence disables moving windows but leaves switching intact.
+            IApplicationViewCollection? views = null;
             var viewsIid = typeof(IApplicationViewCollection).GUID;
             var viewsService = viewsIid;
             if (shell.QueryService(ref viewsService, ref viewsIid, out var viewsInstance) >= 0 && viewsInstance != IntPtr.Zero)
             {
                 try
                 {
-                    _views = (IApplicationViewCollection)Marshal.GetObjectForIUnknown(viewsInstance);
+                    views = (IApplicationViewCollection)Marshal.GetObjectForIUnknown(viewsInstance);
                 }
                 finally
                 {
@@ -268,12 +342,12 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
                 }
             }
 
-            return _internalManager is not null;
+            return new ShellManagers(internalManager, documented, views);
         }
         catch (Exception ex) when (IsInteropFailure(ex))
         {
-            LastError = $"resolve: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
-            return false;
+            error = $"resolve: {ex.GetType().Name} 0x{ex.HResult:X8} {ex.Message}";
+            return null;
         }
     }
 
