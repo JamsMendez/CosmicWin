@@ -195,6 +195,14 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     /// </summary>
     internal bool ErrorObservedForTests => _notify?.ErrorObserved ?? false;
 
+    /// <summary>
+    /// Test-only observability: whether the current engine raised
+    /// <c>MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA</c>, i.e. it has actually opened and parsed the file.
+    /// Lets a test wait for the asynchronous open without probing the file itself, which could
+    /// collide with that very open (R3-probe-interferes-with-open).
+    /// </summary>
+    internal bool MetadataLoadedForTests => _notify?.MetadataLoaded ?? false;
+
     public bool TryPlay(IVideoWallpaperHost host, string videoPath)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -636,11 +644,18 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     {
         public volatile bool ErrorObserved;
 
+        public volatile bool MetadataLoaded;
+
         public void EventNotify(uint @event, nuint param1, uint param2)
         {
-            if ((MF_MEDIA_ENGINE_EVENT)@event == MF_MEDIA_ENGINE_EVENT.MF_MEDIA_ENGINE_EVENT_ERROR)
+            switch ((MF_MEDIA_ENGINE_EVENT)@event)
             {
-                ErrorObserved = true;
+                case MF_MEDIA_ENGINE_EVENT.MF_MEDIA_ENGINE_EVENT_ERROR:
+                    ErrorObserved = true;
+                    break;
+                case MF_MEDIA_ENGINE_EVENT.MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA:
+                    MetadataLoaded = true;
+                    break;
             }
         }
     }

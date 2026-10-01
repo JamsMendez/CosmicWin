@@ -146,26 +146,62 @@ public sealed class MediaFoundationVideoWallpaperPlayerTests
 
             Assert.True(player.TryPlay(host, playedPath), "TryPlay should succeed against a real, valid MP4.");
 
-            // Gives the engine's async source resolution time to actually open the file before
-            // Stop() is asked to release it -- SetSource is documented asynchronous, and calling
-            // Stop() in the same instant TryPlay returns could race ahead of the open itself.
-            Thread.Sleep(300);
+            // R3-stop-release-fixed-sleep: SetSource is documented asynchronous, so the engine opens
+            // the file some time AFTER TryPlay returns. A fixed sleep before Stop() could end before
+            // that open on a slow machine, and the release check below would then pass vacuously --
+            // a file nobody ever held is trivially free. Wait (bounded) for the engine's own
+            // LOADEDMETADATA event instead of probing the file: an exclusive probe racing the
+            // engine's open could make THAT open fail (R3-probe-interferes-with-open).
+            Assert.True(
+                WaitUntil(() => player.MetadataLoadedForTests || player.ErrorObservedForTests, TimeSpan.FromSeconds(10)),
+                "Expected Media Foundation to finish opening the file before Stop() is asked to release it.");
+            Assert.False(player.ErrorObservedForTests, "Media Foundation reported an error opening the fixture.");
+
+            // Safe to probe now -- the open is over. This also pins the premise the release check
+            // rests on (R3-held-assumption-unverified): the engine holds the file without write sharing.
+            Assert.True(IsHeld(playedPath), "Expected the playing engine to hold the file without write sharing.");
 
             player.Stop();
 
-            // Exclusive: FileShare.None. This throws IOException (sharing violation) if Media
-            // Foundation's worker thread still holds any handle open on the file.
-            var exception = Record.Exception(() =>
-            {
-                using var exclusive = new FileStream(
-                    playedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            });
-
-            Assert.Null(exception);
+            Assert.False(IsHeld(playedPath), "Expected Stop() to release the file it was playing.");
         }
         finally
         {
             File.Delete(playedPath);
+        }
+    }
+
+    private static bool WaitUntil(Func<bool> condition, TimeSpan bound)
+    {
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        while (elapsed.Elapsed < bound)
+        {
+            if (condition())
+            {
+                return true;
+            }
+
+            Thread.Sleep(25);
+        }
+
+        return condition();
+    }
+
+    private const int ErrorSharingViolation = unchecked((int)0x80070020);
+
+    // Exclusive: FileShare.None. The open fails with a SHARING VIOLATION while Media Foundation's
+    // worker thread holds any handle on the file. Only that HResult means "held"
+    // (R3-ioexception-too-broad): any other IOException is a real failure and propagates.
+    private static bool IsHeld(string path)
+    {
+        try
+        {
+            using var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (IOException exception) when (exception.HResult == ErrorSharingViolation)
+        {
+            return true;
         }
     }
 

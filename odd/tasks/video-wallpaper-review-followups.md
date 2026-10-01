@@ -86,3 +86,19 @@ RDD: medium, `slice_budget_reached` (520 lines). Consent granted by the maintain
 ## Next step
 
 Local merge on the maintainer's word (the maintainer pushes).
+
+## Re-audit 2026-10-01 (against main 68ec24d)
+
+- `R3-orphaned-temp-on-crash`: already done -- VideoWallpaperImport.SweepLeftoverTempFiles, covered by
+  Import_SweepsLeftoverTempFilesFromAPreviousImport_ButLeavesUnrelatedFilesAlone.
+- `R3-f1-tests-do-not-discriminate`: closed by design (F1 scenario unreachable; see F1).
+- `R3-stop-release-fixed-sleep`: DONE on branch test/stop-release-wait-for-open. The fixed 300 ms sleep is
+  replaced by a bounded wait on the engine's own MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA (new test-only
+  MetadataLoadedForTests), then the held premise is asserted, then Stop() must release. A first version
+  probed the file exclusively in a loop; review-a2b00535ff6448d6 flagged WARNING R3-probe-interferes-with-
+  open (the probe could make the engine's own open fail) plus R3-held-assumption-unverified and
+  R3-ioexception-too-broad (now only ERROR_SHARING_VIOLATION means held) -- all three folded in.
+  Hardware (CosmicWin stopped, COSMICWIN_RUN_DESKTOP_TESTS=1): RED with the seam stubbed to false
+  ("never finished opening"); GREEN 3/3 (~550 ms); mutation Stop() without StopPlaybackOnly -> RED
+  "Expected Stop() to release"; restored byte-identical. Player class 8/8 on the desktop; Interop suite
+  493 passed / 42 skipped / 0 failed.
