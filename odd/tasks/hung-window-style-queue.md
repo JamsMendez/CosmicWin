@@ -55,3 +55,7 @@ Maintainer request, 2026-09-30: "podemos atacar los pendientes?".
   passed/6 skipped. Race noted: a strip racing a restore in parallel reads then writes the whole style
   word, so it could re-set a stale WS_MAXIMIZE bit; only possible when the target was hung, and the
   adapter's next bounds change re-checks the maximized bit.
+- Hardware (route: inline, parent, running Release 9af2c0c): Brave title-bar double-click on the
+  empty tab strip (L+600, T+18) did NOT maximize with tiling on; the same double-click with tiling off
+  maximized (3408x1456, control); tiling back on returned it to its slot with the box disabled. This
+  closes the "inconclusive" double-click case from review-follow-ups-2026-09-30 T5.
