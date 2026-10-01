@@ -64,7 +64,7 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
 - [x] S2 Decide the mask source from S1's numbers: page exports a mask bitmap per show (letters
   are static after reveal, but reveal/pixelation/shake animate) vs C# re-renders the letters with
   DirectWrite (layout drift risk). Maintainer decision if the tradeoff is real.
-- [ ] S3 Interop tint pass (production, TDD): a `VideoTintPass` seam owned by the player, OFF unless a
+- [x] S3 Interop tint pass (production, TDD): a `VideoTintPass` seam owned by the player, OFF unless a
   mask is set; frame -> intermediate texture -> back buffer, then ColorMatrix(luminance x tint) through
   an AlphaMask effect with the mask bitmap. Carry the spike review findings: release the target
   bitmap around ResizeBuffers/re-attach, back off after a device failure, keep it out of the inline
@@ -103,6 +103,26 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   retried every tick after a failure (back off), and the pass must not live inline in the frame
   pump (own seam). Settings restored byte-identical; CosmicWin back on html-mini.
 
+- 2026-10-01 S3 DONE (delegated writer; route: delegated direct, writer trigger 2+ non-trivial files).
+  `MediaFoundationVideoWallpaperPlayer.SetTint(ReadOnlyMemory<byte> maskAlpha, width, height, r, g, b)` /
+  `ClearTint()` (concrete class, like Shake; IVideoWallpaperPlayer untouched). Mask: 8-bit alpha,
+  row-major, tightly packed, top row first, copied at the call; other sizes resampled nearest-neighbour
+  once per request. Lock-free handoff (volatile immutable VideoTintRequest, latest wins). Off path = one
+  volatile read, then today's TransferVideoFrame; no D2D object exists unless a tint is set. Pass:
+  frame -> intermediate texture; back buffer <- intermediate (SOURCE_COPY); then
+  AlphaMask(ColorMatrix(intermediate), A8 mask) SOURCE_OVER. Classes: VideoTintMatrix, VideoTintRequest,
+  VideoTintMaskResampler, VideoTintDriver (+IVideoTintRenderer), D2DVideoTintRenderer. Spike findings:
+  back-buffer-bound objects released on a changed buffer/size and the renderer disposed on ClearTint and
+  worker stop (nothing pins the swapchain outside an alert); 5 s back-off after any failure with fallback
+  to the untinted path; RECREATE_TARGET rebuilds next tick; nothing throws out of Tick.
+  TDD: RED observed for matrix/resampler/driver (20/24 failing on stubs), Abort/ReleaseGpu, and the 6 GPU
+  tests on a stub renderer; VideoTintRequest and player-level API tests are characterization (passed
+  first run). GPU tests (real hardware D3D11, offscreen, no desktop): masked pixels == L*tint within
+  2/255, unmasked unchanged, soft mask, resampled mask, back-buffer pin released (native refcounts).
+  Parent spot check: Interop 529 passed / 42 skipped / 0 failed (was 493/42); App 1434/6/0; build 0
+  errors. Not covered yet: the live Tick/TransferTinted path on the host's shared MT-protected device
+  (S5 hardware); GPU frame cost; RECREATE_TARGET real HRESULT path.
+
 ## Next step
 
-S2: choose the mask source.
+S4: page exports the mask, controller calls SetTint/ClearTint.

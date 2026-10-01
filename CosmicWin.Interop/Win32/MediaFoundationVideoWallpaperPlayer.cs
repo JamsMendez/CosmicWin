@@ -89,10 +89,44 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
     private bool _disposed;
 
+    // See-through tint (see-through-video-tint S3). Constructing the driver creates no GPU object.
+    private static readonly TimeSpan TintFailureBackoff = TimeSpan.FromSeconds(5);
+    private readonly VideoTintDriver _tint;
+
     public MediaFoundationVideoWallpaperPlayer(TimeProvider? timeProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _tint = new VideoTintDriver(_timeProvider, static () => new D2DVideoTintRenderer(), TintFailureBackoff);
     }
+
+    /// <summary>
+    /// While set, the pixels covered by <paramref name="maskAlpha"/> show the video tinted by
+    /// luminance: output = luma(video) * (<paramref name="r"/>, <paramref name="g"/>, <paramref name="b"/>),
+    /// blended by the mask value (0 = untouched video, 255 = fully tinted, in between = soft edge).
+    /// </summary>
+    /// <param name="maskAlpha">
+    /// 8 bits per pixel, row-major, tightly packed (<c>width * height</c> bytes), top row first. Any
+    /// size works; it is scaled (nearest neighbour) to the video back buffer, though a mask of the
+    /// back buffer's own pixel size avoids the resample. The bytes are copied before this returns.
+    /// </param>
+    /// <remarks>
+    /// Callable from any thread. The worker thread picks the latest request up at its next tick (a
+    /// later call replaces an earlier one). No GPU object exists until the first request and all are
+    /// released by <see cref="ClearTint"/>; with no request the frame path is exactly the untinted one.
+    /// A Direct2D failure never reaches the caller: the video keeps playing untinted and the pass is
+    /// retried after a back-off.
+    /// </remarks>
+    /// <exception cref="ArgumentException">The size is not positive or does not match the mask length.</exception>
+    public void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b)
+    {
+        _tint.Set(new VideoTintRequest(maskAlpha.Span, width, height, r, g, b));
+    }
+
+    /// <summary>Removes the tint; the worker releases its Direct2D objects at the next tick. Callable from any thread.</summary>
+    public void ClearTint() => _tint.Clear();
+
+    /// <summary>Test-only observability: whether a tint is currently requested.</summary>
+    internal bool IsTintRequestedForTests => _tint.IsEngaged;
 
     /// <summary>
     /// Starts (or restarts) a native shake of the video, matching the alert page's own dropped
@@ -265,6 +299,9 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
         StopPlaybackOnly();
         ClearShake();
+
+        // Only the request: the worker thread (already stopped, or about to exit) releases the GPU objects.
+        _tint.Clear();
     }
 
     /// <summary>
@@ -423,6 +460,9 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             {
                 _engine = null;
                 _notify = null;
+
+                // D3D/D2D objects die on the thread that made them, before the host can go away.
+                _tint.ReleaseGpu();
             }
         }
 
@@ -579,13 +619,50 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
 
             RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
-            engine.TransferVideoFrame(backBuffer, null, &destRect, null);
+            if (_tint.IsEngaged)
+            {
+                TransferTinted(engine, host, backBuffer, in desc, &destRect);
+            }
+            else
+            {
+                engine.TransferVideoFrame(backBuffer, null, &destRect, null);
+            }
+
             host.Present();
         }
         catch
         {
             // The frame pump must never crash the process or tear down the host window -- a bad
             // tick is skipped and playback is retried on the next tick.
+        }
+    }
+
+    /// <summary>
+    /// The tinted frame path, kept out of <see cref="Tick"/> so the untinted one stays byte-for-byte
+    /// what it was: frame into the tint pass's intermediate texture, then the pass composes it into
+    /// the back buffer. Any failure falls back to the plain transfer for this very frame (the pass
+    /// has already backed itself off), so a tint problem can never cost a frame.
+    /// </summary>
+    private void TransferTinted(
+        IMFMediaEngine engine, IVideoWallpaperHost host, ID3D11Texture2D backBuffer, in D3D11_TEXTURE2D_DESC desc, RECT* destRect)
+    {
+        bool tinted = false;
+        try
+        {
+            if (_tint.TryBegin(host.Device, backBuffer, in desc, out ID3D11Texture2D? target) && target is not null)
+            {
+                engine.TransferVideoFrame(target, null, destRect, null);
+                tinted = _tint.Complete();
+            }
+        }
+        catch
+        {
+            _tint.Abort();
+        }
+
+        if (!tinted)
+        {
+            engine.TransferVideoFrame(backBuffer, null, destRect, null);
         }
     }
 
