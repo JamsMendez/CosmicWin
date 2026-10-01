@@ -1820,18 +1820,35 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// back on, because windows tiled before it was turned off were never announced again.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A fullscreen window is skipped: it is deliberately left alone until it is a window again,
     /// and the bounds-changed path re-strips it then. Does nothing while paused, for the same
     /// reason a window opened while paused is not tiled; the first bounds change after the pause
     /// ends strips it.
+    /// </para>
+    /// <para>
+    /// <c>SW_RESTORE</c> ACTIVATES the window it restores, so restoring several maximized windows in
+    /// a row walks the foreground across all of them and leaves it on whichever came last.
+    /// <paramref name="foregroundBefore"/> is the window that held it when tiling was switched on;
+    /// after a batch that restored at least one window it is given the foreground back through the
+    /// ordinary activation path. Chosen over a non-activating restore because
+    /// <c>SW_SHOWNOACTIVATE</c> is documented as "most recent size and position" with no maximized
+    /// case, so un-maximizing with it would rest on observed behaviour; <c>SW_RESTORE</c> is the
+    /// documented call. Skipped when nothing was restored (nothing moved the foreground), and when
+    /// that window is not one this adapter knows (the registry cannot hand it back; the foreground
+    /// then stays where the last restore left it). The single-window fallback in the bounds-changed
+    /// path keeps activating on purpose: the window the user just maximized already holds the
+    /// foreground, so there is nothing to give back.
+    /// </para>
     /// </remarks>
-    public void ApplyMaximizeBlock()
+    public void ApplyMaximizeBlock(nint foregroundBefore = 0)
     {
         if (_isPaused())
         {
             return;
         }
 
+        var restoredAny = false;
         foreach (var handle in _owners.Keys.ToArray())
         {
             if (_fullscreen.Contains(handle)
@@ -1844,10 +1861,16 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
             if ((window.Style & WindowStyleFlags.Maximized) != 0)
             {
-                window.TryRestore();
+                restoredAny |= window.TryRestore();
             }
 
             StripMaximizeBox(window);
+        }
+
+        if (restoredAny && foregroundBefore != 0
+            && _registry.TryGetWindow(foregroundBefore, out var keeper) && keeper is { IsAlive: true })
+        {
+            keeper.TryActivate();
         }
     }
 

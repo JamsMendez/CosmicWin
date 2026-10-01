@@ -257,6 +257,14 @@ internal sealed class RecordingWindow : IWindow
         return true;
     }
 
+    /// <summary>
+    /// Models <c>SW_RESTORE</c>, which activates the window it restores: a successful
+    /// <see cref="TryRestore"/> appends this handle to <see cref="ActivationLog"/>, because that is
+    /// how a restore steals the foreground in the real thing. Off by default so every fact written
+    /// before it existed keeps meaning what it meant.
+    /// </summary>
+    public bool RestoreActivates { get; set; }
+
     public bool TryRestore()
     {
         RestoreCallCount++;
@@ -267,6 +275,11 @@ internal sealed class RecordingWindow : IWindow
         }
 
         Style &= ~WindowStyleFlags.Maximized;
+        if (RestoreActivates)
+        {
+            ActivationLog?.Add(Handle);
+        }
+
         return true;
     }
 

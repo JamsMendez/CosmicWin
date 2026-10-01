@@ -1323,7 +1323,8 @@ public sealed class AppComposition : IDisposable
 
             // The windows tiled BEFORE it went off were handed their maximize box back then and are
             // never announced again, so this is the only thing that takes it away a second time.
-            sessionAdapter.ApplyMaximizeBlock();
+            // Read BEFORE the batch: restoring a maximized window activates it.
+            sessionAdapter.ApplyMaximizeBlock(foreground.GetForegroundHandle());
 
             // Then EVERY display, not only the ones that gained a window. While tiling was off the
             // user was free to drag and resize with the mouse, and switching it back on is a request

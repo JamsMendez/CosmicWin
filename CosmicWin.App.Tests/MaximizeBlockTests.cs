@@ -308,6 +308,65 @@ public sealed class MaximizeBlockTests
     }
 
     [Fact]
+    public void ApplyingTheBlock_AfterRestoringSeveralWindows_GivesTheForegroundBackToWhoHadIt()
+    {
+        // SW_RESTORE activates what it restores, so restoring two maximized windows in a row leaves
+        // the foreground on whichever came last. The user was working in the FIRST one, which is restored first and so ends up behind.
+        using var h = new Harness();
+        var log = new List<nint>();
+        h.First.ActivationLog = log;
+        h.Second.ActivationLog = log;
+        h.First.RestoreActivates = true;
+        h.Second.RestoreActivates = true;
+        h.TilingOn = false;
+        h.Adapter.ReleaseMaximizeBlock();
+        h.First.SimulateMaximize(WorkArea);
+        h.Second.SimulateMaximize(WorkArea);
+        log.Clear();
+
+        h.TilingOn = true;
+        h.Adapter.ApplyMaximizeBlock(foregroundBefore: h.First.Handle);
+
+        Assert.Equal(1, h.First.RestoreCallCount);
+        Assert.Equal(1, h.Second.RestoreCallCount);
+        Assert.Equal(h.First.Handle, log[^1]);
+    }
+
+    [Fact]
+    public void ApplyingTheBlock_WhenNothingWasRestored_NeverTouchesTheForeground()
+    {
+        using var h = new Harness();
+        var log = new List<nint>();
+        h.First.ActivationLog = log;
+        h.Second.ActivationLog = log;
+        h.TilingOn = false;
+        h.Adapter.ReleaseMaximizeBlock();
+
+        h.TilingOn = true;
+        h.Adapter.ApplyMaximizeBlock(foregroundBefore: h.Second.Handle);
+
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public void ApplyingTheBlock_WhenTheForegroundIsNotATiledWindow_ActivatesNothingExtra()
+    {
+        using var h = new Harness();
+        var log = new List<nint>();
+        h.First.ActivationLog = log;
+        h.First.RestoreActivates = true;
+        h.TilingOn = false;
+        h.Adapter.ReleaseMaximizeBlock();
+        h.First.SimulateMaximize(WorkArea);
+        log.Clear();
+
+        h.TilingOn = true;
+        h.Adapter.ApplyMaximizeBlock(foregroundBefore: new IntPtr(999));
+
+        Assert.Equal([h.First.Handle], log); // only the restore's own activation
+    }
+
+    [Fact]
     public void ApplyingTheBlock_WhilePaused_ChangesNothing()
     {
         using var h = new Harness();

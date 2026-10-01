@@ -142,3 +142,13 @@ strategy question is asked before delivery. Everything stays local; the maintain
   R3-restore-result-dropped (giving the box back ignores a failed write, untraced),
   R3-strip-after-addwindow-untile (adapter ~540: confirm the window is still tiled before
   stripping), R3-unrestorable-test-weak (still open).
+- Follow-up R3-apply-block-activates-many FIXED (route: delegated writer, trigger "2+ non-trivial
+  files"): `ApplyMaximizeBlock(nint foregroundBefore = 0)`; `AppComposition.ResumeTiling` reads the
+  foreground BEFORE the batch and, after a batch that restored at least one window, the adapter
+  gives the foreground back through `TryActivate`. Chosen over a non-activating restore because
+  `SW_SHOWNOACTIVATE` has no documented maximized case. The single-window fallback keeps activating
+  (the window the user just maximized already holds focus). Known limit: a foreground window the
+  registry does not know cannot be handed back. RED:
+  `MaximizeBlockTests.ApplyingTheBlock_AfterRestoringSeveralWindows_GivesTheForegroundBackToWhoHadIt`
+  failed (expected handle 10, actual 20: the foreground ended on the last restored window) against
+  a no-op stub of the new parameter; GREEN 26/26 in `MaximizeBlockTests`. Commit: see git log.
