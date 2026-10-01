@@ -97,3 +97,10 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
     disables it again. Elevated target handled normally (CosmicWin always runs elevated).
   - No `maximize undone`/`kept` trace line in any case: Windows refused every maximize itself.
 
+- Review: the base-diff against origin/main (3519 lines) stopped with `lens_context_budget_exceeded`
+  (nothing created); re-run scoped to this branch (`--base-ref bea8a6c`, 1136 lines, consent granted):
+  lineage review-1e52b56243ca78a3, APPROVED and acknowledged (authority burned) on 03568ef. Advisory,
+  hung-window only, left open on purpose: R3-queue-thread-bound-claim (the StyleCallQueue remark says
+  at most a strip and a give-back per window; restores and repeated Alt+T also queue, so a hung window
+  can park more idle threads), R3-restore-queued-behind-pending-strip (a restore waits behind a pending
+  strip on the same hung window and reports a refusal).
