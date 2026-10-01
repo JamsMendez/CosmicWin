@@ -1773,6 +1773,11 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// asked, which still answers for a window that is about to leave the tree. A window that is
     /// already dead simply cannot be given anything -- the call reports false and the record is
     /// dropped regardless.
+    /// <para>
+    /// A refused write is traced, in the same shape as the "maximize box kept" line: the record is
+    /// gone either way, so without a line the window would stay without a usable button and nothing
+    /// anywhere would say so. Nothing is retried; the window is the one thing that knows why.
+    /// </para>
     /// </remarks>
     private void RestoreMaximizeBox(nint handle, IWindow? known = null)
     {
@@ -1788,7 +1793,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _registry.TryGetWindow(handle, out known);
         }
 
-        known?.TrySetMaximizeBox(true);
+        if (known is { IsAlive: true } && !known.TrySetMaximizeBox(true))
+        {
+            Trace?.Record(
+                $"maximize box not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
+                $"-- the window refused the change; its maximize button stays disabled until it is reopened");
+        }
     }
 
     /// <summary>

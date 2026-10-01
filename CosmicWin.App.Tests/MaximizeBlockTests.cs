@@ -266,6 +266,33 @@ public sealed class MaximizeBlockTests
     }
 
     [Fact]
+    public void AFailedGiveBack_IsTraced_WithTheWindowIdentity()
+    {
+        // The window refuses the write that would return its button (it turned elevated, or its
+        // thread is gone): it is left without one, and that must be readable in the trace.
+        using var h = new Harness();
+        h.First.RefuseStyleChanges = true;
+
+        h.Adapter.ReleaseMaximizeBlock();
+
+        Assert.Contains(
+            h.Trace.Lines,
+            line => line.StartsWith("maximize box not returned hwnd=0xA ", StringComparison.Ordinal)
+                && line.Contains("class=") && line.Contains("proc="));
+    }
+
+    [Fact]
+    public void ASuccessfulGiveBack_IsNotTraced()
+    {
+        using var h = new Harness();
+
+        h.Adapter.ReleaseMaximizeBlock();
+
+        Assert.True(HasMaximizeBox(h.First));
+        Assert.DoesNotContain(h.Trace.Lines, line => line.StartsWith("maximize box not returned", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ReleasingTheBlockTwice_AsksEachWindowOnlyOnce()
     {
         using var h = new Harness();

@@ -152,3 +152,11 @@ strategy question is asked before delivery. Everything stays local; the maintain
   `MaximizeBlockTests.ApplyingTheBlock_AfterRestoringSeveralWindows_GivesTheForegroundBackToWhoHadIt`
   failed (expected handle 10, actual 20: the foreground ended on the last restored window) against
   a no-op stub of the new parameter; GREEN 26/26 in `MaximizeBlockTests`. Commit: see git log.
+- Follow-up R3-restore-result-dropped FIXED (same delegated writer): `RestoreMaximizeBox` now traces
+  `maximize box not returned hwnd=... class=... proc=...` when `TrySetMaximizeBox(true)` fails on a
+  live window; a success records nothing. RED:
+  `MaximizeBlockTests.AFailedGiveBack_IsTraced_WithTheWindowIdentity` failed, the trace held only the
+  `guard state`/`added` lines and no such line (the first RED run; a second failure after the
+  implementation was my own test typo, `0x0A` for `0xA`, fixed). GREEN 28/28 in `MaximizeBlockTests`
+  (the success-path fact `ASuccessfulGiveBack_IsNotTraced` passes by construction against the old
+  code too). Commit: see git log.
