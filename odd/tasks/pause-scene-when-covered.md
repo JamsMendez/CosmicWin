@@ -45,7 +45,7 @@ excluded. Maximized or tiled windows do NOT count (the wallpaper shows in the ga
 - [x] T2 -- Host side: poll the covered state in html mode, send pause/resume only on change,
   never in mini/video mode, trace transitions. Wiring tests with a fake detector.
 - [x] T2b -- Review follow-up (review-9fa143cab060eddf): apply-then-commit, failed sends retried.
-- [ ] T3 -- Hardware: fullscreen browser/video over the desktop -> trace `paused`, CPU/GPU drop;
+- [x] T3 -- Hardware: fullscreen browser/video over the desktop -> trace `paused`, CPU/GPU drop;
   leave fullscreen -> `resumed`, scene animates. Maximized window -> no pause.
 
 Route: T1+T2 delegated direct (one writer; mapping + 2+ non-trivial files). T3 parent, on hardware.
@@ -101,4 +101,24 @@ Route: T1+T2 delegated direct (one writer; mapping + 2+ non-trivial files). T3 p
   (fresh page runs) and re-posts the desired state, tracing `post-scene-pause` errors itself.
   RED (before fix): 3 new wiring tests failed (resume/pause failed once traced as done; persistent failure
   traced `paused`). GREEN after. Controller test is structural only (WebView2 is not runnable in tests).
+- 2026-10-01: T2b (2675528) assessed medium, `under_budget` (no review due). review-9fa143cab060eddf
+  (high, 4 lenses, main..06dacf8) APPROVED and acknowledged; its three WARNINGs fixed by T2b.
+- 2026-10-01: T3 on hardware, Release publish of 2675528, elevated session, wallpaper-mode switched
+  to `html` for the run (settings restored to `html-mini` afterwards), scene processing @ 60 fps.
+  CPU of the CosmicWin process tree (5 s windows): desktop visible 1.27 cores -> borderless topmost
+  3440x1440 probe in the foreground 0.01 -> probe closed 1.27; maximized window 1.26 (no trace line).
+  Trace: `wallpaper-scene paused: desktop covered` / `wallpaper-scene resumed` on each transition only.
+  Win+Tab (Task View) also counts as covered (pause/resume pairs seen) -- correct, it hides the desktop.
+  Alert: `warning:1 duration 6` showing, covered 1.5 s in for 4 s, uncovered -> queue `hide` at 6 s,
+  `resumed`, no stuck layer.
+  Probe gotcha: a borderless WinForms probe shown before its bounds settle gets TILED by CosmicWin and
+  never covers the monitor; make it DPI-aware + TopMost and re-assert Bounds after Show.
+  Unrelated, pre-existing (58 occurrences since before this feature): right after an alert `show`,
+  `alert-layer navigation completed success=False status=ConnectionAborted` -> `close
+  reason=navigation-failed` -> layer recreated; the alert shown during that recreation is not
+  re-shown. Not caused by this change; recorded for its own investigation.
+
+## Next step
+
+Feature complete. Open: the pre-existing navigation-failed recreation above (separate work).
 
