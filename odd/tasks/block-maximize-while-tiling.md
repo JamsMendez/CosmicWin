@@ -92,8 +92,14 @@ strategy question is asked before delivery. Everything stays local; the maintain
   `TurningTilingBackOn_TakesTheMaximizeBoxOfEveryTiledWindowAgain` (wiring). Some "restore"
   facts passed vacuously against the no-op stubs by construction. Mutation checks: reverting
   `IsExcludedAsAdmitted` fails `AStrippedWindow_KeepsItsAdmissionVerdict_...`. GREEN afterwards.
-- [ ] T3: Adapter: maximize fallback (restore + arrange, exempt from `Judge`, fullscreen untouched).
-  Route: same delegated writer.
+- [x] T3: Adapter: maximize fallback (restore + arrange, exempt from `Judge`, fullscreen untouched).
+  Route: same delegated writer (trigger: 2+ non-trivial files). In `OnWindowBoundsChanged`, after
+  the fullscreen guard: `WS_MAXIMIZE` -> `window.TryRestore()`, traced, then the existing reflow
+  puts it in its slot. Exempt from `Judge` only when the restore succeeded (a window the OS will
+  not restore stays under the fighter guard). Mutation check: removing the `!undidMaximize`
+  exemption fails `RepeatedMaximizing_NeverCountsTowardEviction` (the repeated identical
+  maximize landing reads as `MinimumSize` and untiles the window). Fullscreen, tiling-off and
+  user-gesture (Aero Snap) cases covered.
 - [ ] T4: README behavior + limits. Route: same delegated writer.
 - [ ] T5: Hardware check (Notepad, Explorer, Chrome, VS Code; caption button, double-click, Win+Up;
   tiling off restores the button; F11 fullscreen unaffected). Route: inline, PENDING until the

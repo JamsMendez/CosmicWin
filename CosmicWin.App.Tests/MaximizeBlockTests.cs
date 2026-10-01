@@ -370,4 +370,103 @@ public sealed class MaximizeBlockTests
         Assert.False(HasMaximizeBox(h.First));
         Assert.Equal([false], h.First.MaximizeBoxRequests); // one strip, never flapped
     }
+
+    // ---- fallback ------------------------------------------------------------------------------
+
+    [Fact]
+    public void AWindowThatMaximizesAnyway_IsRestoredAndPutBackInItsTile()
+    {
+        using var h = new Harness();
+        h.First.IgnoresMaximizeBox = true;
+
+        h.First.SimulateMaximize(WorkArea);
+        h.Workspace.RaiseWindowBoundsChanged(h.First);
+
+        Assert.Equal(1, h.First.RestoreCallCount);
+        Assert.Equal(0u, h.First.Style & WindowStyleFlags.Maximized);
+        Assert.Equal(h.FirstTile, h.First.Bounds);
+        Assert.True(h.InTree(h.First));
+    }
+
+    [Fact]
+    public void AWindowThatMaximizesAnyway_IsRestoredThroughAUserGestureToo()
+    {
+        // Aero Snap to the top edge ends in MOVESIZEEND and arrives flagged as the user's own.
+        using var h = new Harness();
+
+        h.First.SimulateMaximize(WorkArea);
+        h.Workspace.RaiseWindowBoundsChanged(h.First, isUserGesture: true);
+
+        Assert.Equal(1, h.First.RestoreCallCount);
+        Assert.Equal(h.FirstTile, h.First.Bounds);
+    }
+
+    /// <summary>
+    /// A window that keeps maximizing is a user (or an app) at work, not a fighter: restoring it is
+    /// the correct answer every time, and evicting it for the repetition would leave it maximized.
+    /// </summary>
+    [Fact]
+    public void RepeatedMaximizing_NeverCountsTowardEviction()
+    {
+        using var h = new Harness();
+
+        for (var round = 0; round < EnoughRounds; round++)
+        {
+            h.First.SimulateMaximize(WorkArea);
+            h.Workspace.RaiseWindowBoundsChanged(h.First);
+        }
+
+        Assert.True(h.InTree(h.First));
+        Assert.DoesNotContain(h.Trace.Lines, line => line.Contains("gave up", StringComparison.Ordinal));
+        Assert.Equal(EnoughRounds, h.First.RestoreCallCount);
+        Assert.Equal(h.FirstTile, h.First.Bounds);
+    }
+
+    [Fact]
+    public void AFullscreenWindow_IsNeverRestored()
+    {
+        using var h = new Harness();
+
+        h.First.SimulateFullscreen(Monitor);
+        for (var round = 0; round < EnoughRounds; round++)
+        {
+            h.Workspace.RaiseWindowBoundsChanged(h.First);
+        }
+
+        Assert.Equal(0, h.First.RestoreCallCount);
+        Assert.Equal(Monitor, h.First.Bounds);
+        Assert.True(h.InTree(h.First));
+    }
+
+    [Fact]
+    public void WhileTilingIsOff_AWindowMayMaximize_AndNothingIsRestored()
+    {
+        using var h = new Harness();
+        h.TilingOn = false;
+        h.Adapter.ReleaseMaximizeBlock();
+
+        h.First.SimulateMaximize(WorkArea);
+        h.Workspace.RaiseWindowBoundsChanged(h.First);
+
+        Assert.Equal(0, h.First.RestoreCallCount);
+        Assert.NotEqual(0u, h.First.Style & WindowStyleFlags.Maximized);
+        Assert.Equal(WorkArea, h.First.Bounds);
+    }
+
+    [Fact]
+    public void AMaximizedWindowThatCannotBeRestored_StillFallsUnderTheFighterGuard()
+    {
+        // The guard is a safety net, and a window the OS will not restore is exactly what it is for.
+        using var h = new Harness();
+        h.First.RefuseStyleChanges = true;
+        h.First.SnapsBackTo = WorkArea;
+
+        for (var round = 0; round < EnoughRounds; round++)
+        {
+            h.First.SimulateMaximize(WorkArea);
+            h.Workspace.RaiseWindowBoundsChanged(h.First);
+        }
+
+        Assert.False(h.InTree(h.First));
+    }
 }

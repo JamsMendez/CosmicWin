@@ -1474,6 +1474,28 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // correctness of this may rest on. The state bit does not care about geometry at all.
         var maximized = (window.Style & Layout.Filters.WindowStyleFlags.Maximized) != 0;
 
+        // The fallback for the maximize box. A window that maximizes while tiling is active got
+        // there around the cleared style bit -- a custom title bar that draws its own button, or a
+        // window that was never stripped because it refused -- and is put back: restored here, then
+        // re-arranged into its slot by the reflow below. Fullscreen never reaches this point, and
+        // this keys on WS_MAXIMIZE alone: "covers the monitor" is what a fullscreen window does too.
+        //
+        // Exempt from the fighting-window guard ONLY when the restore actually happened. A window
+        // that keeps being maximized is somebody working, not something that will not stay put, and
+        // counting it would evict it -- leaving it maximized and out of the tree, the opposite of
+        // the request. One the OS will not restore stays under the guard, which is what it is for.
+        var undidMaximize = false;
+        if (maximized)
+        {
+            undidMaximize = window.TryRestore();
+            Trace?.Record(
+                undidMaximize
+                    ? $"maximize undone hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                      $"-- restored and put back in its tile"
+                    : $"maximize kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                      $"-- the window refused the restore");
+        }
+
         if (e.IsUserGesture && !maximized &&
             _registry.TryGetLeaf(handle, out var dragged) && dragged is not null)
         {
@@ -1513,7 +1535,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         //
         // A user's own drag is exempt: it is SUPPOSED to leave the window off its tile, and the
         // block above has just written that intent into the tree.
-        if (!e.IsUserGesture)
+        if (!e.IsUserGesture && !undidMaximize)
         {
             // A window that has already demonstrated it clamps inside its tile is not a new
             // question every two seconds. Measured with the real NVIDIA Broadcast: judged
