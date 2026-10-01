@@ -107,3 +107,9 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   RunNode(timeout, string readyFile, params string[]) overload silently captured "-e" of plain calls
   (2 tests failed), so it is a distinct name. App suite 1422 passed / 6 skipped (was 1390/6 + new);
   node.exe count 7 before and after; build 0 errors (3 pre-existing nullable warnings elsewhere).
+- Review review-1c54d782319b85bb (4 lenses, 88c7964..2210594) APPROVED and acknowledged. Open SUGGESTIONs:
+  R2-ready-wait-silent-on-readiness-bound (WaitUntilReady says nothing when the 30 s bound runs out),
+  R2-slow-start-timing-constants-coupled-by-comment (1500 ms vs 500 ms tied only by a comment),
+  R3-isready-catches-only-ioexception (UnauthorizedAccessException not caught),
+  R3-readiness-deadline-wall-clock (DateTime.UtcNow instead of Stopwatch),
+  R3-survivor-outer-wait-shorter-than-readiness-bound (survivor test waits 20 s, readiness may take 30 s).
