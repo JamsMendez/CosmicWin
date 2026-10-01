@@ -158,3 +158,7 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   - review-cc0444706145579d (both fixes, uncommitted) APPROVED and acknowledged. Open SUGGESTION:
     R3-tryreadpid-unit-coverage-gated-on-node (TryReadPid is only covered by node-gated tests).
   - Full App suite 1425 passed / 6 skipped / 0 failed; node.exe 7 before and after.
+- R3-tryreadpid-terminator-coverage-node-gated DONE: NodeAvailabilityPidFileTests, 7 plain facts (no Node):
+  terminated pid (LF and CRLF) is read; "123", empty, bare terminator, "abc" and a missing file are not.
+  Behavior already existed; mutation dropping the terminator check fails exactly the "123" case; restored
+  byte-identical.
