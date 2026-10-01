@@ -43,7 +43,8 @@ internal static class NodeAvailability
     /// genuinely hung `node --version`. <see cref="TryRunNodeVersion"/> is the only production caller
     /// and passes the same command and bound the probe always used.
     /// </summary>
-    internal static bool TryRunProbe(string fileName, IEnumerable<string> arguments, TimeSpan timeout)
+    internal static bool TryRunProbe(
+        string fileName, IEnumerable<string> arguments, TimeSpan timeout, string? readyFile = null)
     {
         try
         {
@@ -71,6 +72,7 @@ internal static class NodeAvailability
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
 
+            WaitUntilReady(process, readyFile);
             if (!process.WaitForExit((int)timeout.TotalMilliseconds))
             {
                 // R3-node-probe-leaks-on-timeout: the old code called WaitForExit and then read
@@ -98,6 +100,48 @@ internal static class NodeAvailability
         // checks above (InvalidOperationException) -- a gate deciding whether to SKIP must still never
         // crash test discovery over either one.
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    internal static readonly TimeSpan ReadinessBound = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// R3-pid-handshake-shares-timeout-budget: a hang bound that starts when the process starts also pays
+    /// for Node's cold start, so a slow start could kill a test script before it wrote its pid and fail the
+    /// test for no real reason. A caller that names a ready file gets its bound started only once that file
+    /// holds a pid (or the process exits, or <see cref="ReadinessBound"/> runs out -- a script that never
+    /// gets ready must not hang the run either).
+    /// </summary>
+    internal static void WaitUntilReady(Process process, string? readyFile)
+    {
+        if (readyFile is null)
+        {
+            return;
+        }
+
+        var deadline = DateTime.UtcNow + ReadinessBound;
+        while (DateTime.UtcNow < deadline && !process.HasExited)
+        {
+            if (IsReady(readyFile))
+            {
+                return;
+            }
+
+            Thread.Sleep(25);
+        }
+    }
+
+    // The script writes the file in one call, but a reader can still land between create and write,
+    // so "ready" means a parseable pid, not merely an existing file.
+    private static bool IsReady(string readyFile)
+    {
+        try
+        {
+            return File.Exists(readyFile) && int.TryParse(File.ReadAllText(readyFile), out _);
+        }
+        catch (IOException)
         {
             return false;
         }

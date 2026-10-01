@@ -99,7 +99,7 @@ public sealed class AlertLayerLayoutNodeTests
         int childPid = 0;
         try
         {
-            var result = RunNode(TimeSpan.FromSeconds(3), script, pidFile);
+            var result = RunNodeOnceReady(TimeSpan.FromSeconds(3), pidFile, script, pidFile);
             childPid = ReadPid(pidFile);
 
             Assert.True(result.TimedOut, "Expected the hung parent script to be reported as timed out.");
@@ -136,7 +136,8 @@ public sealed class AlertLayerLayoutNodeTests
         try
         {
             var run = Task.Run(() => RunNode(
-                TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1), killEntireProcessTree: false, script, pidFile));
+                TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1), killEntireProcessTree: false, readyFile: pidFile,
+                script, pidFile));
             var finished = run.Wait(TimeSpan.FromSeconds(20));
             survivorPid = ReadPid(pidFile);
 
@@ -167,7 +168,8 @@ public sealed class AlertLayerLayoutNodeTests
         int probePid = 0;
         try
         {
-            var available = NodeAvailability.TryRunProbe("node", [script, pidFile], TimeSpan.FromSeconds(3));
+            var available = NodeAvailability.TryRunProbe(
+                "node", [script, pidFile], TimeSpan.FromSeconds(3), readyFile: pidFile);
             probePid = ReadPid(pidFile);
 
             Assert.False(available, "Expected a probe that outlives its bound to report node as unavailable.");
@@ -180,10 +182,69 @@ public sealed class AlertLayerLayoutNodeTests
         }
     }
 
+    /// <summary>
+    /// R3-pid-handshake-shares-timeout-budget: the hang bound must not also pay for Node's own start.
+    /// The script sleeps longer than the bound BEFORE it reports its pid, standing in for a slow cold
+    /// start; with a ready file the bound only starts once the pid is on disk, so the pid is there.
+    /// </summary>
+    [RequiresNodeFact]
+    public void RunNode_WithAReadyFile_StartsTheTimeoutOnlyOnceTheScriptIsReady()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "slow.pid");
+        var script = scratch.Write("slow.js", SlowStartScript);
+        int pid = 0;
+        try
+        {
+            var result = RunNodeOnceReady(TimeSpan.FromMilliseconds(500), pidFile, script, pidFile);
+            pid = ReadPid(pidFile);
+
+            Assert.True(result.TimedOut);
+            Assert.True(pid > 0, "Expected the timeout to start only after the slow script reported its pid.");
+            Assert.False(ProcessStillRunning(pid), "Expected the slow script to be killed once its bound ran out.");
+        }
+        finally
+        {
+            KillIfRunning(pid);
+        }
+    }
+
+    /// <summary>R3-pid-handshake-shares-timeout-budget: the same ready-file gate on the probe seam.</summary>
+    [RequiresNodeFact]
+    public void NodeAvailabilityProbe_WithAReadyFile_StartsTheTimeoutOnlyOnceTheScriptIsReady()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "slow-probe.pid");
+        var script = scratch.Write("slow-probe.js", SlowStartScript);
+        int pid = 0;
+        try
+        {
+            var available = NodeAvailability.TryRunProbe(
+                "node", [script, pidFile], TimeSpan.FromMilliseconds(500), readyFile: pidFile);
+            pid = ReadPid(pidFile);
+
+            Assert.False(available);
+            Assert.True(pid > 0, "Expected the probe's timeout to start only after the slow script reported its pid.");
+            Assert.False(ProcessStillRunning(pid), "Expected the timed-out probe process to be killed.");
+        }
+        finally
+        {
+            KillIfRunning(pid);
+        }
+    }
+
+    // Writes its pid only after 1.5 s -- three times the 500 ms bound the tests above give it -- then hangs.
+    private const string SlowStartScript = """
+        setTimeout(() => {
+          require('fs').writeFileSync(process.argv[2], String(process.pid));
+          setInterval(() => {}, 1000);
+        }, 1500);
+        """;
+
     private static int ReadPid(string pidFile)
     {
-        // The script writes the file well inside the timeout, so it is normally there already; the short
-        // poll only absorbs a slow disk.
+        // With a ready file the run only times out after the pid is on disk, so it is normally there
+        // already; the short poll only absorbs a slow disk.
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (DateTime.UtcNow < deadline)
         {
@@ -259,10 +320,17 @@ public sealed class AlertLayerLayoutNodeTests
 
     private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNode(
         TimeSpan timeout, params string[] arguments) =>
-        RunNode(timeout, TimeSpan.FromSeconds(5), killEntireProcessTree: true, arguments);
+        RunNode(timeout, TimeSpan.FromSeconds(5), killEntireProcessTree: true, readyFile: null, arguments);
+
+    // A distinct NAME, not a RunNode overload: with `params string[]` an overload taking a string
+    // readyFile would silently capture the first script argument of every plain RunNode call.
+    private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNodeOnceReady(
+        TimeSpan timeout, string readyFile, params string[] arguments) =>
+        RunNode(timeout, TimeSpan.FromSeconds(5), killEntireProcessTree: true, readyFile, arguments);
 
     private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNode(
-        TimeSpan timeout, TimeSpan drainTimeout, bool killEntireProcessTree, params string[] arguments)
+        TimeSpan timeout, TimeSpan drainTimeout, bool killEntireProcessTree, string? readyFile,
+        params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("node")
         {
@@ -286,6 +354,7 @@ public sealed class AlertLayerLayoutNodeTests
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
 
+        NodeAvailability.WaitUntilReady(process, readyFile);
         if (!process.WaitForExit((int)timeout.TotalMilliseconds))
         {
             // Kill the WHOLE tree, not just this process: node can have spawned children of its own,

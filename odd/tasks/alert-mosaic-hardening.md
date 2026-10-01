@@ -100,4 +100,10 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
 - Review review-e74183a916eacd9e (4 lenses, main..73459d3) APPROVED and acknowledged. SUGGESTIONs
   R2-nan-clamp-comment-zero-lifted-by-or-not-max / R3-nan-clamp-comment-misattributes-zero-lift: the 0 is
   lifted by `|| 1` (0 is falsy), not by Math.max; fixed in the next commit, values checked with node.
-- Open: R3-pid-handshake-shares-timeout-budget (behavioral, own commit).
+- R3-pid-handshake-shares-timeout-budget DONE: RunNodeOnceReady / TryRunProbe(readyFile) start the hang
+  bound only once the pid file holds a pid (NodeAvailability.WaitUntilReady, 30 s readiness bound, also
+  ends on process exit). TDD: RED = two new slow-start tests (pid written after 1.5 s, bound 500 ms) failed
+  with the parameter present but unused; GREEN after the gate. Trap caught on the way: a
+  RunNode(timeout, string readyFile, params string[]) overload silently captured "-e" of plain calls
+  (2 tests failed), so it is a distinct name. App suite 1422 passed / 6 skipped (was 1390/6 + new);
+  node.exe count 7 before and after; build 0 errors (3 pre-existing nullable warnings elsewhere).
