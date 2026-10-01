@@ -198,6 +198,9 @@ public sealed class WebViewAlertLayerController : IDisposable
         // treating this controller as already ready for a page it has not actually loaded yet.
         _navigationCompleted = false;
         _pageReportedReady = false;
+        // alert-survives-scene-switch: the new page loads without the alert on screen; requeue it for its
+        // remaining time so TryMarkReady re-shows it once the new page is ready.
+        _state.PageReloading();
         _navigateStopwatch = Stopwatch.StartNew();
         _navigation.BeforeHostNavigate();
         _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));

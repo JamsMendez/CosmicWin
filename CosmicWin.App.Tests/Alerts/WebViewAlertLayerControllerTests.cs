@@ -87,6 +87,19 @@ public sealed class WebViewAlertLayerControllerTests
                 $"'{sourceLines[i]}' is not immediately preceded by _navigation.BeforeHostNavigate();");
         }
         Assert.Equal(3, navigateCalls);
+        // alert-survives-scene-switch: a scene switch requeues a showing alert before reloading the page.
+        var switchScene = source.IndexOf("public bool SwitchScene(", StringComparison.Ordinal);
+        var switchNavigate = source.IndexOf("CoreWebView2.Navigate(", switchScene, StringComparison.Ordinal);
+        var pageReloading = source.IndexOf("_state.PageReloading();", switchScene, StringComparison.Ordinal);
+        Assert.True(switchScene >= 0 && pageReloading > switchScene && pageReloading < switchNavigate,
+            "SwitchScene must call _state.PageReloading() before it navigates");
+        // Review R3-superseded-early-return-order-unasserted: the superseded early return must come
+        // BEFORE the failure branch, or an aborted older navigation still tears the layer down.
+        var completed = source.IndexOf("private void OnNavigationCompleted(", StringComparison.Ordinal);
+        var supersededCheck = source.IndexOf("_navigation.CompletedIsSuperseded(", completed, StringComparison.Ordinal);
+        var failureBranch = source.IndexOf("if (!args.IsSuccess)", completed, StringComparison.Ordinal);
+        Assert.True(completed >= 0 && supersededCheck > completed && failureBranch > supersededCheck,
+            "OnNavigationCompleted must check CompletedIsSuperseded before its IsSuccess failure branch");
         Assert.Contains("AlertLayerTrace.NavigationSuperseded(", source);
         // Every Debug.WriteLine catch site must be paired with an AlertLayerTrace.Error/Close call on
         // the very next non-blank line -- proving telemetry was added ALONGSIDE, not instead of, the

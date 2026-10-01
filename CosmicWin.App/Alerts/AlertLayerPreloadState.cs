@@ -141,4 +141,12 @@ public sealed class AlertLayerPreloadState(Func<DateTimeOffset>? clock = null)
         Visible = false;
         _shown = null;
     }
+
+    /// <summary>
+    /// alert-survives-scene-switch: the host is about to navigate the SAME controller to another page
+    /// (a scene switch). The new page has not loaded yet, so the layer is no longer ready, and an alert
+    /// being shown is requeued exactly as <see cref="ControllerLost"/> does -- the new page re-shows it
+    /// for its remaining time once ready, or drops it if that deadline passes first.
+    /// </summary>
+    public void PageReloading() => ControllerLost();
 }
