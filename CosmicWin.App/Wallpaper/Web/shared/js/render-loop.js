@@ -83,15 +83,6 @@ var wallpaperFrameIntervalMs = 1000 / readWallpaperFpsFromUrl();
 //
 // Reads BOTH location.search and location.hash (parseParams() only reads the hash when one exists), so
 // `index.html?variant=mini#tiles=failed` -- the manual alert hash API -- still selects the mini variant.
-// The basis of a mini composition whose disc border (outer radius = `discOuterRadiusFraction` x basis) is
-// fitted to `ringRadiusFraction` of the short side. Shared by idle and explorer, whose mini fit is the
-// same rule with their own constants; a scene's config.js calls it from its miniSceneBasis (resolved at
-// call time, so load order does not matter).
-function miniRingBasis(W, H, ringRadiusFraction, discOuterRadiusFraction, minBasisPx) {
-  const room = Math.min(W, H) * ringRadiusFraction;
-  return Math.max(minBasisPx, room / discOuterRadiusFraction);
-}
-
 function readSceneVariantFromUrl() {
   try {
     var raw = String(location.search || "").replace(/^[#?]/, "") + "&" + String(location.hash || "").replace(/^[#?]/, "");
@@ -103,6 +94,15 @@ function readSceneVariantFromUrl() {
 
 var sceneVariant = readSceneVariantFromUrl();
 var isMiniVariant = sceneVariant === "mini";
+
+// The basis of a mini composition whose disc border (outer radius = `discOuterRadiusFraction` x basis) is
+// fitted to `ringRadiusFraction` of the short side. Shared by idle and explorer, whose mini fit is the
+// same rule with their own constants; a scene's config.js calls it from its miniSceneBasis (resolved at
+// call time, so load order does not matter).
+function miniRingBasis(W, H, ringRadiusFraction, discOuterRadiusFraction, minBasisPx) {
+  const room = Math.min(W, H) * ringRadiusFraction;
+  return Math.max(minBasisPx, room / discOuterRadiusFraction);
+}
 
 // mini-scene-window T2c: the mini edge fade. The corner window is see-through, so nothing may reach its
 // edge or the square shape shows. After the scene layers (and BEFORE the alert overlay, whose frame is
@@ -135,17 +135,17 @@ function applyMiniEdgeFade(context, width, height) {
   context.restore();
 }
 
-// mini-scene-window T2j: the occluding base of the processing and raphael mini scenes. The mini window is
-// topmost and see-through, so text and icons of the windows behind it read through the scene's structure. This
-// fills ONE dark disc (the scenes' own #01040a background at MINI_SCENE_BASE_ALPHA) beneath everything already
-// drawn (destination-over: it never lightens, tints or dims the bright content), solid out to solidRadius and
-// falling to 0 at falloffRadius, so there is no hard circular edge. Drawn last, right before the edge fade.
 // mini-scene-window T2l: the line thickness of the mini central polygons, so processing's octagon reads as thin
 // as raphael's hexadecagon. Measured: raphael mini's gold ring stroke is coreRadius(288)=40 * 0.012 * 1.3 = 0.624px
 // at rest, drawn magnified by MINI_SCENE_ZOOM 1.2 = 0.749px on screen; both scenes' tests assert their polygon
 // against this one number.
 var MINI_POLYGON_STROKE_PX = 0.75;
 
+// mini-scene-window T2j: the occluding base of the processing and raphael mini scenes. The mini window is
+// topmost and see-through, so text and icons of the windows behind it read through the scene's structure. This
+// fills ONE dark disc (the scenes' own #01040a background at MINI_SCENE_BASE_ALPHA) beneath everything already
+// drawn (destination-over: it never lightens, tints or dims the bright content), solid out to solidRadius and
+// falling to 0 at falloffRadius, so there is no hard circular edge. Drawn last, right before the edge fade.
 var MINI_SCENE_BASE_RGB = "1,4,10";
 var MINI_SCENE_BASE_ALPHA = 0.9;
 

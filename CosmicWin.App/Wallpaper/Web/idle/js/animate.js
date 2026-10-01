@@ -238,8 +238,8 @@ function buildCombinedLightingMask(basis, dpr) {
 // occluding dark base (MINI_RING_BASE_COLOR, the scene's own #01040a at alpha 0.9) so no band sits "under"
 // the text. It covers exactly each band's own annulus (its cache extent, plus the disc border), so the gaps
 // between rings and everything outside the disc stay see-through. It is drawn LAST with destination-over,
-// i.e. beneath everything already drawn: it never lightens, tints or dims the ring content, the planet, the
-// explorer's blue tint (source-atop) or the fan, and needs no cache or rotation handling (the bands are circles).
+// i.e. beneath everything already drawn: it never lightens, tints or dims the ring content, the planet or the
+// fan, and needs no cache or rotation handling (the bands are circles).
 function drawMiniRingBases(context, cx, cy, basis) {
   const annuli = RING_ANIMATIONS.map((ring) => [basis * ring.cacheInnerFrac, basis * ring.cacheOuterFrac]);
   annuli.push([basis * DISC_BORDER_INNER_RADIUS_FRACTION, basis * DISC_BORDER_OUTER_RADIUS_FRACTION]);

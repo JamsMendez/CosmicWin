@@ -546,7 +546,9 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
     miniOnly: ["drawMiniRingBases"],
     // The blue tint (source-atop) tints whatever is already drawn: ring AND planet come before it, the
     // chroma fan (and the sparks) after it, so the fan stays untinted.
-    order: [["drawInnerRing", "drawEarth"], ["drawEarth", "drawBlueRingTint"], ["drawBlueRingTint", "drawChromaticGlowAnimated"], ["drawChromaticGlowAnimated", "drawRisingSparks"]],
+    order: [["drawInnerRing", "drawEarth"], ["drawEarth", "drawBlueRingTint"], ["drawBlueRingTint", "drawChromaticGlowAnimated"], ["drawChromaticGlowAnimated", "drawRisingSparks"],
+      // The occluding base is destination-over: drawn last, so it ends up beneath all of the above.
+      ["drawRisingSparks", "drawMiniRingBases"]],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated", "drawBlueRingTint", "drawRisingSparks"],
     drop: ["drawStarfield", "drawBlueLayer", "drawVignette", "drawCombinedLightingMask"],
     fit: function (page) {
@@ -620,7 +622,7 @@ test("mini scales the hieroglyph band's glyph stroke with the ring (floor, propo
   constellationRingChecks.checkHieroglyphStrokeScale(loadPage);
 });
 
-test("mini draws an occluding dark base under every ring band (destination-over, band radii only); the full variant draws none", function () {
+test("mini draws an occluding dark base under every ring band and the planet hollow (destination-over, band radii only); the full variant draws none", function () {
   constellationRingChecks.checkMiniRingBase(loadPage);
 });
 

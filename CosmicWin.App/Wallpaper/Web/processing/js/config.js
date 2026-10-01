@@ -207,6 +207,16 @@ function structurePx(px, floor = 0) {
 // proportional widths rather than structurePx, because the widths are minD-relative already (not fixed px).
 const MINI_FOLDING_BAND_WIDTH_FACTOR = 0.35;
 
+// The mini occluding base disc (drawMiniSceneBase), as fractions of the short side: solid out to 0.32 (the core
+// of the structure), easing to 0 at 0.40 (about the widest orbit, 0.385), inside the window fade's opaque
+// radius (MINI_EDGE_FADE_INNER, 0.41).
+const MINI_BASE_SOLID_FRACTION = 0.32;
+const MINI_BASE_FALLOFF_FRACTION = 0.40;
+
+// The central octagon's main stroke at rest, px (its chroma copies are 6.8px). Mini rescales both from this
+// width to MINI_POLYGON_STROKE_PX (drawCentralOctagon).
+const CENTRAL_OCTAGON_STROKE_PX = 5.1;
+
 const ORBIT_BLOCK_RING_COUNT = 2;
 const ORBIT_BLOCK_COUNT = ORBIT_BLOCK_RING_COUNTS.reduce((total, count) => total + count, 0);
 

@@ -1,6 +1,7 @@
-// html-wallpaper-demo D6b: copied verbatim from docs/great-sage/background-raphael/js/sprites.js
-// (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled:
-// only this header comment was added, the source's own header/body follow unchanged. The gold ring's
+// html-wallpaper-demo D6b: copied from docs/great-sage/background-raphael/js/sprites.js
+// (reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled: apart
+// from this header, the only change is the gold ring's lost glow (mini-scene-window T11); the source's
+// own header/body follow. The gold ring's
 // PRE-BAKED sprites this file builds (outlineGlyphsGold/outlineGlyphs) stamp straight onto the
 // module-global `ctx` (stampSprite below) -- see js/see-through-hook.js's own header remarks for why
 // the shared alert overlay's hook cannot reuse this path, and reuses js/glyphs.js's

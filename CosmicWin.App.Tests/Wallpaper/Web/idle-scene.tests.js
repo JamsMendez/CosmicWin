@@ -534,6 +534,8 @@ test("mini draws only its kept layers, on a transparent canvas, with no nebula, 
     loadPage: loadPage,
     frameFunction: "renderFrame",
     miniOnly: ["drawMiniRingBases"],
+    // The occluding base is destination-over: it must be drawn after everything it sits beneath.
+    order: [["drawChromaticGlowAnimated", "drawMiniRingBases"]],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
     drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     fit: function (page) {
@@ -573,6 +575,8 @@ test("the full variant still draws every layer and its opaque background", funct
     loadPage: loadPage,
     frameFunction: "renderFrame",
     miniOnly: ["drawMiniRingBases"],
+    // The occluding base is destination-over: it must be drawn after everything it sits beneath.
+    order: [["drawChromaticGlowAnimated", "drawMiniRingBases"]],
     keep: ["drawDiscBorder", "drawCachedRingContent", "drawInnerRing", "drawEarth", "drawChromaticGlowAnimated"],
     drop: ["drawStarfield", "drawVignette", "drawCombinedLightingMask"],
     hasBackgroundFill: true,
@@ -607,7 +611,7 @@ test("mini scales the hieroglyph band's glyph stroke with the ring (floor, propo
   constellationRingChecks.checkHieroglyphStrokeScale(loadPage);
 });
 
-test("mini draws an occluding dark base under every ring band (destination-over, band radii only); the full variant draws none", function () {
+test("mini draws an occluding dark base under every ring band and the planet hollow (destination-over, band radii only); the full variant draws none", function () {
   constellationRingChecks.checkMiniRingBase(loadPage);
 });
 

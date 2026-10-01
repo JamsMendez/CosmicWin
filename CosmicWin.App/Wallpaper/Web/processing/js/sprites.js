@@ -1,6 +1,7 @@
-// html-wallpaper-demo D2: verbatim port of docs/great-sage/backgroud-processing/js/sprites.js (that
-// tree is reference-only, excluded from git -- see the feature doc, "Source material"). Not
-// restyled: only this header comment was added, the source's own header/body follow unchanged.
+// html-wallpaper-demo D2: port of docs/great-sage/backgroud-processing/js/sprites.js (that tree is
+// reference-only, excluded from git -- see the feature doc, "Source material"). Not restyled: apart from
+// this header, the only changes are the mini variant's structurePx() scaling of the glow blur/line widths
+// (mini-scene-window T2l, config.js); the source's own header/body follow.
 //
 // sprites.js — offscreen sprite/glow baking and caching (halos, rainbow rings, flare
 // bodies, soft ovals, glow rectangles, glow lines) plus buildSprites()/ensureSprites().
@@ -114,6 +115,8 @@ const GLOW_STYLES = {
   'gridded-stroke': { color: '180,238,255', blur: SEGMENTED_SPHERE_GLOW_BLUR, lineWidth: 0.72, grid: true },
   'orbit-block': { color: '255,255,255', blur: ORBIT_BLOCK_GLOW_BLUR },
 };
+// Entries bake structurePx() sizes, which depend on the viewport (W, H) in mini, yet the keys carry no
+// viewport: that is safe only because buildSprites() clears this cache on every resize (spritesStale).
 const glowCache = new Map();
 
 function paintGlowRect(g, k, style, width, height) {

@@ -302,12 +302,12 @@ function checkFullLayers(options) {
   // fillRect would otherwise look like a full-canvas fill on the visible canvas.
   drive(page, options.frameFunction, [0]);
 
-  var fullMiniOnly = options.miniOnly || [];
-  var watched = options.keep.concat(options.drop, fullMiniOnly, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
+  var miniOnlyNames = options.miniOnly || [];
+  var watched = options.keep.concat(options.drop, miniOnlyNames, ["renderAlertOverlay", "renderNebula", "applyMiniEdgeFade"]);
   var counts = spyOnFunctions(page, watched);
   var fills = spyOnFillRect(page);
   drive(page, options.frameFunction, [100, 200]);
-  fullMiniOnly.forEach(function (name) {
+  miniOnlyNames.forEach(function (name) {
     assert.strictEqual(counts[name], 0, "the full variant must never run the mini-only layer " + name + " (ran " + counts[name] + " times)");
   });
   assert.strictEqual(counts.applyMiniEdgeFade, 0, "the full variant must never apply the mini edge fade");

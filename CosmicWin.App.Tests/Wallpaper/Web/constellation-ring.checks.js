@@ -189,7 +189,9 @@ function checkConstellationDetailScale(loadPage) {
   var big = mini.sandbox.constellationDetailSizes(bigBox);
   assert.ok(Math.abs(big.dotRadius - dot * bigRatio) < 1e-9, "proportional dot radius " + big.dotRadius + ", expected " + dot * bigRatio);
   assert.ok(Math.abs(big.lineWidth - line * bigRatio) < 1e-9, "proportional line width " + big.lineWidth + ", expected " + line * bigRatio);
-  drawnDotRadiiPx(mini, bigBox).forEach(function (r) {
+  var bigDrawn = drawnDotRadiiPx(mini, bigBox);
+  assert.ok(bigDrawn.length > 0, "expected dots to be drawn in the above-floor ring (an empty list would pass vacuously)");
+  bigDrawn.forEach(function (r) {
     assert.ok(Math.abs(r - dot * bigRatio) < 1e-9, "drawn dot radius " + r + ", expected " + dot * bigRatio);
   });
 
@@ -229,7 +231,9 @@ function checkHieroglyphStrokeScale(loadPage) {
   // above the floor: proportional
   var bigBand = referenceBand * 0.9;
   assert.ok(stroke * 0.9 > floor);
-  drawnHieroglyphStrokesPx(mini, bigBand).forEach(function (w) {
+  var bigWidths = drawnHieroglyphStrokesPx(mini, bigBand);
+  assert.ok(bigWidths.length > 0, "expected hieroglyphs to be drawn in the above-floor band (an empty list would pass vacuously)");
+  bigWidths.forEach(function (w) {
     assert.ok(Math.abs(w - stroke * 0.9) < 1e-9, "proportional hieroglyph stroke " + w + ", expected " + stroke * 0.9);
   });
 
@@ -259,7 +263,7 @@ function checkMiniRingBase(loadPage) {
   var state = { op: "source-over", style: null };
   var context = new Proxy({}, {
     get: function (target, prop) {
-      if (prop === "arc") return function (x, y, r) { arcs.push({ x: x, y: y, r: r }); };
+      if (prop === "arc") return function (x, y, r, start, end, counterclockwise) { arcs.push({ x: x, y: y, r: r, ccw: counterclockwise === true }); };
       if (prop === "fill") return function () { fills.push({ op: state.op, style: state.style }); };
       if (prop === "globalCompositeOperation") return state.op;
       if (prop === "fillStyle") return state.style;
@@ -282,6 +286,12 @@ function checkMiniRingBase(loadPage) {
 
   // arcs come as (outer, inner) pairs, one pair per band
   assert.strictEqual(arcs.length % 2, 0, "expected outer/inner arc pairs");
+  // Winding is what cuts the hole: the outer circle clockwise and the inner one counter-clockwise, so the
+  // single non-zero fill leaves each band's inside (the gap to the next ring) see-through.
+  for (var w = 0; w < arcs.length; w += 2) {
+    assert.strictEqual(arcs[w].ccw, false, "the outer circle of band " + w / 2 + " must wind clockwise");
+    assert.strictEqual(arcs[w + 1].ccw, true, "the inner circle of band " + w / 2 + " must wind counter-clockwise (it cuts the hole)");
+  }
   var annuli = [];
   for (var i = 0; i < arcs.length; i += 2) annuli.push([arcs[i + 1].r, arcs[i].r]);
   annuli.sort(function (a, b) { return a[0] - b[0]; });

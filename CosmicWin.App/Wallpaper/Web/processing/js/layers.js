@@ -657,7 +657,7 @@ function drawCentralOctagon(cx, cy, progress, pulse) {
   const pulseStroke = 1 + pulse * 0.72;
   // Mini: the octagon's line is exactly MINI_POLYGON_STROKE_PX thick (as thin as raphael's hexadecagon); its
   // chroma copies, offsets and glow keep their full-scene proportions to that stroke.
-  const miniK = isMiniVariant ? MINI_POLYGON_STROKE_PX / 5.1 : 1;
+  const miniK = isMiniVariant ? MINI_POLYGON_STROKE_PX / CENTRAL_OCTAGON_STROKE_PX : 1;
   const pulseBlur = (20 + pulse * 18) * miniK;
   ctx.save();
   ctx.translate(cx, cy);
@@ -684,7 +684,7 @@ function drawCentralOctagon(cx, cy, progress, pulse) {
   }
 
   ctx.strokeStyle = 'rgba(255,255,244,0.95)';
-  ctx.lineWidth = 5.1 * miniK * pulseStroke;
+  ctx.lineWidth = CENTRAL_OCTAGON_STROKE_PX * miniK * pulseStroke;
   ctx.shadowColor = 'rgba(255,255,245,0.90)';
   ctx.shadowBlur = pulseBlur;
   ctx.beginPath();

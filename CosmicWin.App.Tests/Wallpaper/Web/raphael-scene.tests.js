@@ -593,8 +593,11 @@ test("no glow under the gold glyphs in either variant: none baked, none stamped 
   function glowArgs(page) {
     var calls = [];
     var original = page.sandbox.drawOutlineGlyphRing;
-    page.sandbox.drawOutlineGlyphRing = function (cx, cy, radius, count, spriteSet, rotation, glowSpriteSet) {
-      calls.push({ count: count, glow: glowSpriteSet });
+    // The ring draw takes no glow sprite set any more: check the declared parameters and what callers pass,
+    // not a named 7th parameter the function can never receive.
+    assert.strictEqual(original.length, 6, "drawOutlineGlyphRing must not grow a glow-sprites parameter");
+    page.sandbox.drawOutlineGlyphRing = function () {
+      calls.push({ argCount: arguments.length });
       return original.apply(this, arguments);
     };
     page.sandbox.render(0);
@@ -604,7 +607,7 @@ test("no glow under the gold glyphs in either variant: none baked, none stamped 
   [{ innerWidth: 288, innerHeight: 288, search: "?variant=mini" }, { innerWidth: 1000, innerHeight: 500 }].forEach(function (options) {
     var got = glowArgs(loadPage(options));
     assert.ok(got.calls.length >= 4, "expected gold and blue ring draws over two frames");
-    got.calls.forEach(function (c) { assert.strictEqual(c.glow, undefined, "no glow sprites may be stamped for any ring"); });
+    got.calls.forEach(function (c) { assert.ok(c.argCount <= 6, "no glow sprites may be passed to any ring draw, got " + c.argCount + " arguments"); });
     var sprites = vm.runInContext("sprites", got.page.sandbox);
     assert.strictEqual("outlineGlyphsGoldGlow" in sprites, false, "no gold glow sprites may be baked");
   });

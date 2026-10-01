@@ -868,6 +868,53 @@ test("mini scales the processing structure's fixed px sizes by min(W,H)/1440 wit
   assert.ok(core(mini).some(function (v) { return Math.abs(v - 20 * S) < 1e-9; }), "the mini core blur must scale");
 });
 
+// T8: the remaining structurePx() sites the test above does not reach: the three segmented-sphere piece strokes
+// (floor 0.5), the folding band lines and the prism edges (3.8px chroma copies, 3.2px edge). Full keeps every width; mini scales them.
+test("mini scales the sphere piece strokes, the folding band lines and the prism edge widths with the structure; the full variant keeps them", function () {
+  var mini = loadPage({ innerWidth: 288, innerHeight: 288, search: "?variant=mini" });
+  var full = loadPage({ innerWidth: 1000, innerHeight: 500 });
+  var S = 0.2;
+  var near = function (a, b, label) { assert.ok(Math.abs(a - b) < 1e-9, label + ": got " + a + ", expected " + b); };
+  var dimensions = { width: 40, height: 20 };
+  var state = { travel: 0, depthAlpha: 1, rotation: 0 };
+  var firstWidth = function (page, name) {
+    // The first call bakes the piece's glow sprite, which sets (scaled) line widths on the same shared context;
+    // measure the second call so only the piece's own stroke is recorded.
+    page.sandbox[name](144, 144, dimensions, state);
+    var widths = pxHistory(page, "__lineWidthHistory", function () { page.sandbox[name](144, 144, dimensions, state); });
+    assert.strictEqual(widths.length, 1, name + " must set exactly its own stroke width, got " + JSON.stringify(widths));
+    return widths[0];
+  };
+
+  [["drawSolidSquareSpherePiece", 1.0], ["drawOutlineRectangleSpherePiece", 0.8], ["drawGriddedRectangleSpherePiece", 0.72]].forEach(function (piece) {
+    assert.strictEqual(firstWidth(full, piece[0]), piece[1], "the full " + piece[0] + " stroke must stay " + piece[1]);
+    // 1.0 / 0.8 / 0.72 px * 0.2 are all below the 0.5px floor in the 288px window
+    assert.strictEqual(firstWidth(mini, piece[0]), 0.5, "the mini " + piece[0] + " stroke must keep the 0.5px floor");
+  });
+
+  // folding band strokes: the dark edge line (0.75px, floor 0.4) and the white outline (1.15px, floor 0.5), each
+  // never thinner than a fraction of the band width; a 2.52px band (the mini widest) keeps that fraction below them
+  var bandLines = function (page) {
+    return pxHistory(page, "__lineWidthHistory", function () { page.sandbox.drawFoldingBand(144, 144, 100, 60, 0, 2.52, 0.3); });
+  };
+  var fullBand = bandLines(full);
+  assert.strictEqual(fullBand[0], 0.75, "the full band edge line must stay 0.75");
+  assert.strictEqual(fullBand[fullBand.length - 1], 1.15, "the full band outline must stay 1.15");
+  var miniBand = bandLines(mini);
+  assert.strictEqual(miniBand[0], 0.4, "the mini band edge line keeps the 0.4px floor");
+  assert.strictEqual(miniBand[miniBand.length - 1], 0.5, "the mini band outline keeps the 0.5px floor");
+
+  var prism = function (page) {
+    return pxHistory(page, "__lineWidthHistory", function () { page.sandbox.drawTriangularPrism(144, 144, 0); });
+  };
+  var fullWidths = prism(full);
+  assert.deepStrictEqual(fullWidths.slice(0, 3), [3.8, 3.8, 3.2], "the full prism widths must stay 3.8/3.8/3.2");
+  var miniWidths = prism(mini);
+  near(miniWidths[0], 3.8 * S, "mini prism chroma copy width");
+  near(miniWidths[1], 3.8 * S, "mini prism chroma copy width");
+  near(miniWidths[2], 3.2 * S, "mini prism edge width");
+});
+
 // ---- mini-scene-window T2m: the two white folding bands ("orbits", drawAtomicOrbits) are minD*0.025 wide -- about
 // 7px at 288, far too thick in the small window. Mini thins every band by MINI_FOLDING_BAND_WIDTH_FACTOR; radii,
 // folding and animation are untouched, and the full scene keeps its exact widths.

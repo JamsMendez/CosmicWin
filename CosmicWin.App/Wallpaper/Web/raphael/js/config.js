@@ -446,9 +446,6 @@ const GLYPH_RING_BLUE_EXTRA_COUNT = 50;
 const GLYPH_RING_STROKE_WIDTH_FRACTION_GOLD = 0.13;
 const GLYPH_RING_STROKE_WIDTH_FRACTION_BLUE = 0.14; // "much heavier" than gold, per RAP-13
 const GLYPH_RING_BORDER_FRACTION = 0.2; // border rim as a fraction of the (derived) body width, each side
-// RAP-34 (user feedback): "los caracteres amarillos deben tener efecto de luz" — a warm gold halo
-// baked ONCE per glyph (never blurred per frame) as a separate, larger, blurred sprite stamped
-// BENEATH the crisp outline glyph with 'screen' compositing, so the outline stays readable.
 // RAP-29 ("sin truncarlos... una fuente delgada... necesita un piso legible"): at
 // GLYPH_RING_BLUE_BASE_SIZE_FRACTION=0.3, the fraction-based body/border width can get thin enough
 // to read as a hairline or vanish; these floors keep a visibly readable outline-font stroke (an

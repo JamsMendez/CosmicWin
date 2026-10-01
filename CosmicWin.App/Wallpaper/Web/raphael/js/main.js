@@ -92,7 +92,8 @@ function render(ms) {
       // Mini: fade everything out before the window edges (before the unmasked alert overlay below).
       // Occlude the background under the whole ring system: solid out to the outer glyph ring's rim (as drawn,
       // i.e. magnified by MINI_SCENE_ZOOM about the scene center), with a short soft edge just outside it.
-      const rimRadius = glyphRingAnnuli(coreRadius(Math.min(W, H)))[3].outerRadius * MINI_SCENE_ZOOM;
+      const outermostRing = glyphRingAnnuli(coreRadius(Math.min(W, H))).at(-1);
+      const rimRadius = outermostRing.outerRadius * MINI_SCENE_ZOOM;
       drawMiniSceneBase(ctx, cx, cy, rimRadius, rimRadius * 1.06);
       applyMiniEdgeFade(ctx, W, H);
     }
