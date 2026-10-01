@@ -49,8 +49,10 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   back up and restore `settings.conf`, relaunch CosmicWin afterwards.
 - The frame tick must stay cheap: measure before wiring.
 - Work-unit commits, Conventional Commits, no AI attribution; ~400 changed lines per task is advisory.
-- Delivery strategy: `ask-on-risk`. Forecast: well over 400 lines in total -> ask for the chain
-  strategy before the running count passes ~400.
+- Delivery strategy: `ask-on-risk`. Forecast S3+S4 ~700-900 lines. Chain strategy chosen by the
+  maintainer 2026-10-01: `feature-branch-chain` -- slices S3 (Interop tint pass) and S4 (page +
+  controller) are reviewable slices on `feat/see-through-video-tint`; main gets the whole feature at
+  the end. PRs/push stay the maintainer's.
 
 ## Tasks
 
