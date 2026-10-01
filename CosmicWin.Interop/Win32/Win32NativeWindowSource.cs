@@ -132,6 +132,13 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     private static readonly TimeSpan ActivationTimeout = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
+    /// How long a style write or a restore may wait on the target window. The same 250 ms as
+    /// <see cref="ActivationTimeout"/>: both bound a synchronous call into another process, and a
+    /// healthy window answers in well under a frame.
+    /// </summary>
+    private static readonly TimeSpan StyleCallTimeout = ActivationTimeout;
+
+    /// <summary>
     /// MR-2. The fourth supervised run recorded 40 focus chords and every
     /// activation failed: once the App layer stopped trusting its own optimistic focus cache, the
     /// earlier bare-<c>AttachThreadInput</c> fix was revealed to have never worked at all. It ran on
@@ -200,8 +207,18 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// the button stays live until something else forces a non-client repaint. Everything else in
     /// the flags says "do not move, resize, reorder or activate": this is a style edit, and
     /// stealing focus or nudging the window would make it a second, unrelated action.
+    /// <para>
+    /// The whole edit runs under <see cref="StyleCallTimeout"/> because both the write and the frame
+    /// redraw SEND messages to the target. A timeout answers <see langword="false"/>, the same as a
+    /// refusal, but the abandoned call may still land: a strip reported as refused can leave the
+    /// button disabled after all. The adapter therefore still tries to give the box back for a
+    /// refused strip when tiling is released; asking for a bit the window already has is a no-op.
+    /// </para>
     /// </remarks>
-    public bool TrySetMaximizeBox(nint hwnd, bool enabled)
+    public bool TrySetMaximizeBox(nint hwnd, bool enabled) =>
+        RunStyleCall(() => SetMaximizeBoxCore(hwnd, enabled), StyleCallTimeout);
+
+    private static bool SetMaximizeBoxCore(nint hwnd, bool enabled)
     {
         try
         {
@@ -243,15 +260,6 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         }
     }
 
-    /// <summary>
-    /// Reports whether the window is out of the maximized state afterwards, not merely whether it
-    /// was asked. <c>SW_RESTORE</c> rather than <c>SW_SHOWNOACTIVATE</c>. The documented contract of
-    /// <c>SW_RESTORE</c> is to restore a maximized window to its previous size and position, which is
-    /// exactly the request; <c>SW_SHOWNOACTIVATE</c> is documented as "most recent size and position"
-    /// with no maximized case, so relying on it would be relying on observed behaviour. The cost is
-    /// that <c>SW_RESTORE</c> also activates, and that is acceptable here: a window only gets
-    /// maximized because the user is working in it, so it already holds the foreground.
-    /// </summary>
     /// <summary>Whether the read-back style shows the requested maximize-box state.</summary>
     /// <remarks>
     /// Looks at the maximize-box bit ONLY. The app and Windows keep changing other bits of the same
@@ -263,7 +271,21 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     internal static bool MaximizeBoxApplied(uint readBack, bool enabled) =>
         ((readBack & MaximizeBoxBit) != 0) == enabled;
 
-    public bool TryRestoreFromMaximized(nint hwnd)
+    /// <summary>
+    /// Restores a maximized window and reports whether it LEFT the maximized state, read back from
+    /// its style; <see langword="false"/> too when the target did not answer within
+    /// <see cref="StyleCallTimeout"/> (the restore may still land later). <c>SW_RESTORE</c> rather
+    /// than <c>SW_SHOWNOACTIVATE</c>. The documented contract of
+    /// <c>SW_RESTORE</c> is to restore a maximized window to its previous size and position, which is
+    /// exactly the request; <c>SW_SHOWNOACTIVATE</c> is documented as "most recent size and position"
+    /// with no maximized case, so relying on it would be relying on observed behaviour. The cost is
+    /// that <c>SW_RESTORE</c> also activates, and that is acceptable here: a window only gets
+    /// maximized because the user is working in it, so it already holds the foreground.
+    /// </summary>
+    public bool TryRestoreFromMaximized(nint hwnd) =>
+        RunStyleCall(() => RestoreFromMaximizedCore(hwnd), StyleCallTimeout);
+
+    private static bool RestoreFromMaximizedCore(nint hwnd)
     {
         try
         {
@@ -306,13 +328,60 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// or a real window. A bound that only the weather can exercise is a bound nobody has tested.
     /// </para>
     /// </remarks>
-    internal static ActivationOutcome RunBounded(Func<ActivationOutcome> attempt, TimeSpan budget)
+    internal static ActivationOutcome RunBounded(Func<ActivationOutcome> attempt, TimeSpan budget) =>
+        RunBounded(attempt, budget, ActivationOutcome.Failed, ActivationOutcome.TimedOut);
+
+    /// <summary>
+    /// The same bound for any answer type: the attempt runs on its own thread, the wait is at most
+    /// <paramref name="budget"/>, and the three endings stay distinct.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="whenFailed"/> is what a throwing attempt answers; <paramref name="whenTimedOut"/>
+    /// is what the caller sees when the budget runs out first. The attempt is wrapped so an exception
+    /// on the worker can never reach the runtime's unhandled-exception path, which terminates the
+    /// process. A late finisher still writes its result into a variable nobody reads any more -- the
+    /// ABANDONED attempt is not cancelled (a blocked cross-process call cannot be), only no longer
+    /// waited for. What that means for the caller's bookkeeping is the caller's to decide.
+    /// </remarks>
+    internal static T RunBounded<T>(Func<T> attempt, TimeSpan budget, T whenFailed, T whenTimedOut)
     {
-        var outcome = ActivationOutcome.Failed;
-        var worker = new Thread(() => outcome = attempt()) { IsBackground = true };
+        var outcome = whenFailed;
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                outcome = attempt();
+            }
+            catch (Exception)
+            {
+                outcome = whenFailed;
+            }
+        })
+        {
+            IsBackground = true,
+        };
         worker.Start();
-        return worker.Join(budget) ? outcome : ActivationOutcome.TimedOut;
+        return worker.Join(budget) ? outcome : whenTimedOut;
     }
+
+    /// <summary>
+    /// Runs a synchronous cross-process style call (a style write, a frame redraw, a restore) under
+    /// <see cref="StyleCallTimeout"/> and answers whether it completed AND succeeded.
+    /// </summary>
+    /// <remarks>
+    /// <c>SetWindowLong</c>, <c>SetWindowPos(SWP_FRAMECHANGED)</c> and <c>ShowWindow(SW_RESTORE)</c>
+    /// all SEND messages to the target window and wait, so a hung target would stall the calling
+    /// thread -- which, for the adapter, is the UI/event thread. A timeout answers
+    /// <see langword="false"/> exactly like a refusal, so every caller's existing refused path
+    /// handles it. Unlike a refusal it does NOT mean "nothing changed": the abandoned call may still
+    /// land later, which is why the adapter keeps a refused strip eligible for a give-back.
+    /// <para>
+    /// The pre-existing <see cref="SetWindowPosition"/> is the same class of call and is NOT bounded
+    /// here; that is a known, separate follow-up.
+    /// </para>
+    /// </remarks>
+    internal static bool RunStyleCall(Func<bool> call, TimeSpan budget) =>
+        RunBounded(call, budget, whenFailed: false, whenTimedOut: false);
 
     /// <summary>
     /// Whether an outcome means the OS CONFIRMED the target holds the foreground. Both failing

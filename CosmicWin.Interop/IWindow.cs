@@ -130,8 +130,9 @@ public interface IWindow : IEquatable<IWindow>
     bool TrySetMaximizeBox(bool enabled);
 
     /// <summary>
-    /// Takes a maximized window back to its normal state, reporting whether the request was made.
-    /// Never throws; <see langword="false"/> for a dead window or one the OS refused.
+    /// Takes a maximized window back to its normal state, reporting whether the window actually
+    /// left the maximized state. Never throws; <see langword="false"/> for a dead window, one the OS
+    /// refused, or one that did not answer within the bounded wait.
     /// </summary>
     /// <remarks>
     /// The fallback for a window that maximizes despite <see cref="TrySetMaximizeBox"/> -- a custom

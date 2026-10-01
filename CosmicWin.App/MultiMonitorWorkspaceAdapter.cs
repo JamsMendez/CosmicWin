@@ -1754,7 +1754,9 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
     /// <summary>
     /// Takes the maximize box off a tiled window, remembering that it had one. A window without a
-    /// box is left alone, and a refusal is traced once and not repeated.
+    /// box is left alone, and a refusal is traced once and not repeated. A refusal includes a style
+    /// write that timed out; see <see cref="RestoreMaximizeBox"/> for why such a handle is still
+    /// given a box back later.
     /// </summary>
     private void StripMaximizeBox(IWindow window)
     {
@@ -1792,9 +1794,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// </remarks>
     private void RestoreMaximizeBox(nint handle, IWindow? known = null)
     {
-        _boxRefused.Remove(handle);
+        var wasRefused = _boxRefused.Remove(handle);
+        var wasStripped = _boxStripped.Remove(handle);
 
-        if (!_boxStripped.Remove(handle))
+        if (!wasStripped && !wasRefused)
         {
             return;
         }
@@ -1804,7 +1807,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _registry.TryGetWindow(handle, out known);
         }
 
-        if (known is { IsAlive: true } && !known.TrySetMaximizeBox(true))
+        // A REFUSED strip is also tried, quietly. The style write is bounded, and a window that did
+        // not answer in time reports the same false as one that refused -- yet the abandoned write
+        // can still land afterwards, leaving a disabled button this adapter never recorded. Asking
+        // a window for a box it still has is a no-op (no cross-process write), so the genuine
+        // refusals (an elevated window) cost one style read and say nothing.
+        if (known is { IsAlive: true } && !known.TrySetMaximizeBox(true) && wasStripped)
         {
             Trace?.Record(
                 $"maximize box not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
@@ -1827,7 +1835,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// </remarks>
     public void ReleaseMaximizeBlock()
     {
-        foreach (var handle in _boxStripped.ToArray())
+        foreach (var handle in _boxStripped.Concat(_boxRefused).Distinct().ToArray())
         {
             RestoreMaximizeBox(handle);
         }

@@ -178,3 +178,16 @@ strategy question is asked before delivery. Everything stays local; the maintain
   (`INativeWindowSource.TryRestoreFromMaximized` doc says it reports "whether the window was
   asked", the implementation reports whether it left the maximized state; fix the doc).
   R3-unrestorable-test-weak still open.
+- Follow-up R3-native-style-calls-unbounded FIXED (route: delegated writer, trigger "2+ non-trivial
+  files"): `RunBounded` generalized to `RunBounded<T>(attempt, budget, whenFailed, whenTimedOut)`
+  (the activation overload delegates to it); new `RunStyleCall` bounds `TrySetMaximizeBox` and
+  `TryRestoreFromMaximized` under `StyleCallTimeout` (= the 250 ms activation timeout). A timeout
+  or a throw answers false, so the adapter's refused/trace paths apply unchanged. Late completion:
+  an abandoned write cannot be cancelled and may land later, so a strip answered "refused" could
+  leave a disabled button unrecorded. Chosen: the adapter still gives the box back for a refused
+  strip on release (quietly; asking for a bit the window still has is a no-op, so genuine UIPI
+  refusals cost one style read and are not traced). The unbounded `SetWindowPosition` is the same
+  class and stays out of scope. RED: `BoundedStyleCallTests` 4/4 failed (NotImplementedException
+  stub) and `MaximizeBlockTests.AStripThatTimedOutButLandedLater_IsStillGivenBackWhenTheBlockIsReleased`
+  failed (button not returned) plus the updated elevated-window fact (`[false, true]` requests).
+  GREEN: Interop.Tests 448 passed / 42 skipped; MaximizeBlockTests 30/30.

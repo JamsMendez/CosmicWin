@@ -171,14 +171,21 @@ internal interface INativeWindowSource
     /// <remarks>
     /// Verified by READING the style back rather than trusting the write's return value: a
     /// refused write (UIPI, an elevated target) and a write that changed nothing both look like a
-    /// zero from <c>SetWindowLong</c>, and the read-back is the only unambiguous answer.
+    /// zero from <c>SetWindowLong</c>, and the read-back is the only unambiguous answer. The call
+    /// is bounded: a target that does not answer in time reports <see langword="false"/>, though
+    /// the abandoned write may still land later.
     /// </remarks>
     bool TrySetMaximizeBox(nint hwnd, bool enabled);
 
     /// <summary>
     /// Takes a maximized window back to its normal size and position. Never throws; reports
-    /// whether the window was asked, not whether it complied.
+    /// whether the window actually LEFT the maximized state, not merely whether it was asked.
     /// </summary>
+    /// <remarks>
+    /// Verified by reading the style back, because <c>ShowWindow</c> only says whether the window
+    /// was visible. A refused call (UIPI) and a target that did not answer within the bounded wait
+    /// both report <see langword="false"/>; in the timeout case the restore may still land later.
+    /// </remarks>
     bool TryRestoreFromMaximized(nint hwnd);
 
     /// <summary>

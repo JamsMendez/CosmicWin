@@ -169,7 +169,38 @@ public sealed class MaximizeBlockTests
 
         adapter.ReleaseMaximizeBlock();
 
-        Assert.Single(elevated.MaximizeBoxRequests); // the one refused strip; nothing to give back
+        // The refused strip, then the quiet give-back attempt a refused strip is still owed (it
+        // cannot be told from a timed-out strip that lands later); both refused, nothing changes.
+        Assert.Equal([false, true], elevated.MaximizeBoxRequests);
+        Assert.DoesNotContain(trace.Lines, line => line.StartsWith("maximize box not returned", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AStripThatTimedOutButLandedLater_IsStillGivenBackWhenTheBlockIsReleased()
+    {
+        // The bounded style call answers false when the target does not reply in time, yet the
+        // abandoned write may land afterwards. Recording that handle as refused-forever would leave
+        // a disabled button nobody knows to give back.
+        var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([primary], primary, registry);
+        var workspace = new FakeWorkspace();
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null)
+        {
+            Trace = new RecordingTrace(),
+        };
+        var slow = new RecordingWindow(new IntPtr(31), Rectangle.FromSize(0, 0, 400, 300), style: BoxedStyle)
+        {
+            StripLandsAfterTimeout = true,
+        };
+
+        workspace.RaiseWindowAdded(slow);
+        Assert.False(HasMaximizeBox(slow)); // the late write landed
+
+        adapter.ReleaseMaximizeBlock();
+
+        Assert.True(HasMaximizeBox(slow));
     }
 
     [Fact]

@@ -238,9 +238,21 @@ internal sealed class RecordingWindow : IWindow
     /// </summary>
     public bool IgnoresMaximizeBox { get; set; }
 
+    /// <summary>
+    /// Models a style write whose bounded wait expired: the call reports <see langword="false"/>
+    /// (not applied) but the abandoned write lands afterwards, so the box really is gone.
+    /// </summary>
+    public bool StripLandsAfterTimeout { get; set; }
+
     public bool TrySetMaximizeBox(bool enabled)
     {
         MaximizeBoxRequests.Add(enabled);
+
+        if (StripLandsAfterTimeout && !enabled && IsAlive)
+        {
+            Style &= ~WindowStyleFlags.MaximizeBox;
+            return false;
+        }
 
         if (!IsAlive || RefuseStyleChanges)
         {
