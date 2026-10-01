@@ -64,3 +64,20 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   observe it through a TraceListener; no existing fallback sink existed beyond Debug.WriteLine in the
   WebView controller). Full App suite 1390 passed / 6 skipped (baseline 1384 / 6); `dotnet build
   CosmicWin.sln` 0 errors, no warnings in touched files.
+- 2026-10-01: parent spot check: App 1390 passed / 6 skipped / 0 failed (baseline 1384/6), node.exe
+  count unchanged (6 before and after). Assessed HIGH (`high_risk`, process-spawning tests); consent
+  granted by the maintainer; review-e4ffb2db5cb77ab7 (4 lenses, main..c7f3797) APPROVED and
+  acknowledged, no correction. Merged into local main fast-forward.
+
+## Follow-ups (non-blocking SUGGESTIONs from review-e4ffb2db5cb77ab7)
+
+- R4-001: in a Release run the Trace fallback only reaches OutputDebugString; a swallowed reload
+  failure still leaves no lasting record without a debugger attached.
+- R2-runnode-kill-comment-now-conditional: the "Kill the WHOLE tree" comment above
+  `process.Kill(killEntireProcessTree)` no longer mentions the root-only test seam.
+- R2-hash-clamp-relies-on-nan-propagation: `Math.max(1, Math.floor(Number(x))) || 1` -- the `|| 1`
+  only fires for NaN; add a note so nobody deletes it as dead code.
+- R2-trace-fallback-doc-misstates-debug-compilation: `ReportSwallowedFailure` doc calls Trace the
+  sink family Debug.WriteLine belongs to; Debug is [Conditional("DEBUG")], Trace is TRACE.
+- R3-pid-handshake-shares-timeout-budget: the process tests start Node, spawn and write the pid inside
+  the same 3 s kill bound, then poll 2 s; a slow cold start could fail them spuriously.
