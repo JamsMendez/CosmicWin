@@ -176,12 +176,16 @@ public static class CompositionRoot
     }
 
     /// <summary>
-    /// R4-reload-gap-swallow-depends-on-optional-trace: a swallowed Reload failure used to be reported
-    /// only through the OPTIONAL desktop trace, so a run without one (the default: the trace needs its
-    /// marker file) lost it entirely. With no trace the line goes to <see cref="Trace"/> instead --
-    /// the same always-compiled sink family <c>Debug.WriteLine</c> belongs to, but visible to a
-    /// listener (and the debugger output window) in Release too. Shared with <c>AppComposition</c>'s
-    /// deferred <c>ReloadGap</c> catch, the other place such a failure is swallowed.
+    /// R4-reload-gap-swallow-depends-on-optional-trace: a swallowed Reload failure is reported through
+    /// the desktop trace. Production always wires one (<c>AppComposition</c> builds the
+    /// <c>FileDesktopTrace</c> unconditionally; the <c>trace-dialogs</c> marker gates only the verbose
+    /// window trace), so in the real app the line lands in <c>desktop-trace.log</c>. The parameter is
+    /// optional only for compositions built without a trace (tests); there the line goes to
+    /// <see cref="Trace"/> instead. Unlike <c>Debug.WriteLine</c>, which is
+    /// <c>[Conditional("DEBUG")]</c> and vanishes from Release, <see cref="Trace"/> is
+    /// <c>[Conditional("TRACE")]</c>, which SDK projects define in both configurations, so a listener
+    /// can still observe it. Shared with <c>AppComposition</c>'s deferred <c>ReloadGap</c> catch, the
+    /// other place such a failure is swallowed.
     /// </summary>
     internal static void ReportSwallowedFailure(IDesktopTrace? desktopTrace, string line)
     {

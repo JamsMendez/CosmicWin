@@ -290,7 +290,8 @@ public sealed class AlertLayerLayoutNodeTests
         {
             // Kill the WHOLE tree, not just this process: node can have spawned children of its own,
             // and an orphan left running (holding the pipes open) would also keep the two read tasks
-            // above from ever completing.
+            // above from ever completing. killEntireProcessTree is true for every real run; only the
+            // drain test passes false, to leave a survivor holding the pipes on purpose.
             process.Kill(killEntireProcessTree);
             process.WaitForExit(5000);
 

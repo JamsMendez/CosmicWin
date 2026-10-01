@@ -81,3 +81,16 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   sink family Debug.WriteLine belongs to; Debug is [Conditional("DEBUG")], Trace is TRACE.
 - R3-pid-handshake-shares-timeout-budget: the process tests start Node, spawn and write the pid inside
   the same 3 s kill bound, then poll 2 s; a slow cold start could fail them spuriously.
+
+## Follow-up pass 2026-10-01 (branch docs/alert-mosaic-followups)
+
+- R4-001 CLOSED, no code change: its premise is false in production. AppComposition always builds
+  FileDesktopTrace and passes it to Wire and the tray controller, so a swallowed reload failure already
+  lands in desktop-trace.log; the Trace fallback only runs in trace-less test compositions. The
+  misleading ReportSwallowedFailure doc ("the default: the trace needs its marker file") is fixed.
+- R2-trace-fallback-doc-misstates-debug-compilation: fixed in the same doc (Debug is
+  [Conditional("DEBUG")], Trace is [Conditional("TRACE")]).
+- R2-runnode-kill-comment-now-conditional: comment names the root-only drain-test seam.
+- R2-hash-clamp-relies-on-nan-propagation: note added on why `|| 1` is not dead code.
+- Checks: Release build 0 errors; AlertLayer|Reload tests 135/135. Comment-only, passive.
+- Open: R3-pid-handshake-shares-timeout-budget (behavioral, own commit).
