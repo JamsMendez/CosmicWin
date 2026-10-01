@@ -9,27 +9,42 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// not. The factory seam stands a fake in for the shell, so no desktop is needed.
 /// </summary>
 /// <remarks>
-/// Serialised in one collection because the seam is static state -- the same state production
-/// caches the manager in.
+/// Each test owns its own <see cref="VirtualDesktopQueryClient"/>, so nothing here touches the
+/// process-wide instance the static <see cref="Win32VirtualDesktopQueries"/> API uses. The earlier
+/// form swapped a static factory, which another test class running in parallel could observe.
 /// </remarks>
-[Collection("VirtualDesktopQueriesStatic")]
-public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
+public sealed class Win32VirtualDesktopQueriesReconnectTests
 {
     private const int E_ACCESSDENIED = unchecked((int)0x80070005);
     private static readonly Guid Desktop = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
     private int _created;
 
-    public void Dispose() => Win32VirtualDesktopQueries.UseFactoryForTests(null);
+    private VirtualDesktopQueryClient _client = null!;
 
     private void Use(params FakeManager[] managers)
     {
         var queue = new Queue<FakeManager>(managers);
-        Win32VirtualDesktopQueries.UseFactoryForTests(() =>
+        _client = new VirtualDesktopQueryClient(() =>
         {
             _created++;
             return queue.Count > 0 ? queue.Dequeue() : null;
         });
+    }
+
+    [Fact]
+    public void Two_clients_do_not_share_a_manager()
+    {
+        Use(new FakeManager());
+        var other = new VirtualDesktopQueryClient(() => null);
+
+        var otherOk = other.TryGetWindowDesktopId(0x50A22, out _, out var otherError);
+        var ok = _client.TryGetWindowDesktopId(0x50A22, out var id, out _);
+
+        Assert.False(otherOk);
+        Assert.Contains("could not be created", otherError);
+        Assert.True(ok);
+        Assert.Equal(Desktop, id);
     }
 
     [Theory]
@@ -39,7 +54,7 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
     {
         Use(new FakeManager { DeadHr = ShellDisconnect.ServerUnavailable, DeadThrows = thrown }, new FakeManager());
 
-        var ok = Win32VirtualDesktopQueries.TryGetWindowDesktopId(0x50A22, out var id, out var error);
+        var ok = _client.TryGetWindowDesktopId(0x50A22, out var id, out var error);
 
         Assert.True(ok);
         Assert.Equal(Desktop, id);
@@ -54,7 +69,7 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
     {
         Use(new FakeManager { DeadHr = ShellDisconnect.Disconnected, DeadThrows = thrown }, new FakeManager());
 
-        var ok = Win32VirtualDesktopQueries.TryIsWindowOnCurrentDesktop(0x50A22, out var onCurrent, out var error);
+        var ok = _client.TryIsWindowOnCurrentDesktop(0x50A22, out var onCurrent, out var error);
 
         Assert.True(ok);
         Assert.True(onCurrent);
@@ -69,7 +84,7 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
     {
         Use(new FakeManager { DeadHr = E_ACCESSDENIED, DeadThrows = thrown }, new FakeManager());
 
-        var ok = Win32VirtualDesktopQueries.TryGetWindowDesktopId(0x50A22, out _, out var error);
+        var ok = _client.TryGetWindowDesktopId(0x50A22, out _, out var error);
 
         Assert.False(ok);
         Assert.Equal(1, _created);
@@ -84,7 +99,7 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
             new FakeManager { DeadHr = ShellDisconnect.ServerUnavailable },
             new FakeManager());
 
-        var ok = Win32VirtualDesktopQueries.TryGetWindowDesktopId(0x50A22, out _, out var error);
+        var ok = _client.TryGetWindowDesktopId(0x50A22, out _, out var error);
 
         Assert.False(ok);
         Assert.Equal(2, _created);
@@ -97,7 +112,7 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
     {
         Use(new FakeManager { DeadHr = ShellDisconnect.ServerUnavailable });
 
-        var ok = Win32VirtualDesktopQueries.TryIsWindowOnCurrentDesktop(0x50A22, out _, out var error);
+        var ok = _client.TryIsWindowOnCurrentDesktop(0x50A22, out _, out var error);
 
         Assert.False(ok);
         Assert.Equal(2, _created);
@@ -109,8 +124,8 @@ public sealed class Win32VirtualDesktopQueriesReconnectTests : IDisposable
     {
         Use(new FakeManager { DeadHr = ShellDisconnect.ServerUnavailable }, new FakeManager());
 
-        _ = Win32VirtualDesktopQueries.TryGetWindowDesktopId(0x50A22, out _, out _);
-        _ = Win32VirtualDesktopQueries.TryGetWindowDesktopId(0x50A22, out _, out _);
+        _ = _client.TryGetWindowDesktopId(0x50A22, out _, out _);
+        _ = _client.TryGetWindowDesktopId(0x50A22, out _, out _);
 
         Assert.Equal(2, _created);
     }

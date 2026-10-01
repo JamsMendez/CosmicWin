@@ -37,7 +37,7 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
 ## Tasks
 
 - [x] T1: CreateDesktop retried only when the call provably never ran. Route: delegated writer.
-- [ ] T2: Queries reconnect tests no longer race other test classes. Route: same writer.
+- [x] T2: Queries reconnect tests no longer race other test classes. Route: same writer.
 - [ ] T3: Maximize block hung-window edge cases. Route: same writer.
 - [ ] T4: README elevation limit reworded. Route: same writer.
 - [ ] T5: Hardware: Edge/Chrome, VS Code, F11 on own probe instances (separate user-data-dir,
@@ -55,3 +55,11 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
   grow the set ... not retried". RED: 5 tests failed (the 3 ambiguous HRESULTs, the next-call and the
   service test; retry made Created 1 instead of 0). GREEN: 27/27 in the reconnect class. Mutation:
   `CallNeverRan` made accept all five -> the same 5 failed; reverted.
+- 2026-09-30 T2 (route: delegated writer): users of `Win32VirtualDesktopQueries` found: the reconnect
+  tests, `Win32VirtualDesktopService.ResolveWindowDesktop`, `Win32NativeWindowSource` (line 84) and the
+  desktop-gated tests (VirtualDesktopMove/Membership/UncloakEvent); only the reconnect class was in the
+  `VirtualDesktopQueriesStatic` collection, so the others were unprotected. Chose to REMOVE the shared
+  mutable seam: new internal `VirtualDesktopQueryClient(factory)` holds the logic and cached manager;
+  the static class delegates to one `Shared` instance; tests build their own client. RED: the test
+  project did not compile (type missing). GREEN: 10/10 in the queries classes. No mutation check
+  required for T2 (structural refactor).
