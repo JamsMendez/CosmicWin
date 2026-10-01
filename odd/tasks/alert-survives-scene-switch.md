@@ -50,3 +50,7 @@ no AI attribution.
   + `page ready` :22.05, `pending show applied ... remaining=5579` :22.06, `done` :27.68, `hide`
   :27.78 -- the alert is back on the new page for its remaining time.
 
+- 2026-10-01: review-8fd7cd8ba38bd0b1 (medium, reliability, main..da6a29e) APPROVED and acknowledged.
+  SUGGESTION R3-structural-guard-indexof-negative-start fixed: both guards assert the method was found
+  before using its index as a search start (a rename now fails with the message, not an
+  ArgumentOutOfRangeException). Controller tests 25/25.

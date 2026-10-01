@@ -89,6 +89,7 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Equal(3, navigateCalls);
         // alert-survives-scene-switch: a scene switch requeues a showing alert before reloading the page.
         var switchScene = source.IndexOf("public bool SwitchScene(", StringComparison.Ordinal);
+        Assert.True(switchScene >= 0, "SwitchScene not found in the controller source");
         var switchNavigate = source.IndexOf("CoreWebView2.Navigate(", switchScene, StringComparison.Ordinal);
         var pageReloading = source.IndexOf("_state.PageReloading();", switchScene, StringComparison.Ordinal);
         Assert.True(switchScene >= 0 && pageReloading > switchScene && pageReloading < switchNavigate,
@@ -96,6 +97,7 @@ public sealed class WebViewAlertLayerControllerTests
         // Review R3-superseded-early-return-order-unasserted: the superseded early return must come
         // BEFORE the failure branch, or an aborted older navigation still tears the layer down.
         var completed = source.IndexOf("private void OnNavigationCompleted(", StringComparison.Ordinal);
+        Assert.True(completed >= 0, "OnNavigationCompleted not found in the controller source");
         var supersededCheck = source.IndexOf("_navigation.CompletedIsSuperseded(", completed, StringComparison.Ordinal);
         var failureBranch = source.IndexOf("if (!args.IsSuccess)", completed, StringComparison.Ordinal);
         Assert.True(completed >= 0 && supersededCheck > completed && failureBranch > supersededCheck,
