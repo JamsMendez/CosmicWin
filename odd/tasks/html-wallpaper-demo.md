@@ -324,3 +324,18 @@ Demo complete. Optional follow-ups: the open review findings above (raphael para
 geometry, idle silent ring-name miss, pacing comment), the missing `done` line, pausing the scene
 while the desktop is covered, and the D3 limitation (HTTP/tray video switch starts a player under
 the page). Merging anything to main is the maintainer's call.
+
+## Leftovers re-audited (2026-10-01, against main f856074)
+
+- R2-gold-ring-params-parallel-geometry: FIXED -- `drawGlyphRings` now reads radius/rotation from
+  `goldGlyphRingDrawParams`; new raphael harness case checks scene vs hook at three progress values
+  (a drifted hook rotation fails it).
+- R2-constellation-index-silent-miss: FIXED -- `animate.js` throws at load when no ring is named
+  'constellation'; new idle harness case (RED: "Missing expected exception", then GREEN 19/19).
+- Pacing comment: FIXED earlier by `a02140a` (scheduler rewrite); only the optional
+  slower-than-cap display test remains.
+- Missing `done` line: benign race, not a bug -- the host queue ends the alert on its own clock and
+  sends `hide` first; `hide()` clears `showStartMs`, so the page never posts `done`. No visible effect.
+- D3 (video switch under the page): FIXED by `ff06f8b` (html/mini mode guard in SwitchVideoWallpaper).
+- Pausing the scene while the desktop is covered: OPEN, needs a maintainer decision and hardware.
+
