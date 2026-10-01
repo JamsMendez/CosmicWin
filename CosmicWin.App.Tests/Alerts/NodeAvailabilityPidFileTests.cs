@@ -38,13 +38,17 @@ public sealed class NodeAvailabilityPidFileTests : IDisposable
 
     /// <summary>
     /// "123" is the case the rule exists for: a reader landing mid-write sees a VALID int that is the
-    /// wrong pid. Empty is a reader landing between create and write; the rest are not pids at all.
+    /// wrong pid. Empty is a reader landing between create and write; the rest are not pids at all --
+    /// including zero and negatives (R3-pidfile-test-nonpositive-pid-unpinned): no real process has
+    /// one, and Process.GetProcessById(0) is the System Idle Process, never a test script.
     /// </summary>
     [Theory]
     [InlineData("123")]
     [InlineData("")]
     [InlineData("\n")]
     [InlineData("abc\n")]
+    [InlineData("0\n")]
+    [InlineData("-5\n")]
     public void TryReadPid_AnythingButATerminatedPid_IsNotRead(string content)
     {
         var path = Write(content);

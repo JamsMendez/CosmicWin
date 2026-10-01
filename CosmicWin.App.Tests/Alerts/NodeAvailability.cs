@@ -162,7 +162,7 @@ internal static class NodeAvailability
     /// Reads a pid a test script wrote as <c>String(pid) + '\n'</c>. A reader can land between create
     /// and write (empty file) or in the middle of the write ("123" of "12345", still a valid int but the
     /// WRONG pid -- R3-isready-accepts-partial-pid-prefix), so a pid only counts once its newline
-    /// terminator is on disk.
+    /// terminator is on disk. Zero and negatives are rejected too: no real process has one.
     /// </summary>
     internal static bool TryReadPid(string pidFile, out int pid)
     {
@@ -175,7 +175,13 @@ internal static class NodeAvailability
             }
 
             var text = File.ReadAllText(pidFile);
-            return text.EndsWith('\n') && int.TryParse(text.AsSpan().TrimEnd(), out pid);
+            if (text.EndsWith('\n') && int.TryParse(text.AsSpan().TrimEnd(), out var parsed) && parsed > 0)
+            {
+                pid = parsed;
+                return true;
+            }
+
+            return false;
         }
         // UnauthorizedAccessException too: a file still being created can deny the read for a moment
         // (R3-isready-catches-only-ioexception); either way it is simply "not ready yet".

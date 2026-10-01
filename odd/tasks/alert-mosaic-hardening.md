@@ -162,3 +162,7 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   terminated pid (LF and CRLF) is read; "123", empty, bare terminator, "abc" and a missing file are not.
   Behavior already existed; mutation dropping the terminator check fails exactly the "123" case; restored
   byte-identical.
+- review-df37d064f5de55c2 (bf686aa) APPROVED and acknowledged. R3-pidfile-test-nonpositive-pid-unpinned
+  fixed: TryReadPid rejects 0 and negatives and leaves pid at 0 on any rejection. RED: "0\n" and "-5\n"
+  were accepted; a first GREEN attempt still leaked -5 through the out parameter (caught by the test's
+  pid == 0 assertion); fixed. R3-pidfile-test-cleanup-narrow-catch left open (temp-dir cleanup only).
