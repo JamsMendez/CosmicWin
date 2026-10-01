@@ -155,13 +155,14 @@ mode.
 
 Limits worth knowing:
 
-- Apps that draw their own title bar (Chrome, Electron apps such as VS Code, Windows Terminal, UWP
-  apps) may keep showing a live maximize button, because they ignore the window style. Maximizing
-  one still does nothing lasting: CosmicWin restores it and puts it back in its slot, so you may
-  see it flash.
-- Windows running as administrator are not touched while CosmicWin is not elevated — Windows
-  refuses the change. Their button stays, and a maximize is still undone after the fact when
-  Windows lets CosmicWin restore them.
+- Apps that draw their own title bar show the disabled button their own way. Chromium browsers
+  (Chrome, Edge, Brave) may keep drawing it as if it were active, though clicking it does nothing;
+  Electron apps such as VS Code hide it while the window is tiled and show it again when it is not.
+  Windows itself refuses the maximize in these apps, so nothing flashes. If an app does manage to
+  maximize anyway, CosmicWin restores it and puts it back in its slot.
+- CosmicWin runs elevated, so administrator windows are handled like any other. The remaining case
+  is a window that refuses the change or does not answer in time: its button stays, and a maximize
+  is still undone after the fact when Windows lets CosmicWin restore it.
 - If CosmicWin crashes or is killed, it cannot give the buttons back: affected windows keep a
   disabled maximize button until they are reopened.
 
