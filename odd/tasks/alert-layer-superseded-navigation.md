@@ -36,7 +36,7 @@ state. A failure of the LATEST navigation still tears down exactly as today.
 
 - [x] T1 -- superseded completions ignored (pure seam + tests + controller wiring + trace line).
   Route: delegated direct (writer; 2+ files).
-- [ ] T2 -- hardware: two scene switches 50 ms apart in html mode -> `superseded` line, no
+- [x] T2 -- hardware: two scene switches 50 ms apart in html mode -> `superseded` line, no
   `navigation-failed`, no recreate; single switch unchanged. Route: parent.
 
 ## Out of scope (recorded)
@@ -62,3 +62,17 @@ state. A failure of the LATEST navigation still tears down exactly as today.
   `navigation superseded id=N status=..`. RED: 8 assertion failures (incl. the abort-before-starting
   model); GREEN 50 focused; mutations (never match abandoned; never abandon) each failed 5 seam tests.
   Full App suite 1415 passed / 6 skipped; build 0 errors, no new warnings. T2 hardware still pending.
+- 2026-10-01: T2 hardware, Release publish of 17743e3, html mode (settings restored to html-mini after):
+  single switch -> `starting id=3`, `completed id=3 success=True`, `page ready`;
+  two switches 50 ms apart -> `starting id=4`, `starting id=5`, `superseded id=4`, `completed id=5
+  success=True`, `page ready` -- no navigation-failed, no recreate;
+  three switches 30 ms apart -> `starting id=6`, `superseded id=6 status=ConnectionAborted`,
+  `starting id=7`, `superseded id=7 status=ConnectionAborted`, `starting id=8`, `completed id=8
+  success=True` -- confirms the abort completion arrives BEFORE the new NavigationStarting (why
+  0aef7b3 could not work). Before the fix the same repro traced navigation-failed + recreate.
+- Found during T2 (pre-existing, NOT fixed here): a scene switch while an alert is showing reloads
+  the page and the alert is NOT re-shown (`show` at :04.48, switch :06.51, `page ready` :06.88, no
+  pending-show line, `hide` at :12.68) -- the alert vanishes for the rest of its duration.
+  Also seen: an external HTTP client was sending alerts/scenes during the run (`alert ignored: one is
+  already showing` for a probe alert), which explains the unexplained switches in the trace.
+
