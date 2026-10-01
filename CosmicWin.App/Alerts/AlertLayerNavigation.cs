@@ -5,9 +5,16 @@
 /// ordering. When the HOST calls Navigate while a navigation is still in flight, WebView2 aborts the old
 /// one and completes it with IsSuccess=false (ConnectionAborted) -- possibly BEFORE it raises
 /// NavigationStarting for the new one. So the host marks the in-flight navigation abandoned right before
-/// it navigates (<see cref="BeforeHostNavigate"/>); a completion of an abandoned id (exact match) is
-/// superseded and consumed. Everything else, a stale success included only if abandoned, is handled as
-/// before, so a real failure of the current navigation still tears the layer down.
+/// it navigates (<see cref="BeforeHostNavigate"/>). A completion is superseded, and ignored whether it
+/// failed or succeeded, when either:
+/// <list type="number">
+/// <item>its id was abandoned that way (exact match; the id is consumed), or</item>
+/// <item>a DIFFERENT navigation started after it (its id is not the latest NavigationStarting, exact
+/// inequality) -- covers two host Navigate calls made before the first start was delivered, when
+/// <see cref="BeforeHostNavigate"/> had nothing in flight to abandon.</item>
+/// </list>
+/// Only a completion of the latest started navigation is handled as before, so a real failure of the
+/// current navigation still tears the layer down.
 /// </summary>
 internal sealed class AlertLayerNavigation
 {

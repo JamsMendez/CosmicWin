@@ -102,3 +102,8 @@ the alert for the rest of its duration (see T2 notes).
   stop hook) APPROVED and acknowledged. Two SUGGESTIONs open: R3-class-doc-contradicts-latest-started-rule
   (AlertLayerNavigation summary still describes only the abandoned-id rule) and R3-wiring-order-unasserted
   (the source guard counts BeforeHostNavigate calls but not that each precedes a Navigate call).
+- 2026-10-01: both SUGGESTIONs of review-4392cc4859d40afa closed. R3-wiring-order-unasserted: the
+  source guard now requires every `CoreWebView2.Navigate(` line to be immediately preceded by
+  `_navigation.BeforeHostNavigate();` (mutation moving the call after Navigate in SwitchScene fails it;
+  the old count-only check passed that mutation). R3-class-doc-contradicts-latest-started-rule: the
+  AlertLayerNavigation summary now lists both superseded rules. Alert-layer tests 111/111, build 0 errors.

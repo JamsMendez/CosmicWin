@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using CosmicWin.Interop.Win32;
@@ -74,8 +74,19 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("_navigation.Started(", source);
         Assert.Contains("_navigation.Clear();", source);
         Assert.Contains("AlertLayerTrace.NavigationStarting(", source);
-        // The host marks the in-flight navigation abandoned right BEFORE each of its Navigate calls.
+        // The host marks the in-flight navigation abandoned right BEFORE each of its Navigate calls
+        // (review R3-wiring-order-unasserted: a count alone would pass with a call moved after Navigate).
         Assert.Equal(3, source.Split("_navigation.BeforeHostNavigate();").Length - 1);
+        var sourceLines = source.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToArray();
+        var navigateCalls = 0;
+        for (var i = 0; i < sourceLines.Length; i++)
+        {
+            if (!sourceLines[i].Contains("CoreWebView2.Navigate(")) continue;
+            navigateCalls++;
+            Assert.True(i > 0 && sourceLines[i - 1] == "_navigation.BeforeHostNavigate();",
+                $"'{sourceLines[i]}' is not immediately preceded by _navigation.BeforeHostNavigate();");
+        }
+        Assert.Equal(3, navigateCalls);
         Assert.Contains("AlertLayerTrace.NavigationSuperseded(", source);
         // Every Debug.WriteLine catch site must be paired with an AlertLayerTrace.Error/Close call on
         // the very next non-blank line -- proving telemetry was added ALONGSIDE, not instead of, the
