@@ -34,7 +34,7 @@ state. A failure of the LATEST navigation still tears down exactly as today.
 
 ## Tasks
 
-- [ ] T1 -- superseded completions ignored (pure seam + tests + controller wiring + trace line).
+- [x] T1 -- superseded completions ignored (pure seam + tests + controller wiring + trace line).
   Route: delegated direct (writer; 2+ files).
 - [ ] T2 -- hardware: two scene switches 50 ms apart in html mode -> `superseded` line, no
   `navigation-failed`, no recreate; single switch unchanged. Route: parent.
@@ -47,3 +47,9 @@ state. A failure of the LATEST navigation still tears down exactly as today.
 ## Progress
 
 - 2026-10-01: branch `fix/alert-layer-superseded-navigation` off main 367feaf.
+- 2026-10-01 T1 done (commit recorded in git log, subject "fix(alert-layer): ignore completions of superseded navigations"). Seam
+  `AlertLayerNavigation.IsSuperseded(completedId, latestStartedId)` (older id => superseded, success
+  included; no recorded start => not superseded); controller records `NavigationStarting.NavigationId`
+  (reset + unsubscribed in TearDown). Trace: `alert-layer navigation superseded id=<N> status=<WebErrorStatus>`.
+  RED: 3 assertion failures (seam stub returning false, trace stub returning "", wiring guard);
+  GREEN: 103 focused pass; mutation `<` -> `<=` failed 1 seam test, restored. Full App suite 1409 passed / 6 skipped (baseline 1404 + 5 new); sln build 0 errors, no warnings in touched files.

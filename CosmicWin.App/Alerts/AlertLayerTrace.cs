@@ -23,6 +23,9 @@ internal static class AlertLayerTrace
     public static string NavigationCompleted(bool success, object webErrorStatus, long elapsedMilliseconds) =>
         $"alert-layer navigation completed success={success} status={webErrorStatus} {elapsedMilliseconds}ms";
 
+    public static string NavigationSuperseded(ulong navigationId, object webErrorStatus) =>
+        $"alert-layer navigation superseded id={navigationId} status={webErrorStatus}";
+
     public static string Show(AlertShowRequest request) =>
         $"alert-layer show tiles={string.Join(",", request.Tiles)} grid={request.Columns}x{request.Rows} "
         + $"gap={request.Gap} work={WorkArea(request)} duration={request.DurationMilliseconds}";

@@ -85,6 +85,10 @@ public sealed class WebViewAlertLayerController : IDisposable
     // separately-traced timings).
     private Stopwatch? _navigateStopwatch;
 
+    // NavigationId of the most recent NavigationStarting for the current controller; a completion with
+    // an older id was superseded by a newer Navigate (see AlertLayerNavigation). Null until one starts.
+    private ulong? _latestNavigationId;
+
     public WebViewAlertLayerController(ICompositionOverlaySurface host, Action<string>? trace = null,
         Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
         WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60)
@@ -340,6 +344,7 @@ public sealed class WebViewAlertLayerController : IDisposable
                     Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
             }
             candidate.CoreWebView2.WebMessageReceived += OnMessage;
+            candidate.CoreWebView2.NavigationStarting += OnNavigationStarting;
             candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
             candidate.CoreWebView2.ProcessFailed += OnProcessFailed;
             _controller = candidate;
@@ -394,10 +399,18 @@ public sealed class WebViewAlertLayerController : IDisposable
         epoch == _epoch && !_disposed && _preloading &&
         _host.IsCompositionReady && _host.Hwnd == hwnd && _host.CompositionGeneration == generation;
 
+    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args) =>
+        _latestNavigationId = args.NavigationId;
+
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
     {
         try
         {
+            if (AlertLayerNavigation.IsSuperseded(args.NavigationId, _latestNavigationId))
+            {
+                _trace?.Invoke(AlertLayerTrace.NavigationSuperseded(args.NavigationId, args.WebErrorStatus));
+                return;
+            }
             _trace?.Invoke(AlertLayerTrace.NavigationCompleted(
                 args.IsSuccess, args.WebErrorStatus, _navigateStopwatch?.ElapsedMilliseconds ?? 0));
             if (!args.IsSuccess)
@@ -502,6 +515,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         ++_epoch;
         _navigationCompleted = false;
         _pageReportedReady = false;
+        _latestNavigationId = null;
         if (dropEnvironment) _environment = null;
         var old = _controller;
         _controller = null;
@@ -509,6 +523,8 @@ public sealed class WebViewAlertLayerController : IDisposable
         _trace?.Invoke(AlertLayerTrace.Close(reason));
         try { old.CoreWebView2.WebMessageReceived -= OnMessage; }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("close-unsubscribe-message", ex)); }
+        try { old.CoreWebView2.NavigationStarting -= OnNavigationStarting; }
+        catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("close-unsubscribe-navigation-starting", ex)); }
         try { old.CoreWebView2.NavigationCompleted -= OnNavigationCompleted; }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("close-unsubscribe-navigation", ex)); }
         try { old.CoreWebView2.ProcessFailed -= OnProcessFailed; }

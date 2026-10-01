@@ -32,6 +32,11 @@ public sealed class AlertLayerTraceTests
             AlertLayerTrace.NavigationCompleted(false, "ConnectionAborted", 42));
     }
 
+    [Fact]
+    public void NavigationSuperseded_NamesIdAndStatus() =>
+        Assert.Equal("alert-layer navigation superseded id=12 status=ConnectionAborted",
+            AlertLayerTrace.NavigationSuperseded(12, "ConnectionAborted"));
+
     /// <summary>
     /// Columns and rows are deliberately DIFFERENT (4x2, not a symmetric grid) so a columns/rows swap
     /// in the format string would fail this; the work area's four fields are all different from each

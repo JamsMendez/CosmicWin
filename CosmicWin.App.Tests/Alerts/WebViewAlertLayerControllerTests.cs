@@ -68,6 +68,10 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("AlertLayerTrace.NoOverlayVisual()", source);
         Assert.Contains("candidate.CoreWebView2.ProcessFailed += OnProcessFailed;", source);
         Assert.Contains("candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;", source);
+        Assert.Contains("candidate.CoreWebView2.NavigationStarting += OnNavigationStarting;", source);
+        Assert.Contains("old.CoreWebView2.NavigationStarting -= OnNavigationStarting;", source);
+        Assert.Contains("AlertLayerNavigation.IsSuperseded(", source);
+        Assert.Contains("AlertLayerTrace.NavigationSuperseded(", source);
         // Every Debug.WriteLine catch site must be paired with an AlertLayerTrace.Error/Close call on
         // the very next non-blank line -- proving telemetry was added ALONGSIDE, not instead of, the
         // existing debugger-only diagnostic.
