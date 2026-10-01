@@ -93,4 +93,6 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
 - R2-runnode-kill-comment-now-conditional: comment names the root-only drain-test seam.
 - R2-hash-clamp-relies-on-nan-propagation: note added on why `|| 1` is not dead code.
 - Checks: Release build 0 errors; AlertLayer|Reload tests 135/135. Comment-only, passive.
+- Review review-b193de9588f975e8 (4 lenses, 5139cc1) APPROVED and acknowledged. Advisory WARNING
+  R2-nan-clamp-comment-misstates-evaluation-order: fixed in the next commit (comment only).
 - Open: R3-pid-handshake-shares-timeout-budget (behavioral, own commit).

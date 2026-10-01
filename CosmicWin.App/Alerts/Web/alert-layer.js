@@ -598,8 +598,9 @@ if (hasExplicitParams) {
     // written hash cannot ask for more tiles than the grid it also names has room for.
     // Both clamp to >= 1 here, exactly like startShowing's own grid, so a zero/negative/NaN size
     // can never turn the cap into slice(0, negative) or a product the grid does not have (R3-hash-
-    // tiles-empty-or-negative-grid-unproved). The trailing `|| 1` is NOT dead code: a missing or
-    // non-numeric value gives Math.max(1, NaN) === NaN, and only the `|| 1` turns that into 1.
+    // tiles-empty-or-negative-grid-unproved). The `|| 1` is NOT dead code: it binds to the floored
+    // value, before Math.max sees it, turning the NaN of a missing or non-numeric value into 1.
+    // Without it Math.max(1, NaN) would return NaN.
     var requestedColumns = Math.max(1, Math.floor(Number(params.get("columns"))) || 1);
     var requestedRows = Math.max(1, Math.floor(Number(params.get("rows"))) || 1);
     var requestedTiles = params.get("tiles").split(",")
