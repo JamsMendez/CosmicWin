@@ -105,7 +105,7 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   ends on process exit). TDD: RED = two new slow-start tests (pid written after 1.5 s, bound 500 ms) failed
   with the parameter present but unused; GREEN after the gate. Trap caught on the way: a
   RunNode(timeout, string readyFile, params string[]) overload silently captured "-e" of plain calls
-  (2 tests failed), so it is a distinct name. App suite 1422 passed / 6 skipped (was 1390/6 + new);
+  (2 tests failed), so it is a distinct name. App suite 1422 passed / 6 skipped (= main 5a9c7e7's 1420 + the 2 new tests; the 1390 above was T3's count, before later main work added tests);
   node.exe count 7 before and after; build 0 errors (3 pre-existing nullable warnings elsewhere).
 - Review review-1c54d782319b85bb (4 lenses, 88c7964..2210594) APPROVED and acknowledged. Open SUGGESTIONs:
   R2-ready-wait-silent-on-readiness-bound (WaitUntilReady says nothing when the 30 s bound runs out),
@@ -113,3 +113,10 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   R3-isready-catches-only-ioexception (UnauthorizedAccessException not caught),
   R3-readiness-deadline-wall-clock (DateTime.UtcNow instead of Stopwatch),
   R3-survivor-outer-wait-shorter-than-readiness-bound (survivor test waits 20 s, readiness may take 30 s).
+- Review review-1eedf1ed3d26142a (4 lenses, main..7cbb7e2) APPROVED and acknowledged; it repeated three of
+  the suggestions above and added R2-task-log-test-count-delta-unexplained (the 1422 line).
+- All six suggestions fixed in one commit: WaitUntilReady kills the never-ready script and throws
+  TimeoutException (TDD: RED = new never-ready test got no exception; GREEN after), Stopwatch instead of
+  wall clock, IsReady also absorbs UnauthorizedAccessException, survivor test waits ReadinessBound + 20 s,
+  slow-start delay and hang bound derive from SlowStartDelayMs, 1422 line explained. App suite 1423 passed /
+  6 skipped; node.exe 7 before and after.

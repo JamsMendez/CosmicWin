@@ -138,7 +138,9 @@ public sealed class AlertLayerLayoutNodeTests
             var run = Task.Run(() => RunNode(
                 TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1), killEntireProcessTree: false, readyFile: pidFile,
                 script, pidFile));
-            var finished = run.Wait(TimeSpan.FromSeconds(20));
+            // Must outlast the WORST case RunNode itself allows: the readiness wait, then the 3 s hang
+            // bound, the 5 s exit wait and the 1 s drain (R3-survivor-outer-wait-shorter-than-readiness-bound).
+            var finished = run.Wait(NodeAvailability.ReadinessBound + TimeSpan.FromSeconds(20));
             survivorPid = ReadPid(pidFile);
 
             Assert.True(finished, "Expected RunNode to return after the timeout kill even though a survivor still holds the pipes.");
@@ -196,7 +198,7 @@ public sealed class AlertLayerLayoutNodeTests
         int pid = 0;
         try
         {
-            var result = RunNodeOnceReady(TimeSpan.FromMilliseconds(500), pidFile, script, pidFile);
+            var result = RunNodeOnceReady(SlowStartHangBound, pidFile, script, pidFile);
             pid = ReadPid(pidFile);
 
             Assert.True(result.TimedOut);
@@ -220,7 +222,7 @@ public sealed class AlertLayerLayoutNodeTests
         try
         {
             var available = NodeAvailability.TryRunProbe(
-                "node", [script, pidFile], TimeSpan.FromMilliseconds(500), readyFile: pidFile);
+                "node", [script, pidFile], SlowStartHangBound, readyFile: pidFile);
             pid = ReadPid(pidFile);
 
             Assert.False(available);
@@ -233,12 +235,47 @@ public sealed class AlertLayerLayoutNodeTests
         }
     }
 
-    // Writes its pid only after 1.5 s -- three times the 500 ms bound the tests above give it -- then hangs.
-    private const string SlowStartScript = """
+    /// <summary>
+    /// R2-ready-wait-silent-on-readiness-bound: a script that never reports ready must not slip into the
+    /// hang bound as if it had -- that would turn "never got ready" into a misleading timeout. The wait
+    /// fails loudly instead, and takes the script down with it so nothing leaks.
+    /// </summary>
+    [RequiresNodeFact]
+    public void WaitUntilReady_AScriptThatNeverReportsReady_FailsLoudlyAndKillsIt()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "never.pid");
+        var startInfo = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true };
+        startInfo.ArgumentList.Add("-e");
+        startInfo.ArgumentList.Add("setInterval(() => {}, 1000)");
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start `node`.");
+        try
+        {
+            var error = Record.Exception(
+                () => NodeAvailability.WaitUntilReady(process, pidFile, TimeSpan.FromMilliseconds(300)));
+
+            Assert.IsType<TimeoutException>(error);
+            Assert.True(process.WaitForExit(5000), "Expected the never-ready script to be killed by the failed wait.");
+        }
+        finally
+        {
+            KillIfRunning(process.HasExited ? 0 : process.Id);
+        }
+    }
+
+    // The slow-start script reports its pid only after SlowStartDelayMs, then hangs. The delay must stay
+    // well above the hang bound the tests give it, or they would pass without the readiness gate; both
+    // derive from the same constant so they cannot drift apart (R2-slow-start-timing-constants-coupled-by-comment).
+    private const int SlowStartDelayMs = 1500;
+
+    private static readonly TimeSpan SlowStartHangBound = TimeSpan.FromMilliseconds(SlowStartDelayMs / 3);
+
+    private static readonly string SlowStartScript = $$"""
         setTimeout(() => {
           require('fs').writeFileSync(process.argv[2], String(process.pid));
           setInterval(() => {}, 1000);
-        }, 1500);
+        }, {{SlowStartDelayMs}});
         """;
 
     private static int ReadPid(string pidFile)

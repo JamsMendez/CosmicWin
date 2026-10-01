@@ -111,26 +111,42 @@ internal static class NodeAvailability
     /// R3-pid-handshake-shares-timeout-budget: a hang bound that starts when the process starts also pays
     /// for Node's cold start, so a slow start could kill a test script before it wrote its pid and fail the
     /// test for no real reason. A caller that names a ready file gets its bound started only once that file
-    /// holds a pid (or the process exits, or <see cref="ReadinessBound"/> runs out -- a script that never
-    /// gets ready must not hang the run either).
+    /// holds a pid, or the process exits on its own. A script still running but not ready when
+    /// <see cref="ReadinessBound"/> runs out is killed (whole tree) and reported with a
+    /// <see cref="TimeoutException"/> (R2-ready-wait-silent-on-readiness-bound): letting it fall through
+    /// into the hang bound would report "never got ready" as an ordinary timeout. TimeoutException on
+    /// purpose -- <see cref="TryRunProbe"/>'s catch must not turn it into a quiet "unavailable".
     /// </summary>
-    internal static void WaitUntilReady(Process process, string? readyFile)
+    internal static void WaitUntilReady(Process process, string? readyFile, TimeSpan? readinessBound = null)
     {
         if (readyFile is null)
         {
             return;
         }
 
-        var deadline = DateTime.UtcNow + ReadinessBound;
-        while (DateTime.UtcNow < deadline && !process.HasExited)
+        // Stopwatch, not DateTime.UtcNow: a wall-clock adjustment mid-wait must not stretch or cut the
+        // bound (R3-readiness-deadline-wall-clock).
+        var bound = readinessBound ?? ReadinessBound;
+        var elapsed = Stopwatch.StartNew();
+        while (elapsed.Elapsed < bound)
         {
-            if (IsReady(readyFile))
+            if (process.HasExited || IsReady(readyFile))
             {
                 return;
             }
 
             Thread.Sleep(25);
         }
+
+        if (process.HasExited || IsReady(readyFile))
+        {
+            return;
+        }
+
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit(5000);
+        throw new TimeoutException(
+            $"The script never reported ready in {readyFile} within {bound.TotalSeconds:0.###} s; it was killed.");
     }
 
     // The script writes the file in one call, but a reader can still land between create and write,
@@ -141,7 +157,9 @@ internal static class NodeAvailability
         {
             return File.Exists(readyFile) && int.TryParse(File.ReadAllText(readyFile), out _);
         }
-        catch (IOException)
+        // UnauthorizedAccessException too: a file still being created can deny the read for a moment
+        // (R3-isready-catches-only-ioexception); either way it is simply "not ready yet".
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
         }
