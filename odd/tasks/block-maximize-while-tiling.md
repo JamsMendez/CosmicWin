@@ -76,8 +76,22 @@ strategy question is asked before delivery. Everything stays local; the maintain
   RED: `Win32WindowTests.TrySetMaximizeBox_Clearing_...`, `TrySetMaximizeBox_Setting_...`,
   `TryRestore_ForwardsToNative_...` failed `Assert.True` against stub members returning false
   (3 of 25 failing). GREEN: 25/25. Commit: see Progress.
-- [ ] T2: Adapter: strip on tile while active, remember original, restore on leave/tiling-off/
-  dispose, re-strip on tiling-on. Route: same delegated writer.
+- [x] T2: Adapter: strip on tile while active, remember original, restore on leave/tiling-off/
+  dispose, re-strip on tiling-on. Route: same delegated writer (trigger: 2+ non-trivial files).
+  `_boxStripped` (handles whose box we cleared = "originally had one") + `_boxRefused` (trace the
+  UIPI refusal once). Strip at end of `AddWindow` and on every settled bounds change (also re-strips
+  after fullscreen); restore on removal, exclusion (minimize), `Untile` (floor/Judge eviction),
+  fullscreen entry, `CanReposition` loss, public `ReleaseMaximizeBlock()` (tiling OFF, wired in
+  `AppComposition.setTiling`), `Dispose`; public `ApplyMaximizeBlock()` re-strips on tiling ON.
+  Decision: restore/strip is keyed on the TILING toggle, NOT on `hook.IsPaused` (a brief, reversible
+  suspension; flashing every title bar twice for it is noise). Admission verdict preserved by
+  `IsExcludedAsAdmitted` (puts WS_MAXIMIZEBOX back into the descriptor for windows we stripped).
+  RED (before the adapter existed): 11 of 21 `MaximizeBlockTests` failed (strip, release, apply,
+  minimize/fullscreen/evict restore, admission verdict, T3 cases), plus
+  `TilingModeTests.TurningTilingOff_GivesEveryTiledWindowItsMaximizeBoxBack` and
+  `TurningTilingBackOn_TakesTheMaximizeBoxOfEveryTiledWindowAgain` (wiring). Some "restore"
+  facts passed vacuously against the no-op stubs by construction. Mutation checks: reverting
+  `IsExcludedAsAdmitted` fails `AStrippedWindow_KeepsItsAdmissionVerdict_...`. GREEN afterwards.
 - [ ] T3: Adapter: maximize fallback (restore + arrange, exempt from `Judge`, fullscreen untouched).
   Route: same delegated writer.
 - [ ] T4: README behavior + limits. Route: same delegated writer.

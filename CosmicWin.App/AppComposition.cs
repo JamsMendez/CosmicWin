@@ -1321,6 +1321,10 @@ public sealed class AppComposition : IDisposable
             // for them BY NAME is the only route back; one already tiled costs a single lookup.
             sessionAdapter.AdoptOpenWindows();
 
+            // The windows tiled BEFORE it went off were handed their maximize box back then and are
+            // never announced again, so this is the only thing that takes it away a second time.
+            sessionAdapter.ApplyMaximizeBlock();
+
             // Then EVERY display, not only the ones that gained a window. While tiling was off the
             // user was free to drag and resize with the mouse, and switching it back on is a request
             // to put the layout back -- which for a display where nothing opened or closed is a
@@ -1418,10 +1422,17 @@ public sealed class AppComposition : IDisposable
                     // hook's own thread does both everywhere else in this file.
                     onOwningThread(ResumeTiling);
                 }
+                else
+                {
+                    // The one thing turning it OFF does: the maximize buttons come back. A mode whose
+                    // promise is that the layout no longer interferes cannot leave windows with a
+                    // disabled button for it. Same thread as the trees the adapter reads.
+                    onOwningThread(sessionAdapter.ReleaseMaximizeBlock);
+                }
 
-                // Turning it OFF does nothing else on purpose. Every window is left exactly where
-                // the layout last put it, which is the honest starting point for a mode whose whole
-                // promise is that nothing moves any more.
+                // Nothing else changes on purpose. Every window is left exactly where the layout
+                // last put it, which is the honest starting point for a mode whose whole promise is
+                // that nothing moves any more.
             },
             getBorderColor: () => borderColor,
             setBorderColor: rgb =>

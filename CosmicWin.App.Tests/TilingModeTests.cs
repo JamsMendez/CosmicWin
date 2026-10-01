@@ -432,6 +432,80 @@ public sealed class TilingModeTests
         }
     }
 
+    /// <summary>
+    /// The maximize block is part of the layout being in charge, so it ends when the layout does:
+    /// the switch going off hands every window its button back, and nothing else about the window
+    /// changes.
+    /// </summary>
+    [Fact]
+    public void TurningTilingOff_GivesEveryTiledWindowItsMaximizeBoxBack()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4001), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            Assert.Equal(0u, window.Style & WindowStyleFlags.MaximizeBox);
+
+            harness.Tray.ToggleTiling();
+
+            Assert.NotEqual(0u, window.Style & WindowStyleFlags.MaximizeBox);
+        }
+    }
+
+    [Fact]
+    public void TurningTilingBackOn_TakesTheMaximizeBoxOfEveryTiledWindowAgain()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4002), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Tray.ToggleTiling();
+            Assert.NotEqual(0u, window.Style & WindowStyleFlags.MaximizeBox);
+
+            harness.Tray.ToggleTiling();
+
+            Assert.Equal(0u, window.Style & WindowStyleFlags.MaximizeBox);
+        }
+    }
+
+    /// <summary>The same promise on the way out: a normal exit leaves no disabled button behind.</summary>
+    [Fact]
+    public void ExitingNormally_GivesTheMaximizeBoxBack()
+    {
+        var harness = Wire();
+        var window = new RecordingWindow(new IntPtr(4003), Rectangle.FromSize(0, 0, 800, 600));
+        harness.Workspace.RaiseWindowAdded(window);
+        Assert.Equal(0u, window.Style & WindowStyleFlags.MaximizeBox);
+
+        harness.Composition.Dispose();
+
+        Assert.NotEqual(0u, window.Style & WindowStyleFlags.MaximizeBox);
+    }
+
+    /// <summary>
+    /// With tiling off a window is free to maximize, and nothing undoes it -- the block is a
+    /// property of the layout being on, not of the window having once been tiled.
+    /// </summary>
+    [Fact]
+    public void WithTilingOff_AWindowMayMaximize()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4004), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Tray.ToggleTiling();
+
+            window.SimulateMaximize(Rectangle.FromSize(0, 0, 1920, 1080));
+            harness.Workspace.RaiseWindowBoundsChanged(window);
+
+            Assert.Equal(0, window.RestoreCallCount);
+            Assert.NotEqual(0u, window.Style & WindowStyleFlags.Maximized);
+        }
+    }
+
     private static async Task<bool> WaitUntil(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);

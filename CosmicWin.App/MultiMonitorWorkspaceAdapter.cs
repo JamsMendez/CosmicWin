@@ -137,6 +137,23 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly HashSet<nint> _arriving = [];
 
     /// <summary>
+    /// Windows whose <c>WS_MAXIMIZEBOX</c> this adapter cleared, and therefore owes back.
+    /// </summary>
+    /// <remarks>
+    /// Membership IS the memory of "this window originally had a maximize box": only a window that
+    /// had one is ever added, so handing boxes back can never GIVE one to a window that never had
+    /// it. Forgotten on removal like every other per-handle record here, because Windows reuses
+    /// HWND values and a stale entry would hand a box to somebody else's window.
+    /// </remarks>
+    private readonly HashSet<nint> _boxStripped = [];
+
+    /// <summary>
+    /// Windows that refused the style change (an elevated one, from a non-elevated CosmicWin), so
+    /// the refusal is traced once and not retried on every bounds change for the life of the window.
+    /// </summary>
+    private readonly HashSet<nint> _boxRefused = [];
+
+    /// <summary>
     /// Which virtual desktop a window is on. Unset means "there is only one", which is how every
     /// caller that predates virtual desktops behaves.
     /// </summary>
@@ -273,7 +290,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         var window = e.Window;
-        if (WorkspaceSessionAdapter.IsExcluded(window, _exceptions()))
+        if (IsExcludedAsAdmitted(window))
         {
             return;
         }
@@ -476,6 +493,8 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // filed under.
         if (IsFullscreen(window, _treeManager.Displays))
         {
+            RestoreMaximizeBox(window.Handle, window);
+
             if (_fullscreen.Add(window.Handle))
             {
                 Trace?.Record(
@@ -515,7 +534,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (!window.CanReposition)
         {
             _owners.Remove(window.Handle);
+            return;
         }
+
+        // Tiled, so it no longer gets to leave its tile by being maximized. After the arrange, and
+        // only for a window that stayed in the tree: stripping one that was just turned away would
+        // be a change to a window this adapter does not manage.
+        StripMaximizeBox(window);
     }
 
     /// <summary>
@@ -1258,6 +1283,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         _misses.Remove(handle);
         _owners.Remove(handle);
 
+        // Looked up BEFORE the registry entry goes below. A window left floating is not ours to
+        // hold a button hostage on.
+        RestoreMaximizeBox(handle);
+
         if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
         {
             Arrange(tree, WorkAreaResolver.Resolve(display));
@@ -1277,6 +1306,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Windows handed out next.
         _misses.Remove(handle);
         _givenUp.Remove(handle);
+        RestoreMaximizeBox(handle, e.Window);
         _minimumSize.Remove(handle);
         _maximumSize.Remove(handle);
         _clampsInsideItsTile.Remove(handle);
@@ -1355,7 +1385,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // clears as the user minimises and restores. Both transitions move the window -- minimising
         // parks it at (-32000,-32000) -- so both arrive here, which makes this the one place the
         // verdict can be kept honest.
-        var excluded = WorkspaceSessionAdapter.IsExcluded(window, _exceptions());
+        var excluded = IsExcludedAsAdmitted(window);
 
         if (!_owners.TryGetValue(handle, out var display))
         {
@@ -1380,6 +1410,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             // keeps a full tile while drawing nothing, which is what made one visible window occupy
             // only half the screen. Remove it and reflow the survivors into the space.
             _owners.Remove(handle);
+            RestoreMaximizeBox(handle, window);
             if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
             {
                 Arrange(tree, WorkAreaResolver.Resolve(display));
@@ -1411,6 +1442,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (IsFullscreen(window, _treeManager.Displays))
         {
             _misses.Remove(handle);
+
+            // A window that is not being tiled for now has no business holding a disabled button;
+            // it is re-stripped by the first ordinary bounds change after it is a window again.
+            RestoreMaximizeBox(handle, window);
 
             // Once per entry rather than once per poll, like `clamps itself`: the poll re-reports the
             // same window every two seconds for as long as the video plays.
@@ -1583,6 +1618,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (!window.CanReposition)
         {
             _owners.Remove(handle);
+            RestoreMaximizeBox(handle, window);
+        }
+        else
+        {
+            // Also what re-strips a window after fullscreen, and one whose application put its box
+            // back on its own. A no-op for a window that has no box left to take.
+            StripMaximizeBox(window);
         }
 
         // A tiled window moving is this adapter's only evidence that the SHAPE of the display
@@ -1655,8 +1697,145 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             : "swap refused";
     }
 
+    /// <summary>
+    /// The exclusion verdict for <paramref name="window"/> as it was ADMITTED, not as it reads now.
+    /// </summary>
+    /// <remarks>
+    /// <c>WindowFilters</c> reads <c>WS_MAXIMIZEBOX</c>: a window with no system menu and no resize
+    /// border is tileable only because it carries both the minimize and the maximize box. Judged by
+    /// the style this adapter itself left it with, that window would be excluded, evicted, handed
+    /// its box back, re-admitted, stripped again and so on for as long as it lives. Putting the
+    /// bit back into the descriptor for a window whose box is ours to return keeps the verdict
+    /// exactly what it was before the block existed.
+    /// </remarks>
+    private bool IsExcludedAsAdmitted(IWindow window)
+    {
+        var descriptor = WindowDescriptorBuilder.Build(window);
+        if (_boxStripped.Contains(window.Handle))
+        {
+            descriptor = descriptor with { Style = descriptor.Style | WindowStyleFlags.MaximizeBox };
+        }
+
+        return WindowFilters.IsExcluded(descriptor, _exceptions());
+    }
+
+    /// <summary>
+    /// Takes the maximize box off a tiled window, remembering that it had one. A window without a
+    /// box is left alone, and a refusal is traced once and not repeated.
+    /// </summary>
+    private void StripMaximizeBox(IWindow window)
+    {
+        var handle = window.Handle;
+        if ((window.Style & WindowStyleFlags.MaximizeBox) == 0 || _boxRefused.Contains(handle))
+        {
+            return;
+        }
+
+        if (window.TrySetMaximizeBox(false))
+        {
+            _boxStripped.Add(handle);
+            return;
+        }
+
+        _boxRefused.Add(handle);
+        Trace?.Record(
+            $"maximize box kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+            $"-- the window refused the change (an elevated window?); a maximize is still undone after the fact");
+    }
+
+    /// <summary>
+    /// Gives the maximize box back if this adapter took it, and forgets the handle either way.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="known"/> is the window the caller already holds; without it the registry is
+    /// asked, which still answers for a window that is about to leave the tree. A window that is
+    /// already dead simply cannot be given anything -- the call reports false and the record is
+    /// dropped regardless.
+    /// </remarks>
+    private void RestoreMaximizeBox(nint handle, IWindow? known = null)
+    {
+        _boxRefused.Remove(handle);
+
+        if (!_boxStripped.Remove(handle))
+        {
+            return;
+        }
+
+        if (known is null)
+        {
+            _registry.TryGetWindow(handle, out known);
+        }
+
+        known?.TrySetMaximizeBox(true);
+    }
+
+    /// <summary>
+    /// Gives every maximize box this adapter took back to its window. Called when tiling is turned
+    /// OFF and on the way out, so the user is never left with a disabled button on a window that is
+    /// no longer being tiled.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the TILING toggle and deliberately not on the keyboard pause. A pause is a brief,
+    /// reversible suspension -- the chords stop and the layout holds still -- and flipping every
+    /// window's frame back and forth for it would flash every title bar twice for something the
+    /// user expects to undo in a minute. While paused the boxes simply stay as they are, and a
+    /// window opened then is not tiled and so is never touched. Turning tiling off is the user
+    /// saying the layout is no longer in charge, and that is when the buttons come back.
+    /// </remarks>
+    public void ReleaseMaximizeBlock()
+    {
+        foreach (var handle in _boxStripped.ToArray())
+        {
+            RestoreMaximizeBox(handle);
+        }
+
+        _boxRefused.Clear();
+    }
+
+    /// <summary>
+    /// Takes the maximize box off every tiled window and puts back any that maximized while tiling
+    /// was off. The counterpart of <see cref="ReleaseMaximizeBlock"/>, called when tiling comes
+    /// back on, because windows tiled before it was turned off were never announced again.
+    /// </summary>
+    /// <remarks>
+    /// A fullscreen window is skipped: it is deliberately left alone until it is a window again,
+    /// and the bounds-changed path re-strips it then. Does nothing while paused, for the same
+    /// reason a window opened while paused is not tiled; the first bounds change after the pause
+    /// ends strips it.
+    /// </remarks>
+    public void ApplyMaximizeBlock()
+    {
+        if (_isPaused())
+        {
+            return;
+        }
+
+        foreach (var handle in _owners.Keys.ToArray())
+        {
+            if (_fullscreen.Contains(handle)
+                || !_registry.TryGetWindow(handle, out var window) || window is not { IsAlive: true })
+            {
+                continue;
+            }
+
+            _boxRefused.Remove(handle);
+
+            if ((window.Style & WindowStyleFlags.Maximized) != 0)
+            {
+                window.TryRestore();
+            }
+
+            StripMaximizeBox(window);
+        }
+    }
+
     public void Dispose()
     {
+        // Normal exit: nobody should be left with a disabled button on a window CosmicWin no longer
+        // manages. A crash or a kill cannot run this, and those windows keep the disabled button
+        // until they are reopened.
+        ReleaseMaximizeBlock();
+
         _workspace.WindowAdded -= OnWindowAdded;
         _workspace.WindowRemoved -= OnWindowRemoved;
         _workspace.WindowBoundsChanged -= OnWindowBoundsChanged;
