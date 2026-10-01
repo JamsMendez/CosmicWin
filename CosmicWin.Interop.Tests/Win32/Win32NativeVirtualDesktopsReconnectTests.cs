@@ -61,14 +61,61 @@ public sealed class Win32NativeVirtualDesktopsReconnectTests
         Assert.Null(harness.Native.LastError);
     }
 
-    [Fact]
-    public void CreateDesktop_reconnects_after_a_disconnect()
+    [Theory]
+    [InlineData(unchecked((int)0x800706BA))]
+    [InlineData(unchecked((int)0x80010108))]
+    public void CreateDesktop_is_retried_when_the_call_provably_never_reached_explorer(int hresult)
     {
-        var harness = Harness.Create(firstDead: true, deadHr: ShellDisconnect.ServerDied);
+        var harness = Harness.Create(firstDead: true, deadHr: hresult);
 
         harness.Native.CreateDesktop();
 
+        Assert.Equal(2, harness.Resolves);
         Assert.Equal(1, harness.Healthy.Created);
+    }
+
+    [Theory]
+    [InlineData(unchecked((int)0x800706BE))]
+    [InlineData(unchecked((int)0x80010012))]
+    [InlineData(unchecked((int)0x80004018))]
+    public void CreateDesktop_reconnects_but_is_not_retried_when_the_call_may_have_run(int hresult)
+    {
+        var harness = Harness.Create(firstDead: false, deadHr: hresult, firstCreateDeadHr: hresult);
+
+        harness.Native.CreateDesktop();
+
+        // Reconnected, so the NEXT call works; not retried, so a create that did run is not doubled.
+        Assert.Equal(2, harness.Resolves);
+        Assert.Equal(0, harness.Healthy.Created);
+        Assert.Contains("not retried", harness.Native.LastError);
+        Assert.Contains($"0x{hresult:X8}", harness.Native.LastError);
+    }
+
+    [Fact]
+    public void After_an_unretried_create_the_next_call_uses_the_fresh_managers()
+    {
+        var harness = Harness.Create(firstDead: false, deadHr: ShellDisconnect.CallFailed, firstCreateDeadHr: ShellDisconnect.CallFailed);
+
+        harness.Native.CreateDesktop();
+        harness.Native.CreateDesktop();
+
+        Assert.Equal(2, harness.Resolves);
+        Assert.Equal(1, harness.Healthy.Created);
+    }
+
+    [Fact]
+    public void A_not_retried_create_degrades_to_a_clear_failure_in_the_service()
+    {
+        var harness = Harness.Create(firstDead: false, deadHr: ShellDisconnect.CallFailed, firstCreateDeadHr: ShellDisconnect.CallFailed);
+        var service = new Win32VirtualDesktopService(harness.Native, _ => { });
+
+        // Two desktops exist; asking for the third makes the service create one.
+        var switched = service.TrySwitchTo(3);
+
+        Assert.False(switched);
+        Assert.Equal(0, harness.Healthy.Created);
+        Assert.Contains("CreateDesktop did not grow the set", service.LastError);
+        Assert.Contains("not retried", service.LastError);
     }
 
     [Fact]
@@ -186,11 +233,12 @@ public sealed class Win32NativeVirtualDesktopsReconnectTests
             int deadHr,
             bool deadThrows = true,
             bool secondDead = false,
-            bool secondResolves = true)
+            bool secondResolves = true,
+            int? firstCreateDeadHr = null)
         {
-            var first = new FakeShell { DeadHr = firstDead ? deadHr : null, DeadThrows = deadThrows };
+            var first = new FakeShell { DeadHr = firstDead ? deadHr : null, DeadThrows = deadThrows, CreateDeadHr = firstCreateDeadHr };
             var second = new FakeShell { DeadHr = secondDead ? deadHr : null, DeadThrows = deadThrows };
-            var harness = new Harness { Healthy = firstDead ? second : first };
+            var harness = new Harness { Healthy = firstDead || firstCreateDeadHr is not null ? second : first };
             var shells = new Queue<FakeShell>([first, second]);
 
             harness.Native = new Win32NativeVirtualDesktops(
@@ -237,6 +285,9 @@ public sealed class Win32NativeVirtualDesktopsReconnectTests
 
         public int Created { get; private set; }
 
+        /// <summary>Makes ONLY CreateDesktop fail, the way a call lost mid-flight does.</summary>
+        public int? CreateDeadHr { get; init; }
+
         private void ThrowIfDead()
         {
             if (DeadHr is { } hr)
@@ -266,6 +317,11 @@ public sealed class Win32NativeVirtualDesktopsReconnectTests
         public IVirtualDesktop CreateDesktop()
         {
             ThrowIfDead();
+            if (CreateDeadHr is { } hr)
+            {
+                throw new COMException("dead", hr);
+            }
+
             Created++;
             return new FakeDesktop(Guid.NewGuid());
         }

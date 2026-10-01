@@ -1,0 +1,57 @@
+# Review follow-ups from 2026-09-30
+
+## Objective
+
+Close the non-blocking findings left by the reviews of the Explorer-restart reconnect and the
+maximize block, and finish their hardware coverage.
+
+## Why
+
+Maintainer request, 2026-09-30: "Vamos a darle a los pendientes no bloqueantes".
+
+## Scope
+
+1. `R3-create-desktop-retry-nonidempotent` -- `Win32NativeVirtualDesktops.CreateDesktop` is retried
+   after a disconnect HRESULT. For an ambiguous failure (`0x800706BE` RPC_S_CALL_FAILED,
+   `0x80010012`, `0x80004018`) the first call may have run in Explorer, so a retry can create TWO
+   desktops. Only an error that proves the call never reached the server may be retried.
+2. `R3-static-seam-parallel-tests` -- `Win32VirtualDesktopQueriesReconnectTests` swaps a STATIC
+   factory seam on `Win32VirtualDesktopQueries`; xUnit runs test classes in parallel, so another
+   class using the real static path can observe the fake (or vice versa).
+3. Hung-window edge cases of the maximize block (only reachable when a bounded style write times
+   out on a hung target): `R3-late-strip-after-giveback` (a strip that timed out lands AFTER the
+   give-back already ran, leaving a disabled button) and
+   `R3-admission-verdict-ignores-late-strip` (`IsExcludedAsAdmitted` re-adds the bit only for
+   `_boxStripped`, not for a timed-out strip that landed).
+4. README: CosmicWin always runs elevated (`app.manifest` requireAdministrator), so the limit
+   "windows running as administrator are not touched while CosmicWin is not elevated" describes a
+   case that does not occur; reword it truthfully.
+5. Hardware coverage not yet measured: a Chromium browser, VS Code, F11 fullscreen.
+
+Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 3, separate change).
+
+## TDD mode
+
+**Strict TDD: enabled**, source: user's global instructions. Runner: xUnit 2.9.3.
+
+## Tasks
+
+- [x] T1: CreateDesktop retried only when the call provably never ran. Route: delegated writer.
+- [ ] T2: Queries reconnect tests no longer race other test classes. Route: same writer.
+- [ ] T3: Maximize block hung-window edge cases. Route: same writer.
+- [ ] T4: README elevation limit reworded. Route: same writer.
+- [ ] T5: Hardware: Edge/Chrome, VS Code, F11 on own probe instances (separate user-data-dir,
+  killed by PID). Route: inline, parallel to T1-T4 against the running build (code == main bea8a6c).
+
+## Progress
+
+- 2026-09-30: branch `fix/review-follow-ups-2026-09-30` from main bea8a6c.
+- 2026-09-30 T1 (route: delegated writer, trigger "2+ non-trivial files"): `ShellDisconnect.CallNeverRan`
+  admits only `0x800706BA` (binding failed, request never delivered) and `0x80010108` (proxy already
+  knew its channel was gone). `0x800706BE`, `0x80010012`, `0x80004018` are what a call lost WHILE
+  running reports, so `CreateDesktop` reconnects but is not retried (`TryInvoke(idempotent: false)`);
+  LastError says "reconnected, not retried because the call may already have run". The service then
+  re-reads the set: if the create ran it grew and resolution proceeds, otherwise "CreateDesktop did not
+  grow the set ... not retried". RED: 5 tests failed (the 3 ambiguous HRESULTs, the next-call and the
+  service test; retry made Created 1 instead of 0). GREEN: 27/27 in the reconnect class. Mutation:
+  `CallNeverRan` made accept all five -> the same 5 failed; reverted.

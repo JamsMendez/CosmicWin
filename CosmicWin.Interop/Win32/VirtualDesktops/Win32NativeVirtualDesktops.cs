@@ -28,7 +28,7 @@ namespace CosmicWin.Interop.Win32.VirtualDesktops;
 /// <b>The shell objects are proxies into <c>explorer.exe</c> and die with it.</b> After an Explorer
 /// restart every call through the cached proxies fails with an RPC disconnect HRESULT (seen on
 /// hardware: <c>0x800706BA</c>), which used to read as "zero desktops" until CosmicWin was
-/// restarted. A call that fails that way now re-resolves the objects and is retried once; see
+/// restarted. A call that fails that way now re-resolves the objects and is retried once (a non-idempotent call only when it provably never ran); see
 /// <see cref="ShellDisconnect"/>. The probe is deliberately NOT re-run: the same build's vtable does
 /// not change across a restart.
 /// </para>
@@ -99,7 +99,7 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
         {
             shell.Internal.CreateDesktop();
             return true;
-        }, false);
+        }, false, idempotent: false);
 
     /// <summary>
     /// Windows' own <c>Win+Ctrl+F4</c>, not the internal <c>RemoveDesktop</c> slot.
@@ -210,8 +210,15 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
     /// resolve, not a loop. Only a disconnect HRESULT triggers it -- any other failure is a real
     /// answer from a live shell and is reported as before. Never throws; a failure that survives the
     /// retry is reported in <see cref="LastError"/> and says a reconnect was attempted.
+    /// <para>
+    /// A call that is NOT idempotent (<c>CreateDesktop</c>) is retried only when the HRESULT proves it
+    /// never reached Explorer (<see cref="ShellDisconnect.CallNeverRan"/>). Otherwise the shell may
+    /// have run it and died before answering, and a retry would make a second desktop. The managers
+    /// are still re-resolved so the next call works, and <see cref="LastError"/> says why this one
+    /// was not repeated; the caller re-reads the desktop set to learn whether it took effect.
+    /// </para>
     /// </remarks>
-    private T TryInvoke<T>(string operation, Func<ShellManagers, T> call, T fallback)
+    private T TryInvoke<T>(string operation, Func<ShellManagers, T> call, T fallback, bool idempotent = true)
     {
         if (_managers is not { } shell)
         {
@@ -233,6 +240,12 @@ internal sealed class Win32NativeVirtualDesktops : INativeVirtualDesktops
             if (!TryConnect())
             {
                 LastError = $"{operation}: {ex.GetType().Name} 0x{ex.HResult:X8}; reconnect failed: {LastError}";
+                return fallback;
+            }
+
+            if (!idempotent && !ShellDisconnect.CallNeverRan(ex.HResult))
+            {
+                LastError = $"{operation}: {ex.GetType().Name} 0x{ex.HResult:X8}; reconnected, not retried because the call may already have run";
                 return fallback;
             }
 

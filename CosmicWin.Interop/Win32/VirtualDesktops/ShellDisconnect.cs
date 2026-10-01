@@ -36,4 +36,21 @@ internal static class ShellDisconnect
     /// </summary>
     public static bool IsDisconnect(int hresult) =>
         hresult is ServerUnavailable or CallFailed or Disconnected or ServerDied or ServerStopping;
+
+    /// <summary>
+    /// Whether <paramref name="hresult"/> PROVES the failed call never reached the shell, so repeating
+    /// it cannot run it twice.
+    /// </summary>
+    /// <remarks>
+    /// Only matters for a call that is not idempotent (<c>CreateDesktop</c>: a second run makes a
+    /// second desktop). <c>RPC_S_SERVER_UNAVAILABLE</c> is the binding failing -- no server to send
+    /// to, the request was never delivered -- and <c>RPC_E_DISCONNECTED</c> is the proxy already
+    /// knowing its channel is gone before it marshals anything. The other three are what a call lost
+    /// WHILE running reports (<c>RPC_S_CALL_FAILED</c>, the server dying or stopping mid-call), so the
+    /// shell may have created the desktop and died before answering: those reconnect, and the caller
+    /// re-reads the world rather than guessing. Residual risk, accepted: the two proofs are a reading
+    /// of the RPC contract, not something the shell promises per call.
+    /// </remarks>
+    public static bool CallNeverRan(int hresult) =>
+        hresult is ServerUnavailable or Disconnected;
 }
