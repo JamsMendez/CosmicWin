@@ -1,4 +1,4 @@
-namespace CosmicWin.App.Alerts;
+﻿namespace CosmicWin.App.Alerts;
 
 /// <summary>
 /// Pure bookkeeping behind "is this NavigationCompleted stale?", independent of event order and of id
@@ -14,7 +14,16 @@ internal sealed class AlertLayerNavigation
     private readonly HashSet<ulong> _abandoned = [];
     private ulong? _inFlight;
 
-    public void Started(ulong navigationId) => _inFlight = navigationId;
+    // The most recent NavigationStarting, kept after it completes: a completion of any OTHER id was
+    // overtaken by a newer navigation (review R3-navigate-before-starting-race: two host Navigate calls
+    // before the first start is delivered leave BeforeHostNavigate nothing to abandon).
+    private ulong? _latestStarted;
+
+    public void Started(ulong navigationId)
+    {
+        _inFlight = navigationId;
+        _latestStarted = navigationId;
+    }
 
     /// <summary>Call immediately before the host calls Navigate.</summary>
     public void BeforeHostNavigate()
@@ -27,6 +36,7 @@ internal sealed class AlertLayerNavigation
     public bool CompletedIsSuperseded(ulong navigationId)
     {
         if (_abandoned.Remove(navigationId)) return true;
+        if (_latestStarted is { } latest && latest != navigationId) return true;
         if (_inFlight == navigationId) _inFlight = null;
         return false;
     }
@@ -35,5 +45,6 @@ internal sealed class AlertLayerNavigation
     {
         _abandoned.Clear();
         _inFlight = null;
+        _latestStarted = null;
     }
 }

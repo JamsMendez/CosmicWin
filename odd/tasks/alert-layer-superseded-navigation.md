@@ -76,3 +76,11 @@ state. A failure of the LATEST navigation still tears down exactly as today.
   Also seen: an external HTTP client was sending alerts/scenes during the run (`alert ignored: one is
   already showing` for a probe alert), which explains the unexplained switches in the trace.
 
+- 2026-10-01: review-ca57113fb799cd52 (medium, reliability, 367feaf..1e47795) APPROVED and acknowledged.
+  Its WARNING R3-navigate-before-starting-race fixed right after: the tracker also remembers the
+  latest NavigationStarting, and a completion of any OTHER id (exact inequality) is superseded, so two
+  host Navigate calls before the first start is delivered no longer leave the older abort fatal.
+  RED: new seam test `TwoHostNavigatesBeforeEitherStarted_...` failed (Assert.True), then GREEN 51/51
+  focused; full App 1416 passed / 6 skipped; hardware repro repeated: same clean superseded traces.
+  Residual (advisory): if the first navigation's abort completes BEFORE either start is delivered,
+  nothing identifies it as stale; not observed on hardware.

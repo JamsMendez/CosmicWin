@@ -1,4 +1,4 @@
-using CosmicWin.App.Alerts;
+﻿using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
 
@@ -89,6 +89,23 @@ public sealed class AlertLayerNavigationTests
         nav.BeforeHostNavigate();
         nav.Clear();
         Assert.False(nav.CompletedIsSuperseded(1));
+    }
+
+    /// <summary>
+    /// Review R3-navigate-before-starting-race: the host navigates twice before NavigationStarting for the
+    /// first is delivered, so BeforeHostNavigate had nothing in flight to abandon. Both starts then arrive
+    /// and the first one's abort completes last: a navigation that started after it supersedes it.
+    /// </summary>
+    [Fact]
+    public void TwoHostNavigatesBeforeEitherStarted_TheOlderAbortIsSuperseded_AndTheNewerStillCounts()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.BeforeHostNavigate();
+        nav.BeforeHostNavigate();
+        nav.Started(11);
+        nav.Started(12);
+        Assert.True(nav.CompletedIsSuperseded(11));
+        Assert.False(nav.CompletedIsSuperseded(12));
     }
 
     [Fact]
