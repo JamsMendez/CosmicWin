@@ -29,7 +29,7 @@ deferred-capture list, hash cap order comment) are OUT of scope.
   spawned by the script dies too); prove NodeAvailability's probe timeout path.
   (R3/R4-runnode-timeout-branch-unbounded-result, R3-timeout-test-proves-root-only,
   R3-probe-timeout-path-unproved)
-- [ ] T3 -- A swallowed gap/exceptions reload failure is never silent when no desktop trace is wired
+- [x] T3 -- A swallowed gap/exceptions reload failure is never silent when no desktop trace is wired
   (AppComposition.cs ~1387 ReloadGap, CompositionRoot.cs ~166/175).
   (R4-reload-gap-swallow-depends-on-optional-trace)
 
@@ -57,3 +57,10 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   probe-timeout test; both restored from backup copies. NodeAvailability gained an internal
   `TryRunProbe(fileName, arguments, timeout)` overload (production probe unchanged). Focused: 5/5 pass,
   no stray node.exe left from the runs.
+- 2026-10-01 T3: RED: three new tests (exceptions-half and gap-half through the tray Reload, plus the
+  deferred ReloadGap catch) failed with "Filter not matched in collection" when no desktop trace was
+  wired. GREEN after `CompositionRoot.ReportSwallowedFailure`: records on the trace when present, else
+  `Trace.WriteLine` (chosen over Debug.WriteLine because it is compiled in Release and a test can
+  observe it through a TraceListener; no existing fallback sink existed beyond Debug.WriteLine in the
+  WebView controller). Full App suite 1390 passed / 6 skipped (baseline 1384 / 6); `dotnet build
+  CosmicWin.sln` 0 errors, no warnings in touched files.

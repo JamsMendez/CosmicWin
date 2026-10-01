@@ -1384,7 +1384,7 @@ public sealed class AppComposition : IDisposable
                 // failure could happen in here, CompositionRoot.Reload has already returned
                 // successfully; without this catch the failure would reach nothing but WPF's
                 // unhandled-dispatcher-exception path instead of a trace line.
-                desktopTrace?.Record($"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
+                CompositionRoot.ReportSwallowedFailure(desktopTrace, $"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
             }
         }
 

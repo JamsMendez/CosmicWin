@@ -229,6 +229,33 @@ public sealed class GapReloadTests
         }
     }
 
+    /// <summary>
+    /// R4-reload-gap-swallow-depends-on-optional-trace: the deferred catch inside
+    /// <c>AppComposition.ReloadGap</c> is the ONLY place that sees an asynchronous failure, so with no
+    /// desktop trace it must still report to <see cref="System.Diagnostics.Trace"/>.
+    /// </summary>
+    [Fact]
+    public void Reload_WithDeferredSchedulingAndNoDesktopTrace_StillReportsAGapReloadFailureToTheFallbackSink()
+    {
+        using var listener = new CosmicWin.App.Tests.TestDoubles.CapturingTraceListener();
+        Action? deferred = null;
+        var harness = Wire(
+            () => throw new InvalidOperationException("settings.conf unreadable (deferred fallback sink)"),
+            scheduleOnOwningThread: work => deferred = work);
+        using (harness.Composition)
+        {
+            harness.Tray.Reload();
+            Assert.NotNull(deferred);
+
+            var thrown = Record.Exception(deferred!);
+
+            Assert.Null(thrown);
+            Assert.Contains(listener.Lines, line =>
+                line.Contains("reload-gap-failed", StringComparison.Ordinal)
+                && line.Contains("deferred fallback sink", StringComparison.Ordinal));
+        }
+    }
+
     /// <summary>Reload is the ONLY trigger -- a gap change on disk does nothing until it is asked for.</summary>
     [Fact]
     public void GapIsNotReReadOnItsOwn_OnlyOnReload()

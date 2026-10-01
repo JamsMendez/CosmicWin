@@ -430,6 +430,50 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
+    /// R4-reload-gap-swallow-depends-on-optional-trace: with no desktop trace wired (the default, and
+    /// every production run without the trace marker file) a swallowed reload failure used to vanish
+    /// completely. It must still reach <see cref="System.Diagnostics.Trace"/>, the fallback sink.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_WithoutADesktopTrace_StillReportsAGapReloadFailureToTheFallbackSink()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        using var listener = new CapturingTraceListener();
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, new ExceptionListStore(ExceptionList.Empty), () => ExceptionList.Empty,
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { },
+            reloadGap: () => throw new InvalidOperationException("settings.conf unreadable (gap fallback sink)"));
+
+        var thrown = Record.Exception(() => controller.Reload());
+
+        Assert.Null(thrown);
+        Assert.Contains(listener.Lines, line =>
+            line.Contains("reload-gap-failed", StringComparison.Ordinal)
+            && line.Contains("gap fallback sink", StringComparison.Ordinal));
+    }
+
+    /// <summary>The exceptions half of the same rule.</summary>
+    [Fact]
+    public void BuildTrayMenuController_Reload_WithoutADesktopTrace_StillReportsAnExceptionsReloadFailureToTheFallbackSink()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        using var listener = new CapturingTraceListener();
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, new ExceptionListStore(ExceptionList.Empty),
+            () => throw new InvalidOperationException("exceptions.conf unreadable (exceptions fallback sink)"),
+            () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { });
+
+        var thrown = Record.Exception(() => controller.Reload());
+
+        Assert.Null(thrown);
+        Assert.Contains(listener.Lines, line =>
+            line.Contains("reload-exceptions-failed", StringComparison.Ordinal)
+            && line.Contains("exceptions fallback sink", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Closes 's mutation-surviving gap where deleting the <c>isPaused</c>
     /// argument from <c>App.xaml.cs</c>'s <see cref="CompositionRoot.BuildSessionAdapter"/> call
     /// compiled cleanly (the parameter is optional, defaulting to never-paused) and left the whole

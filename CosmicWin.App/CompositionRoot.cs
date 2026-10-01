@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CosmicWin.App.Diagnostics;
 using CosmicWin.App.Input;
 using CosmicWin.App.Tray;
@@ -117,7 +118,7 @@ public static class CompositionRoot
     /// exceptions only. <paramref name="desktopTrace"/> is where a failing half of Reload is
     /// reported (T11, alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure) --
     /// optional, same as every other trace sink in this codebase, so a caller without one loses
-    /// nothing but the trace line itself.
+    /// nothing but the trace line itself (the failure then goes to <see cref="Trace"/> instead).
     /// </summary>
     public static TrayMenuController BuildTrayMenuController(
         LowLevelKeyboardHook hook, ExceptionListStore exceptions, Func<ExceptionList> loadExceptions,
@@ -161,7 +162,7 @@ public static class CompositionRoot
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            desktopTrace?.Record($"reload-exceptions-failed {ex.GetType().Name}: {ex.Message}");
+            ReportSwallowedFailure(desktopTrace, $"reload-exceptions-failed {ex.GetType().Name}: {ex.Message}");
         }
 
         try
@@ -170,8 +171,27 @@ public static class CompositionRoot
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            desktopTrace?.Record($"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
+            ReportSwallowedFailure(desktopTrace, $"reload-gap-failed {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// R4-reload-gap-swallow-depends-on-optional-trace: a swallowed Reload failure used to be reported
+    /// only through the OPTIONAL desktop trace, so a run without one (the default: the trace needs its
+    /// marker file) lost it entirely. With no trace the line goes to <see cref="Trace"/> instead --
+    /// the same always-compiled sink family <c>Debug.WriteLine</c> belongs to, but visible to a
+    /// listener (and the debugger output window) in Release too. Shared with <c>AppComposition</c>'s
+    /// deferred <c>ReloadGap</c> catch, the other place such a failure is swallowed.
+    /// </summary>
+    internal static void ReportSwallowedFailure(IDesktopTrace? desktopTrace, string line)
+    {
+        if (desktopTrace is not null)
+        {
+            desktopTrace.Record(line);
+            return;
+        }
+
+        Trace.WriteLine(line);
     }
 
     /// <summary>Same corruption-class exclusion as <c>AppComposition</c>'s own <c>IsRecoverableFailure</c> -- see its remarks.</summary>
