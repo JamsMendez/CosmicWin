@@ -127,6 +127,34 @@ internal sealed class FakeWindow : IWindow
         return true;
     }
 
+    private const uint MaximizeBoxBit = 0x00010000u;
+    private const uint MaximizedBit = 0x01000000u;
+
+    /// <summary>Whether <see cref="TrySetMaximizeBox"/> and <see cref="TryRestore"/> succeed; a protected window refuses both.</summary>
+    public bool RefuseStyleChanges { get; set; }
+
+    public bool TrySetMaximizeBox(bool enabled)
+    {
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return false;
+        }
+
+        Style = enabled ? Style | MaximizeBoxBit : Style & ~MaximizeBoxBit;
+        return true;
+    }
+
+    public bool TryRestore()
+    {
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return false;
+        }
+
+        Style &= ~MaximizedBit;
+        return true;
+    }
+
     /// <summary>Makes the next <see cref="Activate"/> call fail without throwing.</summary>
     public void FailNextActivate() => _failNextActivate = true;
 

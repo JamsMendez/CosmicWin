@@ -16,6 +16,9 @@ internal sealed class Win32Window : IWindow
     /// <summary>Real WS_SYSMENU|WS_MAXIMIZEBOX|WS_MINIMIZEBOX bits -- regression-safety default so pre-existing positional call sites read as tileable, not auto-excluded.</summary>
     private const uint TileableStyleDefault = 0x00080000u | 0x00010000u | 0x00020000u;
 
+    private const uint MaximizeBoxBit = 0x00010000u;
+    private const uint MaximizedBit = 0x01000000u;
+
     private readonly INativeWindowSource _nativeSource;
     private string _title;
     private Rectangle _bounds;
@@ -98,6 +101,37 @@ internal sealed class Win32Window : IWindow
     public bool TryActivate() => Activate().Confirmed();
 
     public bool TryClose() => IsAlive && _nativeSource.TryClose(Handle);
+
+    /// <summary>
+    /// Forwards to the native source and, on success, mirrors the new bit into the cached
+    /// <see cref="Style"/> so a caller that reads it straight afterwards sees what it just did.
+    /// </summary>
+    /// <remarks>
+    /// Does NOT touch <see cref="CanReposition"/> on failure, unlike <see cref="SetPosition"/>: a
+    /// window that refuses a style write (an elevated one, UIPI) is still perfectly tileable, and
+    /// calling it untileable for that would drop it out of the layout over a button.
+    /// </remarks>
+    public bool TrySetMaximizeBox(bool enabled)
+    {
+        if (!IsAlive || !_nativeSource.TrySetMaximizeBox(Handle, enabled))
+        {
+            return false;
+        }
+
+        Style = enabled ? Style | MaximizeBoxBit : Style & ~MaximizeBoxBit;
+        return true;
+    }
+
+    public bool TryRestore()
+    {
+        if (!IsAlive || !_nativeSource.TryRestoreFromMaximized(Handle))
+        {
+            return false;
+        }
+
+        Style &= ~MaximizedBit;
+        return true;
+    }
 
     internal void Refresh(string title, Rectangle bounds, string className, string processName, uint style, uint exStyle, bool isOwned)
     {

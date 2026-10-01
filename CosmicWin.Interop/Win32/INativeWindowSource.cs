@@ -165,6 +165,23 @@ internal interface INativeWindowSource
     bool TryClose(nint hwnd);
 
     /// <summary>
+    /// Sets or clears <c>WS_MAXIMIZEBOX</c> on the given window and reports whether the window
+    /// ends up with the requested state. Never throws.
+    /// </summary>
+    /// <remarks>
+    /// Verified by READING the style back rather than trusting the write's return value: a
+    /// refused write (UIPI, an elevated target) and a write that changed nothing both look like a
+    /// zero from <c>SetWindowLong</c>, and the read-back is the only unambiguous answer.
+    /// </remarks>
+    bool TrySetMaximizeBox(nint hwnd, bool enabled);
+
+    /// <summary>
+    /// Takes a maximized window back to its normal size and position. Never throws; reports
+    /// whether the window was asked, not whether it complied.
+    /// </summary>
+    bool TryRestoreFromMaximized(nint hwnd);
+
+    /// <summary>
     /// Subscribes to every top-level window being SHOWN, with NO trackability filtering. Disposing
     /// the returned handle unsubscribes.
     /// </summary>

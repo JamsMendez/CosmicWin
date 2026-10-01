@@ -75,6 +75,10 @@ public sealed class AppCompositionDesktopFocusWiringTests
 
         public bool TryClose() => true;
 
+        public bool TrySetMaximizeBox(bool enabled) => true;
+
+        public bool TryRestore() => true;
+
         public bool Equals(IWindow? other) => other is not null && Handle == other.Handle;
 
         public override bool Equals(object? obj) => obj is IWindow other && Equals(other);

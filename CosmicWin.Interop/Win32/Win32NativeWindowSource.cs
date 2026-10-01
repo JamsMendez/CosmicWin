@@ -187,6 +187,92 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return PInvoke.IsWindow(target) && PInvoke.PostMessage(target, PInvoke.WM_CLOSE, default, default);
     }
 
+    private const uint MaximizeBoxBit = 0x00010000u;
+    private const uint MaximizedBit = 0x01000000u;
+
+    /// <summary>
+    /// Writes <c>GWL_STYLE</c> and tells the frame to redraw, then READS the style back to answer.
+    /// </summary>
+    /// <remarks>
+    /// <c>SetWindowLong</c> answers with the previous value, so a refusal (a zero) cannot be told
+    /// from a window whose old style really was zero; the read-back can. <c>SWP_FRAMECHANGED</c>
+    /// is what makes the caption repaint with the button greyed -- without it the bit changes and
+    /// the button stays live until something else forces a non-client repaint. Everything else in
+    /// the flags says "do not move, resize, reorder or activate": this is a style edit, and
+    /// stealing focus or nudging the window would make it a second, unrelated action.
+    /// </remarks>
+    public bool TrySetMaximizeBox(nint hwnd, bool enabled)
+    {
+        try
+        {
+            HWND handle = new(hwnd);
+            if (!PInvoke.IsWindow(handle))
+            {
+                return false;
+            }
+
+            var current = ReadStyle(handle);
+            var wanted = enabled ? current | MaximizeBoxBit : current & ~MaximizeBoxBit;
+            if (wanted == current)
+            {
+                return true;
+            }
+
+            PInvoke.SetWindowLong(handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE, unchecked((int)wanted));
+            if (ReadStyle(handle) != wanted)
+            {
+                return false;
+            }
+
+            PInvoke.SetWindowPos(
+                handle,
+                HWND.Null,
+                0,
+                0,
+                0,
+                0,
+                SET_WINDOW_POS_FLAGS.SWP_FRAMECHANGED | SET_WINDOW_POS_FLAGS.SWP_NOMOVE
+                | SET_WINDOW_POS_FLAGS.SWP_NOSIZE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER
+                | SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOOWNERZORDER);
+            return true;
+        }
+        catch (Exception)
+        {
+            // A style edit on somebody else's window is best-effort by definition.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reports whether the window is out of the maximized state afterwards, not merely whether it
+    /// was asked. <c>SW_RESTORE</c> rather than <c>SW_SHOWNOACTIVATE</c>. The documented contract of
+    /// <c>SW_RESTORE</c> is to restore a maximized window to its previous size and position, which is
+    /// exactly the request; <c>SW_SHOWNOACTIVATE</c> is documented as "most recent size and position"
+    /// with no maximized case, so relying on it would be relying on observed behaviour. The cost is
+    /// that <c>SW_RESTORE</c> also activates, and that is acceptable here: a window only gets
+    /// maximized because the user is working in it, so it already holds the foreground.
+    /// </summary>
+    public bool TryRestoreFromMaximized(nint hwnd)
+    {
+        try
+        {
+            HWND handle = new(hwnd);
+            if (!PInvoke.IsWindow(handle))
+            {
+                return false;
+            }
+
+            // ShowWindow answers "was it visible", never "did it work", so the style is read back
+            // for the same reason TrySetMaximizeBox does: a refused call (UIPI) changes nothing.
+            PInvoke.ShowWindow(handle, SHOW_WINDOW_CMD.SW_RESTORE);
+            return (ReadStyle(handle) & MaximizedBit) == 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Runs <paramref name="attempt"/> on a dedicated thread and waits at most
     /// <paramref name="budget"/> for it, reporting the two endings SEPARATELY.

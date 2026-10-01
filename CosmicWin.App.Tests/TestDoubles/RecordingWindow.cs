@@ -220,6 +220,56 @@ internal sealed class RecordingWindow : IWindow
         return true;
     }
 
+    /// <summary>Every <c>TrySetMaximizeBox</c> request, in order, successful or not.</summary>
+    public List<bool> MaximizeBoxRequests { get; } = [];
+
+    /// <summary>How many times this window was asked to leave the maximized state.</summary>
+    public int RestoreCallCount { get; private set; }
+
+    /// <summary>
+    /// When set, style writes and restores fail the way they do against an elevated window from a
+    /// non-elevated caller: the call reports <see langword="false"/> and nothing changes.
+    /// </summary>
+    public bool RefuseStyleChanges { get; set; }
+
+    /// <summary>
+    /// Models an application with a custom title bar that draws its own maximize button: it
+    /// reports success for clearing the box and keeps right on being maximizable.
+    /// </summary>
+    public bool IgnoresMaximizeBox { get; set; }
+
+    public bool TrySetMaximizeBox(bool enabled)
+    {
+        MaximizeBoxRequests.Add(enabled);
+
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return false;
+        }
+
+        if (!IgnoresMaximizeBox)
+        {
+            Style = enabled
+                ? Style | WindowStyleFlags.MaximizeBox
+                : Style & ~WindowStyleFlags.MaximizeBox;
+        }
+
+        return true;
+    }
+
+    public bool TryRestore()
+    {
+        RestoreCallCount++;
+
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return false;
+        }
+
+        Style &= ~WindowStyleFlags.Maximized;
+        return true;
+    }
+
     /// <summary>
     /// Simulates an OUT-OF-BAND move (a mouse drag), the way the real OS reports it: <see
     /// cref="Bounds"/> changes WITHOUT going through <see cref="SetPosition"/> and without

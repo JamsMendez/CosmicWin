@@ -107,4 +107,36 @@ public interface IWindow : IEquatable<IWindow>
     /// and when it happens.
     /// </remarks>
     bool TryClose();
+
+    /// <summary>
+    /// Sets (<paramref name="enabled"/> <see langword="true"/>) or clears (<see langword="false"/>)
+    /// the window's <c>WS_MAXIMIZEBOX</c> style bit, reporting whether the window now has the
+    /// requested state. Never throws, and never marks the window non-repositionable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cleared box greys out the title-bar maximize button and also disables the double-click
+    /// on the caption and <c>Win+Up</c>, which is the whole reason a tiling manager reaches for it:
+    /// the window never gets the chance to leave its tile in the first place.
+    /// </para>
+    /// <para>
+    /// Failure is an answer, not an error. A window of a higher-integrity process refuses the write
+    /// from a non-elevated caller (UIPI), and an application can ignore the bit entirely. Both come
+    /// back as <see langword="false"/>, and a dead window does too without asking the OS. Unlike
+    /// <see cref="SetPosition"/> this does NOT flip <see cref="CanReposition"/>: a window that
+    /// will not give up its maximize button can still be tiled perfectly well.
+    /// </para>
+    /// </remarks>
+    bool TrySetMaximizeBox(bool enabled);
+
+    /// <summary>
+    /// Takes a maximized window back to its normal state, reporting whether the request was made.
+    /// Never throws; <see langword="false"/> for a dead window or one the OS refused.
+    /// </summary>
+    /// <remarks>
+    /// The fallback for a window that maximizes despite <see cref="TrySetMaximizeBox"/> -- a custom
+    /// title bar that draws its own button ignores the style bit. It undoes the state only; putting
+    /// the window back in its tile is the caller's job, because only the caller knows the tile.
+    /// </remarks>
+    bool TryRestore();
 }

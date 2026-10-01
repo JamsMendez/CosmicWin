@@ -130,6 +130,46 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
         return true;
     }
 
+    private const uint MaximizeBoxBit = 0x00010000u;
+    private const uint MaximizedBit = 0x01000000u;
+
+    private readonly HashSet<nint> _failingStyleHandles = new();
+
+    /// <summary>Every <see cref="TrySetMaximizeBox"/> call, in order.</summary>
+    public List<(nint Handle, bool Enabled)> MaximizeBoxCalls { get; } = [];
+
+    /// <summary>Handles asked to leave the maximized state, in order.</summary>
+    public List<nint> RestoreAsks { get; } = [];
+
+    /// <summary>Makes every style write for this handle fail, as an elevated window does for a non-elevated caller.</summary>
+    public void FailStyleChangesFor(nint hwnd) => _failingStyleHandles.Add(hwnd);
+
+    public bool TrySetMaximizeBox(nint hwnd, bool enabled)
+    {
+        MaximizeBoxCalls.Add((hwnd, enabled));
+
+        if (_failingStyleHandles.Contains(hwnd) || !_windows.TryGetValue(hwnd, out var info))
+        {
+            return false;
+        }
+
+        _windows[hwnd] = info with { Style = enabled ? info.Style | MaximizeBoxBit : info.Style & ~MaximizeBoxBit };
+        return true;
+    }
+
+    public bool TryRestoreFromMaximized(nint hwnd)
+    {
+        RestoreAsks.Add(hwnd);
+
+        if (_failingStyleHandles.Contains(hwnd) || !_windows.TryGetValue(hwnd, out var info))
+        {
+            return false;
+        }
+
+        _windows[hwnd] = info with { Style = info.Style & ~MaximizedBit };
+        return true;
+    }
+
     /// <summary>
     /// Makes every subsequent <see cref="Activate"/> call for this handle report
     /// <paramref name="outcome"/> — the rung, not just success or refusal.

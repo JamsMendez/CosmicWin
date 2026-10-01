@@ -12,6 +12,102 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </summary>
 public class Win32WindowTests
 {
+    private const uint MaximizeBox = 0x00010000u;
+    private const uint Maximized = 0x01000000u;
+    private const uint SysMenuAndMinimizeBox = 0x00080000u | 0x00020000u;
+
+    private static (FakeNativeWindowSource Native, Win32Window Window) WindowWithStyle(int handle, uint style)
+    {
+        var native = new FakeNativeWindowSource();
+        var bounds = Rectangle.FromSize(0, 0, 400, 300);
+        native.SeedExistingWindow(new IntPtr(handle), "App", bounds, style: style);
+        return (native, new Win32Window(new IntPtr(handle), "App", bounds, native, style: style));
+    }
+
+    [Fact]
+    public void TrySetMaximizeBox_Clearing_ForwardsToNative_AndDropsTheBitFromStyle()
+    {
+        var (native, window) = WindowWithStyle(20, SysMenuAndMinimizeBox | MaximizeBox);
+
+        var changed = window.TrySetMaximizeBox(false);
+
+        Assert.True(changed);
+        Assert.Equal((new IntPtr(20), false), Assert.Single(native.MaximizeBoxCalls));
+        Assert.Equal(0u, window.Style & MaximizeBox);
+        Assert.Equal(SysMenuAndMinimizeBox, window.Style);
+    }
+
+    [Fact]
+    public void TrySetMaximizeBox_Setting_ForwardsToNative_AndRaisesTheBitInStyle()
+    {
+        var (native, window) = WindowWithStyle(21, SysMenuAndMinimizeBox);
+
+        var changed = window.TrySetMaximizeBox(true);
+
+        Assert.True(changed);
+        Assert.Equal((new IntPtr(21), true), Assert.Single(native.MaximizeBoxCalls));
+        Assert.Equal(MaximizeBox, window.Style & MaximizeBox);
+    }
+
+    [Fact]
+    public void TrySetMaximizeBox_WhenNativeRefuses_ReturnsFalse_KeepsStyle_AndStaysRepositionable()
+    {
+        // Threat matrix, same row as SetPosition: an elevated window refuses a style write from a
+        // non-elevated caller. Unlike a refused reposition it must NOT make the window untileable.
+        var (native, window) = WindowWithStyle(22, SysMenuAndMinimizeBox | MaximizeBox);
+        native.FailStyleChangesFor(new IntPtr(22));
+
+        var exception = Record.Exception(() => Assert.False(window.TrySetMaximizeBox(false)));
+
+        Assert.Null(exception);
+        Assert.Equal(MaximizeBox, window.Style & MaximizeBox);
+        Assert.True(window.CanReposition);
+    }
+
+    [Fact]
+    public void TrySetMaximizeBox_OnADeadWindow_ReturnsFalse_WithoutAskingTheOs()
+    {
+        var (native, window) = WindowWithStyle(23, SysMenuAndMinimizeBox | MaximizeBox);
+        window.MarkDead();
+
+        Assert.False(window.TrySetMaximizeBox(false));
+        Assert.Empty(native.MaximizeBoxCalls);
+    }
+
+    [Fact]
+    public void TryRestore_ForwardsToNative_AndClearsTheMaximizedBit()
+    {
+        var (native, window) = WindowWithStyle(24, SysMenuAndMinimizeBox | MaximizeBox | Maximized);
+
+        var restored = window.TryRestore();
+
+        Assert.True(restored);
+        Assert.Equal(new IntPtr(24), Assert.Single(native.RestoreAsks));
+        Assert.Equal(0u, window.Style & Maximized);
+    }
+
+    [Fact]
+    public void TryRestore_WhenNativeRefuses_ReturnsFalse_AndKeepsStyle()
+    {
+        var (native, window) = WindowWithStyle(25, SysMenuAndMinimizeBox | Maximized);
+        native.FailStyleChangesFor(new IntPtr(25));
+
+        var exception = Record.Exception(() => Assert.False(window.TryRestore()));
+
+        Assert.Null(exception);
+        Assert.Equal(Maximized, window.Style & Maximized);
+    }
+
+    [Fact]
+    public void TryRestore_OnADeadWindow_ReturnsFalse_WithoutAskingTheOs()
+    {
+        var (native, window) = WindowWithStyle(26, SysMenuAndMinimizeBox | Maximized);
+        window.MarkDead();
+
+        Assert.False(window.TryRestore());
+        Assert.Empty(native.RestoreAsks);
+    }
+
     [Fact]
     public void SetPosition_ForwardsRequestedBoundsUnmodified_ToNativeSource()
     {
