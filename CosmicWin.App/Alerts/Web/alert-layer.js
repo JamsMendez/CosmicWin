@@ -599,8 +599,9 @@ if (hasExplicitParams) {
     // Both clamp to >= 1 here, exactly like startShowing's own grid, so a zero/negative/NaN size
     // can never turn the cap into slice(0, negative) or a product the grid does not have (R3-hash-
     // tiles-empty-or-negative-grid-unproved). The `|| 1` is NOT dead code: it binds to the floored
-    // value, before Math.max sees it, turning the NaN of a missing or non-numeric value into 1.
-    // Without it Math.max(1, NaN) would return NaN.
+    // value, before Math.max sees it, turning the NaN of a non-numeric value ("abc") into 1.
+    // Without it Math.max(1, NaN) would return NaN. A missing or empty value never reaches it as NaN:
+    // Number(null) and Number("") are 0, which Math.max already lifts to 1.
     var requestedColumns = Math.max(1, Math.floor(Number(params.get("columns"))) || 1);
     var requestedRows = Math.max(1, Math.floor(Number(params.get("rows"))) || 1);
     var requestedTiles = params.get("tiles").split(",")
