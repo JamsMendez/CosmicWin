@@ -139,8 +139,9 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     private static readonly TimeSpan StyleCallTimeout = ActivationTimeout;
 
     /// <summary>
-    /// Every bounded style call goes through one queue, so a call never overtakes an abandoned one
-    /// on the same window. See <see cref="StyleCallQueue"/>.
+    /// Every bounded style call goes through one queue, so a maximize-box write never overtakes an
+    /// abandoned one on the same window; a restore uses the queue's independent lane. See
+    /// <see cref="StyleCallQueue"/>.
     /// </summary>
     /// <remarks>
     /// <c>SetWindowLong</c>, <c>SetWindowPos(SWP_FRAMECHANGED)</c> and <c>ShowWindow(SW_RESTORE)</c>
@@ -293,8 +294,16 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// that <c>SW_RESTORE</c> also activates, and that is acceptable here: a window only gets
     /// maximized because the user is working in it, so it already holds the foreground.
     /// </summary>
+    /// <remarks>
+    /// Runs in the queue's independent lane, NOT behind a pending maximize-box write. A restore only
+    /// undoes a maximize and nothing it does depends on whether a box write has landed, so ordering
+    /// it after one buys no correctness (the adapter's maximize fallback and the tiling-on batch
+    /// both call it without caring about the box), while queuing it behind a hung strip would report
+    /// a refusal the adapter counts toward evicting the window. A window that really does not answer
+    /// still times out, which is the honest answer; only the false one is gone.
+    /// </remarks>
     public bool TryRestoreFromMaximized(nint hwnd) =>
-        StyleCalls.Run(hwnd, () => RestoreFromMaximizedCore(hwnd), StyleCallTimeout) == StyleWriteOutcome.Applied;
+        StyleCalls.RunIndependent(hwnd, () => RestoreFromMaximizedCore(hwnd), StyleCallTimeout) == StyleWriteOutcome.Applied;
 
     private static bool RestoreFromMaximizedCore(nint hwnd)
     {
