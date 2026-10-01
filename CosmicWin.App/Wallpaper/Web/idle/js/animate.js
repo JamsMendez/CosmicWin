@@ -67,6 +67,11 @@ const RING_ANIMATIONS = [
 // independently confirm which ring the hook actually stamped is the constellation ring, rather than
 // only checking the hook is internally consistent with itself.
 var CONSTELLATION_RING_INDEX = RING_ANIMATIONS.findIndex((ring) => ring.name === 'constellation');
+// R2-constellation-index-silent-miss: a renamed ring would leave the index at -1 and the
+// see-through ring would vanish without a trace -- fail at load instead, like the assertion below.
+if (CONSTELLATION_RING_INDEX < 0) {
+  throw new Error("RING_ANIMATIONS has no ring named 'constellation' (the see-through hook needs it)");
+}
 
 // Startup assertion: every rotating ring's cache annulus must be disjoint from every other ring's
 // (no two overlap) and must sit entirely inside the disc border's inner edge — otherwise one

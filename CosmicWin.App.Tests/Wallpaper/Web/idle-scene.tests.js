@@ -186,6 +186,8 @@ function loadPage(options) {
     var isShared = entry.indexOf("shared:") === 0;
     var filePath = path.join(isShared ? sharedDir : sceneDir, isShared ? entry.slice("shared:".length) : entry);
     var source = fs.readFileSync(filePath, "utf8");
+    // Optional: lets a case load a deliberately altered copy of one script (never written to disk).
+    if (options.transformSource) source = options.transformSource(entry, source);
     vm.runInContext(source, sandbox, { filename: filePath });
   }
 
@@ -617,6 +619,23 @@ test("mini draws an occluding dark base under every ring band and the planet hol
 
 test("the stylesheet makes the mini page transparent", function () {
   miniVariantChecks.checkMiniStylesheet(sceneDir);
+});
+
+// html-wallpaper-demo review follow-up R2-constellation-index-silent-miss: the see-through hook finds
+// the constellation ring by NAME; a rename used to leave CONSTELLATION_RING_INDEX at -1, so the ring
+// seen through the alert letters vanished with nothing logged. Loading must fail loudly instead.
+test("a renamed constellation ring fails the page load instead of silently dropping the see-through ring", function () {
+  var renamed = false;
+  assert.throws(function () {
+    loadPage({
+      transformSource: function (entry, source) {
+        if (entry !== "js/animate.js" || source.indexOf("name: 'constellation'") < 0) return source;
+        renamed = true;
+        return source.replace("name: 'constellation'", "name: 'constellations'");
+      },
+    });
+  }, /constellation/);
+  assert.ok(renamed, "test setup: the constellation ring's name literal must be found in js/animate.js");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
