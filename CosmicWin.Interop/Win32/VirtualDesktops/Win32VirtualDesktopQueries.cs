@@ -13,20 +13,25 @@ namespace CosmicWin.Interop.Win32.VirtualDesktops;
 /// </remarks>
 internal static class Win32VirtualDesktopQueries
 {
+    private static Func<IVirtualDesktopManager?> _factory = CreateManager;
     private static IVirtualDesktopManager? _manager;
 
-    private static IVirtualDesktopManager? Manager
-    {
-        get
-        {
-            if (_manager is not null)
-            {
-                return _manager;
-            }
+    private static IVirtualDesktopManager? Manager => _manager ??= _factory();
 
-            var type = Type.GetTypeFromCLSID(ShellComGuids.VirtualDesktopManager, throwOnError: false);
-            return _manager = type is null ? null : Activator.CreateInstance(type) as IVirtualDesktopManager;
-        }
+    private static IVirtualDesktopManager? CreateManager()
+    {
+        var type = Type.GetTypeFromCLSID(ShellComGuids.VirtualDesktopManager, throwOnError: false);
+        return type is null ? null : Activator.CreateInstance(type) as IVirtualDesktopManager;
+    }
+
+    /// <summary>
+    /// Replaces how the manager is created and drops the cached one. Tests only: it is the seam that
+    /// lets a fake stand in for the shell, and passing <see langword="null"/> restores the real one.
+    /// </summary>
+    internal static void UseFactoryForTests(Func<IVirtualDesktopManager?>? factory)
+    {
+        _factory = factory ?? CreateManager;
+        _manager = null;
     }
 
     /// <summary>
@@ -39,35 +44,21 @@ internal static class Win32VirtualDesktopQueries
         desktopId = Guid.Empty;
         error = null;
 
-        if (Manager is not { } manager)
+        Guid found = Guid.Empty;
+        if (!Invoke("GetWindowDesktopId", manager => manager.GetWindowDesktopId(windowHandle, out found), out error))
         {
-            error = "IVirtualDesktopManager could not be created.";
             return false;
         }
 
-        try
+        // A window that is minimized or mid-creation can answer Guid.Empty rather than failing.
+        if (found == Guid.Empty)
         {
-            var hr = manager.GetWindowDesktopId(windowHandle, out desktopId);
-            if (hr < 0)
-            {
-                error = $"GetWindowDesktopId: HRESULT 0x{hr:X8}";
-                return false;
-            }
-
-            // A window that is minimized or mid-creation can answer Guid.Empty rather than failing.
-            if (desktopId == Guid.Empty)
-            {
-                error = "GetWindowDesktopId succeeded but reported an empty desktop id.";
-                return false;
-            }
-
-            return true;
-        }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException)
-        {
-            error = $"GetWindowDesktopId: {ex.GetType().Name} 0x{ex.HResult:X8}";
+            error = "GetWindowDesktopId succeeded but reported an empty desktop id.";
             return false;
         }
+
+        desktopId = found;
+        return true;
     }
 
     /// <summary>
@@ -89,27 +80,64 @@ internal static class Win32VirtualDesktopQueries
         onCurrentDesktop = false;
         error = null;
 
-        if (Manager is not { } manager)
+        var onCurrent = 0;
+        if (!Invoke("IsWindowOnCurrentVirtualDesktop", manager => manager.IsWindowOnCurrentVirtualDesktop(windowHandle, out onCurrent), out error))
         {
-            error = "IVirtualDesktopManager could not be created.";
             return false;
         }
 
-        try
+        onCurrentDesktop = onCurrent != 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Runs one call against the cached manager; on a disconnect-class failure drops the dead proxy,
+    /// creates a fresh one and retries THAT call once.
+    /// </summary>
+    /// <remarks>
+    /// The manager is a proxy into <c>explorer.exe</c>, so an Explorer restart leaves it dead for
+    /// good (see <see cref="ShellDisconnect"/>). The failure arrives either thrown or as the
+    /// <c>hr &lt; 0</c> a <c>PreserveSig</c> method returns; both are handled here. At most one
+    /// reconnect per call, and only for a disconnect -- any other HRESULT is a real answer from a
+    /// live shell. Never throws: a failure that survives the retry says a reconnect was attempted.
+    /// </remarks>
+    private static bool Invoke(string operation, Func<IVirtualDesktopManager, int> call, out string? error)
+    {
+        error = null;
+        for (var attempt = 0; ; attempt++)
         {
-            var hr = manager.IsWindowOnCurrentVirtualDesktop(windowHandle, out var onCurrent);
-            if (hr < 0)
+            if (Manager is not { } manager)
             {
-                error = $"IsWindowOnCurrentVirtualDesktop: HRESULT 0x{hr:X8}";
+                error = attempt == 0
+                    ? "IVirtualDesktopManager could not be created."
+                    : $"{operation}: reconnect failed, IVirtualDesktopManager could not be created.";
                 return false;
             }
 
-            onCurrentDesktop = onCurrent != 0;
-            return true;
-        }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException)
-        {
-            error = $"IsWindowOnCurrentVirtualDesktop: {ex.GetType().Name} 0x{ex.HResult:X8}";
+            int hr;
+            string? thrown = null;
+            try
+            {
+                hr = call(manager);
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException)
+            {
+                hr = ex.HResult;
+                thrown = $"{operation}: {ex.GetType().Name} 0x{hr:X8}";
+            }
+
+            if (thrown is null && hr >= 0)
+            {
+                return true;
+            }
+
+            if (attempt == 0 && ShellDisconnect.IsDisconnect(hr))
+            {
+                _manager = null;
+                continue;
+            }
+
+            error = (thrown ?? $"{operation}: HRESULT 0x{hr:X8}") + (attempt > 0 ? " (after reconnect)" : string.Empty);
             return false;
         }
     }
