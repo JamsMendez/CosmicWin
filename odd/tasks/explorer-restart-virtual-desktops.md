@@ -60,7 +60,7 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
   (injectable resolver seam, tests with a fake). Route: delegated writer.
 - [x] T2: `Win32VirtualDesktopQueries` drops and recreates its static manager on a disconnect and
   retries once. Route: same delegated writer.
-- [ ] T3: Hardware check: CosmicWin running, `Stop-Process -Name explorer -Force`, then Alt+N and
+- [x] T3: Hardware check: CosmicWin running, `Stop-Process -Name explorer -Force`, then Alt+N and
   a new window are tiled; trace shows no `0x800706BA` after the reconnect. Route: inline.
 
 ## Acceptance criteria
@@ -104,3 +104,10 @@ Strategy: `ask-on-risk`. Forecast: about 250 authored changed lines, one slice.
   0x800706BE could create two desktops), R3-empty-reconnect-reason (reconnect-failed message can be
   empty), R3-static-seam-parallel-tests (static factory seam in the Queries tests vs xUnit parallel
   classes).
+- T3 hardware check, 2026-09-30, elevated shell, combined local test branch `test/hw-2026-09-30`,
+  Debug build run from `run/` (PID 30076): before the restart `Alt+2`/`Alt+1` -> `SwitchDesktop ok=True
+  count=3->3`. `Stop-Process -Name explorer -Force`, Explorer back as PID 33564, CosmicWin kept the
+  same PID. Same switches -> `ok=True count=3->3 error=(none)`, no 0x800706BA / 0x8001xxxx in the
+  trace. A new probe window opened after the restart was tiled (`border around 0xF099A`, slot
+  415x708). Before this fix the same restart gave `count=0` and `0x800706BA`.
+
