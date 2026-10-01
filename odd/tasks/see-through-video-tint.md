@@ -18,6 +18,10 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
 
 - 2026-10-01, maintainer: tint EVERY brightness (luminance mapped to the tint color), not only
   near-white pixels.
+- 2026-10-01, maintainer (S2): the PAGE exports the letters mask (single source of truth for the
+  layout: font fit, mirrored fragments, mosaic). During the pixelated reveal the letters look as
+  today; the tint takes over when the reveal ends. C# re-rendering with DirectWrite was rejected
+  (layout duplicated in two languages, drift risk).
 - Only `Video` mode has a video back buffer; `Html` / `HtmlMini` never start the player. This
   feature changes nothing there (html scenes already redraw their own content via
   `sceneSeeThroughLayer`).
@@ -55,11 +59,21 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   inside a HARDCODED rectangle mask. Answer: (a) can D2D target the back buffer surface directly,
   or does the frame need an intermediate texture (an effect cannot read the surface it draws to);
   (b) per-frame cost at the real resolution; (c) visual check on hardware. Route: delegated writer.
-- [ ] S2 Decide the mask source from S1's numbers: page exports a mask bitmap per show (letters
+- [x] S2 Decide the mask source from S1's numbers: page exports a mask bitmap per show (letters
   are static after reveal, but reveal/pixelation/shake animate) vs C# re-renders the letters with
   DirectWrite (layout drift risk). Maintainer decision if the tradeoff is real.
-- [ ] S3 Page side: in video mode the letters become holes/neutral so the tinted video reads through.
-- [ ] S4 Wire per tile (mosaic), reveal and shake; clear the tint on hide/done.
+- [ ] S3 Interop tint pass (production, TDD): a `VideoTintPass` seam owned by the player, OFF unless a
+  mask is set; frame -> intermediate texture -> back buffer, then ColorMatrix(luminance x tint) through
+  an AlphaMask effect with the mask bitmap. Carry the spike review findings: release the target
+  bitmap around ResizeBuffers/re-attach, back off after a device failure, keep it out of the inline
+  frame pump. API sketch: `SetTint(mask pixels+size, tint color)` / `ClearTint()`, thread-safe
+  handoff to the worker thread.
+- [ ] S4 Page + controller: in video mode only (C# says so in the `show` message), when the reveal
+  ends the page renders a dedicated mask canvas (opaque letters, no shadow/alpha/pixelation, back
+  buffer pixel size) and posts it (PNG data URL) to C#; the controller decodes it and calls SetTint
+  with the kind's color (failed blue, warning violet); after C# acks, the page stops drawing the
+  letter fill so the tinted video reads through. `hide`/`done`/scene reload -> ClearTint. Mosaic:
+  one mask covers every tile.
 - [ ] S5 Hardware check in `Video` mode (failed blue, warning violet, mosaic, shake), restore settings.
 
 ## Acceptance
