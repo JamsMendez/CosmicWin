@@ -204,3 +204,13 @@ another, so a burst of requests plays a long chain of alerts.
   remains the only acceptance-criteria gap, unchanged from before this task.
 - 2026-09-26: review `review-4c0ef26e22b851af` (medium, reliability, 2421b89..67edcf0, covers A4) APPROVED
   with no findings, acknowledged (authority burned).
+
+- 2026-10-01: covered/waiting case confirmed on hardware (Release of main 0f2161a). It cannot happen in
+  html-mini mode (the mini window is topmost; AppComposition's desktopVisible for mini has no coverage
+  check), so wallpaper-mode was switched to `html` for the run and restored afterwards (settings.conf
+  byte-identical to the backup). A borderless topmost WinForms probe covered the primary monitor
+  (`wallpaper-scene paused: desktop covered`). 22:25:52.54 `{"warning":1,"duration":5}` -> 202;
+  22:25:52.64 `{"failed":1,"duration":5}` -> 202, trace `alert ignored: one is already waiting to
+  show`. Probe closed 22:25:58 -> `wallpaper-scene resumed`, `alert-layer show tiles=warning ...
+  duration=5000`, done/hide at 22:26:03-04. The ignored failed alert never showed (0 `tiles=failed`
+  shows in the window; 1 show in total). A3's covered half is now closed.
