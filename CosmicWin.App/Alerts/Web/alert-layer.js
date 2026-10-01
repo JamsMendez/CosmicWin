@@ -596,8 +596,11 @@ if (hasExplicitParams) {
     // "warning" first, so the old post-map length>0 filter never actually dropped anything, and an
     // extra unwanted tile appeared. Capped at columns*rows (the grid's own slot count) so a hand-
     // written hash cannot ask for more tiles than the grid it also names has room for.
-    var requestedColumns = Number(params.get("columns")) || 1;
-    var requestedRows = Number(params.get("rows")) || 1;
+    // Both clamp to >= 1 here, exactly like startShowing's own grid, so a zero/negative/NaN size
+    // can never turn the cap into slice(0, negative) or a product the grid does not have (R3-hash-
+    // tiles-empty-or-negative-grid-unproved).
+    var requestedColumns = Math.max(1, Math.floor(Number(params.get("columns"))) || 1);
+    var requestedRows = Math.max(1, Math.floor(Number(params.get("rows"))) || 1);
     var requestedTiles = params.get("tiles").split(",")
       .map(function (tile) { return tile.trim(); })
       .filter(function (tile) { return tile === "failed" || tile === "warning"; })

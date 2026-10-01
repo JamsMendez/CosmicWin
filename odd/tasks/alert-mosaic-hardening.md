@@ -21,7 +21,7 @@ deferred-capture list, hash cap order comment) are OUT of scope.
 
 ## Tasks
 
-- [ ] T1 -- Hash API grid: `columns`/`rows` below 1 clamp to 1 (alert-layer.js hash parser ~593-612),
+- [x] T1 -- Hash API grid: `columns`/`rows` below 1 clamp to 1 (alert-layer.js hash parser ~593-612),
   so a negative grid never drops tiles; pin the empty-filtered-list fallback (one "warning" tile)
   with a harness case. (R3-hash-tiles-empty-or-negative-grid-unproved, R4-hash-tiles-empty-list)
 - [ ] T2 -- Node harness runner: bounded stdout/stderr reads after a timeout kill
@@ -44,3 +44,7 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
 ## Progress
 
 - 2026-10-01: branch `fix/alert-mosaic-hardening` off main e8ac6ae.
+- 2026-10-01 T1: baseline App suite 1384 passed / 6 skipped. RED: negative-columns and two-negatives
+  harness cases failed (slice(0,-2) dropped tiles; -2*-3 gave a cap of 6). GREEN after clamping
+  columns/rows to >= 1 in the hash parser (20/20 harness cases). All-junk fallback case is pinned
+  behavior: proved meaningful by mutating startShowing's fallback on a scratch copy (it failed).

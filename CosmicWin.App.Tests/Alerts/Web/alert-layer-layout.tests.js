@@ -256,6 +256,39 @@ test("hash API: tiles= drops empty/unknown entries before mapping, then caps at 
   assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
 });
 
+// Review follow-up R3-hash-tiles-empty-or-negative-grid-unproved: a negative columns=/rows= used to
+// reach .slice(0, columns * rows) unclamped -- columns=-2 turned the cap into slice(0, -2), which
+// DROPS the last two tiles instead of capping, and two negatives multiplied into a positive cap
+// larger than the 1x1 grid startShowing then actually builds. Both now clamp to 1 first, so the
+// hash cap and the grid agree.
+test("hash API: a negative columns= clamps to 1 so the cap never drops the wrong tiles", function () {
+  var page = loadPage({ hash: "#tiles=failed,warning&columns=-2&rows=1&gap=0&duration=1000" });
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed"]);
+  assert.strictEqual(page.sandbox.gridColumns, 1);
+  assert.strictEqual(page.sandbox.gridRows, 1);
+});
+
+test("hash API: two negative grid sizes do not multiply into a positive cap", function () {
+  var page = loadPage({ hash: "#tiles=failed,warning,failed&columns=-2&rows=-3&gap=0&duration=1000" });
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed"]);
+  assert.strictEqual(page.sandbox.gridColumns, 1);
+  assert.strictEqual(page.sandbox.gridRows, 1);
+});
+
+test("hash API: zero and non-numeric columns=/rows= clamp to a 1x1 grid with one tile", function () {
+  var page = loadPage({ hash: "#tiles=failed,warning&columns=0&rows=abc&gap=0&duration=1000" });
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed"]);
+  assert.strictEqual(page.sandbox.gridColumns, 1);
+  assert.strictEqual(page.sandbox.gridRows, 1);
+});
+
+// Review follow-up R4-hash-tiles-empty-list: pins the fallback startShowing applies when the filter
+// leaves nothing (an all-junk tiles= list) -- exactly one "warning" tile, never an empty mosaic.
+test("hash API: an all-junk tiles= list falls back to exactly one warning tile", function () {
+  var page = loadPage({ hash: "#tiles=bogus,,nope&columns=2&rows=2&gap=0&duration=1000" });
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["warning"]);
+});
+
 // ---- Cases: the fake band intersections must never be painted (remove-fake-letter-bands, B1) ----
 // drawFailureOverlay used to draw a copy of the wallpaper's folding-band animation, clipped to the
 // letters, in a fixed color per kind (FAILURE_OVERLAY_THEMES[kind].intersections) -- a fake effect
