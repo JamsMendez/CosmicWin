@@ -97,4 +97,7 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   R2-nan-clamp-comment-misstates-evaluation-order: fixed in the next commit (comment only).
 - Review review-2761ded7f0de6e58 (4 lenses, main..e506ee2) APPROVED and acknowledged. SUGGESTION
   R2-nan-clamp-comment-missing-param-is-zero-not-nan fixed in the next commit (missing/empty -> 0, not NaN).
+- Review review-e74183a916eacd9e (4 lenses, main..73459d3) APPROVED and acknowledged. SUGGESTIONs
+  R2-nan-clamp-comment-zero-lifted-by-or-not-max / R3-nan-clamp-comment-misattributes-zero-lift: the 0 is
+  lifted by `|| 1` (0 is falsy), not by Math.max; fixed in the next commit, values checked with node.
 - Open: R3-pid-handshake-shares-timeout-budget (behavioral, own commit).
