@@ -45,6 +45,10 @@ const MINI_SCENE_ZOOM = 1.2;
 const MINI_NEBULA_FADE_START = 0.75;
 const MINI_NEBULA_FADE_END = 0.98;
 // T2k: the mini nebula alpha is boosted (about 1.4x its previous density); the fade above still reaches 0 at the edge.
+// The nebula is DELIBERATELY subtle in mini: it sits under the 0.9-alpha dark base (drawMiniSceneBase), so only
+// about a tenth of it shows through. This gain is part of the look the maintainer approved on 2026-09-29, not a
+// leftover: rendering the mini scene with gain 1.0 changes about 51k of the 288x288 pixels (T8.31 measurement),
+// so do not remove or retune it without a new visual approval.
 const MINI_NEBULA_GAIN = 1.4;
 
 // Tiempo total (en segundos) que la animación avanza antes de invertirse (ping-pong); el ciclo
