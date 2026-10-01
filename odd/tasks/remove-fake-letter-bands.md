@@ -75,3 +75,13 @@ tint (a Direct2D pass on the video back buffer) is parked and out of scope.
 
 Feature complete. Merge into local main is the maintainer's call. Optional follow-ups: the two
 review SUGGESTIONs above.
+
+## Follow-ups closed (2026-10-01)
+
+Both review SUGGESTIONs closed in `alert-layer-layout.tests.js` (route inline: one test file).
+- R3-no-positive-paint-control: every band case also requires the kind's own wash and letter colors
+  (read from `FAILURE_OVERLAY_THEMES`) to be painted.
+- R3-mosaic-not-covered: new mixed failed+warning 2x1 mosaic case.
+Mutation proof on a scratch copy of alert-layer.js: dropping the wash fill failed all 3 band cases;
+painting the warning band color again failed the warning and mosaic cases. Harness 16/16, App
+`AlertLayerLayoutNodeTests` 2/2.

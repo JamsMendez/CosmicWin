@@ -267,6 +267,17 @@ test("hash API: tiles= drops empty/unknown entries before mapping, then caps at 
 var FAILED_BAND_COLOR = "rgb(0,160,196)";
 var WARNING_BAND_COLOR = "rgb(88,40,196)";
 
+// Review follow-up R3-no-positive-paint-control: an absence check alone also passes when the page
+// paints nothing at all, so every case below also requires the kind's own wash and letter colors to
+// have been painted -- read from the page's real theme table, never restated here.
+function assertKindPainted(page, kind) {
+  var theme = page.sandbox.FAILURE_OVERLAY_THEMES[kind];
+  assert.notStrictEqual(page.fillStyleHistory.indexOf(theme.wash), -1,
+    "expected the " + kind + " wash color " + theme.wash + " to be painted");
+  assert.notStrictEqual(page.fillStyleHistory.indexOf(theme.letters), -1,
+    "expected the " + kind + " letter color " + theme.letters + " to be painted");
+}
+
 test("shown failed tile never paints the fake band intersection color", function () {
   var page = loadPage({ innerWidth: 800, innerHeight: 600 });
   page.sandbox.startShowing(["failed"], 1, 1, 0, 5000);
@@ -277,6 +288,7 @@ test("shown failed tile never paints the fake band intersection color", function
   assert.strictEqual(page.sandbox.kindState.failed.state, "shown");
   assert.strictEqual(page.fillStyleHistory.indexOf(FAILED_BAND_COLOR), -1,
     "expected the failed band color to never be painted, but fillStyle was set to it");
+  assertKindPainted(page, "failed");
 });
 
 test("shown warning tile never paints the fake band intersection color", function () {
@@ -289,6 +301,27 @@ test("shown warning tile never paints the fake band intersection color", functio
   assert.strictEqual(page.sandbox.kindState.warning.state, "shown");
   assert.strictEqual(page.fillStyleHistory.indexOf(WARNING_BAND_COLOR), -1,
     "expected the warning band color to never be painted, but fillStyle was set to it");
+  assertKindPainted(page, "warning");
+});
+
+// Review follow-up R3-mosaic-not-covered: a mixed failed+warning mosaic, both tiles driven to
+// "shown" in the same frames, paints neither band color and does paint both kinds.
+test("mixed failed+warning mosaic never paints either fake band color", function () {
+  var page = loadPage({ innerWidth: 1000, innerHeight: 400 });
+  page.sandbox.startShowing(["failed", "warning"], 2, 1, 20, 5000);
+  page.sandbox.render(0);
+  page.sandbox.render(200); // failed revealing (120..470), warning revealing (0..700)
+  assert.strictEqual(page.sandbox.kindState.failed.state, "revealing");
+  assert.strictEqual(page.sandbox.kindState.warning.state, "revealing");
+  page.sandbox.render(800); // both shown
+  assert.strictEqual(page.sandbox.kindState.failed.state, "shown");
+  assert.strictEqual(page.sandbox.kindState.warning.state, "shown");
+  assert.strictEqual(page.fillStyleHistory.indexOf(FAILED_BAND_COLOR), -1,
+    "expected the failed band color to never be painted in a mixed mosaic");
+  assert.strictEqual(page.fillStyleHistory.indexOf(WARNING_BAND_COLOR), -1,
+    "expected the warning band color to never be painted in a mixed mosaic");
+  assertKindPainted(page, "failed");
+  assertKindPainted(page, "warning");
 });
 
 // ---- Run ----------------------------------------------------------------------------------------
