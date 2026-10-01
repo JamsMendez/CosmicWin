@@ -268,9 +268,13 @@ public sealed class AlertLayerLayoutNodeTests
     /// R3-probe-never-ready-propagation-unproved: <see cref="NodeAvailability.TryRunProbe"/> must let the
     /// never-ready <see cref="TimeoutException"/> escape. Its catch turns start failures into
     /// "unavailable", and swallowing this one there would hide a broken test setup behind an ordinary
-    /// skip. Propagation only: that the script is killed is proved by
-    /// <see cref="WaitUntilReady_AScriptThatNeverReportsReady_FailsLoudlyAndKillsIt"/>, so this test
-    /// writes no pid file and has no start-up race of its own (R3-never-ready-probe-pid-race).
+    /// skip. The kill itself is proved unconditionally by
+    /// <see cref="WaitUntilReady_AScriptThatNeverReportsReady_FailsLoudlyAndKillsIt"/>.
+    /// R3-probe-never-ready-test-no-observable-cleanup: the script also writes its pid to a SEPARATE
+    /// file (never the ready file), and when it got that far it must be dead once the probe throws. The
+    /// check is conditional on purpose: a Node start slower than the readiness bound kills the script
+    /// before it writes anything, and failing then would bring back the start-up race
+    /// R3-never-ready-probe-pid-race removed. No polling is needed -- a killed process writes nothing.
     /// </summary>
     [RequiresNodeFact]
     public void NodeAvailabilityProbe_AScriptThatNeverReportsReady_LetsTheTimeoutOut()
@@ -278,14 +282,31 @@ public sealed class AlertLayerLayoutNodeTests
         using var scratch = new ScratchDirectory();
         // Nothing ever writes this file, so the script can never report ready.
         var readyFile = Path.Combine(scratch.Path, "never-ready.pid");
+        var alivePidFile = Path.Combine(scratch.Path, "alive.pid");
+        var script = scratch.Write("never-ready.js", """
+            require('fs').writeFileSync(process.argv[2], String(process.pid));
+            setInterval(() => {}, 1000);
+            """);
+        int pid = 0;
+        try
+        {
+            // The readiness bound is what this test exercises, kept short so the run stays fast; the hang
+            // bound is never reached (the readiness wait throws first), so its value only has to be valid.
+            var error = Record.Exception(() => NodeAvailability.TryRunProbe(
+                "node", [script, alivePidFile], timeout: TimeSpan.FromSeconds(3), readyFile,
+                readinessBound: TimeSpan.FromMilliseconds(300)));
+            pid = File.Exists(alivePidFile) && int.TryParse(File.ReadAllText(alivePidFile), out var written) ? written : 0;
 
-        // The readiness bound is what this test exercises, kept short so the run stays fast; the hang
-        // bound is never reached (the readiness wait throws first), so its value only has to be valid.
-        var error = Record.Exception(() => NodeAvailability.TryRunProbe(
-            "node", ["-e", "setInterval(() => {}, 1000)"], timeout: TimeSpan.FromSeconds(3), readyFile,
-            readinessBound: TimeSpan.FromMilliseconds(300)));
-
-        Assert.IsType<TimeoutException>(error);
+            Assert.IsType<TimeoutException>(error);
+            if (pid > 0)
+            {
+                Assert.False(ProcessStillRunning(pid), "Expected the never-ready probe process to be killed.");
+            }
+        }
+        finally
+        {
+            KillIfRunning(pid);
+        }
     }
 
     // The slow-start script reports its pid only after SlowStartDelayMs, then hangs. The delay must stay

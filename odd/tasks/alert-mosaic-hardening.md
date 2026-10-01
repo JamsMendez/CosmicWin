@@ -137,3 +137,12 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   (each fix reopens another review round): R2-loadgap-comment-line-overlong (AppComposition.cs:174),
   R3-probe-never-ready-test-no-observable-cleanup (kill is proved by the WaitUntilReady test instead).
 - Full App suite on that tree: 1424 passed / 6 skipped / 0 failed; node.exe 7 before and after.
+- Maintainer asked to close the two left-open suggestions too: R2-loadgap-comment-line-overlong (comment
+  rewrapped) and R3-probe-never-ready-test-no-observable-cleanup (script writes its pid to a separate file;
+  when present the process must be dead -- conditional so the start-up race does not come back). Mutation:
+  removing WaitUntilReady's kill fails the test 3/3; restored byte-identical; node.exe count unchanged.
+- review-613874fd45adc112 APPROVED and acknowledged. R2-loadgap-comment-overlong-line-moved: the first rewrap
+  left the next sentence glued on (145 chars); rewrapped for real (<=100). R3-probe-never-ready-cleanup-
+  check-silently-vacuous: accepted tradeoff, not changed -- the check can only be vacuous on a Node start
+  slower than the readiness bound, the unconditional kill proof lives in the WaitUntilReady test, and the
+  mutation run shows the check live 3/3 here.
