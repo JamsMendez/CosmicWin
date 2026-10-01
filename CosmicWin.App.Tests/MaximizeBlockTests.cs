@@ -44,6 +44,9 @@ public sealed class MaximizeBlockTests
 
     private const int EnoughRounds = 30;
 
+    /// <summary>Mirrors the adapter's give-up threshold: the restore is asked for at least this often.</summary>
+    private const int MaximizeRoundsBeforeEviction = 12;
+
     private sealed class RecordingTrace : CosmicWin.App.Diagnostics.IDesktopTrace
     {
         public List<string> Lines { get; } = [];
@@ -606,16 +609,50 @@ public sealed class MaximizeBlockTests
     public void AMaximizedWindowThatCannotBeRestored_StillFallsUnderTheFighterGuard()
     {
         // The guard is a safety net, and a window the OS will not restore is exactly what it is for.
+        //
+        // The window maximizes the way a real one does: its frame overshoots the work area by the
+        // invisible border, so it does NOT land on the corner of its tile. That matters. A window
+        // that obeys its corner and fills the work area exactly is read as a MINIMUM-SIZE window and
+        // untiled by that path instead -- an earlier version of this fact used such a window and
+        // passed without ever reaching the guard (no "gave up" line), so it would have passed against
+        // an adapter that never attempted the restore at all.
         using var h = new Harness();
         h.First.RefuseStyleChanges = true;
-        h.First.SnapsBackTo = WorkArea;
+        var overshoot = Rectangle.FromSize(
+            WorkArea.Left - 8, WorkArea.Top - 8, WorkArea.Width + 16, WorkArea.Height + 16);
 
         for (var round = 0; round < EnoughRounds; round++)
         {
-            h.First.SimulateMaximize(WorkArea);
+            h.First.SimulateMaximize(overshoot);
             h.Workspace.RaiseWindowBoundsChanged(h.First);
         }
 
+        // Evicted and refused for good, by the guard, and the trace names the reason.
         Assert.False(h.InTree(h.First));
+        Assert.Contains(h.Trace.Lines, line => line.StartsWith("gave up hwnd=0xA ", StringComparison.Ordinal));
+        Assert.DoesNotContain(h.Trace.Lines, line => line.StartsWith("minimum size", StringComparison.Ordinal));
+
+        // The restore was genuinely ATTEMPTED every round until the guard fired, and every refusal
+        // was reported as such, never as a success.
+        Assert.True(h.First.RestoreCallCount >= MaximizeRoundsBeforeEviction);
+        Assert.DoesNotContain(h.Trace.Lines, line => line.StartsWith("maximize undone", StringComparison.Ordinal));
+        Assert.Contains(h.Trace.Lines, line => line.StartsWith("maximize kept hwnd=0xA ", StringComparison.Ordinal));
+
+        // Nothing pretends it was put back: it is still maximized.
+        Assert.NotEqual(0u, h.First.Style & WindowStyleFlags.Maximized);
+    }
+
+    [Fact]
+    public void AMaximizedWindowThatCannotBeRestored_IsNotEvictedBeforeTheGuardThreshold()
+    {
+        // The other side of the guard: a single refused restore is a wobble, not a fight.
+        using var h = new Harness();
+        h.First.RefuseStyleChanges = true;
+
+        h.First.SimulateMaximize(Rectangle.FromSize(-8, -8, WorkArea.Width + 16, WorkArea.Height + 16));
+        h.Workspace.RaiseWindowBoundsChanged(h.First);
+
+        Assert.True(h.InTree(h.First));
+        Assert.Equal(1, h.First.RestoreCallCount);
     }
 }

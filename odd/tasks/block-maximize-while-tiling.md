@@ -191,3 +191,19 @@ strategy question is asked before delivery. Everything stays local; the maintain
   stub) and `MaximizeBlockTests.AStripThatTimedOutButLandedLater_IsStillGivenBackWhenTheBlockIsReleased`
   failed (button not returned) plus the updated elevated-window fact (`[false, true]` requests).
   GREEN: Interop.Tests 448 passed / 42 skipped; MaximizeBlockTests 30/30.
+- Follow-up R3-restore-contract-mismatch FIXED (same delegated writer; landed inside the bounding
+  commit because the same members were edited): `INativeWindowSource.TryRestoreFromMaximized` and
+  `Win32NativeWindowSource.TryRestoreFromMaximized` now say it reports whether the window LEFT the
+  maximized state (read back), false on refusal or timeout; `IWindow.TryRestore` says the same.
+  Doc-only, no RED applicable.
+- Follow-up R3-unrestorable-test-weak FIXED (same delegated writer). Finding: the old fact
+  (`AMaximizedWindowThatCannotBeRestored_StillFallsUnderTheFighterGuard`) did not reach the guard
+  at all: the window filled the work area from its tile's corner, so the "minimum size" path
+  untiled it (trace: `minimum size ... untiled`, no `gave up` line), and `!InTree` held without
+  the restore ever mattering. Rewritten with a realistic overshooting maximize (-8px frame) so the
+  guard really fires; it now asserts `gave up`, no `minimum size`, restore attempted >= 12 times,
+  `maximize kept` traced, never `maximize undone`, and still maximized. Added the counterpart
+  `..._IsNotEvictedBeforeTheGuardThreshold`. Mutation checks (adapter edited, then reverted,
+  `git diff` clean): (1) `undidMaximize = false` with no `TryRestore()` call -> fact FAILED
+  (restore count assertion); (2) `TryRestore(); undidMaximize = true` (pretend restored) -> fact
+  FAILED (window not evicted). GREEN `MaximizeBlockTests` 31/31.
