@@ -40,7 +40,7 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
 - [x] T2: Queries reconnect tests no longer race other test classes. Route: same writer.
 - [x] T3: Maximize block hung-window edge cases. Route: same writer.
 - [x] T4: README elevation limit reworded. Route: same writer.
-- [ ] T5: Hardware: Edge/Chrome, VS Code, F11 on own probe instances (separate user-data-dir,
+- [x] T5: Hardware: Edge/Chrome, VS Code, F11 on own probe instances (separate user-data-dir,
   killed by PID). Route: inline, parallel to T1-T4 against the running build (code == main bea8a6c).
 
 ## Progress
@@ -84,3 +84,16 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
   facts the parent measured (Chromium may draw an active-looking button that does nothing; VS Code hides
   it; nothing flashes; the restore is a safety net). Other README elevation sentences (lines 42-47) are
   true and unchanged.
+- T5 hardware (route: inline, parallel to T1-T4, running build == main bea8a6c, elevated shell, own
+  probe instances with separate user-data-dir, killed by PID):
+  - Brave (Chromium, custom title bar): tiled `maxbox=False`; button DRAWN AS ACTIVE; a real click on
+    it did nothing (IsZoomed false); the same click with tiling off maximized (3408x1456); tiling on
+    put it back in its slot with `maxbox=False`. Win+Up blocked. F11: real fullscreen 3440x1440 with
+    the box given back; leaving F11 returned it to its slot, box disabled again. Title-bar
+    double-click: INCONCLUSIVE (the control with tiling off did not maximize either, so the click
+    missed a draggable area).
+  - VS Code (Electron, ran as Administrator): tiled `maxbox=False`; the maximize button is HIDDEN
+    (only minimize/close drawn); Win+Up and SW_MAXIMIZE refused; Alt+T off gives it back, on
+    disables it again. Elevated target handled normally (CosmicWin always runs elevated).
+  - No `maximize undone`/`kept` trace line in any case: Windows refused every maximize itself.
+
