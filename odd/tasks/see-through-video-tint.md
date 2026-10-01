@@ -50,7 +50,7 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
 
 ## Tasks
 
-- [ ] S1 SPIKE (throwaway, measures, no production wiring): on the video back buffer, before
+- [x] S1 SPIKE (throwaway, measures, no production wiring): on the video back buffer, before
   `Present`, run a Direct2D pass that draws the current frame tinted by luminance (ColorMatrix)
   inside a HARDCODED rectangle mask. Answer: (a) can D2D target the back buffer surface directly,
   or does the frame need an intermediate texture (an effect cannot read the surface it draws to);
@@ -71,7 +71,22 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
 ## Progress
 
 - 2026-10-01: branch `feat/see-through-video-tint` off main 8fe9ed3; map done; tint decision taken.
+- 2026-10-01 S1 DONE (throwaway branch `spike/see-through-tint`, c41e558, NOT to be merged; delegated
+  writer). Approach: with a marker file `%LOCALAPPDATA%\CosmicWin\spike-tint`, TransferVideoFrame
+  writes into an INTERMEDIATE B8G8R8A8 texture (RENDER_TARGET | SHADER_RESOURCE); a D2D device
+  context (device from the host's D3D11 device) targets a bitmap over the back buffer, draws the
+  intermediate full-size (SOURCE_COPY), then a CLSID_D2D1ColorMatrix of it inside
+  PushAxisAlignedClip(rect). Answers: (a) yes, an intermediate texture is needed and works;
+  (b) hardware, 3440x1440, ~1 min: D2D pass CPU avg ~0.35 ms, max 1.13 ms; whole tick avg ~0.7 ms,
+  max 2.5 ms; 0 failures across every 120-tick window (GPU time not measured); (c) screenshot:
+  the centered rect shows the moving video tinted by luminance (white -> full blue, grey -> dark
+  blue, black stays black), outside it unchanged. CsWin32 has no D2D1_MATRIX_5X4_F: the matrix is
+  passed as raw bytes through ID2D1Effect.SetValue. Review review-7ef316d4ddfb0c6b (spike) approved;
+  WARNINGs worth carrying into the real design: the target bitmap pins the swapchain buffer
+  (would break ResizeBuffers -- release/recreate around resize), device creation must not be
+  retried every tick after a failure (back off), and the pass must not live inline in the frame
+  pump (own seam). Settings restored byte-identical; CosmicWin back on html-mini.
 
 ## Next step
 
-S1 spike.
+S2: choose the mask source.
