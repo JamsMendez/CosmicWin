@@ -160,6 +160,43 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// The other end of <see cref="StartOnFreePort"/>: when every attempt loses its bind, it gives up
+    /// after exactly <c>attempts</c> tries and fails with the losing attempt's bind-failure line, never
+    /// by handing back an inert server whose first request would read as a bare connection refusal.
+    /// </summary>
+    [Fact]
+    public void StartOnFreePort_EveryPortTaken_ThrowsWithTheLastBindFailure()
+    {
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        try
+        {
+            var takenPort = ((IPEndPoint)blocker.LocalEndpoint).Port;
+            var created = 0;
+
+            var error = Assert.Throws<InvalidOperationException>(() => StartOnFreePort(
+                (candidate, sink) =>
+                {
+                    created++;
+                    return new LocalHttpCommandServer(candidate, Token, _ => "ok", sink);
+                },
+                nextPort: () => takenPort,
+                attempts: 3));
+
+            Assert.Equal(3, created);
+            Assert.Contains("after 3 free-port attempts", error.Message, StringComparison.Ordinal);
+            Assert.Contains(
+                $"alert http: failed to start listening on port {takenPort} (127.0.0.1)",
+                error.Message,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            blocker.Stop();
+        }
+    }
+
     [Fact]
     public void Dispose_BeforeStart_IsSafe()
     {
@@ -1234,11 +1271,20 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
         var lines = new List<string>();
         void Sink(string line)
         {
-            output.WriteLine(line);
             lock (gate)
             {
                 lines.Add(line);
                 diagnostics?.Add(line);
+            }
+
+            // The server may report from its background loop after the test has finished, when xunit's
+            // output helper throws; the line is already recorded above, so losing the echo is harmless.
+            try
+            {
+                output.WriteLine(line);
+            }
+            catch (InvalidOperationException)
+            {
             }
         }
 

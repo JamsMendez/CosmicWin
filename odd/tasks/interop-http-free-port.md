@@ -32,6 +32,8 @@ was the known leftover in the Interop suite. Decided by the maintainer 2026-10-0
 - [x] T1 -- `StartOnFreePort` helper + proof test (first port held by a `TcpListener` -> server lands
   on another port and answers 202); route every started-server test through it.
   Route: delegated direct (one writer; ~65 call sites, preparation reading).
+- [x] T2 -- review follow-ups: exhaustion-path test; sink records before echoing and swallows the
+  output helper's off-test InvalidOperationException. Route: inline (one file, small).
 
 ## Acceptance
 
@@ -50,10 +52,13 @@ was the known leftover in the Interop suite. Decided by the maintainer 2026-10-0
   maintainer; review-9dada7fbe66534df (one lens, reliability) approved and acknowledged. Reviewed
   boundary advances to 77b65be.
 
-## Follow-ups (non-blocking SUGGESTIONs from review-9dada7fbe66534df)
+## Follow-ups (non-blocking SUGGESTIONs from review-9dada7fbe66534df) -- both closed by T2
 
 - R3-exhaustion-path-unproved: no test covers every attempt losing its bind (throws with the
   diagnostics, each loser disposed).
 - R3-sink-forwards-to-test-output-off-thread: the shared sink now forwards every diagnostic to
   `ITestOutputHelper.WriteLine`, possibly from the server's background loop after the test ended;
   guard it with try/catch or record before forwarding.
+- 2026-10-01: T2 done inline. Proof: mutating `if (!lost)` to always return failed both helper
+  tests (`Assert.NotEqual` same port; `Assert.Throws` no exception). Interop 493 passed / 42 skipped
+  / 0 failed; build 0 errors, no warning in this file. Maintainer: merge into main when done.
