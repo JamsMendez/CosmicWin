@@ -219,7 +219,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             }
 
             PInvoke.SetWindowLong(handle, WINDOW_LONG_PTR_INDEX.GWL_STYLE, unchecked((int)wanted));
-            if (ReadStyle(handle) != wanted)
+            if (!MaximizeBoxApplied(ReadStyle(handle), enabled))
             {
                 return false;
             }
@@ -252,6 +252,17 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// that <c>SW_RESTORE</c> also activates, and that is acceptable here: a window only gets
     /// maximized because the user is working in it, so it already holds the foreground.
     /// </summary>
+    /// <summary>Whether the read-back style shows the requested maximize-box state.</summary>
+    /// <remarks>
+    /// Looks at the maximize-box bit ONLY. The app and Windows keep changing other bits of the same
+    /// style (visibility, the maximized state, frame bits), and one of them changing between the
+    /// write and the read-back says nothing about whether the box write landed. Comparing the whole
+    /// style read such a race as a refusal, and a window recorded as refused is never given its
+    /// button back.
+    /// </remarks>
+    internal static bool MaximizeBoxApplied(uint readBack, bool enabled) =>
+        ((readBack & MaximizeBoxBit) != 0) == enabled;
+
     public bool TryRestoreFromMaximized(nint hwnd)
     {
         try

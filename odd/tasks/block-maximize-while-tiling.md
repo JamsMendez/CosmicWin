@@ -129,3 +129,9 @@ strategy question is asked before delivery. Everything stays local; the maintain
   the handle is never recorded as stripped and its button is never given back -- fix: compare only
   the maximize-box bit), R3-strip-without-restore-on-admit (adapter ~1749-1760), and
   R3-unrestorable-test-weak (MaximizeBlockTests ~456-471).
+- Follow-up R3-style-readback-full-compare FIXED (route: inline, 1 production file + 1 test file,
+  mechanical): `TrySetMaximizeBox` now checks only the maximize-box bit through the pure
+  `Win32NativeWindowSource.MaximizeBoxApplied(readBack, enabled)`. RED: 9/9
+  `Win32NativeWindowSourceMaximizeBoxTests` failed against a throwing stub; GREEN 9/9; full
+  `dotnet test CosmicWin.Interop.Tests` 444 passed / 42 skipped / 0 failed; `dotnet build
+  CosmicWin.sln` 0 errors.
