@@ -75,10 +75,19 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
     private WallpaperScene _scene;
     private int _fps;
     private DrawingRectangle _viewport;
-    // At most this many re-attaches after WebView2 process failures for the window's lifetime: a
-    // browser that keeps dying gives up (traced) instead of looping.
+    // At most this many re-attaches after WebView2 process failures in a burst: a browser that keeps
+    // dying gives up (traced) instead of looping.
     private const int MaxRecoveries = 2;
+
+    /// <summary>
+    /// A failure at least this long after the previous one starts a new burst: the recovery counter is
+    /// reset, so a window that ran stably for this long gets its full budget back.
+    /// </summary>
+    public static readonly TimeSpan StableWindow = TimeSpan.FromMinutes(10);
+
+    private readonly Func<DateTimeOffset> _clock;
     private int _recoveries;
+    private DateTimeOffset? _lastFailureAt;
     private bool _attached;
     // The PAGE reported ready (after each navigation). Not IsReady: that one means the browser is attached.
     private bool _pageReady;
@@ -86,8 +95,10 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
     private bool _disposed;
 
     public MiniSceneWindowController(
-        Func<IMiniSceneSurface> surfaceFactory, IMiniSceneBrowser browser, Action<string>? trace = null)
+        Func<IMiniSceneSurface> surfaceFactory, IMiniSceneBrowser browser, Action<string>? trace = null,
+        Func<DateTimeOffset>? clock = null)
     {
+        _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _surfaceFactory = surfaceFactory;
         _browser = browser;
         _trace = trace;
@@ -232,6 +243,9 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
         _pageReady = false;
         _trace?.Invoke($"mini-window: {reason}");
         if (_surface is not { } surface) return;
+        var now = _clock();
+        if (_lastFailureAt is { } last && now - last >= StableWindow) _recoveries = 0;
+        _lastFailureAt = now;
         if (_recoveries >= MaxRecoveries)
         {
             _trace?.Invoke("mini-window: recovery exhausted, staying down");

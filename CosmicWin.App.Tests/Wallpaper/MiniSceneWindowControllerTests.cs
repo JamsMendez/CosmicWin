@@ -70,11 +70,21 @@ public sealed class MiniSceneWindowControllerTests
 
     private readonly List<string> _trace = [];
 
+    private DateTimeOffset _now = new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
+
     private (MiniSceneWindowController Controller, FakeSurface Surface, FakeBrowser Browser) Create()
     {
         var surface = new FakeSurface();
         var browser = new FakeBrowser();
-        return (new MiniSceneWindowController(() => surface, browser, _trace.Add), surface, browser);
+        return (new MiniSceneWindowController(() => surface, browser, _trace.Add, () => _now), surface, browser);
+    }
+
+    /// <summary>Fails the browser and completes the recovery attach, if one was started.</summary>
+    private static void FailAndRecover(FakeBrowser browser)
+    {
+        var attaches = browser.AttachCalls;
+        browser.RaiseFailed("process-failed");
+        if (browser.AttachCalls > attaches) browser.AttachResult.SetResult(true);
     }
 
     private static AlertShowRequest Alert() =>
@@ -395,6 +405,75 @@ public sealed class MiniSceneWindowControllerTests
         Assert.Equal(3, browser.AttachCalls);
         Assert.False(controller.IsReady);
         Assert.Contains(_trace, line => line.Contains("recovery exhausted"));
+    }
+
+    [Fact]
+    public void TheRecoveryBudgetIsReplenishedAfterAStableWindow()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+
+        for (var i = 0; i < 4; i++)
+        {
+            FailAndRecover(browser);
+            _now += MiniSceneWindowController.StableWindow;
+        }
+
+        Assert.Equal(5, browser.AttachCalls);
+        Assert.True(controller.IsReady);
+        Assert.DoesNotContain(_trace, line => line.Contains("recovery exhausted"));
+    }
+
+    [Fact]
+    public void ThreeFailuresInsideTheStableWindowStillGiveUpAfterTwoRecoveries()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+
+        for (var i = 0; i < 3; i++)
+        {
+            FailAndRecover(browser);
+            _now += TimeSpan.FromMinutes(1);
+        }
+
+        Assert.Equal(3, browser.AttachCalls);
+        Assert.False(controller.IsReady);
+        Assert.Contains(_trace, line => line.Contains("recovery exhausted"));
+    }
+
+    [Fact]
+    public void AFailureJustBeforeTheWindowExpiresDoesNotResetTheBudget()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+
+        FailAndRecover(browser);
+        _now += TimeSpan.FromMinutes(1);
+        FailAndRecover(browser);
+        _now += MiniSceneWindowController.StableWindow - TimeSpan.FromSeconds(1);
+        FailAndRecover(browser);
+
+        Assert.Equal(3, browser.AttachCalls);
+        Assert.Contains(_trace, line => line.Contains("recovery exhausted"));
+    }
+
+    [Fact]
+    public void AFailureExactlyAtTheWindowEdgeResetsTheBudget()
+    {
+        var (controller, _, browser) = Create();
+        controller.Show(WallpaperScene.Processing, 30, Corner);
+        browser.AttachResult.SetResult(true);
+
+        FailAndRecover(browser);
+        FailAndRecover(browser);
+        _now += MiniSceneWindowController.StableWindow;
+        FailAndRecover(browser);
+
+        Assert.Equal(4, browser.AttachCalls);
+        Assert.DoesNotContain(_trace, line => line.Contains("recovery exhausted"));
     }
 
     [Fact]
