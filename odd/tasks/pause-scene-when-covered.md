@@ -44,6 +44,7 @@ excluded. Maximized or tiled windows do NOT count (the wallpaper shows in the ga
   restarts. Node harness coverage.
 - [x] T2 -- Host side: poll the covered state in html mode, send pause/resume only on change,
   never in mini/video mode, trace transitions. Wiring tests with a fake detector.
+- [x] T2b -- Review follow-up (review-9fa143cab060eddf): apply-then-commit, failed sends retried.
 - [ ] T3 -- Hardware: fullscreen browser/video over the desktop -> trace `paused`, CPU/GPU drop;
   leave fullscreen -> `resumed`, scene animates. Maximized window -> no pause.
 
@@ -86,3 +87,18 @@ Route: T1+T2 delegated direct (one writer; mapping + 2+ non-trivial files). T3 p
   with htmlWallpaperActive; kept as an explicit second lock).
   Suites: App tests 1390 -> 1399 passed (6 skipped unchanged); `dotnet build CosmicWin.sln` 0 errors, only the
   pre-existing CA2022 warning in CosmicWinAlert.Tests/ProgramTests.cs.
+- 2026-10-01 T2b (apply-then-commit) done. Fixes WARNINGs R2-trace-before-effect, R3-composition-state-before-send,
+  R3-post-failure-not-retried; covers SUGGESTION R3-failure-paths-untested.
+  `UpdateHtmlScenePause` calls the setter FIRST; only on success does it store `htmlScenePaused` and trace
+  `wallpaper-scene paused: desktop covered` / `wallpaper-scene resumed`. A recoverable setter failure leaves the
+  state unchanged (next 400 ms tick retries) and traces `wallpaper-scene pause-failed <Type>: <message>`.
+  Rate-limit rule: pause-failed is traced only for the FIRST failure of a streak (`htmlScenePauseFailing`); a
+  success clears it, so a later streak traces again. Detector failure keeps `wallpaper-scene cover-check-failed`
+  (state kept, no transition; unchanged, not rate-limited).
+  Controller: `SetScenePaused` now stores the desired `_scenePaused` unconditionally and posts when ready and
+  `_scenePostedPaused != _scenePaused`; `PostScenePause` no longer swallows (the composition traces and retries),
+  and sets `_scenePostedPaused` only after the post succeeded. `TryMarkReady` resets `_scenePostedPaused = false`
+  (fresh page runs) and re-posts the desired state, tracing `post-scene-pause` errors itself.
+  RED (before fix): 3 new wiring tests failed (resume/pause failed once traced as done; persistent failure
+  traced `paused`). GREEN after. Controller test is structural only (WebView2 is not runnable in tests).
+

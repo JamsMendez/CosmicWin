@@ -1100,6 +1100,7 @@ public sealed class AppComposition : IDisposable
         // process `hide` while paused and the host-side timing (the queue) still ends it; the queue
         // never STARTS one while covered.
         var htmlScenePaused = false;
+        var htmlScenePauseFailing = false;
         void UpdateHtmlScenePause()
         {
             if (setHtmlWallpaperScenePaused is null
@@ -1125,16 +1126,28 @@ public sealed class AppComposition : IDisposable
                 return;
             }
 
-            htmlScenePaused = covered;
-            desktopTrace?.Record(covered ? "wallpaper-scene paused: desktop covered" : "wallpaper-scene resumed");
+            // Apply, then commit: the stored state and the transition trace only change once the setter
+            // succeeded, so a failed send is retried by the next tick instead of being forgotten (which
+            // would leave the scene frozen while the desktop is visible). A persistent failure would
+            // repeat every tick, so only the FIRST failure of a streak is traced; a success ends it.
             try
             {
                 setHtmlWallpaperScenePaused(covered);
             }
             catch (Exception ex) when (IsRecoverableFailure(ex))
             {
-                desktopTrace?.Record($"wallpaper-scene pause-failed {ex.GetType().Name}: {ex.Message}");
+                if (!htmlScenePauseFailing)
+                {
+                    htmlScenePauseFailing = true;
+                    desktopTrace?.Record($"wallpaper-scene pause-failed {ex.GetType().Name}: {ex.Message}");
+                }
+
+                return;
             }
+
+            htmlScenePauseFailing = false;
+            htmlScenePaused = covered;
+            desktopTrace?.Record(covered ? "wallpaper-scene paused: desktop covered" : "wallpaper-scene resumed");
         }
 
         // The catch filter for one feature's recoverable failure (alert layer, mini window, focus border,

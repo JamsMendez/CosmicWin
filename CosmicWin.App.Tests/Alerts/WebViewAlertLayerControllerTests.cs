@@ -129,17 +129,24 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("!_htmlWallpaperMode", setBody);
         Assert.Contains("_scenePaused = paused;", setBody);
         Assert.Contains("_navigationCompleted && _pageReportedReady", setBody);
+        // A failed post must not leave a remembered state that suppresses the retry: the call is
+        // compared with what the page was last successfully told, and the failure propagates.
+        Assert.Contains("_scenePostedPaused != _scenePaused", setBody);
+        Assert.DoesNotContain("catch", setBody);
 
         var postStart = source.IndexOf("private void PostScenePause()", StringComparison.Ordinal);
         var postBody = source[postStart..source.IndexOf("public void End()", postStart, StringComparison.Ordinal)];
         Assert.Contains("AlertLayerMessages.Pause", postBody);
         Assert.Contains("AlertLayerMessages.Resume", postBody);
-        Assert.Contains("AlertLayerTrace.Error(\"post-scene-pause\"", postBody);
+        Assert.Contains("_scenePostedPaused = _scenePaused;", postBody);
+        Assert.DoesNotContain("catch", postBody);
 
         var readyStart = source.IndexOf("private void TryMarkReady()", StringComparison.Ordinal);
         var readyBody = source[readyStart..source.IndexOf("[DllImport", readyStart, StringComparison.Ordinal)];
         Assert.Contains("_htmlWallpaperMode && _scenePaused", readyBody);
+        Assert.Contains("_scenePostedPaused = false;", readyBody);
         Assert.Contains("PostScenePause()", readyBody);
+        Assert.Contains("AlertLayerTrace.Error(\"post-scene-pause\"", readyBody);
     }
 
     private static string ReadControllerSource([CallerFilePath] string testFilePath = "") =>
