@@ -119,3 +119,13 @@ strategy question is asked before delivery. Everything stays local; the maintain
 
 - 2026-09-30: branch `feat/block-maximize-while-tiling` from main f46d0f4.
 - 2026-09-30: T1 d8b8eba, T2 5fc56f2, T3 e3b7ab3, T4 (README) committed on the branch by one delegated writer. Verification: `dotnet build CosmicWin.sln` 0 errors; Interop.Tests 435 passed/42 skipped; Layout.Tests 198 passed; App.Tests 1344 passed/6 skipped. T5 (hardware check) still PENDING.
+- Parent spot check: `dotnet test CosmicWin.Interop.Tests` re-run, 435 passed / 42 skipped / 0 failed.
+  New native calls are synchronous cross-process like the existing `SetWindowPosition` (no new
+  hang class).
+- Review (RDD, medium, 1310 lines, consent granted): lineage review-7a0549b5722a49d2, lens
+  review-reliability, APPROVED and acknowledged (authority burned) on ff703b0. Advisory follow-ups:
+  R3-style-readback-full-compare (`TrySetMaximizeBox` compares the WHOLE style on read-back; if the
+  app or Windows changes another bit at the same moment, a successful strip reads as "refused",
+  the handle is never recorded as stripped and its button is never given back -- fix: compare only
+  the maximize-box bit), R3-strip-without-restore-on-admit (adapter ~1749-1760), and
+  R3-unrestorable-test-weak (MaximizeBlockTests ~456-471).
