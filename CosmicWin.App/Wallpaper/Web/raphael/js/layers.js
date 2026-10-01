@@ -374,8 +374,8 @@ function drawGlyphRingDelimiters(cx, cy, annuli) {
 // context, so it cannot be reused by the shared alert overlay's see-through hook, which must draw
 // into the tile-local context the overlay hands it (CosmicWin.App/Wallpaper/Web/shared/js/
 // alert-overlay.js's drawSeeThroughIntersections), never the scene's own canvas. This factors out
-// ONLY the gold ring's own draw parameters -- the exact same radius/rotation/count values
-// drawGlyphRings computes just below, from the same pure, already-tested geometry (coreRadius,
+// ONLY the gold ring's own draw parameters -- the radius/rotation drawGlyphRings below also reads
+// from here, and the count it cross-checks against the baked sprites, from the same pure, already-tested geometry (coreRadius,
 // js/hexadecagon.js; glyphRingAnnuli/glyphRingCountForRing/glyphRingGlyphBounds, js/glyph-rings.js)
 // and the same RING_GLYPH_POOL (js/glyphs.js) the real sprite bake reads -- so
 // js/see-through-hook.js can redraw the identical ring, at the identical position, through
@@ -405,8 +405,10 @@ function drawGlyphRings(cx, cy, progress) {
   // RAP-20b: count is no longer a fixed config constant (it's derived from the ring's own
   // circumference at bake time — glyphRingCountFromCircumference, glyph-rings.js), so it's read
   // here from the actual baked sprite array length, always in sync with what was baked.
-  const gold = annuli[1];
-  drawOutlineGlyphRing(cx, cy, (gold.innerRadius + gold.outerRadius) / 2, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, progress * TAU * GLYPH_RING_GOLD_ROTATION_SPEED);
+  // R2-gold-ring-params-parallel-geometry: radius and rotation come from goldGlyphRingDrawParams,
+  // the same source the see-through hook redraws from, so the two rings cannot drift apart.
+  const gold = goldGlyphRingDrawParams(progress);
+  drawOutlineGlyphRing(cx, cy, gold.radius, sprites.outlineGlyphsGold.length, sprites.outlineGlyphsGold, gold.rotation);
 
   const blue = annuli[3];
   drawOutlineGlyphRing(cx, cy, (blue.innerRadius + blue.outerRadius) / 2, sprites.outlineGlyphs.length, sprites.outlineGlyphs, progress * TAU * GLYPH_RING_BLUE_ROTATION_SPEED);

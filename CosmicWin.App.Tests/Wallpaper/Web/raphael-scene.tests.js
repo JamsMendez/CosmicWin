@@ -745,6 +745,30 @@ test("the perspective rays rotate independently: each has its own signed angular
   assert.ok(Math.abs(delta(cw) - delta(ccw)) > 1e-6);
 });
 
+// html-wallpaper-demo review follow-up R2-gold-ring-params-parallel-geometry: the see-through hook
+// redraws the gold ring from goldGlyphRingDrawParams, so the scene's own drawGlyphRings must place
+// the gold ring at exactly that radius and rotation, at any progress -- otherwise the ring seen
+// through the alert letters drifts away from the one on the wallpaper.
+test("the scene's gold ring is drawn at the see-through hook's own radius and rotation", function () {
+  var page = loadPage({ innerWidth: 1920, innerHeight: 1080 });
+  var sb = page.sandbox;
+  sb.render(0); // ensureSprites() bakes the ring sprites drawGlyphRings stamps
+  vm.runInContext(
+    "var __ringCalls = []; var __realDrawOutlineGlyphRing = drawOutlineGlyphRing;" +
+    "drawOutlineGlyphRing = function (cx, cy, radius, count, spriteSet, rotation) {" +
+    "  __ringCalls.push({ radius: radius, rotation: rotation, spriteSet: spriteSet });" +
+    "  return __realDrawOutlineGlyphRing.apply(this, arguments); };", sb);
+  [0, 0.37, 2.5].forEach(function (progress) {
+    vm.runInContext("__ringCalls.length = 0", sb);
+    sb.drawGlyphRings(960, 540, progress);
+    var gold = vm.runInContext("__ringCalls.filter(function (c) { return c.spriteSet === sprites.outlineGlyphsGold; })[0]", sb);
+    assert.ok(gold, "expected drawGlyphRings to draw the gold ring at progress " + progress);
+    var params = sb.goldGlyphRingDrawParams(progress);
+    assert.strictEqual(gold.radius, params.radius, "gold radius at progress " + progress);
+    assert.strictEqual(gold.rotation, params.rotation, "gold rotation at progress " + progress);
+  });
+});
+
 // ---- Run ----------------------------------------------------------------------------------------
 
 var failures = [];
