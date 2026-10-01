@@ -79,6 +79,170 @@ public sealed class AlertLayerLayoutNodeTests
             "Expected the timed-out node process to actually be killed, not just reported.");
     }
 
+    /// <summary>
+    /// R3-timeout-test-proves-root-only: the test above only spawns one process, so it cannot tell
+    /// <c>Kill(entireProcessTree: true)</c> from a plain <c>Kill()</c>. Here the hung script spawns a
+    /// CHILD of its own and reports the child's pid; after the timeout kill the child must be gone too.
+    /// </summary>
+    [RequiresNodeFact]
+    public void RunNode_TimeoutKill_TakesTheChildrenOfTheHungScriptToo()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "child.pid");
+        var script = scratch.Write("parent.js", """
+            const { spawn } = require('child_process');
+            const fs = require('fs');
+            const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true });
+            fs.writeFileSync(process.argv[2], String(child.pid));
+            setInterval(() => {}, 1000);
+            """);
+        int childPid = 0;
+        try
+        {
+            var result = RunNode(TimeSpan.FromSeconds(3), script, pidFile);
+            childPid = ReadPid(pidFile);
+
+            Assert.True(result.TimedOut, "Expected the hung parent script to be reported as timed out.");
+            Assert.True(childPid > 0, "Expected the hung script to have reported its child's pid before the timeout.");
+            Assert.False(
+                ProcessStillRunning(childPid),
+                "Expected the timeout kill to take the script's child process down with it (entireProcessTree).");
+        }
+        finally
+        {
+            KillIfRunning(childPid);
+        }
+    }
+
+    /// <summary>
+    /// R3/R4-runnode-timeout-branch-unbounded-result: a descendant that outlives the kill keeps the
+    /// redirected pipes open, and the old <c>Task.Result</c> reads after the kill then blocked forever.
+    /// On Windows a real tree kill reaches even orphaned grandchildren, so the survivor is produced by
+    /// injecting a root-only kill (the "kill missed a holder" case) instead of a tree kill.
+    /// </summary>
+    [RequiresNodeFact]
+    public void RunNode_TimeoutKill_DoesNotHangWhenASurvivorStillHoldsThePipes()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "survivor.pid");
+        var script = scratch.Write("parent.js", """
+            const { spawn } = require('child_process');
+            const fs = require('fs');
+            const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit', detached: true });
+            fs.writeFileSync(process.argv[2], String(child.pid));
+            setInterval(() => {}, 1000);
+            """);
+        int survivorPid = 0;
+        try
+        {
+            var run = Task.Run(() => RunNode(
+                TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(1), killEntireProcessTree: false, script, pidFile));
+            var finished = run.Wait(TimeSpan.FromSeconds(20));
+            survivorPid = ReadPid(pidFile);
+
+            Assert.True(finished, "Expected RunNode to return after the timeout kill even though a survivor still holds the pipes.");
+            Assert.True(run.Result.TimedOut);
+            Assert.True(survivorPid > 0 && ProcessStillRunning(survivorPid), "Test setup: the survivor should still be running (root-only kill).");
+        }
+        finally
+        {
+            // Releases the pipes too, so a RunNode that was (wrongly) still blocked can finish.
+            KillIfRunning(survivorPid);
+        }
+    }
+
+    /// <summary>
+    /// R3-probe-timeout-path-unproved: aims the probe at a process that never exits, with a tiny bound,
+    /// and requires both the "unavailable" answer and that the probe's process was actually killed.
+    /// </summary>
+    [RequiresNodeFact]
+    public void NodeAvailabilityProbe_AProcessThatNeverExits_IsKilledAndReportedUnavailable()
+    {
+        using var scratch = new ScratchDirectory();
+        var pidFile = Path.Combine(scratch.Path, "probe.pid");
+        var script = scratch.Write("probe.js", """
+            require('fs').writeFileSync(process.argv[2], String(process.pid));
+            setInterval(() => {}, 1000);
+            """);
+        int probePid = 0;
+        try
+        {
+            var available = NodeAvailability.TryRunProbe("node", [script, pidFile], TimeSpan.FromSeconds(3));
+            probePid = ReadPid(pidFile);
+
+            Assert.False(available, "Expected a probe that outlives its bound to report node as unavailable.");
+            Assert.True(probePid > 0, "Expected the probe script to have reported its pid before the timeout.");
+            Assert.False(ProcessStillRunning(probePid), "Expected the timed-out probe process to be killed.");
+        }
+        finally
+        {
+            KillIfRunning(probePid);
+        }
+    }
+
+    private static int ReadPid(string pidFile)
+    {
+        // The script writes the file well inside the timeout, so it is normally there already; the short
+        // poll only absorbs a slow disk.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(pidFile) && int.TryParse(File.ReadAllText(pidFile), out var pid))
+            {
+                return pid;
+            }
+
+            Thread.Sleep(50);
+        }
+
+        return 0;
+    }
+
+    private static void KillIfRunning(int processId)
+    {
+        if (processId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit(5000);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Already gone -- the outcome the cleanup wants.
+        }
+    }
+
+    private sealed class ScratchDirectory : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "cosmicwin-nodetests-" + Guid.NewGuid().ToString("N"));
+
+        public ScratchDirectory() => Directory.CreateDirectory(Path);
+
+        public string Write(string name, string content)
+        {
+            var path = System.IO.Path.Combine(Path, name);
+            File.WriteAllText(path, content);
+            return path;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort temp cleanup.
+            }
+        }
+    }
+
     private static bool ProcessStillRunning(int processId)
     {
         try
@@ -94,7 +258,11 @@ public sealed class AlertLayerLayoutNodeTests
     }
 
     private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNode(
-        TimeSpan timeout, params string[] arguments)
+        TimeSpan timeout, params string[] arguments) =>
+        RunNode(timeout, TimeSpan.FromSeconds(5), killEntireProcessTree: true, arguments);
+
+    private static (int ExitCode, string Stdout, string Stderr, bool TimedOut, int ProcessId) RunNode(
+        TimeSpan timeout, TimeSpan drainTimeout, bool killEntireProcessTree, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo("node")
         {
@@ -123,11 +291,20 @@ public sealed class AlertLayerLayoutNodeTests
             // Kill the WHOLE tree, not just this process: node can have spawned children of its own,
             // and an orphan left running (holding the pipes open) would also keep the two read tasks
             // above from ever completing.
-            process.Kill(entireProcessTree: true);
+            process.Kill(killEntireProcessTree);
             process.WaitForExit(5000);
-            return (-1, stdoutTask.Result, stderrTask.Result, TimedOut: true, process.Id);
+
+            // R3/R4-runnode-timeout-branch-unbounded-result: the tree kill above can still miss a
+            // descendant that keeps the redirected pipes open, and an unbounded Task.Result on a pipe
+            // nobody will ever close would hang the whole test run. Wait a bounded time for the streams
+            // and report whatever completed (empty when it did not) -- the timeout itself is the failure.
+            Task.WaitAll([stdoutTask, stderrTask], drainTimeout);
+            return (-1, CompletedOrEmpty(stdoutTask), CompletedOrEmpty(stderrTask), TimedOut: true, process.Id);
         }
 
         return (process.ExitCode, stdoutTask.Result, stderrTask.Result, TimedOut: false, process.Id);
     }
+
+    private static string CompletedOrEmpty(Task<string> readTask) =>
+        readTask.IsCompletedSuccessfully ? readTask.Result : string.Empty;
 }

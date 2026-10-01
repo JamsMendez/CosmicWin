@@ -33,17 +33,33 @@ internal static class NodeAvailability
     /// </summary>
     private const int ProbeTimeoutMilliseconds = 5000;
 
-    private static bool TryRunNodeVersion()
+    private static bool TryRunNodeVersion() =>
+        TryRunProbe("node", ["--version"], TimeSpan.FromMilliseconds(ProbeTimeoutMilliseconds));
+
+    /// <summary>
+    /// R3-probe-timeout-path-unproved: the probe's command, arguments and bound as an internal seam, so
+    /// a test can aim it at a process that never exits and watch the timeout branch (kill the tree,
+    /// report unavailable) run for real instead of waiting <see cref="ProbeTimeoutMilliseconds"/> on a
+    /// genuinely hung `node --version`. <see cref="TryRunNodeVersion"/> is the only production caller
+    /// and passes the same command and bound the probe always used.
+    /// </summary>
+    internal static bool TryRunProbe(string fileName, IEnumerable<string> arguments, TimeSpan timeout)
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo("node", "--version")
+            var startInfo = new ProcessStartInfo(fileName)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            });
+            };
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo);
             if (process is null)
             {
                 return false;
@@ -55,7 +71,7 @@ internal static class NodeAvailability
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
 
-            if (!process.WaitForExit(ProbeTimeoutMilliseconds))
+            if (!process.WaitForExit((int)timeout.TotalMilliseconds))
             {
                 // R3-node-probe-leaks-on-timeout: the old code called WaitForExit and then read
                 // ExitCode regardless of whether it actually returned true, so a hung `node --version`
