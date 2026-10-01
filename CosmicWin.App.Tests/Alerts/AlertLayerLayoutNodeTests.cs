@@ -35,7 +35,7 @@ public sealed class AlertLayerLayoutNodeTests
 
     /// <summary>
     /// T14 (alert-tile-mosaic, review R3/R4-node-harness-no-timeout): generous, but bounded -- the
-    /// harness runs 13 small vm-sandboxed cases and normally finishes in well under a second; this
+    /// harness runs a handful of small vm-sandboxed cases and normally finishes in well under a second; this
     /// only exists to turn "the process manager wedged" into a reported test failure instead of a
     /// `dotnet test` run that never comes back.
     /// </summary>
@@ -262,6 +262,30 @@ public sealed class AlertLayerLayoutNodeTests
         {
             KillIfRunning(process.HasExited ? 0 : process.Id);
         }
+    }
+
+    /// <summary>
+    /// R3-probe-never-ready-propagation-unproved: <see cref="NodeAvailability.TryRunProbe"/> must let the
+    /// never-ready <see cref="TimeoutException"/> escape. Its catch turns start failures into
+    /// "unavailable", and swallowing this one there would hide a broken test setup behind an ordinary
+    /// skip. Propagation only: that the script is killed is proved by
+    /// <see cref="WaitUntilReady_AScriptThatNeverReportsReady_FailsLoudlyAndKillsIt"/>, so this test
+    /// writes no pid file and has no start-up race of its own (R3-never-ready-probe-pid-race).
+    /// </summary>
+    [RequiresNodeFact]
+    public void NodeAvailabilityProbe_AScriptThatNeverReportsReady_LetsTheTimeoutOut()
+    {
+        using var scratch = new ScratchDirectory();
+        // Nothing ever writes this file, so the script can never report ready.
+        var readyFile = Path.Combine(scratch.Path, "never-ready.pid");
+
+        // The readiness bound is what this test exercises, kept short so the run stays fast; the hang
+        // bound is never reached (the readiness wait throws first), so its value only has to be valid.
+        var error = Record.Exception(() => NodeAvailability.TryRunProbe(
+            "node", ["-e", "setInterval(() => {}, 1000)"], timeout: TimeSpan.FromSeconds(3), readyFile,
+            readinessBound: TimeSpan.FromMilliseconds(300)));
+
+        Assert.IsType<TimeoutException>(error);
     }
 
     // The slow-start script reports its pid only after SlowStartDelayMs, then hangs. The delay must stay

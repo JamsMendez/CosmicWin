@@ -120,3 +120,20 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   wall clock, IsReady also absorbs UnauthorizedAccessException, survivor test waits ReadinessBound + 20 s,
   slow-start delay and hang bound derive from SlowStartDelayMs, 1422 line explained. App suite 1423 passed /
   6 skipped; node.exe 7 before and after.
+- Reviews review-dfe36f633c071c52 / review-0b2658a3e399eaf0 (00bceed) approved. Their suggestions fixed in the
+  next commit: R3-tryrunprobe/probe-never-ready-propagation-unproved (new test: TryRunProbe lets the
+  never-ready TimeoutException out; mutation adding TimeoutException to its catch fails it),
+  R2-ready-wait-post-loop-recheck-unexplained (comment). review-8bbcafe4921de9b2 WARNING
+  R3-never-ready-probe-pid-race: that new test first had the very start-up race R3-pid-handshake removed;
+  now propagation only (no pid file). R2-readiness-bound-param-undocumented and the test summary wording
+  fixed; review-d1033b667731dc61 literal suggestions answered with comments.
+- Doc nits the maintainer approved on 2026-10-01 (delegated writer, same commit): stale line anchors
+  (WebViewAlertCompositionWiringTests.cs), "13 cases" in HarnessTimeout doc, ReloadGap "(below)"
+  (AppComposition.cs Wire parameter comment), T15 third entry (hash now bogus,,bogus,warning,failed,warning
+  -> [warning, failed]; mutations no-cap / keep-last-two / map-before-filter each fail it),
+  R3-deferred-reload-test-weak-capture (GapReloadTests keeps every scheduled action, exactly one traces;
+  disabling the ReloadGap catch fails it), hash cap order comment (alert-layer.js). Harness 20/20.
+- review-57d4a078c543f8c9 (all of the above, uncommitted) APPROVED and acknowledged. Left open by choice
+  (each fix reopens another review round): R2-loadgap-comment-line-overlong (AppComposition.cs:174),
+  R3-probe-never-ready-test-no-observable-cleanup (kill is proved by the WaitUntilReady test instead).
+- Full App suite on that tree: 1424 passed / 6 skipped / 0 failed; node.exe 7 before and after.

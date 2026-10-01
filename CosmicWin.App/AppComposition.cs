@@ -171,7 +171,7 @@ public sealed class AppComposition : IDisposable
         bool tilingEnabled = true,
         Action<bool>? persistTiling = null,
         // T5 (alert-tile-mosaic): mirrors loadExceptions -- a fresh read of settings.conf's `gap`
-        // key, invoked from ReloadGap (below) on the SAME WE-3 "Reload" trigger the exception list
+        // key, invoked from the local function ReloadGap (defined further down in this method) on the SAME WE-3 "Reload" trigger the exception list
         // already uses. Unset -- as in every test that predates this parameter -- Reload never
         // touches TreeArranger.Gap, exactly the exceptions-only behaviour this project has always had.
         Func<int>? loadGap = null,

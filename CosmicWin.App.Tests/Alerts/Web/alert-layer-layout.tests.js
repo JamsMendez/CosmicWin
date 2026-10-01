@@ -246,14 +246,22 @@ test("hash API: the old single-kind #kind= form still maps to one full-canvas ti
 //
 // Review follow-up R3-t15-cap-no-longer-exercised: with only two real entries left after the
 // filter, a 2x1 grid never had to cap anything, so deleting the cap still passed. A THIRD real entry
-// after the junk makes the cap load-bearing: without it the result is ["failed", "warning", "failed"].
+// after the junk makes the cap load-bearing: without it the result is three tiles instead of two.
 // Confirmed by temporarily deleting the .slice(0, columns * rows) call: this fact failed, then passed
 // again once restored.
+//
+// Review follow-up R3-t15-third-entry-duplicates-first: the real entries are "warning", "failed",
+// "warning" -- the third repeats the FIRST (only two kinds exist, so some repeat is unavoidable), but
+// the order is chosen so the expected result ["warning", "failed"] is distinguishable from every
+// plausible cap bug: a cap that keeps the LAST two gives ["failed", "warning"], a failed-first
+// reorder (the C# mosaic's rule, deliberately not applied to the manual hash API) gives
+// ["failed", "warning"] too, and deleting the cap gives three tiles. Confirmed by temporary
+// mutations of alert-layer.js: no cap, keep-last-two and map-before-filter each failed this fact.
 test("hash API: tiles= drops empty/unknown entries before mapping, then caps at columns*rows (T12/T15)", function () {
   var page = loadPage({
-    hash: "#tiles=bogus,,bogus,failed,warning,failed&columns=2&rows=1&gap=0&duration=1000",
+    hash: "#tiles=bogus,,bogus,warning,failed,warning&columns=2&rows=1&gap=0&duration=1000",
   });
-  assert.deepStrictEqual(plain(page.sandbox.tiles), ["failed", "warning"]);
+  assert.deepStrictEqual(plain(page.sandbox.tiles), ["warning", "failed"]);
 });
 
 // Review follow-up R3-hash-tiles-empty-or-negative-grid-unproved: a negative columns=/rows= used to

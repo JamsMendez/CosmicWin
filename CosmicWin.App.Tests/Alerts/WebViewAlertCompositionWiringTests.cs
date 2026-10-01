@@ -102,14 +102,14 @@ public sealed class WebViewAlertCompositionWiringTests
     /// <summary>
     /// T10 (alert-tile-mosaic, review follow-up R3-workarea-catch-path-unexercised): a display whose
     /// <see cref="WorkArea"/> getter throws, proving <c>UpdateAlertOverlay</c>'s try/catch around
-    /// <c>AlertLayerWorkArea.Resolve</c> (<c>AppComposition.cs</c> ~744) actually degrades to
+    /// <c>AlertLayerWorkArea.Resolve</c> actually degrades to
     /// <see cref="AlertLayerWorkArea.Unavailable"/> and traces <c>alert-layer-workarea-failed</c>,
     /// instead of being an untested catch block that could silently stop catching anything.
     /// </summary>
     /// <remarks>
     /// Throws from the SECOND read onward, not the first: <c>AppComposition.Wire</c> itself already
     /// reads the primary display's <c>WorkArea</c> once, eagerly, at wiring time
-    /// (<c>WorkAreaResolver.Resolve</c>, <c>AppComposition.cs</c> ~278, for the initial tiling
+    /// (<c>WorkAreaResolver.Resolve</c> on the primary display, for the initial tiling
     /// layout) -- a display that throws unconditionally breaks composition before an alert is ever
     /// sent, proving nothing about the alert's OWN try/catch. <see cref="Bounds"/> stays an ordinary
     /// rect throughout: <c>AlertLayerWorkArea.Resolve</c>'s caller reads it as the surface argument

@@ -209,25 +209,41 @@ public sealed class GapReloadTests
     public void Reload_WithDeferredSchedulingLikeTheRealDispatcher_StillTracesAGapReloadFailure()
     {
         var trace = new RecordingDesktopTrace();
-        Action? deferred = null;
+        // Every scheduled action is kept (not just the last one): Reload also queues unrelated
+        // owning-thread work, so the test runs each item on its own and proves that exactly one of
+        // them -- the deferred gap reload -- is what writes the trace line.
+        var deferredWork = new List<Action>();
         var harness = Wire(
             () => throw new InvalidOperationException("settings.conf unreadable"),
-            scheduleOnOwningThread: work => deferred = work,
+            scheduleOnOwningThread: deferredWorkItem => deferredWork.Add(deferredWorkItem),
             desktopTrace: trace);
         using (harness.Composition)
         {
             var thrownByReload = Record.Exception(() => harness.Tray.Reload());
 
             Assert.Null(thrownByReload);
-            Assert.NotNull(deferred);
-            Assert.DoesNotContain(trace.Lines, line => line.Contains("reload-gap-failed", StringComparison.Ordinal));
+            Assert.NotEmpty(deferredWork);
+            Assert.DoesNotContain(trace.Lines, line => IsGapFailureLine(line));
 
-            var thrownByTheDeferredWork = Record.Exception(deferred!);
+            var itemsThatTraced = 0;
+            foreach (var deferred in deferredWork.ToArray())
+            {
+                var before = trace.Lines.Count(IsGapFailureLine);
 
-            Assert.Null(thrownByTheDeferredWork);
-            Assert.Contains(trace.Lines, line => line.Contains("reload-gap-failed", StringComparison.Ordinal));
+                Assert.Null(Record.Exception(deferred));
+
+                if (trace.Lines.Count(IsGapFailureLine) > before)
+                {
+                    itemsThatTraced++;
+                }
+            }
+
+            Assert.Equal(1, itemsThatTraced);
         }
     }
+
+    private static bool IsGapFailureLine(string line) =>
+        line.Contains("reload-gap-failed", StringComparison.Ordinal);
 
     /// <summary>
     /// R4-reload-gap-swallow-depends-on-optional-trace: the deferred catch inside

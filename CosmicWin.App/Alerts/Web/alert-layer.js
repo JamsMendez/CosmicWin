@@ -607,6 +607,8 @@ if (hasExplicitParams) {
     var requestedTiles = params.get("tiles").split(",")
       .map(function (tile) { return tile.trim(); })
       .filter(function (tile) { return tile === "failed" || tile === "warning"; })
+      // The cap keeps the entries in the ORDER GIVEN: unlike the C# mosaic this does not reorder
+      // failed-first, so a hash listing warnings first can push failed tiles past the cap.
       .slice(0, requestedColumns * requestedRows);
     startShowing(
       requestedTiles,

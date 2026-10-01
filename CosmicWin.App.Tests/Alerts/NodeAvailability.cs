@@ -41,10 +41,14 @@ internal static class NodeAvailability
     /// a test can aim it at a process that never exits and watch the timeout branch (kill the tree,
     /// report unavailable) run for real instead of waiting <see cref="ProbeTimeoutMilliseconds"/> on a
     /// genuinely hung `node --version`. <see cref="TryRunNodeVersion"/> is the only production caller
-    /// and passes the same command and bound the probe always used.
+    /// and passes the same command and bound the probe always used. <paramref name="readyFile"/> and
+    /// <paramref name="readinessBound"/> are test-only: they start <paramref name="timeout"/> only once the
+    /// script reported ready, waiting at most <paramref name="readinessBound"/> (default
+    /// <see cref="ReadinessBound"/>) -- see <see cref="WaitUntilReady"/>.
     /// </summary>
     internal static bool TryRunProbe(
-        string fileName, IEnumerable<string> arguments, TimeSpan timeout, string? readyFile = null)
+        string fileName, IEnumerable<string> arguments, TimeSpan timeout, string? readyFile = null,
+        TimeSpan? readinessBound = null)
     {
         try
         {
@@ -72,7 +76,7 @@ internal static class NodeAvailability
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
 
-            WaitUntilReady(process, readyFile);
+            WaitUntilReady(process, readyFile, readinessBound);
             if (!process.WaitForExit((int)timeout.TotalMilliseconds))
             {
                 // R3-node-probe-leaks-on-timeout: the old code called WaitForExit and then read
@@ -138,6 +142,9 @@ internal static class NodeAvailability
             Thread.Sleep(25);
         }
 
+        // One last look after the bound (R2-ready-wait-post-loop-recheck-unexplained): the loop can
+        // run out while sleeping, so a script that got ready inside that final 25 ms slice would
+        // otherwise be killed and reported as never ready.
         if (process.HasExited || IsReady(readyFile))
         {
             return;
