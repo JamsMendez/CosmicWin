@@ -104,7 +104,7 @@ strategy question is asked before delivery. Everything stays local; the maintain
   Tiling section: one bullet under "What works" plus a "Maximize while tiling" subsection (what is
   blocked, when the button returns, pause behaviour, the three limits); `tiling` settings row
   mentions maximize. Docs only, no RED/GREEN applicable; README rendered by readback.
-- [ ] T5: Hardware check (Notepad, Explorer, Chrome, VS Code; caption button, double-click, Win+Up;
+- [x] T5: Hardware check (Notepad, Explorer, Chrome, VS Code; caption button, double-click, Win+Up;
   tiling off restores the button; F11 fullscreen unaffected). Route: inline, PENDING until the
   maintainer allows a supervised run.
 
@@ -215,3 +215,18 @@ strategy question is asked before delivery. Everything stays local; the maintain
   finishes), R3-admission-verdict-ignores-refused (`IsExcludedAsAdmitted` only re-adds the bit for
   `_boxStripped`, not for a refused strip that landed late). Left open on purpose: rare path,
   diminishing returns; revisit if the hardware check or the trace shows timeouts.
+- T5 hardware check, 2026-09-30, elevated shell, combined local test branch `test/hw-2026-09-30`
+  (this branch + fix/explorer-restart-virtual-desktops), Debug build run from `run/`:
+  - Two WinForms probes tiled: `maxbox=False minbox=True`; caption screenshot shows the maximize
+    button still drawn, greyed out, between minimize and close.
+  - `ShowWindow(SW_MAXIMIZE)` on a tiled probe returned true but the window NEVER became zoomed
+    (IsZoomed false immediately and after 30 ms, no `maximize undone/kept` trace line): without
+    WS_MAXIMIZEBOX Windows itself refuses the maximize, so the fallback is not even reached for
+    standard windows.
+  - `Alt+T` off: both probes `maxbox=True`; the same SW_MAXIMIZE then maximized probe 2 (3408x1456).
+  - `Alt+T` on: probe 2 un-maximized back to its slot with `maxbox=False`; foreground stayed on the
+    same window (weak check: it already held focus).
+  - Windows 11 Notepad (custom title bar): `maxbox=False`, maximize refused, button drawn dimmed.
+  - Not covered: Chrome, VS Code, F11 fullscreen, an elevated target (the maintainer's own apps
+    were not touched).
+
