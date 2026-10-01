@@ -93,7 +93,7 @@ public sealed class AlertLayerLayoutNodeTests
             const { spawn } = require('child_process');
             const fs = require('fs');
             const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true });
-            fs.writeFileSync(process.argv[2], String(child.pid));
+            fs.writeFileSync(process.argv[2], String(child.pid) + '\n');
             setInterval(() => {}, 1000);
             """);
         int childPid = 0;
@@ -129,7 +129,7 @@ public sealed class AlertLayerLayoutNodeTests
             const { spawn } = require('child_process');
             const fs = require('fs');
             const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit', detached: true });
-            fs.writeFileSync(process.argv[2], String(child.pid));
+            fs.writeFileSync(process.argv[2], String(child.pid) + '\n');
             setInterval(() => {}, 1000);
             """);
         int survivorPid = 0;
@@ -164,7 +164,7 @@ public sealed class AlertLayerLayoutNodeTests
         using var scratch = new ScratchDirectory();
         var pidFile = Path.Combine(scratch.Path, "probe.pid");
         var script = scratch.Write("probe.js", """
-            require('fs').writeFileSync(process.argv[2], String(process.pid));
+            require('fs').writeFileSync(process.argv[2], String(process.pid) + '\n');
             setInterval(() => {}, 1000);
             """);
         int probePid = 0;
@@ -265,6 +265,34 @@ public sealed class AlertLayerLayoutNodeTests
     }
 
     /// <summary>
+    /// R3-isready-accepts-partial-pid-prefix: a reader can land in the middle of the script's write and see
+    /// "123" of "12345" -- still a valid int, but the WRONG pid. A pid only counts once its newline
+    /// terminator is on disk, so a file holding digits without one is not ready yet.
+    /// </summary>
+    [RequiresNodeFact]
+    public void WaitUntilReady_APidWithoutItsTerminator_IsNotReadyYet()
+    {
+        using var scratch = new ScratchDirectory();
+        var readyFile = scratch.Write("partial.pid", "123");
+        var startInfo = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true };
+        startInfo.ArgumentList.Add("-e");
+        startInfo.ArgumentList.Add("setInterval(() => {}, 1000)");
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start `node`.");
+        try
+        {
+            var error = Record.Exception(
+                () => NodeAvailability.WaitUntilReady(process, readyFile, TimeSpan.FromMilliseconds(300)));
+
+            Assert.IsType<TimeoutException>(error);
+        }
+        finally
+        {
+            KillIfRunning(process.HasExited ? 0 : process.Id);
+        }
+    }
+
+    /// <summary>
     /// R3-probe-never-ready-propagation-unproved: <see cref="NodeAvailability.TryRunProbe"/> must let the
     /// never-ready <see cref="TimeoutException"/> escape. Its catch turns start failures into
     /// "unavailable", and swallowing this one there would hide a broken test setup behind an ordinary
@@ -284,7 +312,7 @@ public sealed class AlertLayerLayoutNodeTests
         var readyFile = Path.Combine(scratch.Path, "never-ready.pid");
         var alivePidFile = Path.Combine(scratch.Path, "alive.pid");
         var script = scratch.Write("never-ready.js", """
-            require('fs').writeFileSync(process.argv[2], String(process.pid));
+            require('fs').writeFileSync(process.argv[2], String(process.pid) + '\n');
             setInterval(() => {}, 1000);
             """);
         int pid = 0;
@@ -295,7 +323,7 @@ public sealed class AlertLayerLayoutNodeTests
             var error = Record.Exception(() => NodeAvailability.TryRunProbe(
                 "node", [script, alivePidFile], timeout: TimeSpan.FromSeconds(3), readyFile,
                 readinessBound: TimeSpan.FromMilliseconds(300)));
-            pid = File.Exists(alivePidFile) && int.TryParse(File.ReadAllText(alivePidFile), out var written) ? written : 0;
+            pid = NodeAvailability.TryReadPid(alivePidFile, out var written) ? written : 0;
 
             Assert.IsType<TimeoutException>(error);
             if (pid > 0)
@@ -318,7 +346,7 @@ public sealed class AlertLayerLayoutNodeTests
 
     private static readonly string SlowStartScript = $$"""
         setTimeout(() => {
-          require('fs').writeFileSync(process.argv[2], String(process.pid));
+          require('fs').writeFileSync(process.argv[2], String(process.pid) + '\n');
           setInterval(() => {}, 1000);
         }, {{SlowStartDelayMs}});
         """;
@@ -330,7 +358,7 @@ public sealed class AlertLayerLayoutNodeTests
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (DateTime.UtcNow < deadline)
         {
-            if (File.Exists(pidFile) && int.TryParse(File.ReadAllText(pidFile), out var pid))
+            if (NodeAvailability.TryReadPid(pidFile, out var pid))
             {
                 return pid;
             }

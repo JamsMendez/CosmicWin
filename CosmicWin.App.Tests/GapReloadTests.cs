@@ -211,7 +211,9 @@ public sealed class GapReloadTests
         var trace = new RecordingDesktopTrace();
         // Every scheduled action is kept (not just the last one): Reload also queues unrelated
         // owning-thread work, so the test runs each item on its own and proves that exactly one of
-        // them -- the deferred gap reload -- is what writes the trace line.
+        // them -- the deferred gap reload -- is what writes the trace line. The list is drained as a
+        // queue, not a snapshot, so work an item schedules while it runs is run and counted too
+        // (R3-gap-reload-snapshot-skips-nested-deferred-work).
         var deferredWork = new List<Action>();
         var harness = Wire(
             () => throw new InvalidOperationException("settings.conf unreadable"),
@@ -225,9 +227,13 @@ public sealed class GapReloadTests
             Assert.NotEmpty(deferredWork);
             Assert.DoesNotContain(trace.Lines, line => IsGapFailureLine(line));
 
+            // Bounded, so an item that keeps rescheduling itself fails the test instead of hanging it.
+            const int MaxDeferredItems = 100;
             var itemsThatTraced = 0;
-            foreach (var deferred in deferredWork.ToArray())
+            for (var index = 0; index < deferredWork.Count; index++)
             {
+                Assert.True(index < MaxDeferredItems, "Expected the deferred work to drain, not keep rescheduling itself.");
+                var deferred = deferredWork[index];
                 var before = trace.Lines.Count(IsGapFailureLine);
 
                 Assert.Null(Record.Exception(deferred));

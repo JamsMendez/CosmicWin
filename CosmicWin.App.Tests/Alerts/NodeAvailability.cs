@@ -156,13 +156,26 @@ internal static class NodeAvailability
             $"The script never reported ready in {readyFile} within {bound.TotalSeconds:0.###} s; it was killed.");
     }
 
-    // The script writes the file in one call, but a reader can still land between create and write,
-    // so "ready" means a parseable pid, not merely an existing file.
-    private static bool IsReady(string readyFile)
+    private static bool IsReady(string readyFile) => TryReadPid(readyFile, out _);
+
+    /// <summary>
+    /// Reads a pid a test script wrote as <c>String(pid) + '\n'</c>. A reader can land between create
+    /// and write (empty file) or in the middle of the write ("123" of "12345", still a valid int but the
+    /// WRONG pid -- R3-isready-accepts-partial-pid-prefix), so a pid only counts once its newline
+    /// terminator is on disk.
+    /// </summary>
+    internal static bool TryReadPid(string pidFile, out int pid)
     {
+        pid = 0;
         try
         {
-            return File.Exists(readyFile) && int.TryParse(File.ReadAllText(readyFile), out _);
+            if (!File.Exists(pidFile))
+            {
+                return false;
+            }
+
+            var text = File.ReadAllText(pidFile);
+            return text.EndsWith('\n') && int.TryParse(text.AsSpan().TrimEnd(), out pid);
         }
         // UnauthorizedAccessException too: a file still being created can deny the read for a moment
         // (R3-isready-catches-only-ioexception); either way it is simply "not ready yet".

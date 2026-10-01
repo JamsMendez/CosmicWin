@@ -146,3 +146,15 @@ Route: delegated direct, one writer (writer trigger: 2+ non-trivial files).
   check-silently-vacuous: accepted tradeoff, not changed -- the check can only be vacuous on a Node start
   slower than the readiness bound, the unconditional kill proof lives in the WaitUntilReady test, and the
   mutation run shows the check live 3/3 here.
+- 2026-10-01 merged into local main (ff 6dd653a); final review-408019cb47823147 approved and acknowledged.
+  Its two SUGGESTIONs fixed on branch test/review-suggestions-followup:
+  - R3-isready-accepts-partial-pid-prefix: scripts write `String(pid) + '\n'`; NodeAvailability.TryReadPid
+    (shared by IsReady, ReadPid and the alive-pid read) only accepts a pid once its terminator is on disk.
+    RED: new test ("123" without terminator) was taken as ready; GREEN after. Mutation: scripts without
+    the terminator fail 5 of 10 node tests.
+  - R3-gap-reload-snapshot-skips-nested-deferred-work: the deferred list is drained as a bounded queue.
+    DEFENSIVE ONLY: reverting to the snapshot still passes, because no deferred item schedules more work
+    today; the queue keeps the count honest if one ever does.
+  - review-cc0444706145579d (both fixes, uncommitted) APPROVED and acknowledged. Open SUGGESTION:
+    R3-tryreadpid-unit-coverage-gated-on-node (TryReadPid is only covered by node-gated tests).
+  - Full App suite 1425 passed / 6 skipped / 0 failed; node.exe 7 before and after.
