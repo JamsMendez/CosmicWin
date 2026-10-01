@@ -87,7 +87,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T11 Raphael FULL scene: triple gold glyphs + no gold glow, same as mini (maintainer 2026-09-29; out-of-mini scope change on the big wallpaper) (route: delegated writer)
 - [x] T2m Processing mini: thin the two white folding bands (~7px -> ~2.5px at 288), radii unchanged (maintainer 2026-09-29) (route: delegated writer)
 - [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
-- [ ] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
+- [x] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
 ## Progress / evidence
 - Mapping (explorer agent, main 67a0aae): scenes in `CosmicWin.App/Wallpaper/Web/<scene>/`, one `#scene`
@@ -332,3 +332,5 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
+- T6 closed 2026-09-30: after using the merged mini window in the running app, the maintainer confirmed
+  it looks and behaves right ("Si me parece bien, márcalo como hecho").

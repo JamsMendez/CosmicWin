@@ -36,7 +36,7 @@ taller than the screen. The center also sits low (`CENTER_Y_FRACTION = 0.511`).
 - [x] T1 — Fitted basis + centered disc in idle and explorer, with harness tests per scene
   (outer radius + 25 <= cy and <= H - cy at 1920x1080 and 1000x800). Route: delegated direct
   (writer trigger: 2+ non-trivial files per scene). Commit: 00148b3.
-- [ ] T2 — Visual check with Edge headless (--no-sandbox) and in the maintainer's browser.
+- [x] T2 — Visual check with Edge headless (--no-sandbox) and in the maintainer's browser.
 
 ## Acceptance criteria
 
