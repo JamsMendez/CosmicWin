@@ -142,13 +142,15 @@ maximize button, a double click on the title bar, and `Win+Up`.
 
 ### Maximize while tiling
 
-While tiling is on, CosmicWin removes the maximize button from every tiled window that has one. It
-never adds one to a window that never had it, and it leaves fullscreen (`F11`) alone.
+While tiling is on, CosmicWin disables (greys out) the maximize button of every tiled window that
+has one; the button stays visible. It never enables one on a window that never had it, and it leaves
+fullscreen (`F11`) alone. A window with no minimize button (rare, some dialogs) shows neither button
+while tiled, because Windows draws the two as a pair.
 
-The button comes back whenever a window stops being tiled: you turn tiling off (`Alt+T` or the
+The button is enabled again whenever a window stops being tiled: you turn tiling off (`Alt+T` or the
 tray), the window closes, is minimized or hidden, goes fullscreen, is left floating because it does
-not fit or will not stay in its slot, or CosmicWin exits normally. Turning tiling back on takes it
-away again. **Pausar** leaves the buttons as they are — it is a short suspension, not a change of
+not fit or will not stay in its slot, or CosmicWin exits normally. Turning tiling back on disables it
+again. **Pausar** leaves the buttons as they are — it is a short suspension, not a change of
 mode.
 
 Limits worth knowing:
