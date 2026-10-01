@@ -634,7 +634,7 @@ test("a renamed constellation ring fails the page load instead of silently dropp
         return source.replace("name: 'constellation'", "name: 'constellations'");
       },
     });
-  }, /constellation/);
+  }, /no ring named 'constellation'/);
   assert.ok(renamed, "test setup: the constellation ring's name literal must be found in js/animate.js");
 });
 

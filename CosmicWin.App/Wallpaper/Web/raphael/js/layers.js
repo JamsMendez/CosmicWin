@@ -374,8 +374,9 @@ function drawGlyphRingDelimiters(cx, cy, annuli) {
 // context, so it cannot be reused by the shared alert overlay's see-through hook, which must draw
 // into the tile-local context the overlay hands it (CosmicWin.App/Wallpaper/Web/shared/js/
 // alert-overlay.js's drawSeeThroughIntersections), never the scene's own canvas. This factors out
-// ONLY the gold ring's own draw parameters -- the radius/rotation drawGlyphRings below also reads
-// from here, and the count it cross-checks against the baked sprites, from the same pure, already-tested geometry (coreRadius,
+// ONLY the gold ring's own draw parameters -- drawGlyphRings below reads its radius/rotation from
+// here; its count is NOT read there (that draws sprites.outlineGlyphsGold.length) but is pinned
+// equal to the baked sprite count by the raphael-scene.tests.js gold ring cases -- from the same pure, already-tested geometry (coreRadius,
 // js/hexadecagon.js; glyphRingAnnuli/glyphRingCountForRing/glyphRingGlyphBounds, js/glyph-rings.js)
 // and the same RING_GLYPH_POOL (js/glyphs.js) the real sprite bake reads -- so
 // js/see-through-hook.js can redraw the identical ring, at the identical position, through

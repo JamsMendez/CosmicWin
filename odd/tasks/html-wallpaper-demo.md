@@ -339,3 +339,9 @@ the page). Merging anything to main is the maintainer's call.
 - D3 (video switch under the page): FIXED by `ff06f8b` (html/mini mode guard in SwitchVideoWallpaper).
 - Pausing the scene while the desktop is covered: OPEN, needs a maintainer decision and hardware.
 
+- Review `review-7727f5af1072b5e1` (high, 4 lenses, a1333d8..d8fe76b) APPROVED and acknowledged.
+  Fixed right after: WARNING R2-gold-count-crosscheck-comment-misleading (comment claimed
+  drawGlyphRings cross-checks the count; it does not -- the harness pins it) and SUGGESTION
+  R2-idle-rename-test-loose-regex (now matches "no ring named 'constellation'"). Left as is:
+  R3-gold-ring-count-unpinned (count already pinned by the two gold-ring count cases) and
+  R3-idle-load-throw-scope (accepted: only a developer rename can trigger it).
