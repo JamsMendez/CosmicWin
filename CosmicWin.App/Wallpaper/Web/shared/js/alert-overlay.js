@@ -498,6 +498,10 @@ function handleHostMessage(event) {
     }
   } else if (data.type === "hide") {
     hide();
+  } else if (data.type === "pause" || data.type === "resume") {
+    // pause-scene-when-covered: only the wallpaper scene pages load render-loop.js (which owns the
+    // switch); any other page that reuses this handler simply has nothing to pause.
+    if (typeof setWallpaperPaused === "function") setWallpaperPaused(data.type === "pause");
   }
 }
 

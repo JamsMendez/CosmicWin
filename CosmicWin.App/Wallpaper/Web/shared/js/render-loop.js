@@ -196,6 +196,47 @@ var wallpaperNextDueFrameTimeMs = null;
 // through where only one fpscap-worth of time has elapsed.
 var WALLPAPER_FRAME_INTERVAL_EPSILON_MS = 1;
 
+// pause-scene-when-covered T1: the pause/resume switch. The host (WebViewAlertLayerController) posts
+// {type:"pause"} while a fullscreen window covers the primary monitor -- nobody can see the wallpaper,
+// so it should cost nothing -- and {type:"resume"} when it no longer does (alert-overlay.js's
+// handleHostMessage routes both here). While paused scheduleFrame arms NO requestAnimationFrame at
+// all (not a slowed loop: the page goes fully idle) and remembers the callbacks it was asked to
+// schedule; resume re-arms each of them exactly once.
+//
+// Time: every scene derives its animation from the rAF timestamp it is handed (alertSceneMs(ms) and the
+// scene's own progress(ms)), not from an accumulated delta, so after a gap the scene simply continues
+// at the CURRENT time -- there is no catch-up burst and no visible rewind. The fps schedule is reset
+// the same way (wallpaperNextDueFrameTimeMs = null draws the first resumed frame immediately).
+//
+// An alert showing when the pause arrives is NOT touched: its host-side timing stays authoritative
+// (the queue ends it with `hide`, which handleHostMessage processes as a message, not as a frame), and
+// its page-side clock is the same rAF timestamp, so a short cover that ends before the alert's
+// duration finds the alert still correctly timed on the first resumed frame.
+//
+// The mini variant is the always-visible topmost corner window and never pauses (the host does not
+// send it these messages; ignoring them here is the second lock).
+var wallpaperPaused = false;
+var wallpaperHeldFrameCallbacks = [];
+
+function holdFrameWhilePaused(callback) {
+  if (wallpaperHeldFrameCallbacks.indexOf(callback) < 0) {
+    wallpaperHeldFrameCallbacks.push(callback);
+  }
+}
+
+function setWallpaperPaused(paused) {
+  if (isMiniVariant) return;
+  paused = paused === true;
+  if (paused === wallpaperPaused) return;
+  wallpaperPaused = paused;
+  if (paused) return;
+
+  wallpaperNextDueFrameTimeMs = null;
+  var held = wallpaperHeldFrameCallbacks;
+  wallpaperHeldFrameCallbacks = [];
+  held.forEach(function (callback) { scheduleFrame(callback); });
+}
+
 // The ONE place every scene's render loop schedules its next frame (see this function's own header
 // remarks above for what it replaces, and the D6d hardening remarks just above for the pacing rule
 // itself). At the default 60fps on a 60Hz-or-slower display this draws every real animation frame,
@@ -209,7 +250,18 @@ var WALLPAPER_FRAME_INTERVAL_EPSILON_MS = 1;
 // alert-overlay.js's startShowing/render) still elapses correctly regardless of how many frames were
 // skipped in between; only the DRAWING rate is capped, never the clock a drawn frame is handed.
 function scheduleFrame(callback) {
+  if (wallpaperPaused) {
+    holdFrameWhilePaused(callback);
+    return;
+  }
+
   window.requestAnimationFrame(function (frameTimeMs) {
+    if (wallpaperPaused) {
+      // The pause arrived while this frame was already in flight: draw nothing and re-arm nothing.
+      holdFrameWhilePaused(callback);
+      return;
+    }
+
     if (wallpaperNextDueFrameTimeMs !== null &&
         frameTimeMs < wallpaperNextDueFrameTimeMs - WALLPAPER_FRAME_INTERVAL_EPSILON_MS) {
       scheduleFrame(callback);

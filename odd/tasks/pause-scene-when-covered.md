@@ -39,7 +39,7 @@ excluded. Maximized or tiled windows do NOT count (the wallpaper shows in the ga
 
 ## Tasks
 
-- [ ] T1 -- Page side: a pause/resume web message handled by the shared render loop (all four
+- [x] T1 -- Page side: a pause/resume web message handled by the shared render loop (all four
   scenes); while paused no frame is drawn and no rAF work beyond the minimum; on resume drawing
   restarts. Node harness coverage.
 - [ ] T2 -- Host side: poll the covered state in html mode, send pause/resume only on change,
@@ -52,3 +52,16 @@ Route: T1+T2 delegated direct (one writer; mapping + 2+ non-trivial files). T3 p
 ## Progress
 
 - 2026-10-01: branch `feat/pause-scene-when-covered` off main a4ee8f5.
+- 2026-10-01 T1 (page side) done. Host->page messages: `{type:"pause"}` / `{type:"resume"}`, handled in
+  `shared/js/alert-overlay.js` handleHostMessage -> `setWallpaperPaused` in `shared/js/render-loop.js`
+  (all four scenes schedule through the shared `scheduleFrame`). Paused: `scheduleFrame` arms NO rAF and holds
+  the callbacks; a frame already in flight when the pause arrives draws nothing and holds its callback;
+  resume re-arms each held callback once and resets the fps schedule (first resumed frame draws at once).
+  Scenes derive time from the rAF timestamp, so after a gap they continue at the CURRENT time (no catch-up,
+  no rewind). Mini variant ignores both messages. `hide` is a message handler, so it still works while paused.
+  Shared checks: `CosmicWin.App.Tests/Wallpaper/Web/pause-resume.checks.js`, used by all four harnesses.
+  RED: processing/raphael harness "pause/resume host messages ..." failed with "expected a paused page to
+  draw no frame and arm no further requestAnimationFrame". GREEN after the change (processing 44/44,
+  raphael 26/26, idle 21/21, explorer 22/22). Mini test pre-existed green, proven by mutation: removing
+  `if (isMiniVariant) return;` failed it ("expected the mini variant to keep drawing after a pause message").
+  Judgment call: an alert showing at pause time is not special-cased (page frozen, host timing authoritative).

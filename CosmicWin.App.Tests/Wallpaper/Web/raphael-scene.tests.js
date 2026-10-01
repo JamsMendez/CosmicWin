@@ -23,6 +23,7 @@ const assert = require("assert");
 const { URLSearchParams } = require("url");
 
 const miniVariantChecks = require(path.join(__dirname, "mini-variant.checks.js"));
+const pauseResumeChecks = require(path.join(__dirname, "pause-resume.checks.js"));
 const sceneDir = process.argv[2];
 if (!sceneDir) {
   console.error("usage: node raphael-scene.tests.js <path-to-wallpaper-raphael-directory>");
@@ -767,6 +768,16 @@ test("the scene's gold ring is drawn at the see-through hook's own radius and ro
     assert.strictEqual(gold.radius, params.radius, "gold radius at progress " + progress);
     assert.strictEqual(gold.rotation, params.rotation, "gold rotation at progress " + progress);
   });
+});
+
+// ---- pause-scene-when-covered T1: the host's pause/resume messages (shared checks) --------------------
+
+test("pause/resume host messages: a paused page draws and arms nothing, resume re-arms exactly once, hide still works", function () {
+  pauseResumeChecks.checkPauseResume(loadPage);
+});
+
+test("the mini variant ignores the pause message (the corner window is always visible)", function () {
+  pauseResumeChecks.checkMiniVariantIgnoresPause(loadPage);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

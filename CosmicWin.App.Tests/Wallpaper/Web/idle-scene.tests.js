@@ -26,6 +26,7 @@ const { URLSearchParams } = require("url");
 const constellationRingChecks = require(path.join(__dirname, "constellation-ring.checks.js"));
 
 const miniVariantChecks = require(path.join(__dirname, "mini-variant.checks.js"));
+const pauseResumeChecks = require(path.join(__dirname, "pause-resume.checks.js"));
 const sceneDir = process.argv[2];
 if (!sceneDir) {
   console.error("usage: node idle-scene.tests.js <path-to-wallpaper-idle-directory>");
@@ -636,6 +637,16 @@ test("a renamed constellation ring fails the page load instead of silently dropp
     });
   }, /no ring named 'constellation'/);
   assert.ok(renamed, "test setup: the constellation ring's name literal must be found in js/animate.js");
+});
+
+// ---- pause-scene-when-covered T1: the host's pause/resume messages (shared checks) --------------------
+
+test("pause/resume host messages: a paused page draws and arms nothing, resume re-arms exactly once, hide still works", function () {
+  pauseResumeChecks.checkPauseResume(loadPage);
+});
+
+test("the mini variant ignores the pause message (the corner window is always visible)", function () {
+  pauseResumeChecks.checkMiniVariantIgnoresPause(loadPage);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

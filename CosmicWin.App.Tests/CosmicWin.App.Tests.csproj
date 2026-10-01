@@ -53,6 +53,11 @@
     <Content Include="Wallpaper\Web\mini-variant.checks.js">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- pause-scene-when-covered T1: the pause/resume host-message checks all four scene harnesses
+         require() from their own directory. -->
+    <Content Include="Wallpaper\Web\pause-resume.checks.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <!-- html-wallpaper-demo D6c: the committed Node vm-sandbox harness proving the idle-scene
          wallpaper page's own contract (IdleSceneNodeTests shells out to `node` and passes it this
          file's resolved output path, same technique as explorer-scene.tests.js above). -->
