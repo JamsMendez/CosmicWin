@@ -107,3 +107,7 @@ the alert for the rest of its duration (see T2 notes).
   `_navigation.BeforeHostNavigate();` (mutation moving the call after Navigate in SwitchScene fails it;
   the old count-only check passed that mutation). R3-class-doc-contradicts-latest-started-rule: the
   AlertLayerNavigation summary now lists both superseded rules. Alert-layer tests 111/111, build 0 errors.
+- 2026-10-01: review-58abc6b3793730e0 (medium, reliability, cd42b0e..45fed2f) APPROVED and acknowledged.
+  Both SUGGESTIONs fixed right after: R3-incidental-bom-insertion (BOM removed from the three touched
+  files; the repo is mostly BOM-less, 284 vs 64 .cs files) and R3-adjacency-guard-matches-comments (the
+  ordering guard skips `//` lines). Alert-layer tests 111/111.

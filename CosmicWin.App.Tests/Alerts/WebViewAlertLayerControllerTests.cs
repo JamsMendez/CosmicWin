@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using CosmicWin.Interop.Win32;
@@ -81,7 +81,7 @@ public sealed class WebViewAlertLayerControllerTests
         var navigateCalls = 0;
         for (var i = 0; i < sourceLines.Length; i++)
         {
-            if (!sourceLines[i].Contains("CoreWebView2.Navigate(")) continue;
+            if (sourceLines[i].StartsWith("//") || !sourceLines[i].Contains("CoreWebView2.Navigate(")) continue;
             navigateCalls++;
             Assert.True(i > 0 && sourceLines[i - 1] == "_navigation.BeforeHostNavigate();",
                 $"'{sourceLines[i]}' is not immediately preceded by _navigation.BeforeHostNavigate();");

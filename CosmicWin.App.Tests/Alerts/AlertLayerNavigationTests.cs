@@ -1,4 +1,4 @@
-﻿using CosmicWin.App.Alerts;
+using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
 

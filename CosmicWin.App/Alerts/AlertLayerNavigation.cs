@@ -1,4 +1,4 @@
-﻿namespace CosmicWin.App.Alerts;
+namespace CosmicWin.App.Alerts;
 
 /// <summary>
 /// Pure bookkeeping behind "is this NavigationCompleted stale?", independent of event order and of id
