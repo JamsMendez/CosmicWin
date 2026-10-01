@@ -21,13 +21,29 @@ public sealed class WebView2MiniSceneBrowserSourceGuardTests
     }
 
     [Fact]
+    public void OnlyAFatalProcessFailureKindTearsTheBrowserDown()
+    {
+        var source = ReadSource();
+        var handlerAt = source.IndexOf("private void OnProcessFailed", StringComparison.Ordinal);
+        var policyAt = source.IndexOf("MiniProcessFailurePolicy.RequiresRecovery(args.ProcessFailedKind)", StringComparison.Ordinal);
+        var releaseAt = source.IndexOf("ReleaseController();", handlerAt, StringComparison.Ordinal);
+
+        Assert.True(handlerAt > 0 && policyAt > handlerAt, "OnProcessFailed must consult the failure kind policy.");
+        Assert.True(policyAt < releaseAt, "The kind check must come before the teardown.");
+    }
+
+    [Fact]
     public void APartialAttachReleasesTheControllerTheVisualAndTheEnvironment()
     {
         var source = ReadSource();
         var finallyAt = source.IndexOf("finally", StringComparison.Ordinal);
 
         Assert.True(finallyAt > 0, "AttachAsync must clean up in a finally.");
-        var cleanup = source[finallyAt..];
+        // Only the finally block itself: OnProcessFailed and ReleaseController further down also null the
+        // environment and close controllers, so a wider slice would pass with the cleanup removed.
+        var cleanupEnd = source.IndexOf("public void Navigate", finallyAt, StringComparison.Ordinal);
+        Assert.True(cleanupEnd > finallyAt, "Expected Navigate to follow AttachAsync.");
+        var cleanup = source[finallyAt..cleanupEnd];
         Assert.Contains("candidate.Close();", cleanup);
         Assert.Contains("surface.RemoveCompositionOverlayVisual();", cleanup);
         Assert.Contains("_environment = null;", cleanup);

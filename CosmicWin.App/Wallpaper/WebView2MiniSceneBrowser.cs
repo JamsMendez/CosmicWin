@@ -114,6 +114,13 @@ public sealed class WebView2MiniSceneBrowser : IMiniSceneBrowser
     {
         try
         {
+            if (!MiniProcessFailurePolicy.RequiresRecovery(args.ProcessFailedKind))
+            {
+                // A helper process died and WebView2 restarts it by itself: keep the page and the budget.
+                Debug.WriteLine($"mini WebView2 helper process failed, ignored: {args.ProcessFailedKind}");
+                return;
+            }
+
             var reason = AlertLayerTrace.ProcessFailed(args.ProcessFailedKind, args.Reason);
             // The failed browser and everything hanging off it is dropped; the owner re-attaches.
             ReleaseController();

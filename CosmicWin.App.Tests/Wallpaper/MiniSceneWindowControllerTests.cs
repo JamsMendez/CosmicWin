@@ -410,6 +410,7 @@ public sealed class MiniSceneWindowControllerTests
 
         Assert.False(controller.IsReady);
         Assert.Equal(navigations, browser.Navigations.Count);
+        Assert.Contains(_trace, line => line.Contains("attach failed"));
     }
 
     [Fact]

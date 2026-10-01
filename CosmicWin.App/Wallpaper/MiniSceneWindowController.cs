@@ -80,7 +80,8 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
     private const int MaxRecoveries = 2;
     private int _recoveries;
     private bool _attached;
-    private bool _ready;
+    // The PAGE reported ready (after each navigation). Not IsReady: that one means the browser is attached.
+    private bool _pageReady;
     private string? _pendingAlert;
     private bool _disposed;
 
@@ -185,7 +186,7 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
         CheckAccess();
         ObjectDisposedException.ThrowIf(_disposed, this);
         _pendingAlert = null;
-        if (_ready) _browser.PostMessage(AlertLayerMessages.Hide);
+        if (_pageReady) _browser.PostMessage(AlertLayerMessages.Hide);
     }
 
     public void Dispose()
@@ -228,7 +229,7 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
     {
         if (_disposed) return;
         _attached = false;
-        _ready = false;
+        _pageReady = false;
         _trace?.Invoke($"mini-window: {reason}");
         if (_surface is not { } surface) return;
         if (_recoveries >= MaxRecoveries)
@@ -244,19 +245,19 @@ public sealed class MiniSceneWindowController : IMiniSceneWindow
 
     private void NavigateToScene()
     {
-        _ready = false;
+        _pageReady = false;
         _browser.Navigate(WebViewAlertLayerController.SceneUrl(_scene, _fps, "mini"));
     }
 
     private void Post(string json)
     {
-        if (_ready) _browser.PostMessage(json);
+        if (_pageReady) _browser.PostMessage(json);
         else _pendingAlert = json;
     }
 
     private void OnReady()
     {
-        _ready = true;
+        _pageReady = true;
         if (_pendingAlert is not { } pending) return;
         _pendingAlert = null;
         _browser.PostMessage(pending);
