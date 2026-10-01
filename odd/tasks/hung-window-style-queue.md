@@ -59,3 +59,8 @@ Maintainer request, 2026-09-30: "podemos atacar los pendientes?".
   empty tab strip (L+600, T+18) did NOT maximize with tiling on; the same double-click with tiling off
   maximized (3408x1456, control); tiling back on returned it to its slot with the box disabled. This
   closes the "inconclusive" double-click case from review-follow-ups-2026-09-30 T5.
+- Review (scoped `--base-ref 9af2c0c`, 419 lines, consent granted): lineage review-749493d3b3217cd8,
+  APPROVED and acknowledged (authority burned) on 6dc69a6. Advisory, left open: R3-restore-lane-lost-
+  update-race (the documented residual: a strip racing a restore on a hung window can re-set a stale
+  maximized bit; the next bounds change re-checks it), R3-independent-lane-release-unproved (no test
+  proves the independent lane frees its slot after the parked call finally returns).
