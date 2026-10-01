@@ -111,3 +111,8 @@ the alert for the rest of its duration (see T2 notes).
   Both SUGGESTIONs fixed right after: R3-incidental-bom-insertion (BOM removed from the three touched
   files; the repo is mostly BOM-less, 284 vs 64 .cs files) and R3-adjacency-guard-matches-comments (the
   ordering guard skips `//` lines). Alert-layer tests 111/111.
+- 2026-10-01: review-6102324abe503b29 (medium, reliability, 45fed2f..4acadf0) APPROVED and acknowledged.
+  SUGGESTION R3-comment-skip-guard-partial-and-unproved recorded, NOT changed: the skip covers `//`
+  lines only (trailing/block comments would still count). The lines ARE trimmed before the check
+  (`Select(line => line.Trim())`). The guard is a structural source test; hardening it further has
+  diminishing returns -- stop here.
