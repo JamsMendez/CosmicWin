@@ -110,4 +110,139 @@ public sealed class StyleCallQueueTests
 
         Assert.Equal(StyleWriteOutcome.Applied, queue.Run(1, () => true, Plenty));
     }
+
+    [Fact]
+    public void ManyCallsOnAParkedWindow_ParkOneWorker_AndOnlyTheLatestRequestLandsAfterTheFirst()
+    {
+        // 50 style writes pile up on a window that never answers. The bound is real: one worker is
+        // parked and one request is pending, whatever the number of callers; the newest request
+        // replaces the one before it, so once the window wakes the executed writes are the one that
+        // was already running and the LAST one issued -- nothing in between.
+        var queue = new StyleCallQueue();
+        var release = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        var executed = new List<int>();
+        var threads = new HashSet<int>();
+        var gate = new object();
+        var done = new ManualResetEventSlim(false);
+        bool Call(int wanted)
+        {
+            lock (gate)
+            {
+                executed.Add(wanted);
+                threads.Add(Environment.CurrentManagedThreadId);
+            }
+
+            return true;
+        }
+
+        try
+        {
+            _ = queue.Run(9, () => { started.Set(); release.Wait(); Call(0); return true; }, TimeSpan.FromMilliseconds(50));
+            Assert.True(started.Wait(Plenty));
+            for (var i = 1; i <= 50; i++)
+            {
+                var wanted = i;
+                var outcome = queue.Run(9, () => { Call(wanted); if (wanted == 50) { done.Set(); } return true; }, TimeSpan.FromMilliseconds(1));
+                Assert.Equal(StyleWriteOutcome.TimedOut, outcome);
+            }
+
+            Assert.Equal(1, queue.WorkerCount);
+            Assert.True(queue.HasPending(9));
+
+            release.Set();
+            Assert.True(done.Wait(Plenty));
+
+            lock (gate)
+            {
+                Assert.Equal([0, 50], executed);
+                Assert.Single(threads);
+            }
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public void ASupersededPendingCall_StopsWaitingAtOnce_AndReportsTimedOut()
+    {
+        var queue = new StyleCallQueue();
+        var release = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        var ran = new List<string>();
+        var gate = new object();
+        var landed = new ManualResetEventSlim(false);
+        try
+        {
+            _ = queue.Run(3, () => { started.Set(); release.Wait(); return true; }, TimeSpan.FromMilliseconds(50));
+            Assert.True(started.Wait(Plenty));
+
+            var older = Task.Run(() => queue.Run(3, () => { lock (gate) { ran.Add("older"); } return true; }, TimeSpan.FromSeconds(30)));
+            Assert.True(SpinWait.SpinUntil(() => queue.HasPending(3), Plenty));
+
+            _ = queue.Run(3, () => { lock (gate) { ran.Add("newer"); } landed.Set(); return true; }, TimeSpan.FromMilliseconds(1));
+
+            Assert.True(older.Wait(Plenty)); // released by the replacement, not by its 30 s budget
+            Assert.Equal(StyleWriteOutcome.TimedOut, older.Result);
+
+            release.Set();
+            Assert.True(landed.Wait(Plenty));
+            lock (gate)
+            {
+                Assert.Equal(["newer"], ran);
+            }
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public void AnIndependentCall_IsNotQueuedBehindAParkedOrderedCall_OnTheSameWindow()
+    {
+        var queue = new StyleCallQueue();
+        var release = new ManualResetEventSlim(false);
+        try
+        {
+            _ = queue.Run(5, () => { release.Wait(); return true; }, TimeSpan.FromMilliseconds(50));
+
+            Assert.Equal(StyleWriteOutcome.Applied, queue.RunIndependent(5, () => true, Plenty));
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public void RepeatedIndependentCalls_OnAWindowThatNeverAnswers_ParkOneWorker()
+    {
+        var queue = new StyleCallQueue();
+        var release = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        var starts = 0;
+        try
+        {
+            var first = queue.RunIndependent(6, () => { Interlocked.Increment(ref starts); started.Set(); release.Wait(); return true; }, TimeSpan.FromMilliseconds(50));
+            Assert.Equal(StyleWriteOutcome.TimedOut, first);
+            Assert.True(started.Wait(Plenty));
+
+            for (var i = 0; i < 20; i++)
+            {
+                Assert.Equal(StyleWriteOutcome.TimedOut, queue.RunIndependent(6, () => { Interlocked.Increment(ref starts); return true; }, TimeSpan.FromMilliseconds(1)));
+            }
+
+            Assert.Equal(1, queue.WorkerCount);
+            release.Set();
+            Assert.True(SpinWait.SpinUntil(() => queue.WorkerCount == 0, Plenty));
+            Assert.Equal(1, Volatile.Read(ref starts)); // the refused ones never even started
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
 }
