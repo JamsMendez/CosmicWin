@@ -207,3 +207,11 @@ strategy question is asked before delivery. Everything stays local; the maintain
   `git diff` clean): (1) `undidMaximize = false` with no `TryRestore()` call -> fact FAILED
   (restore count assertion); (2) `TryRestore(); undidMaximize = true` (pretend restored) -> fact
   FAILED (window not evicted). GREEN `MaximizeBlockTests` 31/31.
+- Fourth review (whole branch incl. bounded style calls, 1918 lines, consent granted): lineage
+  review-02250cc1abdec9df, APPROVED and acknowledged (authority burned) on c075549. Advisory
+  follow-ups, both only reachable when a style write TIMES OUT (a hung target window):
+  R3-late-strip-after-giveback (a timed-out strip can land AFTER the give-back already ran, leaving
+  a disabled button; closing it fully needs the give-back to run when the abandoned worker
+  finishes), R3-admission-verdict-ignores-refused (`IsExcludedAsAdmitted` only re-adds the bit for
+  `_boxStripped`, not for a refused strip that landed late). Left open on purpose: rare path,
+  diminishing returns; revisit if the hardware check or the trace shows timeouts.
