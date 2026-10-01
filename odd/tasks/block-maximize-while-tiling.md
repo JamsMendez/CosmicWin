@@ -100,7 +100,10 @@ strategy question is asked before delivery. Everything stays local; the maintain
   exemption fails `RepeatedMaximizing_NeverCountsTowardEviction` (the repeated identical
   maximize landing reads as `MinimumSize` and untiles the window). Fullscreen, tiling-off and
   user-gesture (Aero Snap) cases covered.
-- [ ] T4: README behavior + limits. Route: same delegated writer.
+- [x] T4: README behavior + limits. Route: same delegated writer (trigger: 2+ non-trivial files).
+  Tiling section: one bullet under "What works" plus a "Maximize while tiling" subsection (what is
+  blocked, when the button returns, pause behaviour, the three limits); `tiling` settings row
+  mentions maximize. Docs only, no RED/GREEN applicable; README rendered by readback.
 - [ ] T5: Hardware check (Notepad, Explorer, Chrome, VS Code; caption button, double-click, Win+Up;
   tiling off restores the button; F11 fullscreen unaffected). Route: inline, PENDING until the
   maintainer allows a supervised run.
@@ -115,3 +118,4 @@ strategy question is asked before delivery. Everything stays local; the maintain
 ## Progress
 
 - 2026-09-30: branch `feat/block-maximize-while-tiling` from main f46d0f4.
+- 2026-09-30: T1 d8b8eba, T2 5fc56f2, T3 e3b7ab3, T4 (README) committed on the branch by one delegated writer. Verification: `dotnet build CosmicWin.sln` 0 errors; Interop.Tests 435 passed/42 skipped; Layout.Tests 198 passed; App.Tests 1344 passed/6 skipped. T5 (hardware check) still PENDING.

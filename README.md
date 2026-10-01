@@ -136,6 +136,32 @@ maximize button, a double click on the title bar, and `Win+Up`.
 - **Windows that fight back** — a window dragged out of its slot snaps back on drop; a window that
   resizes itself is put back; a window that refuses to be positioned is left alone rather than
   fought.
+- **No maximizing while tiling** — a tiled window's maximize button is greyed out, which also
+  disables the double click on the title bar and `Win+Up`. A window that still gets maximized is
+  restored and put back in its slot.
+
+### Maximize while tiling
+
+While tiling is on, CosmicWin removes the maximize button from every tiled window that has one. It
+never adds one to a window that never had it, and it leaves fullscreen (`F11`) alone.
+
+The button comes back whenever a window stops being tiled: you turn tiling off (`Alt+T` or the
+tray), the window closes, is minimized or hidden, goes fullscreen, is left floating because it does
+not fit or will not stay in its slot, or CosmicWin exits normally. Turning tiling back on takes it
+away again. **Pausar** leaves the buttons as they are — it is a short suspension, not a change of
+mode.
+
+Limits worth knowing:
+
+- Apps that draw their own title bar (Chrome, Electron apps such as VS Code, Windows Terminal, UWP
+  apps) may keep showing a live maximize button, because they ignore the window style. Maximizing
+  one still does nothing lasting: CosmicWin restores it and puts it back in its slot, so you may
+  see it flash.
+- Windows running as administrator are not touched while CosmicWin is not elevated — Windows
+  refuses the change. Their button stays, and a maximize is still undone after the fact when
+  Windows lets CosmicWin restore them.
+- If CosmicWin crashes or is killed, it cannot give the buttons back: affected windows keep a
+  disabled maximize button until they are reopened.
 
 ### Not yet
 
@@ -260,7 +286,7 @@ edit of your own. A hand edit takes effect at CosmicWin's next start; **Reload**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `tiling` | `on` | Lay windows out at all; off leaves them where they open. |
+| `tiling` | `on` | Lay windows out at all; off leaves them where they open and gives maximize back. |
 | `gap` | `8` | Whole pixels of space around and between tiled windows and alert tiles (0–64). |
 | `focus-border` | `on` | Draw CosmicWin's own thicker focus border. |
 | `border-color` | `accent` | `#RRGGBB`, or `accent` to follow Windows' own accent colour. |
