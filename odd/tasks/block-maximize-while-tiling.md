@@ -170,3 +170,11 @@ strategy question is asked before delivery. Everything stays local; the maintain
   strip is skipped unless the window still has a registry leaf. GREEN `MaximizeBlockTests` 29/29.
   Also: README reworded (button is disabled/greyed, not removed) at the maintainer's request.
   Commits: see git log.
+- Third review (whole branch incl. the three fixes and README rewording, 1618 lines, consent
+  granted): lineage review-aff2dac8adb0b542, APPROVED and acknowledged (authority burned) on
+  72c7e83. Advisory follow-ups: R3-native-style-calls-unbounded (the style write and restore are
+  synchronous cross-process calls with no timeout; same class as the existing `SetWindowPosition`,
+  a hung target window can stall the caller), R3-restore-contract-mismatch
+  (`INativeWindowSource.TryRestoreFromMaximized` doc says it reports "whether the window was
+  asked", the implementation reports whether it left the maximized state; fix the doc).
+  R3-unrestorable-test-weak still open.
