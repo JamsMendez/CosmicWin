@@ -86,7 +86,7 @@ maintainer merges/pushes (established precedent). RDD: on (global).
 - [x] T2l Processing mini orbits too big: scale px-absolute band/block/stroke sizes (and check W-based radii) to the window; octagon thickness equal to the raphael mini hexadecagon line (maintainer 2026-09-29) (route: delegated writer)
 - [x] T11 Raphael FULL scene: triple gold glyphs + no gold glow, same as mini (maintainer 2026-09-29; out-of-mini scope change on the big wallpaper) (route: delegated writer)
 - [x] T2m Processing mini: thin the two white folding bands (~7px -> ~2.5px at 288), radii unchanged (maintainer 2026-09-29) (route: delegated writer)
-- [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer)
+- [ ] T8 Third review follow-ups (ProcessFailed kind-aware teardown, source guard scope, recovery budget, naming) (route: delegated writer) -- 24 fixed, 7 already fixed, 8 obsolete; 2 decisions pending (T8.6 recovery budget, T8.31 nebula gain); see the T8 inventory below
 - [x] T6 Hardware check with the maintainer's visual approval (route: inline, supervised run)
 
 ## Progress / evidence
@@ -329,6 +329,48 @@ maintainer merges/pushes (established precedent). RDD: on (global).
   (verified LocalHttpCommandServer.cs:369), and Alt+M "8 positions".
 - Merge 2026-09-29 (maintainer-requested): local main fast-forwarded a7c7dcf -> branch HEAD (T2i through T2m, T11,
   README). Every slice reviewed and acknowledged. Unpushed.
+
+### T8 inventory (re-verified against branch `fix/mini-scene-t8-cleanup`, from main 5ff6e0e; route: delegated writer, trigger: 2+ non-trivial files)
+Sources: the "(-> T8)" advisories of the six reviews above. 41 items: 7 ALREADY FIXED, 8 OBSOLETE, 2 STILL VALID and returned as decisions, 24 STILL VALID and fixed.
+- [x] T8.1 ProcessFailed teardown ignores the failure kind (WebView2MiniSceneBrowser.cs): STILL VALID. New `MiniProcessFailurePolicy.RequiresRecovery`; helper-process kinds (utility, GPU, sandbox, plugin, sub-frame) no longer tear down or spend the recovery budget; browser/render/unresponsive/unknown/future kinds still recover.
+- [x] T8.2 Source guard finally scope too wide (WebView2MiniSceneBrowserSourceGuardTests): STILL VALID (`source[finallyAt..]` also contained OnProcessFailed's `_environment = null;`). Now scoped to the finally block; a new guard pins the kind check before the teardown.
+- [x] T8.3 miniRingBasis splits the variant comment (render-loop.js): STILL VALID. Moved below the variant declarations.
+- [x] T8.4 IsReady vs ready naming (MiniSceneWindowController): STILL VALID. Private `_ready` is now `_pageReady`, with a comment saying it is not `IsReady`.
+- [x] T8.5 A failed recovery attach is silent: ALREADY FIXED in code (AttachAsync traces "attach failed" for every attach, recovery included); the test did not assert it. Assertion added.
+- [ ] T8.6 Recovery budget never replenishes (Controller MaxRecoveries = 2 per window lifetime): STILL VALID, DECISION RETURNED to the maintainer (timing/product: replenish after a stable period?).
+- [x] T8.7 MiniCorner name drifts from its meaning: ALREADY FIXED (4008996 renamed it MiniPosition).
+- [x] T8.8 Next() reaches LeftCenter implicitly (MiniWindowPlacement): STILL VALID. Explicit LeftCenter arm; the default arm documents that an undefined value restarts the cycle.
+- [x] T8.9 Dot probe comment misleading, T8.10 proportional branch unproved, T8.11 hardcoded tunables, T8.12 probe proxy scale not restored (constellation-ring.checks.js): ALREADY FIXED by 569e403 (T2h): above-floor case at 90%, expectations derived from the config, scale stack kept by the recording context.
+- [x] T8.13 Shrink-factor wording (idle rings.js): ALREADY FIXED (the T2h comment describes the ratio and floor, no "shrink").
+- [x] T8.14 Video route always on with the server, T8.15 legacy route semantics shift, T8.16 legacy alert-http=off drops the scene route: OBSOLETE, these are the maintainer's T10 decision (one http-server switch, per-route toggles removed); the README migration table documents it.
+- [x] T8.17 Trace prints hardcoded route flags (AppComposition.cs): STILL VALID (the flags are constants now). Comment rewritten to say so; the stale "third independent gate" wording removed. The trace text is unchanged.
+- [x] T8.18 Stale test names (SettingsTests): STILL VALID. AlertHttp* tests renamed HttpServer*, MiniCorner* renamed MiniPosition*/LegacyMiniCornerKey*, stale cref to the removed WallpaperSceneHttpEnabled replaced.
+- [x] T8.19 mini-corner tests cover only the legacy key: STILL VALID. New-key theory (8 values, case/spacing), unreadable new-key values, http-server off/unreadable cases added.
+- [x] T8.20 Parse local naming: STILL VALID. `miniPositionNew/Legacy` -> `miniPosition/legacyMiniPosition`, matching `alerts/legacyAlerts`.
+- [x] T8.21 Constellation shared constants: OBSOLETE (MINI_CONSTELLATION_* and the detail helpers live in rings.js "Ring 3", which ConstellationRingParityTests already compares between idle and explorer).
+- [x] T8.22 Vacuous above-floor draw assertions (constellation-ring.checks.js): STILL VALID. Both loops now assert the drawn list is non-empty.
+- [x] T8.23 `fullMiniOnly` naming (mini-variant.checks.js): STILL VALID. Renamed `miniOnlyNames`.
+- [x] T8.24 Idle comment mentions the explorer tint: STILL VALID. Removed from idle/js/animate.js.
+- [x] T8.25 Test title for the ring bases: STILL VALID (omitted the planet hollow). Titles updated in idle and explorer.
+- [x] T8.26 Gap winding unproved: STILL VALID. checkMiniRingBase now asserts outer clockwise / inner counter-clockwise per band.
+- [x] T8.27 Explorer order unasserted: STILL VALID for the base (tint order already asserted). idle and explorer now assert the base is drawn after the fan / the sparks.
+- [x] T8.28 Raphael duplicated mini glow gate (sprites.js:376): OBSOLETE (T11 removed the gold glow, baker and sprites).
+- [x] T8.29 Processing inline geometry constants (main.js): STILL VALID. `MINI_BASE_SOLID_FRACTION` / `MINI_BASE_FALLOFF_FRACTION` in config.js.
+- [x] T8.30 Raphael magic annulus index `[3]` (main.js): STILL VALID. Now `.at(-1)` with a named local.
+- [ ] T8.31 Raphael nebula gain masked by the dark base inside the disc (nebula.js:280): STILL VALID as an observation, DECISION RETURNED (visual: the maintainer approved the look; raising or removing the gain, or letting the base fall away under the nebula, changes what he sees).
+- [x] T8.32 Zero-size gradient stop when solid == falloff (render-loop.js drawMiniSceneBase): OBSOLETE (two stops at offset 1 are valid canvas; both call sites pass solid < falloff, asserted by tests).
+- [x] T8.33 "test doc/title/order nits" (T2j/T2k review): OBSOLETE as stated (no file/line); the concrete ones found are T8.25/T8.27.
+- [x] T8.34 Processing glow cache keyed without the viewport (sprites.js): STILL VALID as documentation: the cache is correct because buildSprites() clears it on every resize. Comment added.
+- [x] T8.35 Polygon stroke comment split by the base comment (render-loop.js): STILL VALID. Reordered.
+- [x] T8.36 Octagon magic 5.1 (processing layers.js): STILL VALID. `CENTRAL_OCTAGON_STROKE_PX` in config.js.
+- [x] T8.37 Orphan RAP-34 comment (raphael config.js): STILL VALID (the gold halo it describes was removed in T11). Removed.
+- [x] T8.38 Misleading sprites headers ("verbatim", processing and raphael): STILL VALID. Headers now name the mini/T11 changes.
+- [x] T8.39 Untested structurePx sites: STILL VALID. New processing test covers the three sphere-piece strokes, the folding-band lines and the prism edges. `safeMargin` (layers.js:707) stays untested on purpose: min(W,H)*0.035 always exceeds structurePx(14, 3) in both variants, so the structurePx term never decides the result.
+- [x] T8.40 Vacuous glow-arg assertion (raphael test): STILL VALID (the 7th parameter does not exist, so it was always undefined). Now asserts the declared arity (6) and the arguments callers pass.
+- [x] T8.41 Test proxy indentation: OBSOLETE (not reproducible: the proxies in processing/explorer tests are consistently indented).
+- Commits: 9cfcddc (C# controller/browser: T8.1, .2, .4, .5), 7aad58e (settings/placement/trace: T8.8, .17-.20), 62f5207 (scenes and scene checks: the rest). Suite: App 1380 passed, 6 skipped, 0 failed; solution build 0 errors; Interop untouched.
+- Evidence: RED = new MiniProcessFailurePolicyTests did not compile (CS0103). The JS cases are guard/characterization tests over existing behavior, proven by mutation: base-before-fan (idle) and base-before-sparks (explorer) fail the order pair, an inner arc wound clockwise fails the winding check, an unscaled sphere-piece stroke or band outline fails the structurePx test, a 7th ring argument fails the arity guard, an empty dot probe fails the new non-empty asserts. C# mutations: policy always-true fails 6 helper-kind cases, removing `_environment = null;` from the finally fails the scoped guard, removing the attach-failed trace fails AFailedRecoveryAttachStaysNotReadyAndDoesNotNavigate. (A first version of the sphere-piece check passed with the stroke unscaled, because the first recorded width came from the glow bake; it now measures the second call and asserts exactly one width.)
+- Decisions returned: T8.6 (budget replenish), T8.31 (nebula gain under the base). T8 stays unchecked until the maintainer answers them.
 
 ## Next step
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
