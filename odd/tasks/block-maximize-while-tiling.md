@@ -135,3 +135,10 @@ strategy question is asked before delivery. Everything stays local; the maintain
   `Win32NativeWindowSourceMaximizeBoxTests` failed against a throwing stub; GREEN 9/9; full
   `dotnet test CosmicWin.Interop.Tests` 444 passed / 42 skipped / 0 failed; `dotnet build
   CosmicWin.sln` 0 errors.
+- Second review (whole branch incl. acb0aa7, 1404 lines, consent granted): lineage
+  review-6b208b1e7780e5d5, APPROVED and acknowledged (authority burned) on acb0aa7. Advisory
+  follow-ups: R3-apply-block-activates-many (turning tiling back on calls `SW_RESTORE` on every
+  maximized tiled window, and `SW_RESTORE` activates, so focus can hop across several windows),
+  R3-restore-result-dropped (giving the box back ignores a failed write, untraced),
+  R3-strip-after-addwindow-untile (adapter ~540: confirm the window is still tiled before
+  stripping), R3-unrestorable-test-weak (still open).
