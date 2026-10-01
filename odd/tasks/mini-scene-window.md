@@ -376,3 +376,8 @@ Sources: the "(-> T8)" advisories of the six reviews above. 41 items: 7 ALREADY 
 Maintainer's own look at the running app; then T8 follow-ups or merge decision (maintainer-owned).
 - T6 closed 2026-09-30: after using the merged mini window in the running app, the maintainer confirmed
   it looks and behaves right ("Si me parece bien, márcalo como hecho").
+- T8 review (scoped `--base-ref 5ff6e0e`, risk HIGH because the scene test harnesses spawn node, 26 files,
+  497 lines, consent granted): lineage review-c978ade853708b97, four lenses (risk, resilience,
+  readability, reliability), APPROVED and acknowledged (authority burned) on ef36e29. The capture
+  outputs were lost to a broken background launcher on the parent's side (the captures themselves
+  completed and were admitted), so the advisory findings of this review were not recorded.
