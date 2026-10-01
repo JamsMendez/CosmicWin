@@ -26,11 +26,15 @@ public sealed class AlertLayerTraceTests
     [Fact]
     public void NavigationCompleted_NamesSuccessStatusAndElapsed()
     {
-        Assert.Equal("alert-layer navigation completed success=True status=Unknown 42ms",
-            AlertLayerTrace.NavigationCompleted(true, "Unknown", 42));
-        Assert.Equal("alert-layer navigation completed success=False status=ConnectionAborted 42ms",
-            AlertLayerTrace.NavigationCompleted(false, "ConnectionAborted", 42));
+        Assert.Equal("alert-layer navigation completed id=4 success=True status=Unknown 42ms",
+            AlertLayerTrace.NavigationCompleted(4, true, "Unknown", 42));
+        Assert.Equal("alert-layer navigation completed id=5 success=False status=ConnectionAborted 42ms",
+            AlertLayerTrace.NavigationCompleted(5, false, "ConnectionAborted", 42));
     }
+
+    [Fact]
+    public void NavigationStarting_NamesId() =>
+        Assert.Equal("alert-layer navigation starting id=8", AlertLayerTrace.NavigationStarting(8));
 
     [Fact]
     public void NavigationSuperseded_NamesIdAndStatus() =>

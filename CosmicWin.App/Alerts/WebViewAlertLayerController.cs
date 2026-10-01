@@ -85,9 +85,9 @@ public sealed class WebViewAlertLayerController : IDisposable
     // separately-traced timings).
     private Stopwatch? _navigateStopwatch;
 
-    // NavigationId of the most recent NavigationStarting for the current controller; a completion with
-    // an older id was superseded by a newer Navigate (see AlertLayerNavigation). Null until one starts.
-    private ulong? _latestNavigationId;
+    // Tracks in-flight/abandoned navigation ids so the abort completion of a host Navigate-over-Navigate
+    // is ignored regardless of event order (see AlertLayerNavigation).
+    private readonly AlertLayerNavigation _navigation = new();
 
     public WebViewAlertLayerController(ICompositionOverlaySurface host, Action<string>? trace = null,
         Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
@@ -199,6 +199,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         _navigationCompleted = false;
         _pageReportedReady = false;
         _navigateStopwatch = Stopwatch.StartNew();
+        _navigation.BeforeHostNavigate();
         _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
         return true;
     }
@@ -367,10 +368,12 @@ public sealed class WebViewAlertLayerController : IDisposable
                 // Settings.WallpaperFps) -- neither can ever inject an unexpected path segment or
                 // query into this URL. S3: _currentScene, not the constructor's own
                 // htmlWallpaperScene parameter -- see that field's own remarks for why.
+                _navigation.BeforeHostNavigate();
                 _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
             }
             else
             {
+                _navigation.BeforeHostNavigate();
                 _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
             }
         }
@@ -399,20 +402,23 @@ public sealed class WebViewAlertLayerController : IDisposable
         epoch == _epoch && !_disposed && _preloading &&
         _host.IsCompositionReady && _host.Hwnd == hwnd && _host.CompositionGeneration == generation;
 
-    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args) =>
-        _latestNavigationId = args.NavigationId;
+    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs args)
+    {
+        _navigation.Started(args.NavigationId);
+        _trace?.Invoke(AlertLayerTrace.NavigationStarting(args.NavigationId));
+    }
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
     {
         try
         {
-            if (AlertLayerNavigation.IsSuperseded(args.NavigationId, _latestNavigationId))
+            if (_navigation.CompletedIsSuperseded(args.NavigationId))
             {
                 _trace?.Invoke(AlertLayerTrace.NavigationSuperseded(args.NavigationId, args.WebErrorStatus));
                 return;
             }
             _trace?.Invoke(AlertLayerTrace.NavigationCompleted(
-                args.IsSuccess, args.WebErrorStatus, _navigateStopwatch?.ElapsedMilliseconds ?? 0));
+                args.NavigationId, args.IsSuccess, args.WebErrorStatus, _navigateStopwatch?.ElapsedMilliseconds ?? 0));
             if (!args.IsSuccess)
             {
                 _state.Failed();
@@ -515,7 +521,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         ++_epoch;
         _navigationCompleted = false;
         _pageReportedReady = false;
-        _latestNavigationId = null;
+        _navigation.Clear();
         if (dropEnvironment) _environment = null;
         var old = _controller;
         _controller = null;

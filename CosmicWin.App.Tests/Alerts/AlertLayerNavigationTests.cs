@@ -2,27 +2,96 @@ using CosmicWin.App.Alerts;
 
 namespace CosmicWin.App.Tests.Alerts;
 
-/// <summary>
-/// A completion is superseded when a NEWER navigation has started since it: WebView2 aborts the older
-/// one and reports it as a failure (ConnectionAborted), which must not tear the layer down. Any
-/// completion of a non-latest navigation is ignored, success included: a stale success must not mark
-/// the layer ready for the page that is still loading.
-/// </summary>
 public sealed class AlertLayerNavigationTests
 {
     [Fact]
-    public void CompletionOfTheLatestStartedNavigation_IsNotSuperseded() =>
-        Assert.False(AlertLayerNavigation.IsSuperseded(completedId: 7, latestStartedId: 7));
+    public void CompletionOfTheCurrentNavigation_IsNotSuperseded()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(7);
+        Assert.False(nav.CompletedIsSuperseded(7));
+    }
+
+    /// <summary>The real order seen on hardware: the abort completion arrives BEFORE the new NavigationStarting.</summary>
+    [Fact]
+    public void AbortCompletionBeforeTheNewStarting_IsSuperseded_AndTheNewOneStillCounts()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(5);
+        nav.BeforeHostNavigate();
+        Assert.True(nav.CompletedIsSuperseded(5));
+        nav.Started(6);
+        Assert.False(nav.CompletedIsSuperseded(6));
+    }
 
     [Fact]
-    public void CompletionOfAnOlderNavigation_IsSuperseded() =>
-        Assert.True(AlertLayerNavigation.IsSuperseded(completedId: 6, latestStartedId: 7));
+    public void AbortCompletionAfterTheNewStarting_IsSuperseded()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(5);
+        nav.BeforeHostNavigate();
+        nav.Started(6);
+        Assert.True(nav.CompletedIsSuperseded(5));
+        Assert.False(nav.CompletedIsSuperseded(6));
+    }
+
+    /// <summary>Ids are matched exactly, never ordered: a non-monotonic id is not treated as stale.</summary>
+    [Fact]
+    public void NonMonotonicIds_AreMatchedExactly()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(9);
+        nav.BeforeHostNavigate();
+        nav.Started(3);
+        Assert.False(nav.CompletedIsSuperseded(3));
+        Assert.True(nav.CompletedIsSuperseded(9));
+    }
 
     [Fact]
-    public void CompletionWhenNoNavigationStartWasRecorded_IsNotSuperseded() =>
-        Assert.False(AlertLayerNavigation.IsSuperseded(completedId: 3, latestStartedId: null));
+    public void ABurstOfNavigations_AbandonsEachInFlightOne()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(1);
+        nav.BeforeHostNavigate();
+        nav.Started(2);
+        nav.BeforeHostNavigate();
+        nav.Started(3);
+        Assert.True(nav.CompletedIsSuperseded(1));
+        Assert.True(nav.CompletedIsSuperseded(2));
+        Assert.False(nav.CompletedIsSuperseded(3));
+    }
 
     [Fact]
-    public void CompletionIdAheadOfTheRecordedOne_IsNotSuperseded() =>
-        Assert.False(AlertLayerNavigation.IsSuperseded(completedId: 9, latestStartedId: 7));
+    public void HostNavigateAfterTheNavigationCompleted_AbandonsNothing()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(1);
+        Assert.False(nav.CompletedIsSuperseded(1));
+        nav.BeforeHostNavigate();
+        Assert.False(nav.CompletedIsSuperseded(1));
+    }
+
+    [Fact]
+    public void ASupersededIdIsConsumed_SoALaterReuseOfItIsNotSuperseded()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(1);
+        nav.BeforeHostNavigate();
+        Assert.True(nav.CompletedIsSuperseded(1));
+        Assert.False(nav.CompletedIsSuperseded(1));
+    }
+
+    [Fact]
+    public void Clear_ForgetsAbandonedAndInFlight()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(1);
+        nav.BeforeHostNavigate();
+        nav.Clear();
+        Assert.False(nav.CompletedIsSuperseded(1));
+    }
+
+    [Fact]
+    public void CompletionWithNothingRecorded_IsNotSuperseded() =>
+        Assert.False(new AlertLayerNavigation().CompletedIsSuperseded(3));
 }

@@ -70,7 +70,12 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;", source);
         Assert.Contains("candidate.CoreWebView2.NavigationStarting += OnNavigationStarting;", source);
         Assert.Contains("old.CoreWebView2.NavigationStarting -= OnNavigationStarting;", source);
-        Assert.Contains("AlertLayerNavigation.IsSuperseded(", source);
+        Assert.Contains("_navigation.CompletedIsSuperseded(", source);
+        Assert.Contains("_navigation.Started(", source);
+        Assert.Contains("_navigation.Clear();", source);
+        Assert.Contains("AlertLayerTrace.NavigationStarting(", source);
+        // The host marks the in-flight navigation abandoned right BEFORE each of its Navigate calls.
+        Assert.Equal(3, source.Split("_navigation.BeforeHostNavigate();").Length - 1);
         Assert.Contains("AlertLayerTrace.NavigationSuperseded(", source);
         // Every Debug.WriteLine catch site must be paired with an AlertLayerTrace.Error/Close call on
         // the very next non-blank line -- proving telemetry was added ALONGSIDE, not instead of, the

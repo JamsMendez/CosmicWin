@@ -20,8 +20,11 @@ internal static class AlertLayerTrace
         $"alert-layer controller ready {elapsedMilliseconds}ms";
 
     /// <summary><paramref name="webErrorStatus"/> takes the enum's own <c>ToString()</c> so this class does not need a WebView2 reference.</summary>
-    public static string NavigationCompleted(bool success, object webErrorStatus, long elapsedMilliseconds) =>
-        $"alert-layer navigation completed success={success} status={webErrorStatus} {elapsedMilliseconds}ms";
+    public static string NavigationCompleted(ulong navigationId, bool success, object webErrorStatus, long elapsedMilliseconds) =>
+        $"alert-layer navigation completed id={navigationId} success={success} status={webErrorStatus} {elapsedMilliseconds}ms";
+
+    public static string NavigationStarting(ulong navigationId) =>
+        $"alert-layer navigation starting id={navigationId}";
 
     public static string NavigationSuperseded(ulong navigationId, object webErrorStatus) =>
         $"alert-layer navigation superseded id={navigationId} status={webErrorStatus}";

@@ -53,3 +53,12 @@ state. A failure of the LATEST navigation still tears down exactly as today.
   (reset + unsubscribed in TearDown). Trace: `alert-layer navigation superseded id=<N> status=<WebErrorStatus>`.
   RED: 3 assertion failures (seam stub returning false, trace stub returning "", wiring guard);
   GREEN: 103 focused pass; mutation `<` -> `<=` failed 1 seam test, restored. Full App suite 1409 passed / 6 skipped (baseline 1404 + 5 new); sln build 0 errors, no warnings in touched files.
+- 2026-10-01 T1 redo: 0aef7b3 failed on hardware (order of events): WebView2 completes the aborted
+  navigation BEFORE raising NavigationStarting for the new one, so the id comparison never fired.
+  Now exact-id bookkeeping: the host calls `AlertLayerNavigation.BeforeHostNavigate()` before each
+  Navigate (SwitchScene + both CreateAsync branches), marking the in-flight id abandoned; a completion
+  of an abandoned id is superseded and consumed; set cleared in TearDown; no `<` comparison. Trace lines
+  now: `alert-layer navigation starting id=N`, `navigation completed id=N success=.. status=.. Nms`,
+  `navigation superseded id=N status=..`. RED: 8 assertion failures (incl. the abort-before-starting
+  model); GREEN 50 focused; mutations (never match abandoned; never abandon) each failed 5 seam tests.
+  Full App suite 1415 passed / 6 skipped; build 0 errors, no new warnings. T2 hardware still pending.

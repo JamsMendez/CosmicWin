@@ -1,15 +1,39 @@
 namespace CosmicWin.App.Alerts;
 
 /// <summary>
-/// The pure decision behind "is this NavigationCompleted stale?". A scene switch calls Navigate while
-/// the previous navigation may still be in flight; WebView2 then aborts the older one and completes it
-/// with IsSuccess=false (ConnectionAborted). That completion must not tear the layer down, and a stale
-/// success must not mark the layer ready for the page that is still loading, so EVERY completion that
-/// is not for the latest started navigation is ignored. With no start recorded (should not happen) the
-/// completion is handled as before.
+/// Pure bookkeeping behind "is this NavigationCompleted stale?", independent of event order and of id
+/// ordering. When the HOST calls Navigate while a navigation is still in flight, WebView2 aborts the old
+/// one and completes it with IsSuccess=false (ConnectionAborted) -- possibly BEFORE it raises
+/// NavigationStarting for the new one. So the host marks the in-flight navigation abandoned right before
+/// it navigates (<see cref="BeforeHostNavigate"/>); a completion of an abandoned id (exact match) is
+/// superseded and consumed. Everything else, a stale success included only if abandoned, is handled as
+/// before, so a real failure of the current navigation still tears the layer down.
 /// </summary>
-internal static class AlertLayerNavigation
+internal sealed class AlertLayerNavigation
 {
-    public static bool IsSuperseded(ulong completedId, ulong? latestStartedId) =>
-        latestStartedId is { } latest && completedId < latest;
+    private readonly HashSet<ulong> _abandoned = [];
+    private ulong? _inFlight;
+
+    public void Started(ulong navigationId) => _inFlight = navigationId;
+
+    /// <summary>Call immediately before the host calls Navigate.</summary>
+    public void BeforeHostNavigate()
+    {
+        if (_inFlight is { } id) _abandoned.Add(id);
+        _inFlight = null;
+    }
+
+    /// <summary>True (and the id is consumed) when this completion belongs to an abandoned navigation.</summary>
+    public bool CompletedIsSuperseded(ulong navigationId)
+    {
+        if (_abandoned.Remove(navigationId)) return true;
+        if (_inFlight == navigationId) _inFlight = null;
+        return false;
+    }
+
+    public void Clear()
+    {
+        _abandoned.Clear();
+        _inFlight = null;
+    }
 }
