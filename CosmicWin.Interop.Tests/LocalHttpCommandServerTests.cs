@@ -16,6 +16,10 @@ namespace CosmicWin.Interop.Tests;
 /// its own free loopback port (<see cref="GetFreePort"/>) even though <c>TestParallelism.cs</c>
 /// already serialises this assembly, for the same belt-and-braces reason the pipe tests give every
 /// fact its own pipe name: a leftover listener from a previous run must never collide with this one.
+/// <see cref="GetFreePort"/> releases its port before the server binds it, so a fact that starts a
+/// server goes through <see cref="StartOnFreePort"/>, which retries on the next free port when another
+/// process took the first one in between (the same fix as <c>WireOnFreePort</c> in the App
+/// end-to-end tests).
 /// </summary>
 public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
 {
@@ -58,9 +62,9 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BothRoutesDisabled_AlertsRouteAnswersExactlyLikeAnUnknownPath()
     {
-        var port = GetFreePort();
-        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
-        server.Start();
+        var (server, port) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, handleCommand: null, sink));
+        using var _ = server;
 
         using var client = NewClient();
         var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
@@ -75,9 +79,9 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BothRoutesDisabled_VideoRouteAnswersExactlyLikeAnUnknownPath()
     {
-        var port = GetFreePort();
-        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg));
-        server.Start();
+        var (server, port) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, handleCommand: null, sink));
+        using var _ = server;
 
         using var client = NewClient();
         var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
@@ -94,9 +98,9 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task Start_Idempotent_SecondCallStillServesNormally()
     {
-        var port = GetFreePort();
-        using var server = new LocalHttpCommandServer(port, Token, _ => "ok");
-        server.Start();
+        var (server, port) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, _ => "ok", sink));
+        using var _ = server;
         server.Start(); // must be a no-op, not a re-bind attempt
 
         var (status, body) = await PostAsync(port, "{\"warning\":1}");
@@ -108,10 +112,12 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public void Start_PortAlreadyInUse_ReportsDiagnosticAndDoesNotThrow()
     {
-        var port = GetFreePort();
-        using var occupant = new LocalHttpCommandServer(port, Token, _ => "ok");
-        occupant.Start();
+        var (occupant, port) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, _ => "ok", sink));
+        using var _ = occupant;
 
+        // Deliberately the SAME port the occupant just bound: this fact is about a lost bind, so the
+        // second server must not go through StartOnFreePort.
         var diagnostics = new List<string>();
         using var server = new LocalHttpCommandServer(port, Token, _ => "ok", diagnostics.Add);
 
@@ -119,6 +125,39 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
 
         Assert.Null(exception);
         Assert.NotEmpty(diagnostics);
+    }
+
+    /// <summary>
+    /// Proves the retry in <see cref="StartOnFreePort"/>: the first port handed out is already held by
+    /// another listener, so the server cannot bind it and must move on to the next free port -- where
+    /// a real POST then answers 202.
+    /// </summary>
+    [Fact]
+    public async Task StartOnFreePort_FirstPortTaken_RetriesOnTheNextOne()
+    {
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        try
+        {
+            var takenPort = ((IPEndPoint)blocker.LocalEndpoint).Port;
+            // Only the taken port is scripted; every later attempt draws a fresh free port at the moment it
+            // binds, so no fallback port sits released across a whole attempt.
+            var ports = new Queue<int>([takenPort]);
+
+            var (server, port) = StartOnFreePort(
+                (candidate, sink) => new LocalHttpCommandServer(candidate, Token, _ => "ok", sink),
+                nextPort: () => ports.Count > 0 ? ports.Dequeue() : GetFreePort());
+            using var _ = server;
+
+            Assert.NotEqual(takenPort, port);
+            var (status, body) = await PostAsync(port, "{\"warning\":1}");
+            Assert.Equal(202, status);
+            Assert.Equal("ok", body);
+        }
+        finally
+        {
+            blocker.Stop();
+        }
     }
 
     [Fact]
@@ -132,8 +171,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public void Dispose_Idempotent()
     {
-        var server = new LocalHttpCommandServer(GetFreePort(), Token, _ => "ok");
-        server.Start();
+        var (server, _) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, _ => "ok", sink));
         server.Dispose();
         var exception = Record.Exception(server.Dispose);
         Assert.Null(exception);
@@ -142,9 +181,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task Dispose_StopsAccepting()
     {
-        var port = GetFreePort();
-        var server = new LocalHttpCommandServer(port, Token, _ => "ok");
-        server.Start();
+        var (server, port) = StartOnFreePort((candidate, sink) =>
+            new LocalHttpCommandServer(candidate, Token, _ => "ok", sink));
 
         // Prove it really was accepting first.
         var (status, _) = await PostAsync(port, "{\"warning\":1}");
@@ -162,8 +200,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task OriginHeaderPresent_Returns403()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var request = NewRequest(port, HttpMethod.Post, "{\"warning\":1}");
         request.Headers.Add("Origin", "http://evil.example");
@@ -209,8 +246,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task RawHost_ArbitraryHostname_IsRejectedByOurOwnCheckWith403()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, "evil.example:1234", "{\"warning\":1}"));
 
@@ -221,8 +257,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task RawHost_ExactLoopbackIp_ReachesOurHandlerAndReturns202()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", "{\"warning\":1}"));
 
@@ -233,8 +268,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task RawHost_LocalhostAlias_ReachesOurHandlerAndReturns202()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var (status, body) = await SendRawAsync(port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"localhost:{port}", "{\"warning\":1}"));
 
@@ -252,8 +286,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task LiteralLocalhostUrl_ViaRealDnsResolution_ReachesTheServer()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var client = NewClient();
         client.Timeout = TimeSpan.FromSeconds(5);
@@ -267,8 +300,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task WrongPath_Returns404()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var client = NewClient();
         using var response = await client.PostAsync($"http://127.0.0.1:{port}/v1/other", JsonContent("{\"warning\":1}"));
@@ -279,8 +311,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task WrongMethod_Returns405WithAllowHeader()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var request = NewRequest(port, HttpMethod.Get, body: null);
         using var client = NewClient();
@@ -302,8 +333,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task OptionsWithNoOrigin_Returns405AndNeverAnswersWithCorsHeaders()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var request = NewRequest(port, HttpMethod.Options, body: null);
 
@@ -318,8 +348,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task MissingAuthorization_Returns401WithWwwAuthenticate()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var client = NewClientWithoutAuth();
         using var response = await client.PostAsync(
@@ -332,8 +361,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task WrongToken_Returns401()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var client = NewClientWithoutAuth();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "not-the-token");
@@ -346,8 +374,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task WrongContentType_Returns415()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var client = NewClient();
         var content = new StringContent("{\"warning\":1}", Encoding.UTF8, "text/plain");
@@ -359,9 +386,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task DeclaredContentLengthTooLarge_Returns413()
     {
-        var port = GetFreePort();
-        var handlerCalls = 0;
-        using var server = Start(port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
+            var handlerCalls = 0;
+        using var server = Start(out var port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
 
         var oversizedJson = "{\"warning\":" + new string('1', AlertHttpProtocol.MaxBodyBytes + 100) + "}";
         using var client = NewClient();
@@ -375,8 +401,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task ChunkedBodyTooLarge_Returns413()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var oversizedJson = "{\"warning\":" + new string('1', AlertHttpProtocol.MaxBodyBytes + 100) + "}";
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}")
@@ -395,8 +420,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BadUtf8Body_Returns400()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var invalidUtf8 = new byte[] { 0xFF, 0xFE, 0x00, 0x01 };
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}{AlertHttpProtocol.AlertsPath}")
@@ -414,8 +438,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BadJsonBody_Returns400()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var (status, body) = await PostAsync(port, "not-json");
 
@@ -426,9 +449,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task ValidRequest_HandlerReceivesTheTranslatedCommandText_Returns202()
     {
-        var port = GetFreePort();
-        string? received = null;
-        using var server = Start(port, text => { received = text; return "ok"; });
+            string? received = null;
+        using var server = Start(out var port, text => { received = text; return "ok"; });
 
         var (status, body) = await PostAsync(port, "{\"warning\":2,\"failed\":1}", contentType: "application/json; charset=utf-8");
 
@@ -440,8 +462,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task HandlerReplyAlertsDisabled_PassesThroughAs503()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => AlertPipeProtocol.FormatError("alerts are disabled"));
+            using var server = Start(out var port, _ => AlertPipeProtocol.FormatError("alerts are disabled"));
 
         var (status, body) = await PostAsync(port, "{\"warning\":1}");
 
@@ -452,10 +473,9 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task HandlerThrows_Returns500AndTheLoopKeepsServing()
     {
-        var port = GetFreePort();
         var diagnostics = new List<string>();
         var first = true;
-        using var server = new LocalHttpCommandServer(port, Token, _ =>
+        var (server, port) = StartOnFreePort((candidate, sink) => new LocalHttpCommandServer(candidate, Token, _ =>
         {
             if (first)
             {
@@ -464,8 +484,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
             }
 
             return "ok";
-        }, diagnostics.Add);
-        server.Start();
+        }, sink), diagnostics: diagnostics);
+        using var _ = server;
 
         var (firstStatus, firstBody) = await PostAsync(port, "{\"warning\":1}");
         Assert.Equal(500, firstStatus);
@@ -481,8 +501,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     public async Task ConnectingThroughANonLoopbackAddress_IsRejectedOrRefused()
     {
         var address = RequiresNonLoopbackIPv4FactAttribute.NonLoopbackIPv4!;
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post, $"http://{address}:{port}{AlertHttpProtocol.AlertsPath}")
@@ -578,8 +597,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BearerSchemeLowercase_IsAccepted()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         var (status, body) = await SendRawAsync(
             port, BuildRawRequest(AlertHttpProtocol.AlertsPath, $"127.0.0.1:{port}", "{\"warning\":1}", authorization: $"bearer {Token}"));
@@ -621,8 +639,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BodyExactlyAtTheCap_ValidJsonPaddedWithWhitespace_Returns202()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         const string prefix = "{\"warning\":1";
         const string suffix = "}";
@@ -639,9 +656,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BodyOneByteOverTheCap_Returns413()
     {
-        var port = GetFreePort();
-        var handlerCalls = 0;
-        using var server = Start(port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
+            var handlerCalls = 0;
+        using var server = Start(out var port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
 
         const string prefix = "{\"warning\":1";
         const string suffix = "}";
@@ -658,8 +674,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task TrulyChunkedBody_RawSocket_OverTheCap_Returns413()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok");
+            using var server = Start(out var port, _ => "ok");
 
         const string prefix = "{\"warning\":1";
         const string suffix = "}";
@@ -683,9 +698,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_ChunkedBodyBetweenTheAlertCapAndTheVideoCap_PassesTheSizeGate()
     {
-        var port = GetFreePort();
-        var switchCalls = 0;
-        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+            var switchCalls = 0;
+        using var server = StartVideoOnly(out var port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
 
         var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
         var body = "{\"warning\":" + padding + "}";
@@ -705,9 +719,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_ChunkedBodyOverTheVideoCap_Returns413WithoutCallingTheSwitchDelegate()
     {
-        var port = GetFreePort();
-        var switchCalls = 0;
-        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+            var switchCalls = 0;
+        using var server = StartVideoOnly(out var port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
 
         var oversized = VideoBody(@"C:\" + new string('a', VideoWallpaperHttpProtocol.MaxBodyBytes) + ".mp4");
         Assert.True(Encoding.UTF8.GetByteCount(oversized) > VideoWallpaperHttpProtocol.MaxBodyBytes);
@@ -723,9 +736,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task AlertsRoute_TheSameChunkedBodyThatPassesOnVideo_Returns413()
     {
-        var port = GetFreePort();
-        var handlerCalls = 0;
-        using var server = Start(port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
+            var handlerCalls = 0;
+        using var server = Start(out var port, _ => { Interlocked.Increment(ref handlerCalls); return "ok"; });
 
         var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
         var body = "{\"warning\":" + padding + "}";
@@ -745,9 +757,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_ValidRequest_CallsSwitchDelegateWithThePath_Returns202()
     {
-        var port = GetFreePort();
-        string? received = null;
-        using var server = StartVideoOnly(port, path => { received = path; return true; }, FakeVideoProbes(exists: true));
+            string? received = null;
+        using var server = StartVideoOnly(out var port, path => { received = path; return true; }, FakeVideoProbes(exists: true));
 
         var (status, body) = await PostVideoAsync(port, VideoBody(ExistingVideo));
 
@@ -759,8 +770,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_MissingAuthorization_Returns401WithWwwAuthenticate()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         using var client = NewClientWithoutAuth();
         using var response = await client.PostAsync(
@@ -773,8 +783,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_WrongToken_Returns401()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         using var client = NewClientWithoutAuth();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "not-the-token");
@@ -787,8 +796,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_OriginHeaderPresent_Returns403()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post, $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}")
@@ -807,8 +815,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_ForeignHost_Returns403()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         var (status, body) = await SendRawAsync(
             port, BuildRawRequest(VideoWallpaperHttpProtocol.VideoPath, "evil.example:1234", VideoBody(ExistingVideo)));
@@ -820,8 +827,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_WrongMethod_Returns405WithAllowHeader()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get, $"http://127.0.0.1:{port}{VideoWallpaperHttpProtocol.VideoPath}");
@@ -835,8 +841,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_WrongContentType_Returns415()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         using var client = NewClient();
         var content = new StringContent(VideoBody(ExistingVideo), Encoding.UTF8, "text/plain");
@@ -849,9 +854,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_BodyOverTheVideoCap_Returns413()
     {
-        var port = GetFreePort();
-        var switchCalls = 0;
-        using var server = StartVideoOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
+            var switchCalls = 0;
+        using var server = StartVideoOnly(out var port, _ => { Interlocked.Increment(ref switchCalls); return true; }, FakeVideoProbes(exists: true));
 
         var oversized = VideoBody(@"C:\" + new string('a', VideoWallpaperHttpProtocol.MaxBodyBytes) + ".mp4");
         Assert.True(Encoding.UTF8.GetByteCount(oversized) > VideoWallpaperHttpProtocol.MaxBodyBytes);
@@ -873,8 +877,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BodyBetweenTheAlertCapAndTheVideoCap_Is413OnAlertsButNotOnVideo()
     {
-        var port = GetFreePort();
-        using var server = StartBoth(port, _ => "ok", _ => true, FakeVideoProbes(exists: true));
+            using var server = StartBoth(out var port, _ => "ok", _ => true, FakeVideoProbes(exists: true));
 
         var padding = new string('1', AlertHttpProtocol.MaxBodyBytes + 200);
         var body = "{\"warning\":" + padding + "}";
@@ -893,8 +896,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_MalformedBody_Returns400WithItsOwnMessage()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         var (status, body) = await PostVideoAsync(port, "not-json");
 
@@ -905,8 +907,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_MissingFile_Returns404WithItsOwnMessage()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: false));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: false));
 
         var (status, body) = await PostVideoAsync(port, VideoBody(@"C:\videos\missing.mp4"));
 
@@ -917,8 +918,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_WrongExtension_Returns415WithItsOwnMessage()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true));
 
         var (status, body) = await PostVideoAsync(port, VideoBody(@"C:\videos\x.txt"));
 
@@ -929,8 +929,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_SwitchDelegateReturnsFalse_Returns503WithNotAvailableError()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => false, FakeVideoProbes(exists: true));
+            using var server = StartVideoOnly(out var port, _ => false, FakeVideoProbes(exists: true));
 
         var (status, body) = await PostVideoAsync(port, VideoBody(ExistingVideo));
 
@@ -941,10 +940,10 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRoute_SwitchDelegateThrows_Returns500AndTheLoopKeepsServing()
     {
-        var port = GetFreePort();
         var diagnostics = new List<string>();
         var first = true;
-        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+        var (server, port) = StartOnFreePort((candidate, sink) => new LocalHttpCommandServer(
+            candidate, Token, handleCommand: null, sink,
             handleVideoWallpaperSwitch: _ =>
             {
                 if (first)
@@ -955,8 +954,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
 
                 return true;
             },
-            videoWallpaperProbes: FakeVideoProbes(exists: true));
-        server.Start();
+            videoWallpaperProbes: FakeVideoProbes(exists: true)), diagnostics: diagnostics);
+        using var _ = server;
 
         var (firstStatus, firstBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
         Assert.Equal(500, firstStatus);
@@ -973,12 +972,12 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     {
         // An IOException's message routinely names the file -- an absolute path under the user's
         // profile, which no trace line may carry. Only the exception's type is reported.
-        var port = GetFreePort();
         var diagnostics = new List<string>();
-        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+        var (server, port) = StartOnFreePort((candidate, sink) => new LocalHttpCommandServer(
+            candidate, Token, handleCommand: null, sink,
             handleVideoWallpaperSwitch: _ => throw new IOException($"Could not open '{ExistingVideo}'."),
-            videoWallpaperProbes: FakeVideoProbes(exists: true));
-        server.Start();
+            videoWallpaperProbes: FakeVideoProbes(exists: true)), diagnostics: diagnostics);
+        using var _ = server;
 
         var (status, _) = await PostVideoAsync(port, VideoBody(ExistingVideo));
 
@@ -991,8 +990,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task VideoRouteDisabled_AnswersExactlyLikeAnUnknownPath()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok"); // alert route only; handleVideoWallpaperSwitch left null
+            using var server = Start(out var port, _ => "ok"); // alert route only; handleVideoWallpaperSwitch left null
 
         using var client = NewClient();
         var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
@@ -1007,8 +1005,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task AlertRouteDisabled_VideoRouteEnabled_AlertsAnswerExactlyLikeAnUnknownPath()
     {
-        var port = GetFreePort();
-        using var server = StartVideoOnly(port, _ => true, FakeVideoProbes(exists: true)); // handleCommand left null
+            using var server = StartVideoOnly(out var port, _ => true, FakeVideoProbes(exists: true)); // handleCommand left null
 
         using var client = NewClient();
         var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
@@ -1023,11 +1020,10 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task BothRoutesEnabled_WorkIndependentlyOnOneServer()
     {
-        var port = GetFreePort();
         string? receivedCommand = null;
         string? receivedVideoPath = null;
         using var server = StartBoth(
-            port,
+            out var port,
             text => { receivedCommand = text; return "ok"; },
             path => { receivedVideoPath = path; return true; },
             FakeVideoProbes(exists: true));
@@ -1049,9 +1045,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_ValidRequest_CallsSwitchDelegateWithTheCanonicalName_Returns202()
     {
-        var port = GetFreePort();
-        string? received = null;
-        using var server = StartSceneOnly(port, name => { received = name; return true; });
+            string? received = null;
+        using var server = StartSceneOnly(out var port, name => { received = name; return true; });
 
         var (status, body) = await PostSceneAsync(port, SceneBody("Idle"));
 
@@ -1063,8 +1058,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_MissingAuthorization_Returns401WithWwwAuthenticate()
     {
-        var port = GetFreePort();
-        using var server = StartSceneOnly(port, _ => true);
+            using var server = StartSceneOnly(out var port, _ => true);
 
         using var client = NewClientWithoutAuth();
         using var response = await client.PostAsync(
@@ -1077,8 +1071,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_WrongMethod_Returns405WithAllowHeader()
     {
-        var port = GetFreePort();
-        using var server = StartSceneOnly(port, _ => true);
+            using var server = StartSceneOnly(out var port, _ => true);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get, $"http://127.0.0.1:{port}{WallpaperSceneHttpProtocol.ScenePath}");
@@ -1092,9 +1085,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_BodyOverTheSceneCap_Returns413()
     {
-        var port = GetFreePort();
-        var switchCalls = 0;
-        using var server = StartSceneOnly(port, _ => { Interlocked.Increment(ref switchCalls); return true; });
+            var switchCalls = 0;
+        using var server = StartSceneOnly(out var port, _ => { Interlocked.Increment(ref switchCalls); return true; });
 
         var oversized = "{\"scene\":\"" + new string('a', WallpaperSceneHttpProtocol.MaxBodyBytes) + "\"}";
         Assert.True(Encoding.UTF8.GetByteCount(oversized) > WallpaperSceneHttpProtocol.MaxBodyBytes);
@@ -1108,8 +1100,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_MalformedBody_Returns400WithItsOwnMessage()
     {
-        var port = GetFreePort();
-        using var server = StartSceneOnly(port, _ => true);
+            using var server = StartSceneOnly(out var port, _ => true);
 
         var (status, body) = await PostSceneAsync(port, "not-json");
 
@@ -1120,8 +1111,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_UnknownSceneName_Returns400WithItsOwnMessage()
     {
-        var port = GetFreePort();
-        using var server = StartSceneOnly(port, _ => true);
+            using var server = StartSceneOnly(out var port, _ => true);
 
         var (status, body) = await PostSceneAsync(port, SceneBody("video"));
 
@@ -1134,8 +1124,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_SwitchDelegateReturnsFalse_Returns503WithNotAvailableError()
     {
-        var port = GetFreePort();
-        using var server = StartSceneOnly(port, _ => false);
+            using var server = StartSceneOnly(out var port, _ => false);
 
         var (status, body) = await PostSceneAsync(port, SceneBody("idle"));
 
@@ -1146,10 +1135,10 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRoute_SwitchDelegateThrows_Returns500AndTheLoopKeepsServing()
     {
-        var port = GetFreePort();
         var diagnostics = new List<string>();
         var first = true;
-        using var server = new LocalHttpCommandServer(port, Token, handleCommand: null, diagnostics.Add,
+        var (server, port) = StartOnFreePort((candidate, sink) => new LocalHttpCommandServer(
+            candidate, Token, handleCommand: null, sink,
             handleWallpaperSceneSwitch: _ =>
             {
                 if (first)
@@ -1159,8 +1148,8 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
                 }
 
                 return true;
-            });
-        server.Start();
+            }), diagnostics: diagnostics);
+        using var _ = server;
 
         var (firstStatus, firstBody) = await PostSceneAsync(port, SceneBody("idle"));
         Assert.Equal(500, firstStatus);
@@ -1175,8 +1164,7 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task SceneRouteDisabled_AnswersExactlyLikeAnUnknownPath()
     {
-        var port = GetFreePort();
-        using var server = Start(port, _ => "ok"); // alert route only; handleWallpaperSceneSwitch left null
+            using var server = Start(out var port, _ => "ok"); // alert route only; handleWallpaperSceneSwitch left null
 
         using var client = NewClient();
         var (unknownStatus, unknownBody) = await GetAgainstUnknownPath(client, port);
@@ -1191,17 +1179,16 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
     [Fact]
     public async Task AllThreeRoutesEnabled_WorkIndependentlyOnOneServer()
     {
-        var port = GetFreePort();
         string? receivedCommand = null;
         string? receivedVideoPath = null;
         string? receivedScene = null;
-        using var server = new LocalHttpCommandServer(port, Token,
+        var (server, port) = StartOnFreePort((candidate, sink) => new LocalHttpCommandServer(candidate, Token,
             handleCommand: text => { receivedCommand = text; return "ok"; },
-            onDiagnostic: msg => output.WriteLine(msg),
+            onDiagnostic: sink,
             handleVideoWallpaperSwitch: path => { receivedVideoPath = path; return true; },
             videoWallpaperProbes: FakeVideoProbes(exists: true),
-            handleWallpaperSceneSwitch: name => { receivedScene = name; return true; });
-        server.Start();
+            handleWallpaperSceneSwitch: name => { receivedScene = name; return true; }));
+        using var _ = server;
 
         var (alertStatus, alertBody) = await PostAsync(port, "{\"warning\":2}");
         var (videoStatus, videoBody) = await PostVideoAsync(port, VideoBody(ExistingVideo));
@@ -1224,39 +1211,109 @@ public sealed class LocalHttpCommandServerTests(ITestOutputHelper output)
 
     private const string ExistingVideo = @"C:\videos\x.mp4";
 
-    private LocalHttpCommandServer Start(int port, Func<string, string> handleCommand)
+    /// <summary>
+    /// <see cref="GetFreePort"/> releases its port before the server binds it, so another process can
+    /// take it in between. <see cref="LocalHttpCommandServer.Start"/> never throws on a bind failure:
+    /// its LAST attempt (127.0.0.1 only) reports <c>alert http: failed to start listening on port N
+    /// (127.0.0.1)</c> and the server stays inert. That line is the retry signal: dispose, pick the
+    /// next port, try again. After <paramref name="attempts"/> losses the test fails with the
+    /// diagnostics that explain why, never with a bare connection refusal from the first request.
+    /// <paramref name="create"/> receives the port and the diagnostic sink it must hand to the server;
+    /// the sink records every line, forwards it to the test output and, when given, to
+    /// <paramref name="diagnostics"/> (cleared between attempts, so a test only ever sees the lines of
+    /// the attempt that won).
+    /// </summary>
+    private (LocalHttpCommandServer Server, int Port) StartOnFreePort(
+        Func<int, Action<string>, LocalHttpCommandServer> create,
+        Func<int>? nextPort = null,
+        int attempts = 5,
+        List<string>? diagnostics = null)
     {
-        var server = new LocalHttpCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg));
-        server.Start();
+        nextPort ??= GetFreePort;
+        var gate = new object();
+        var lines = new List<string>();
+        void Sink(string line)
+        {
+            output.WriteLine(line);
+            lock (gate)
+            {
+                lines.Add(line);
+                diagnostics?.Add(line);
+            }
+        }
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            var port = nextPort();
+            var server = create(port, Sink);
+            server.Start();
+            bool lost;
+            lock (gate)
+            {
+                lost = lines.Any(line => IsFinalBindFailure(line, port));
+            }
+
+            if (!lost)
+            {
+                return (server, port);
+            }
+
+            server.Dispose();
+            if (attempt < attempts)
+            {
+                lock (gate)
+                {
+                    lines.Clear();
+                    diagnostics?.Clear();
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"could not bind the real HTTP server after {attempts} free-port attempts; last diagnostics: " +
+            string.Join(" | ", lines));
+    }
+
+    private static bool IsFinalBindFailure(string line, int port) =>
+        line.StartsWith($"alert http: failed to start listening on port {port} (127.0.0.1)", StringComparison.Ordinal);
+
+    private LocalHttpCommandServer Start(out int port, Func<string, string> handleCommand)
+    {
+        var (server, bound) = StartOnFreePort(
+            (candidate, sink) => new LocalHttpCommandServer(candidate, Token, handleCommand, sink));
+        port = bound;
         return server;
     }
 
     private LocalHttpCommandServer StartVideoOnly(
-        int port, Func<string, bool> handleVideoWallpaperSwitch, VideoWallpaperFileProbes probes)
+        out int port, Func<string, bool> handleVideoWallpaperSwitch, VideoWallpaperFileProbes probes)
     {
-        var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
-            handleVideoWallpaperSwitch, probes);
-        server.Start();
+        var (server, bound) = StartOnFreePort(
+            (candidate, sink) => new LocalHttpCommandServer(candidate, Token, handleCommand: null, sink,
+                handleVideoWallpaperSwitch, probes));
+        port = bound;
         return server;
     }
 
     private LocalHttpCommandServer StartBoth(
-        int port,
+        out int port,
         Func<string, string> handleCommand,
         Func<string, bool> handleVideoWallpaperSwitch,
         VideoWallpaperFileProbes probes)
     {
-        var server = new LocalHttpCommandServer(port, Token, handleCommand, msg => output.WriteLine(msg),
-            handleVideoWallpaperSwitch, probes);
-        server.Start();
+        var (server, bound) = StartOnFreePort(
+            (candidate, sink) => new LocalHttpCommandServer(candidate, Token, handleCommand, sink,
+                handleVideoWallpaperSwitch, probes));
+        port = bound;
         return server;
     }
 
-    private LocalHttpCommandServer StartSceneOnly(int port, Func<string, bool> handleWallpaperSceneSwitch)
+    private LocalHttpCommandServer StartSceneOnly(out int port, Func<string, bool> handleWallpaperSceneSwitch)
     {
-        var server = new LocalHttpCommandServer(port, Token, handleCommand: null, msg => output.WriteLine(msg),
-            handleWallpaperSceneSwitch: handleWallpaperSceneSwitch);
-        server.Start();
+        var (server, bound) = StartOnFreePort(
+            (candidate, sink) => new LocalHttpCommandServer(candidate, Token, handleCommand: null, sink,
+                handleWallpaperSceneSwitch: handleWallpaperSceneSwitch));
+        port = bound;
         return server;
     }
 
