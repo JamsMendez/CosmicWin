@@ -98,3 +98,7 @@ state. A failure of the LATEST navigation still tears down exactly as today.
 
 Fix complete and hardware-checked. Open, separate: a scene switch while an alert is showing drops
 the alert for the rest of its duration (see T2 notes).
+- 2026-10-01: review-4392cc4859d40afa (medium, reliability, whole range 367feaf..2e956b6, asked by the
+  stop hook) APPROVED and acknowledged. Two SUGGESTIONs open: R3-class-doc-contradicts-latest-started-rule
+  (AlertLayerNavigation summary still describes only the abandoned-id rule) and R3-wiring-order-unasserted
+  (the source guard counts BeforeHostNavigate calls but not that each precedes a Navigate call).
