@@ -335,10 +335,10 @@ public sealed class SettingsTests
     /// ON unless the file says otherwise, since S9 (wallpaper-scene-http-endpoint, 2026-09-27,
     /// maintainer's decision: "alertas tambien debe estar prendidas") -- loopback-only and gated by a
     /// bearer token, so a fresh install opens this port as an accepted consequence, the same call S8
-    /// made for <see cref="Settings.WallpaperSceneHttpEnabled"/>.
+    /// made for the (since removed) per-route scene switch.
     /// </summary>
     [Fact]
-    public void AlertHttpIsOn_UnlessTheFileSaysOtherwise()
+    public void HttpServerIsOn_UnlessTheFileSaysOtherwise()
     {
         Assert.True(Settings.Default.HttpServerEnabled);
         Assert.True(Settings.Parse(string.Empty).HttpServerEnabled);
@@ -350,25 +350,27 @@ public sealed class SettingsTests
     [InlineData("  ALERT-HTTP   =   On  ")]
     [InlineData("alert-http = true")]
     [InlineData("alert-http = 1")]
-    public void AlertHttpIsTurnedOn_HoweverTheLineIsSpelled(string line)
+    public void HttpServerIsTurnedOn_HoweverTheLineIsSpelled(string line)
     {
         Assert.True(Settings.Parse(line).HttpServerEnabled);
     }
 
     [Theory]
+    [InlineData("http-server = off")]
     [InlineData("alert-http = off")]
     [InlineData("alert-http = false")]
     [InlineData("alert-http = 0")]
-    public void AlertHttpIsTurnedOff_HoweverTheLineIsSpelled(string line)
+    public void HttpServerIsTurnedOff_HoweverTheLineIsSpelled(string line)
     {
         Assert.False(Settings.Parse(line).HttpServerEnabled);
     }
 
     [Theory]
+    [InlineData("http-server = perhaps")]
     [InlineData("alert-http = perhaps")]
     [InlineData("alert-http =")]
     [InlineData("alert-http")]
-    public void AnUnreadableAlertHttpValue_KeepsTheDefaultRatherThanGuessing(string line)
+    public void AnUnreadableHttpServerValue_KeepsTheDefaultRatherThanGuessing(string line)
     {
         Assert.True(Settings.Parse(line).HttpServerEnabled);
     }
@@ -376,7 +378,7 @@ public sealed class SettingsTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void SerializeThenParse_RoundTripsTheAlertHttpSwitch(bool alertHttpEnabled)
+    public void SerializeThenParse_RoundTripsTheHttpServerSwitch(bool alertHttpEnabled)
     {
         var original = new Settings(FocusBorder: true, HttpServerEnabled: alertHttpEnabled);
 
@@ -389,7 +391,7 @@ public sealed class SettingsTests
     /// server agree on where the endpoint lives.
     /// </summary>
     [Fact]
-    public void AlertHttpPortDefaultsToTheProtocolConstant()
+    public void HttpServerPortDefaultsToTheProtocolConstant()
     {
         Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Default.HttpServerPort);
         Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(string.Empty).HttpServerPort);
@@ -401,7 +403,7 @@ public sealed class SettingsTests
     [InlineData("  ALERT-HTTP-PORT   =   8080  ")]
     [InlineData("alert-http-port = 1")]
     [InlineData("alert-http-port = 65535")]
-    public void AlertHttpPortIsRead_HoweverTheLineIsSpelled(string line)
+    public void HttpServerPortIsRead_HoweverTheLineIsSpelled(string line)
     {
         var expected = int.Parse(line.Split('=')[1].Trim());
 
@@ -419,7 +421,7 @@ public sealed class SettingsTests
     [InlineData("alert-http-port = abc")]
     [InlineData("alert-http-port =")]
     [InlineData("alert-http-port")]
-    public void AnInvalidAlertHttpPort_KeepsTheDefaultRatherThanGuessing(string line)
+    public void AnInvalidHttpServerPort_KeepsTheDefaultRatherThanGuessing(string line)
     {
         Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(line).HttpServerPort);
     }
@@ -428,7 +430,7 @@ public sealed class SettingsTests
     [InlineData(1)]
     [InlineData(47811)]
     [InlineData(65535)]
-    public void SerializeThenParse_RoundTripsTheAlertHttpPort(int port)
+    public void SerializeThenParse_RoundTripsTheHttpServerPort(int port)
     {
         var original = new Settings(FocusBorder: true, HttpServerPort: port);
 
@@ -436,7 +438,7 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void Serialize_IncludesTheAlertHttpSwitchAndPortWithComments()
+    public void Serialize_IncludesTheHttpServerSwitchAndPortWithComments()
     {
         var serialized = new Settings(FocusBorder: true, HttpServerEnabled: true, HttpServerPort: 8080).Serialize();
 
@@ -448,7 +450,7 @@ public sealed class SettingsTests
 
     /// <summary>The comment tells the user where the token lives and that the endpoint never leaves the machine.</summary>
     [Fact]
-    public void TheAlertHttpComment_NamesTheTokenFileAndLoopbackOnly()
+    public void TheHttpServerComment_NamesTheTokenFileAndLoopbackOnly()
     {
         var serialized = new Settings(FocusBorder: true).Serialize();
 
@@ -458,7 +460,7 @@ public sealed class SettingsTests
 
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
     [Fact]
-    public void AlertHttpSettingsAreReadIndependentlyOfTheOtherSettings()
+    public void HttpServerSettingsAreReadIndependentlyOfTheOtherSettings()
     {
         var settings = Settings.Parse("focus-border = off\nalert-http = on\nalert-http-port = 9999");
 
@@ -775,7 +777,7 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void MiniCornerDefaultsToTopRight()
+    public void MiniPositionDefaultsToTopRight()
     {
         Assert.Equal(MiniPosition.TopRight, Settings.Default.MiniPosition);
         Assert.Equal(MiniPosition.TopRight, Settings.Parse(string.Empty).MiniPosition);
@@ -790,7 +792,21 @@ public sealed class SettingsTests
     [InlineData("mini-corner = right-center", MiniPosition.RightCenter)]
     [InlineData("mini-corner = bottom-center", MiniPosition.BottomCenter)]
     [InlineData("MINI-CORNER = Left-Center", MiniPosition.LeftCenter)]
-    public void MiniCornerIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
+    public void LegacyMiniCornerKeyIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
+    {
+        Assert.Equal(expected, Settings.Parse(line).MiniPosition);
+    }
+
+    [Theory]
+    [InlineData("mini-position = top-left", MiniPosition.TopLeft)]
+    [InlineData("mini-position=top-right", MiniPosition.TopRight)]
+    [InlineData("mini-position = bottom-left", MiniPosition.BottomLeft)]
+    [InlineData("  MINI-POSITION  =  Bottom-Right ", MiniPosition.BottomRight)]
+    [InlineData("mini-position = top-center", MiniPosition.TopCenter)]
+    [InlineData("mini-position = right-center", MiniPosition.RightCenter)]
+    [InlineData("mini-position = bottom-center", MiniPosition.BottomCenter)]
+    [InlineData("MINI-POSITION = Left-Center", MiniPosition.LeftCenter)]
+    public void MiniPositionKeyIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
     {
         Assert.Equal(expected, Settings.Parse(line).MiniPosition);
     }
@@ -799,7 +815,10 @@ public sealed class SettingsTests
     [InlineData("mini-corner = middle")]
     [InlineData("mini-corner =")]
     [InlineData("mini-corner")]
-    public void AnUnreadableMiniCorner_KeepsTheDefaultRatherThanGuessing(string line)
+    [InlineData("mini-position = middle")]
+    [InlineData("mini-position =")]
+    [InlineData("mini-position")]
+    public void AnUnreadableMiniPosition_KeepsTheDefaultRatherThanGuessing(string line)
     {
         Assert.Equal(MiniPosition.TopRight, Settings.Parse(line).MiniPosition);
     }
@@ -813,7 +832,7 @@ public sealed class SettingsTests
     [InlineData(MiniPosition.RightCenter)]
     [InlineData(MiniPosition.BottomCenter)]
     [InlineData(MiniPosition.LeftCenter)]
-    public void SerializeThenParse_RoundTripsTheMiniCorner(MiniPosition corner)
+    public void SerializeThenParse_RoundTripsTheMiniPosition(MiniPosition corner)
     {
         var original = new Settings(FocusBorder: true, MiniPosition: corner);
 
@@ -821,7 +840,7 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void Serialize_IncludesTheMiniCornerAndListsEachValue()
+    public void Serialize_IncludesTheMiniPositionAndListsEachValue()
     {
         var serialized = Settings.Default.Serialize();
 
@@ -832,9 +851,9 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void MiniCornerIsReadIndependentlyOfTheOtherSettings()
+    public void MiniPositionIsReadIndependentlyOfTheOtherSettings()
     {
-        var settings = Settings.Parse("focus-border = off\nmini-corner = top-left\ntiling = off");
+        var settings = Settings.Parse("focus-border = off\nmini-position = top-left\ntiling = off");
 
         Assert.False(settings.FocusBorder);
         Assert.Equal(MiniPosition.TopLeft, settings.MiniPosition);

@@ -46,6 +46,8 @@ public static class MiniWindowPlacement
         MiniPosition.BottomRight => MiniPosition.BottomCenter,
         MiniPosition.BottomCenter => MiniPosition.BottomLeft,
         MiniPosition.BottomLeft => MiniPosition.LeftCenter,
+        MiniPosition.LeftCenter => MiniPosition.TopLeft,
+        // Not a defined position (a cast int): restart the cycle rather than throw.
         _ => MiniPosition.TopLeft,
     };
 }

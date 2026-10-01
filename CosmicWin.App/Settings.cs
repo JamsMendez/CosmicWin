@@ -244,7 +244,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var videoWallpaperPath = Default.VideoWallpaperPath;
         bool? alerts = null, legacyAlerts = null, httpServer = null, legacyHttpServer = null;
         int? httpServerPort = null, legacyHttpServerPort = null;
-        MiniPosition? miniPositionNew = null, miniPositionLegacy = null;
+        MiniPosition? miniPosition = null, legacyMiniPosition = null;
         var gap = Default.Gap;
         var wallpaperMode = Default.WallpaperMode;
         var wallpaperScene = Default.WallpaperScene;
@@ -346,12 +346,12 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             else if (key.Equals(MiniPositionKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadMiniPosition(value, out var miniPositionValue))
             {
-                miniPositionNew = miniPositionValue;
+                miniPosition = miniPositionValue;
             }
             else if (key.Equals(LegacyMiniPositionKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadMiniPosition(value, out var legacyMiniPositionValue))
             {
-                miniPositionLegacy = legacyMiniPositionValue;
+                legacyMiniPosition = legacyMiniPositionValue;
             }
             // video-wallpaper-http and wallpaper-scene-http: per-route toggles that no longer exist.
             // Deliberately no branch -- the line is skipped like any other unknown key.
@@ -362,7 +362,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             httpServer ?? legacyHttpServer ?? Default.HttpServerEnabled,
             httpServerPort ?? legacyHttpServerPort ?? Default.HttpServerPort,
             gap, wallpaperMode, wallpaperScene, wallpaperFps,
-            miniPositionNew ?? miniPositionLegacy ?? Default.MiniPosition);
+            miniPosition ?? legacyMiniPosition ?? Default.MiniPosition);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>

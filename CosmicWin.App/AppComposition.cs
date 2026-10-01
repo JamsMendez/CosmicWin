@@ -1601,13 +1601,10 @@ public sealed class AppComposition : IDisposable
                         desktopTrace?.Record($"alert-http start requested port={httpServerPort}");
                     }
 
-                    // V4: which routes actually ended up in the routing table, so a trace reader
-                    // can tell a video-only start (alerts fully disabled) from every other
-                    // combination without inferring it from the line above being absent.
-                    // S10 (wallpaper-scene-http-endpoint, follow-up): the scene route (S4) is a
-                    // third independent gate, same as the other two -- it belongs on this same line
-                    // rather than a separate one, or a trace reader could tell a video-only start
-                    // from every OTHER combination except this one.
+                    // V4: which routes ended up in the routing table. The video and scene routes are
+                    // always registered now (http-server is the one switch for the whole server), so
+                    // their flags are constants kept in the line for the readers of this trace; only
+                    // the alerts route still depends on alertsEnabled.
                     desktopTrace?.Record(
                         $"http-server start requested port={httpServerPort} " +
                         $"alerts-route={alertHttpRouteOn} video-route=True scene-route=True");
