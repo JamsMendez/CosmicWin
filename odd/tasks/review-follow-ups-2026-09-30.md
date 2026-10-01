@@ -38,8 +38,8 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
 
 - [x] T1: CreateDesktop retried only when the call provably never ran. Route: delegated writer.
 - [x] T2: Queries reconnect tests no longer race other test classes. Route: same writer.
-- [ ] T3: Maximize block hung-window edge cases. Route: same writer.
-- [ ] T4: README elevation limit reworded. Route: same writer.
+- [x] T3: Maximize block hung-window edge cases. Route: same writer.
+- [x] T4: README elevation limit reworded. Route: same writer.
 - [ ] T5: Hardware: Edge/Chrome, VS Code, F11 on own probe instances (separate user-data-dir,
   killed by PID). Route: inline, parallel to T1-T4 against the running build (code == main bea8a6c).
 
@@ -63,3 +63,24 @@ Out of scope: bounding the pre-existing `SetWindowPosition` (same class as item 
   the static class delegates to one `Shared` instance; tests build their own client. RED: the test
   project did not compile (type missing). GREEN: 10/10 in the queries classes. No mutation check
   required for T2 (structural refactor).
+- 2026-09-30 T3 (route: delegated writer, trigger "2+ non-trivial files"). Design: the native style write
+  is now tri-state (`StyleWriteOutcome` Applied / Refused / TimedOut) through `INativeWindowSource` and
+  `IWindow`. (a) Adapter: a TimedOut strip is added to `_boxStripped` (owed, possibly landed), so
+  `IsExcludedAsAdmitted` keeps the bit; a re-strip is skipped while the handle is in `_boxStripped`;
+  only a proven Refused goes to `_boxRefused`. (b) New `StyleCallQueue`: per-hwnd ordering -- a style call
+  starts only after an earlier call on the same window finished, even an abandoned one. The wait is on
+  the call's own worker thread, so the dispatcher thread stays bounded by the 250 ms budget and nothing
+  needs marshalling back; the queued give-back reports TimedOut now and lands after the strip. Proof is
+  headless: `StyleCallQueueTests.ALaterCallOnTheSameWindow_RunsOnlyAfterTheAbandonedOneFinished` parks a
+  strip, times it out, issues the give-back, asserts it has not run, releases the strip and asserts the
+  order [strip-landed, give-back]. RED: adapter `AStripThatTimedOutAndLanded_KeepsTheAdmissionVerdict_...`
+  failed (window evicted); queue ordering test failed against an unchained skeleton (give-back ran,
+  reported Applied). GREEN: MaximizeBlockTests 34/34, StyleCallQueueTests 5/5, Interop 487 passed, App
+  1355 passed. Mutations: removed the chain wait -> ordering test failed; TimedOut mapped to
+  `_boxRefused` -> admission test failed; both reverted. `BoundedStyleCallTests` removed (its three facts
+  moved to `StyleCallQueueTests`, `RunStyleCall` is gone).
+- 2026-09-30 T4: README limit reworded (CosmicWin always runs elevated; remaining case is a window that
+  refuses or does not answer in time) and the custom-title-bar bullet corrected with the hardware
+  facts the parent measured (Chromium may draw an active-looking button that does nothing; VS Code hides
+  it; nothing flashes; the restore is a safety net). Other README elevation sentences (lines 42-47) are
+  true and unchanged.

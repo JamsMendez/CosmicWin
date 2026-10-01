@@ -56,7 +56,11 @@ public sealed class MaximizeBlockTests
 
     private sealed class Harness : IDisposable
     {
-        public Harness(uint firstStyle = BoxedStyle, uint secondStyle = BoxedStyle, bool tilingOn = true)
+        public Harness(
+            uint firstStyle = BoxedStyle,
+            uint secondStyle = BoxedStyle,
+            bool tilingOn = true,
+            Action<RecordingWindow>? configure = null)
         {
             TilingOn = tilingOn;
             var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
@@ -72,6 +76,7 @@ public sealed class MaximizeBlockTests
 
             First = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300), style: firstStyle);
             Second = new RecordingWindow(new IntPtr(20), Rectangle.FromSize(0, 0, 400, 300), style: secondStyle);
+            configure?.Invoke(First);
             Workspace.RaiseWindowAdded(First);
             Workspace.RaiseWindowAdded(Second);
 
@@ -204,6 +209,55 @@ public sealed class MaximizeBlockTests
         adapter.ReleaseMaximizeBlock();
 
         Assert.True(HasMaximizeBox(slow));
+    }
+
+    [Fact]
+    public void AStripThatTimedOutAndLanded_KeepsTheAdmissionVerdict_WhenItIsReEvaluated()
+    {
+        // R3-admission-verdict-ignores-late-strip: a timed-out strip is UNKNOWN, not refused. This
+        // window is tileable only because it carries both boxes; once the abandoned write lands,
+        // judging it by its stripped style would evict it, give the box back, re-admit it and flap.
+        using var h = new Harness(firstStyle: AdmittedOnlyByItsBoxes, configure: window => window.StripLandsAfterTimeout = true);
+        Assert.False(HasMaximizeBox(h.First)); // the late write landed
+        Assert.True(h.InTree(h.First));
+
+        for (var round = 0; round < 5; round++)
+        {
+            h.Workspace.RaiseWindowBoundsChanged(h.First);
+        }
+
+        Assert.True(h.InTree(h.First));
+        Assert.Equal([false], h.First.MaximizeBoxRequests); // one strip, never flapped
+    }
+
+    [Fact]
+    public void AStripThatTimedOutAndIsStillPending_IsNotRetriedOnEveryBoundsChange()
+    {
+        using var h = new Harness(configure: window => window.StripStaysPendingAfterTimeout = true);
+
+        for (var round = 0; round < 5; round++)
+        {
+            h.Workspace.RaiseWindowBoundsChanged(h.First);
+        }
+
+        Assert.Equal([false], h.First.MaximizeBoxRequests);
+        Assert.True(h.InTree(h.First));
+    }
+
+    [Fact]
+    public void AStripStillPendingWhenTheBlockIsReleased_IsGivenBackAfterItLands()
+    {
+        // R3-late-strip-after-giveback: the give-back reads the box as still present while the
+        // abandoned strip has not landed. It must still be ISSUED, because the style call it makes
+        // is queued behind the pending strip and so runs after it (pinned in StyleCallQueueTests).
+        using var h = new Harness(configure: window => window.StripStaysPendingAfterTimeout = true);
+        Assert.True(HasMaximizeBox(h.First)); // the strip has not landed yet
+
+        h.TilingOn = false;
+        h.Adapter.ReleaseMaximizeBlock();
+
+        Assert.Equal([false, true], h.First.MaximizeBoxRequests);
+        Assert.True(HasMaximizeBox(h.First));
     }
 
     [Fact]

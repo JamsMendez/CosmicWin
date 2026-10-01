@@ -244,19 +244,42 @@ internal sealed class RecordingWindow : IWindow
     /// </summary>
     public bool StripLandsAfterTimeout { get; set; }
 
-    public bool TrySetMaximizeBox(bool enabled)
+    /// <summary>
+    /// Models a clearing write that timed out and is STILL PENDING: the call reports
+    /// <see cref="StyleWriteOutcome.TimedOut"/> and the box is still there, until the abandoned
+    /// write lands. The native layer runs a later style call on the same handle only AFTER that
+    /// write has finished, so the next request lands the pending strip first and then applies
+    /// itself -- which is exactly what a give-back relies on.
+    /// </summary>
+    public bool StripStaysPendingAfterTimeout { get; set; }
+
+    private bool _stripPending;
+
+    public StyleWriteOutcome TrySetMaximizeBox(bool enabled)
     {
         MaximizeBoxRequests.Add(enabled);
+
+        if (_stripPending && IsAlive)
+        {
+            Style &= ~WindowStyleFlags.MaximizeBox;
+            _stripPending = false;
+        }
+
+        if (StripStaysPendingAfterTimeout && !enabled && IsAlive)
+        {
+            _stripPending = true;
+            return StyleWriteOutcome.TimedOut;
+        }
 
         if (StripLandsAfterTimeout && !enabled && IsAlive)
         {
             Style &= ~WindowStyleFlags.MaximizeBox;
-            return false;
+            return StyleWriteOutcome.TimedOut;
         }
 
         if (!IsAlive || RefuseStyleChanges)
         {
-            return false;
+            return StyleWriteOutcome.Refused;
         }
 
         if (!IgnoresMaximizeBox)
@@ -266,7 +289,7 @@ internal sealed class RecordingWindow : IWindow
                 : Style & ~WindowStyleFlags.MaximizeBox;
         }
 
-        return true;
+        return StyleWriteOutcome.Applied;
     }
 
     /// <summary>

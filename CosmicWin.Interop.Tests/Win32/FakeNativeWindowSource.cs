@@ -144,17 +144,27 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// <summary>Makes every style write for this handle fail, as an elevated window does for a non-elevated caller.</summary>
     public void FailStyleChangesFor(nint hwnd) => _failingStyleHandles.Add(hwnd);
 
-    public bool TrySetMaximizeBox(nint hwnd, bool enabled)
+    private readonly HashSet<nint> _timingOutStyleHandles = new();
+
+    /// <summary>Makes every box write for this handle report <see cref="StyleWriteOutcome.TimedOut"/> without changing the style.</summary>
+    public void TimeOutStyleChangesFor(nint hwnd) => _timingOutStyleHandles.Add(hwnd);
+
+    public StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled)
     {
         MaximizeBoxCalls.Add((hwnd, enabled));
 
+        if (_timingOutStyleHandles.Contains(hwnd))
+        {
+            return StyleWriteOutcome.TimedOut;
+        }
+
         if (_failingStyleHandles.Contains(hwnd) || !_windows.TryGetValue(hwnd, out var info))
         {
-            return false;
+            return StyleWriteOutcome.Refused;
         }
 
         _windows[hwnd] = info with { Style = enabled ? info.Style | MaximizeBoxBit : info.Style & ~MaximizeBoxBit };
-        return true;
+        return StyleWriteOutcome.Applied;
     }
 
     public bool TryRestoreFromMaximized(nint hwnd)

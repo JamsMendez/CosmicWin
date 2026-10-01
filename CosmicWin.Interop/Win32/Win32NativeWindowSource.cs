@@ -139,6 +139,19 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     private static readonly TimeSpan StyleCallTimeout = ActivationTimeout;
 
     /// <summary>
+    /// Every bounded style call goes through one queue, so a call never overtakes an abandoned one
+    /// on the same window. See <see cref="StyleCallQueue"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>SetWindowLong</c>, <c>SetWindowPos(SWP_FRAMECHANGED)</c> and <c>ShowWindow(SW_RESTORE)</c>
+    /// all SEND messages to the target window and wait, so a hung target would stall the calling
+    /// thread -- which, for the adapter, is the UI/event thread. The pre-existing
+    /// <see cref="SetWindowPosition"/> is the same class of call and is NOT bounded here; that is a
+    /// known, separate follow-up.
+    /// </remarks>
+    private static readonly StyleCallQueue StyleCalls = new();
+
+    /// <summary>
     /// MR-2. The fourth supervised run recorded 40 focus chords and every
     /// activation failed: once the App layer stopped trusting its own optimistic focus cache, the
     /// earlier bare-<c>AttachThreadInput</c> fix was revealed to have never worked at all. It ran on
@@ -209,14 +222,12 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// stealing focus or nudging the window would make it a second, unrelated action.
     /// <para>
     /// The whole edit runs under <see cref="StyleCallTimeout"/> because both the write and the frame
-    /// redraw SEND messages to the target. A timeout answers <see langword="false"/>, the same as a
-    /// refusal, but the abandoned call may still land: a strip reported as refused can leave the
-    /// button disabled after all. The adapter therefore still tries to give the box back for a
-    /// refused strip when tiling is released; asking for a bit the window already has is a no-op.
+    /// redraw SEND messages to the target. A timeout answers <see cref="StyleWriteOutcome.TimedOut"/>,
+    /// distinct from a refusal because the abandoned call may still land.
     /// </para>
     /// </remarks>
-    public bool TrySetMaximizeBox(nint hwnd, bool enabled) =>
-        RunStyleCall(() => SetMaximizeBoxCore(hwnd, enabled), StyleCallTimeout);
+    public StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled) =>
+        StyleCalls.Run(hwnd, () => SetMaximizeBoxCore(hwnd, enabled), StyleCallTimeout);
 
     private static bool SetMaximizeBoxCore(nint hwnd, bool enabled)
     {
@@ -283,7 +294,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// maximized because the user is working in it, so it already holds the foreground.
     /// </summary>
     public bool TryRestoreFromMaximized(nint hwnd) =>
-        RunStyleCall(() => RestoreFromMaximizedCore(hwnd), StyleCallTimeout);
+        StyleCalls.Run(hwnd, () => RestoreFromMaximizedCore(hwnd), StyleCallTimeout) == StyleWriteOutcome.Applied;
 
     private static bool RestoreFromMaximizedCore(nint hwnd)
     {
@@ -363,25 +374,6 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         worker.Start();
         return worker.Join(budget) ? outcome : whenTimedOut;
     }
-
-    /// <summary>
-    /// Runs a synchronous cross-process style call (a style write, a frame redraw, a restore) under
-    /// <see cref="StyleCallTimeout"/> and answers whether it completed AND succeeded.
-    /// </summary>
-    /// <remarks>
-    /// <c>SetWindowLong</c>, <c>SetWindowPos(SWP_FRAMECHANGED)</c> and <c>ShowWindow(SW_RESTORE)</c>
-    /// all SEND messages to the target window and wait, so a hung target would stall the calling
-    /// thread -- which, for the adapter, is the UI/event thread. A timeout answers
-    /// <see langword="false"/> exactly like a refusal, so every caller's existing refused path
-    /// handles it. Unlike a refusal it does NOT mean "nothing changed": the abandoned call may still
-    /// land later, which is why the adapter keeps a refused strip eligible for a give-back.
-    /// <para>
-    /// The pre-existing <see cref="SetWindowPosition"/> is the same class of call and is NOT bounded
-    /// here; that is a known, separate follow-up.
-    /// </para>
-    /// </remarks>
-    internal static bool RunStyleCall(Func<bool> call, TimeSpan budget) =>
-        RunBounded(call, budget, whenFailed: false, whenTimedOut: false);
 
     /// <summary>
     /// Whether an outcome means the OS CONFIRMED the target holds the foreground. Both failing

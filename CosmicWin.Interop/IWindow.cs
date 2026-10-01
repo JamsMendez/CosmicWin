@@ -110,8 +110,9 @@ public interface IWindow : IEquatable<IWindow>
 
     /// <summary>
     /// Sets (<paramref name="enabled"/> <see langword="true"/>) or clears (<see langword="false"/>)
-    /// the window's <c>WS_MAXIMIZEBOX</c> style bit, reporting whether the window now has the
-    /// requested state. Never throws, and never marks the window non-repositionable.
+    /// the window's <c>WS_MAXIMIZEBOX</c> style bit, reporting how the write ended: applied,
+    /// refused, or timed out (see <see cref="StyleWriteOutcome"/>). Never throws, and never marks the
+    /// window non-repositionable.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -122,12 +123,14 @@ public interface IWindow : IEquatable<IWindow>
     /// <para>
     /// Failure is an answer, not an error. A window of a higher-integrity process refuses the write
     /// from a non-elevated caller (UIPI), and an application can ignore the bit entirely. Both come
-    /// back as <see langword="false"/>, and a dead window does too without asking the OS. Unlike
+    /// back as <see cref="StyleWriteOutcome.Refused"/>, and a dead window does too without asking the
+    /// OS. A write that gets no answer in time is <see cref="StyleWriteOutcome.TimedOut"/>, NOT a
+    /// refusal: the abandoned write may still land. Unlike
     /// <see cref="SetPosition"/> this does NOT flip <see cref="CanReposition"/>: a window that
     /// will not give up its maximize button can still be tiled perfectly well.
     /// </para>
     /// </remarks>
-    bool TrySetMaximizeBox(bool enabled);
+    StyleWriteOutcome TrySetMaximizeBox(bool enabled);
 
     /// <summary>
     /// Takes a maximized window back to its normal state, reporting whether the window actually

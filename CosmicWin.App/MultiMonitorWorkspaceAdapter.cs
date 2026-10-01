@@ -137,9 +137,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     private readonly HashSet<nint> _arriving = [];
 
     /// <summary>
-    /// Windows whose <c>WS_MAXIMIZEBOX</c> this adapter cleared, and therefore owes back.
+    /// Windows whose <c>WS_MAXIMIZEBOX</c> this adapter cleared, or MAY have cleared, and therefore
+    /// owes back.
     /// </summary>
     /// <remarks>
+    /// A strip that timed out is in here too: its abandoned write can still land, so the box is owed
+    /// and the admission verdict must keep reading the bit as present. Only a strip the window
+    /// provably refused stays out (see <see cref="_boxRefused"/>).
     /// Membership IS the memory of "this window originally had a maximize box": only a window that
     /// had one is ever added, so handing boxes back can never GIVE one to a window that never had
     /// it. Forgotten on removal like every other per-handle record here, because Windows reuses
@@ -1754,28 +1758,42 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
     /// <summary>
     /// Takes the maximize box off a tiled window, remembering that it had one. A window without a
-    /// box is left alone, and a refusal is traced once and not repeated. A refusal includes a style
-    /// write that timed out; see <see cref="RestoreMaximizeBox"/> for why such a handle is still
-    /// given a box back later.
+    /// box is left alone. A refusal is traced once and not repeated; a write that timed out is traced
+    /// as pending and treated as possibly landed (see <see cref="_boxStripped"/>).
     /// </summary>
     private void StripMaximizeBox(IWindow window)
     {
         var handle = window.Handle;
-        if ((window.Style & WindowStyleFlags.MaximizeBox) == 0 || _boxRefused.Contains(handle))
+        if ((window.Style & WindowStyleFlags.MaximizeBox) == 0
+            || _boxRefused.Contains(handle)
+            || _boxStripped.Contains(handle))
         {
             return;
         }
 
-        if (window.TrySetMaximizeBox(false))
+        switch (window.TrySetMaximizeBox(false))
         {
-            _boxStripped.Add(handle);
-            return;
-        }
+            case StyleWriteOutcome.Applied:
+                _boxStripped.Add(handle);
+                return;
 
-        _boxRefused.Add(handle);
-        Trace?.Record(
-            $"maximize box kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
-            $"-- the window refused the change (an elevated window?); a maximize is still undone after the fact");
+            case StyleWriteOutcome.TimedOut:
+                // Unknown, not refused: the abandoned write may land. Owed like an applied strip, so
+                // the admission verdict keeps the bit and a give-back is attempted; its style call is
+                // queued behind the pending write by the native layer, so it lands AFTER it.
+                _boxStripped.Add(handle);
+                Trace?.Record(
+                    $"maximize box pending hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                    $"-- the window did not answer in time; the change may still land and is given back with the others");
+                return;
+
+            default:
+                _boxRefused.Add(handle);
+                Trace?.Record(
+                    $"maximize box kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                    $"-- the window refused the change (an elevated window?); a maximize is still undone after the fact");
+                return;
+        }
     }
 
     /// <summary>
@@ -1807,16 +1825,22 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             _registry.TryGetWindow(handle, out known);
         }
 
-        // A REFUSED strip is also tried, quietly. The style write is bounded, and a window that did
-        // not answer in time reports the same false as one that refused -- yet the abandoned write
-        // can still land afterwards, leaving a disabled button this adapter never recorded. Asking
-        // a window for a box it still has is a no-op (no cross-process write), so the genuine
-        // refusals (an elevated window) cost one style read and say nothing.
-        if (known is { IsAlive: true } && !known.TrySetMaximizeBox(true) && wasStripped)
+        // A REFUSED strip is also tried, quietly: a belt-and-braces call that costs one style read
+        // for a window that provably kept its box. The case that needs it is a strip that TIMED OUT,
+        // and that one is in _boxStripped. Its write may still be pending, so the window can read as
+        // "box present" here; the native layer runs this call only after the pending write has
+        // finished, which is what makes the give-back land last.
+        if (known is { IsAlive: true })
         {
-            Trace?.Record(
-                $"maximize box not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
-                $"-- the window refused the change; its maximize button stays disabled until it is reopened");
+            var outcome = known.TrySetMaximizeBox(true);
+            if (outcome != StyleWriteOutcome.Applied && wasStripped)
+            {
+                Trace?.Record(
+                    $"maximize box not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
+                    (outcome == StyleWriteOutcome.TimedOut
+                        ? "-- the window did not answer in time; the give-back stays queued behind the pending change"
+                        : "-- the window refused the change; its maximize button stays disabled until it is reopened"));
+            }
         }
     }
 

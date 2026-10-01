@@ -165,17 +165,17 @@ internal interface INativeWindowSource
     bool TryClose(nint hwnd);
 
     /// <summary>
-    /// Sets or clears <c>WS_MAXIMIZEBOX</c> on the given window and reports whether the window
-    /// ends up with the requested state. Never throws.
+    /// Sets or clears <c>WS_MAXIMIZEBOX</c> on the given window and reports how the write ended.
+    /// Never throws.
     /// </summary>
     /// <remarks>
     /// Verified by READING the style back rather than trusting the write's return value: a
     /// refused write (UIPI, an elevated target) and a write that changed nothing both look like a
     /// zero from <c>SetWindowLong</c>, and the read-back is the only unambiguous answer. The call
-    /// is bounded: a target that does not answer in time reports <see langword="false"/>, though
-    /// the abandoned write may still land later.
+    /// is bounded: a target that does not answer in time reports <see cref="StyleWriteOutcome.TimedOut"/>
+    /// -- not a refusal, because the abandoned write may still land later.
     /// </remarks>
-    bool TrySetMaximizeBox(nint hwnd, bool enabled);
+    StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled);
 
     /// <summary>
     /// Takes a maximized window back to its normal size and position. Never throws; reports

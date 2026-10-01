@@ -111,15 +111,22 @@ internal sealed class Win32Window : IWindow
     /// window that refuses a style write (an elevated one, UIPI) is still perfectly tileable, and
     /// calling it untileable for that would drop it out of the layout over a button.
     /// </remarks>
-    public bool TrySetMaximizeBox(bool enabled)
+    public StyleWriteOutcome TrySetMaximizeBox(bool enabled)
     {
-        if (!IsAlive || !_nativeSource.TrySetMaximizeBox(Handle, enabled))
+        if (!IsAlive)
         {
-            return false;
+            return StyleWriteOutcome.Refused;
         }
 
-        Style = enabled ? Style | MaximizeBoxBit : Style & ~MaximizeBoxBit;
-        return true;
+        // The cached style follows only a CONFIRMED write. A timed-out one leaves it alone: the
+        // write may or may not land, and the caller is told so through the outcome.
+        var outcome = _nativeSource.TrySetMaximizeBox(Handle, enabled);
+        if (outcome == StyleWriteOutcome.Applied)
+        {
+            Style = enabled ? Style | MaximizeBoxBit : Style & ~MaximizeBoxBit;
+        }
+
+        return outcome;
     }
 
     public bool TryRestore()

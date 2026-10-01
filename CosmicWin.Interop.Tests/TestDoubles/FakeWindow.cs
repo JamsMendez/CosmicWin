@@ -133,15 +133,15 @@ internal sealed class FakeWindow : IWindow
     /// <summary>Whether <see cref="TrySetMaximizeBox"/> and <see cref="TryRestore"/> succeed; a protected window refuses both.</summary>
     public bool RefuseStyleChanges { get; set; }
 
-    public bool TrySetMaximizeBox(bool enabled)
+    public StyleWriteOutcome TrySetMaximizeBox(bool enabled)
     {
         if (!IsAlive || RefuseStyleChanges)
         {
-            return false;
+            return StyleWriteOutcome.Refused;
         }
 
         Style = enabled ? Style | MaximizeBoxBit : Style & ~MaximizeBoxBit;
-        return true;
+        return StyleWriteOutcome.Applied;
     }
 
     public bool TryRestore()

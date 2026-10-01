@@ -31,7 +31,7 @@ public class Win32WindowTests
 
         var changed = window.TrySetMaximizeBox(false);
 
-        Assert.True(changed);
+        Assert.Equal(StyleWriteOutcome.Applied, changed);
         Assert.Equal((new IntPtr(20), false), Assert.Single(native.MaximizeBoxCalls));
         Assert.Equal(0u, window.Style & MaximizeBox);
         Assert.Equal(SysMenuAndMinimizeBox, window.Style);
@@ -44,7 +44,7 @@ public class Win32WindowTests
 
         var changed = window.TrySetMaximizeBox(true);
 
-        Assert.True(changed);
+        Assert.Equal(StyleWriteOutcome.Applied, changed);
         Assert.Equal((new IntPtr(21), true), Assert.Single(native.MaximizeBoxCalls));
         Assert.Equal(MaximizeBox, window.Style & MaximizeBox);
     }
@@ -57,11 +57,24 @@ public class Win32WindowTests
         var (native, window) = WindowWithStyle(22, SysMenuAndMinimizeBox | MaximizeBox);
         native.FailStyleChangesFor(new IntPtr(22));
 
-        var exception = Record.Exception(() => Assert.False(window.TrySetMaximizeBox(false)));
+        var exception = Record.Exception(() => Assert.Equal(StyleWriteOutcome.Refused, window.TrySetMaximizeBox(false)));
 
         Assert.Null(exception);
         Assert.Equal(MaximizeBox, window.Style & MaximizeBox);
         Assert.True(window.CanReposition);
+    }
+
+    [Fact]
+    public void TrySetMaximizeBox_WhenNativeTimesOut_ReportsTimedOut_AndLeavesTheCachedStyleAlone()
+    {
+        var (native, window) = WindowWithStyle(25, SysMenuAndMinimizeBox | MaximizeBox);
+        native.TimeOutStyleChangesFor(new IntPtr(25));
+
+        var outcome = window.TrySetMaximizeBox(false);
+
+        // Unknown, not refused: the cached style must not claim either state.
+        Assert.Equal(StyleWriteOutcome.TimedOut, outcome);
+        Assert.Equal(MaximizeBox, window.Style & MaximizeBox);
     }
 
     [Fact]
@@ -70,7 +83,7 @@ public class Win32WindowTests
         var (native, window) = WindowWithStyle(23, SysMenuAndMinimizeBox | MaximizeBox);
         window.MarkDead();
 
-        Assert.False(window.TrySetMaximizeBox(false));
+        Assert.Equal(StyleWriteOutcome.Refused, window.TrySetMaximizeBox(false));
         Assert.Empty(native.MaximizeBoxCalls);
     }
 

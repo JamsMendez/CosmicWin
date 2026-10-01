@@ -438,7 +438,7 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public bool TryClose(nint hwnd) => inner.TryClose(hwnd);
 
-        public bool TrySetMaximizeBox(nint hwnd, bool enabled) => inner.TrySetMaximizeBox(hwnd, enabled);
+        public StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled) => inner.TrySetMaximizeBox(hwnd, enabled);
 
         public bool TryRestoreFromMaximized(nint hwnd) => inner.TryRestoreFromMaximized(hwnd);
     }

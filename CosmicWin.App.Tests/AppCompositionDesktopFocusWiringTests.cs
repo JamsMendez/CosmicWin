@@ -75,7 +75,7 @@ public sealed class AppCompositionDesktopFocusWiringTests
 
         public bool TryClose() => true;
 
-        public bool TrySetMaximizeBox(bool enabled) => true;
+        public StyleWriteOutcome TrySetMaximizeBox(bool enabled) => StyleWriteOutcome.Applied;
 
         public bool TryRestore() => true;
 
