@@ -46,3 +46,14 @@ was the known leftover in the Interop suite. Decided by the maintainer 2026-10-0
   parent. Build: same 6 pre-existing warnings, none in this file. Left on explicit ports: constructor
   facts, Dispose_BeforeStart, Start_AfterDispose (never start), and the second server of
   Start_PortAlreadyInUse (must reuse the occupied port).
+- 2026-10-01: T1 commit 77b65be. Assessed medium, `slice_budget_reached`; consent granted by the
+  maintainer; review-9dada7fbe66534df (one lens, reliability) approved and acknowledged. Reviewed
+  boundary advances to 77b65be.
+
+## Follow-ups (non-blocking SUGGESTIONs from review-9dada7fbe66534df)
+
+- R3-exhaustion-path-unproved: no test covers every attempt losing its bind (throws with the
+  diagnostics, each loser disposed).
+- R3-sink-forwards-to-test-output-off-thread: the shared sink now forwards every diagnostic to
+  `ITestOutputHelper.WriteLine`, possibly from the server's background loop after the test ended;
+  guard it with try/catch or record before forwarding.
