@@ -84,3 +84,17 @@ state. A failure of the LATEST navigation still tears down exactly as today.
   focused; full App 1416 passed / 6 skipped; hardware repro repeated: same clean superseded traces.
   Residual (advisory): if the first navigation's abort completes BEFORE either start is delivered,
   nothing identifies it as stale; not observed on hardware.
+- 2026-10-01: review-fb68dcc27e3d96bc (medium, reliability, 1e47795..76d9f87) APPROVED and
+  acknowledged. SUGGESTION R3-reset-latest-started-untested closed: new seam test
+  `Clear_ForgetsTheLatestStart_...` (mutation removing `_latestStarted = null` in Clear fails it).
+  WARNING R3-latest-started-broadens-staleness recorded as an accepted advisory: any completion whose
+  id differs from the latest NavigationStarting now counts as superseded, which would misfire only if
+  a navigation the host did not start overtook the host's own (the scene pages never navigate
+  themselves -- verified by searching shared/ and every scene for location/href/open/history) or if
+  a start were ever missed. Revisit if a `superseded` line is ever followed by a layer that never
+  reports `page ready`.
+
+## Next step
+
+Fix complete and hardware-checked. Open, separate: a scene switch while an alert is showing drops
+the alert for the rest of its duration (see T2 notes).

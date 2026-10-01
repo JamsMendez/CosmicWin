@@ -108,6 +108,16 @@ public sealed class AlertLayerNavigationTests
         Assert.False(nav.CompletedIsSuperseded(12));
     }
 
+    /// <summary>Review R3-reset-latest-started-untested: a teardown must forget the previous controller's latest start.</summary>
+    [Fact]
+    public void Clear_ForgetsTheLatestStart_SoTheNextControllersFirstCompletionCounts()
+    {
+        var nav = new AlertLayerNavigation();
+        nav.Started(1);
+        nav.Clear();
+        Assert.False(nav.CompletedIsSuperseded(2));
+    }
+
     [Fact]
     public void CompletionWithNothingRecorded_IsNotSuperseded() =>
         Assert.False(new AlertLayerNavigation().CompletedIsSuperseded(3));
