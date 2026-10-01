@@ -540,6 +540,17 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Tiled, so it no longer gets to leave its tile by being maximized. After the arrange, and
         // only for a window that stayed in the tree: stripping one that was just turned away would
         // be a change to a window this adapter does not manage.
+        //
+        // Checked against the registry rather than assumed. Nothing in the straight-line path above
+        // can take the window out of the tree without also failing CanReposition, but the arrange
+        // runs the after-arrange listener and the trace, and either can re-enter and remove this
+        // very window. Stripping it then would take the button off a window nobody manages and
+        // record it as ours to give back, after the removal had already forgotten it.
+        if (!_registry.TryGetLeaf(window.Handle, out _))
+        {
+            return;
+        }
+
         StripMaximizeBox(window);
     }
 
@@ -1825,9 +1836,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
-    /// Takes the maximize box off every tiled window and puts back any that maximized while tiling
-    /// was off. The counterpart of <see cref="ReleaseMaximizeBlock"/>, called when tiling comes
-    /// back on, because windows tiled before it was turned off were never announced again.
+    /// Clears the maximize box (greys the button) of every tiled window and puts back any that
+    /// maximized while tiling was off. The counterpart of <see cref="ReleaseMaximizeBlock"/>, called
+    /// when tiling comes back on, because windows tiled before it was turned off were never
+    /// announced again.
     /// </summary>
     /// <remarks>
     /// <para>

@@ -160,3 +160,13 @@ strategy question is asked before delivery. Everything stays local; the maintain
   implementation was my own test typo, `0x0A` for `0xA`, fixed). GREEN 28/28 in `MaximizeBlockTests`
   (the success-path fact `ASuccessfulGiveBack_IsNotTraced` passes by construction against the old
   code too). Commit: see git log.
+- Follow-up R3-strip-after-addwindow-untile FIXED (same delegated writer). Investigation: in the
+  straight-line path of `AddWindow` the window cannot leave the tree and still pass
+  `CanReposition` (floor failure `Untile`s and returns; fullscreen returns; the arrange evicts only
+  on `!CanReposition`, which already returns). It CAN be removed by re-entrancy: the arrange runs
+  the after-arrange listener, which may remove the window being admitted. RED:
+  `MaximizeBlockTests.AWindowThatLeavesTheTreeWhileItIsBeingAdded_IsNeverStripped` failed (a
+  `TrySetMaximizeBox(false)` request reached a window the adapter had already forgotten). Fix: the
+  strip is skipped unless the window still has a registry leaf. GREEN `MaximizeBlockTests` 29/29.
+  Also: README reworded (button is disabled/greyed, not removed) at the maintainer's request.
+  Commits: see git log.

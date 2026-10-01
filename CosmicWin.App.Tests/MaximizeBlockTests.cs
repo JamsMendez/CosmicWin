@@ -172,6 +172,38 @@ public sealed class MaximizeBlockTests
         Assert.Single(elevated.MaximizeBoxRequests); // the one refused strip; nothing to give back
     }
 
+    [Fact]
+    public void AWindowThatLeavesTheTreeWhileItIsBeingAdded_IsNeverStripped()
+    {
+        // The arrange at the end of admission runs a listener, and a listener can end up removing
+        // the very window being admitted. Stripping it afterwards would take the button off a
+        // window this adapter no longer manages -- and record it as ours to give back later, so
+        // the handle would be remembered for good.
+        var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
+        var registry = new WindowRegistry();
+        var trees = new TreeManager([primary], primary, registry);
+        var workspace = new FakeWorkspace();
+        var window = new RecordingWindow(new IntPtr(40), Rectangle.FromSize(0, 0, 400, 300), style: BoxedStyle);
+        var removed = false;
+        using var adapter = new MultiMonitorWorkspaceAdapter(
+            workspace, trees, registry, () => ExceptionList.Empty, () => false, () => null,
+            afterArrange: _ =>
+            {
+                if (!removed)
+                {
+                    removed = true;
+                    workspace.RaiseWindowRemoved(window);
+                }
+            });
+
+        workspace.RaiseWindowAdded(window);
+
+        Assert.True(removed);
+        Assert.False(registry.TryGetLeaf(window.Handle, out _));
+        Assert.DoesNotContain(false, window.MaximizeBoxRequests);
+        Assert.True(HasMaximizeBox(window));
+    }
+
     // ---- giving it back ------------------------------------------------------------------------
 
     [Fact]
