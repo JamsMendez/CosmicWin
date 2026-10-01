@@ -62,3 +62,4 @@ was the known leftover in the Interop suite. Decided by the maintainer 2026-10-0
 - 2026-10-01: T2 done inline. Proof: mutating `if (!lost)` to always return failed both helper
   tests (`Assert.NotEqual` same port; `Assert.Throws` no exception). Interop 493 passed / 42 skipped
   / 0 failed; build 0 errors, no warning in this file. Maintainer: merge into main when done.
+- 2026-10-01: T2 assessed medium, `under_budget` (no review due; c2f8b60..8d0778f unreviewed). Merged into local main fast-forward.
