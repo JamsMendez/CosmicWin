@@ -104,6 +104,44 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.Contains("AlertLayerMessages.Show(request)", body);
     }
 
+    /// <summary>
+    /// pause-scene-when-covered T2: the message JSON the scene page's handleHostMessage understands.
+    /// </summary>
+    [Fact]
+    public void PauseAndResumeMessagesHaveTheShapeTheScenePageHandles()
+    {
+        Assert.Equal("{\"type\":\"pause\"}", AlertLayerMessages.Pause);
+        Assert.Equal("{\"type\":\"resume\"}", AlertLayerMessages.Resume);
+    }
+
+    /// <summary>
+    /// pause-scene-when-covered T2 (structural, like every WebView2-bound assertion in this file): the
+    /// desired pause state survives a page that is not ready yet or is recreated, so it is re-posted
+    /// when the page reports ready, and it is html-wallpaper-mode only (video mode is never paused).
+    /// </summary>
+    [Fact]
+    public void ScenePauseIsRememberedPostedWhenReadyAndHtmlModeOnly()
+    {
+        var source = ReadControllerSource();
+        var setStart = source.IndexOf("public void SetScenePaused(bool paused)", StringComparison.Ordinal);
+        Assert.True(setStart >= 0, "expected a public void SetScenePaused(bool paused) method");
+        var setBody = source[setStart..source.IndexOf("private void PostScenePause()", setStart, StringComparison.Ordinal)];
+        Assert.Contains("!_htmlWallpaperMode", setBody);
+        Assert.Contains("_scenePaused = paused;", setBody);
+        Assert.Contains("_navigationCompleted && _pageReportedReady", setBody);
+
+        var postStart = source.IndexOf("private void PostScenePause()", StringComparison.Ordinal);
+        var postBody = source[postStart..source.IndexOf("public void End()", postStart, StringComparison.Ordinal)];
+        Assert.Contains("AlertLayerMessages.Pause", postBody);
+        Assert.Contains("AlertLayerMessages.Resume", postBody);
+        Assert.Contains("AlertLayerTrace.Error(\"post-scene-pause\"", postBody);
+
+        var readyStart = source.IndexOf("private void TryMarkReady()", StringComparison.Ordinal);
+        var readyBody = source[readyStart..source.IndexOf("[DllImport", readyStart, StringComparison.Ordinal)];
+        Assert.Contains("_htmlWallpaperMode && _scenePaused", readyBody);
+        Assert.Contains("PostScenePause()", readyBody);
+    }
+
     private static string ReadControllerSource([CallerFilePath] string testFilePath = "") =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFilePath)!,
             "..", "..", "CosmicWin.App", "Alerts", "WebViewAlertLayerController.cs")));

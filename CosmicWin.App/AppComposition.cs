@@ -286,7 +286,13 @@ public sealed class AppComposition : IDisposable
         // The corner the window starts in, and the persist seam Alt+M uses (T5). Already resolved
         // from Settings before Wire is called, like every other value above.
         MiniPosition miniPosition = MiniPosition.TopRight,
-        Action<MiniPosition>? persistMiniPosition = null)
+        Action<MiniPosition>? persistMiniPosition = null,
+        // pause-scene-when-covered T2: tells the html wallpaper scene page to pause (true) or resume
+        // (false). Called on the owning thread from the watch tick, ONLY when the covered state
+        // changes and ONLY in html wallpaper mode with the host attached; production wires it to
+        // WebViewAlertLayerController.SetScenePaused. Unset (every test that predates it, mini and
+        // video mode, no alert layer) means there is no scene page to pause.
+        Action<bool>? setHtmlWallpaperScenePaused = null)
     {
         var alertClock = timeProvider ?? TimeProvider.System;
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
@@ -1081,6 +1087,54 @@ public sealed class AppComposition : IDisposable
                 return;
             }
             displayedAlert = active;
+        }
+
+        // pause-scene-when-covered T2: the html scene page is invisible while a fullscreen window covers
+        // the primary monitor, so it is paused for exactly that long. The signal is the one that already
+        // holds alerts above (isPrimaryMonitorCovered -> PrimaryMonitorFullscreenDetector), polled on
+        // the same watch tick; only a CHANGE is sent and traced. Html mode only: video playback is left
+        // alone, and the mini window (a topmost corner window nothing can cover) never reaches this
+        // because its wallpaperMode is HtmlMini and it has no wallpaper page at all.
+        //
+        // An alert already on screen when the cover starts is not special-cased: the page stays able to
+        // process `hide` while paused and the host-side timing (the queue) still ends it; the queue
+        // never STARTS one while covered.
+        var htmlScenePaused = false;
+        void UpdateHtmlScenePause()
+        {
+            if (setHtmlWallpaperScenePaused is null
+                || wallpaperMode != WallpaperMode.Html
+                || !htmlWallpaperActive.Value)
+            {
+                return;
+            }
+
+            bool covered;
+            try
+            {
+                covered = isPrimaryMonitorCovered?.Invoke() ?? false;
+            }
+            catch (Exception ex) when (IsRecoverableFailure(ex))
+            {
+                desktopTrace?.Record($"wallpaper-scene cover-check-failed {ex.GetType().Name}: {ex.Message}");
+                return;
+            }
+
+            if (covered == htmlScenePaused)
+            {
+                return;
+            }
+
+            htmlScenePaused = covered;
+            desktopTrace?.Record(covered ? "wallpaper-scene paused: desktop covered" : "wallpaper-scene resumed");
+            try
+            {
+                setHtmlWallpaperScenePaused(covered);
+            }
+            catch (Exception ex) when (IsRecoverableFailure(ex))
+            {
+                desktopTrace?.Record($"wallpaper-scene pause-failed {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         // The catch filter for one feature's recoverable failure (alert layer, mini window, focus border,
@@ -2151,6 +2205,7 @@ public sealed class AppComposition : IDisposable
                 });
             }
 
+            UpdateHtmlScenePause();
             UpdateAlertOverlay();
             UpdateFocusBorder();
         }
@@ -2421,6 +2476,7 @@ public sealed class AppComposition : IDisposable
             wallpaperFps: settings.WallpaperFps,
             miniPosition: settings.MiniPosition,
             persistMiniPosition: corner => settingsStore.Update(s => s with { MiniPosition = corner }),
+            setHtmlWallpaperScenePaused: alertLayer is null ? null : alertLayer.SetScenePaused,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }

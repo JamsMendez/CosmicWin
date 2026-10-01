@@ -42,7 +42,7 @@ excluded. Maximized or tiled windows do NOT count (the wallpaper shows in the ga
 - [x] T1 -- Page side: a pause/resume web message handled by the shared render loop (all four
   scenes); while paused no frame is drawn and no rAF work beyond the minimum; on resume drawing
   restarts. Node harness coverage.
-- [ ] T2 -- Host side: poll the covered state in html mode, send pause/resume only on change,
+- [x] T2 -- Host side: poll the covered state in html mode, send pause/resume only on change,
   never in mini/video mode, trace transitions. Wiring tests with a fake detector.
 - [ ] T3 -- Hardware: fullscreen browser/video over the desktop -> trace `paused`, CPU/GPU drop;
   leave fullscreen -> `resumed`, scene animates. Maximized window -> no pause.
@@ -65,3 +65,24 @@ Route: T1+T2 delegated direct (one writer; mapping + 2+ non-trivial files). T3 p
   raphael 26/26, idle 21/21, explorer 22/22). Mini test pre-existed green, proven by mutation: removing
   `if (isMiniVariant) return;` failed it ("expected the mini variant to keep drawing after a pause message").
   Judgment call: an alert showing at pause time is not special-cased (page frozen, host timing authoritative).
+- 2026-10-01 T2 (host side) done. `AppComposition.Wire` gains `setHtmlWallpaperScenePaused: Action<bool>?`
+  (production: `WebViewAlertLayerController.SetScenePaused`). `UpdateHtmlScenePause()` runs on the existing watch
+  tick (right before `UpdateAlertOverlay`), reads the same `isPrimaryMonitorCovered` that holds alerts, and acts
+  only when `wallpaperMode == Html`, the host is attached (`htmlWallpaperActive`) and the state CHANGED.
+  Messages: `AlertLayerMessages.Pause` = `{"type":"pause"}`, `Resume` = `{"type":"resume"}`. Trace lines (on
+  change only): `wallpaper-scene paused: desktop covered`, `wallpaper-scene resumed`; failures:
+  `wallpaper-scene cover-check-failed ...`, `wallpaper-scene pause-failed ...`.
+  Controller keeps the desired state (`_scenePaused`) and re-posts it from `TryMarkReady`, so a page that is
+  recreated (Explorer restart, process failure) or re-navigated (scene switch) while covered is paused again.
+  Exclusions: video mode and mini mode have `htmlWallpaperActive == false` (mini builds no alert layer and no
+  wallpaper host; also the explicit `wallpaperMode != Html` guard); the mini window is never sent these messages
+  and its page also ignores them.
+  Alert rule chosen: the queue never starts an alert while covered; one already showing is NOT special-cased.
+  Pause freezes the page, host timing stays authoritative (queue ends it with `hide`, which the page processes
+  as a message), a short cover resumes with correct rAF-based alert timing.
+  RED: with the `UpdateHtmlScenePause()` call disabled, 3 HtmlScenePauseWiringTests failed on assertions
+  (pause/resume/pause-again). GREEN: all pass. Mutation: dropping `!htmlWallpaperActive.Value` fails
+  `WhenTheHostNeverAttaches_...`; dropping the `wallpaperMode != Html` guard does NOT fail a test (redundant
+  with htmlWallpaperActive; kept as an explicit second lock).
+  Suites: App tests 1390 -> 1399 passed (6 skipped unchanged); `dotnet build CosmicWin.sln` 0 errors, only the
+  pre-existing CA2022 warning in CosmicWinAlert.Tests/ProgramTests.cs.

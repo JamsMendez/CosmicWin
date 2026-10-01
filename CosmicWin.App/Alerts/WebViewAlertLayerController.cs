@@ -61,6 +61,10 @@ public sealed class WebViewAlertLayerController : IDisposable
     // query param on the Navigate URL below (shared/js/render-loop.js parses it). 30 or 60, same
     // fixed set Settings.WallpaperFps itself accepts; irrelevant in video mode.
     private readonly int _htmlWallpaperFps;
+    // pause-scene-when-covered T2: the DESIRED pause state of the html scene page, kept here (not only
+    // posted) because a page that is not ready yet, or is recreated/re-navigated later (Explorer
+    // restart, process failure, scene switch), starts out running and must be told again once ready.
+    private bool _scenePaused;
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
@@ -189,6 +193,32 @@ public sealed class WebViewAlertLayerController : IDisposable
         _navigateStopwatch = Stopwatch.StartNew();
         _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
         return true;
+    }
+
+    /// <summary>
+    /// pause-scene-when-covered T2: pauses (<paramref name="paused"/> true) or resumes the html wallpaper
+    /// scene page while a fullscreen window covers the desktop. Html wallpaper mode only; a no-op in
+    /// video mode. Safe at any time: while the page is not ready the state is just remembered and
+    /// <see cref="TryMarkReady"/> posts it once the page can receive it.
+    /// </summary>
+    public void SetScenePaused(bool paused)
+    {
+        CheckAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_htmlWallpaperMode || _scenePaused == paused) return;
+        _scenePaused = paused;
+        if (_navigationCompleted && _pageReportedReady) PostScenePause();
+    }
+
+    private void PostScenePause()
+    {
+        if (_controller is null) return;
+        try
+        {
+            _controller.CoreWebView2.PostWebMessageAsJson(
+                _scenePaused ? AlertLayerMessages.Pause : AlertLayerMessages.Resume);
+        }
+        catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-scene-pause", ex)); }
     }
 
     public void End() => End("end");
@@ -432,6 +462,8 @@ public sealed class WebViewAlertLayerController : IDisposable
         {
             _controller.IsVisible = true;
         }
+        // A fresh page always starts running: tell it again if the desktop is covered right now.
+        if (_htmlWallpaperMode && _scenePaused) PostScenePause();
         if (_state.ApplyPendingShowIfDue() is { } pending)
         {
             _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending));
