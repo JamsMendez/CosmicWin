@@ -53,4 +53,10 @@ Strategy: `ask-on-risk`. Forecast ~80 authored changed lines, one PR slice.
 - 2026-10-02: branch `ci/release-workflow` from main 4515feb; doc written.
 - T1 done: YAML parses (js-yaml); local `dotnet publish CosmicWin.App -c Release -r win-x64
   --self-contained true -p:Version=0.0.0-test` produced CosmicWin.App.exe (271 files); diff vs
-  CielWin's workflow is names only (6 lines).
+  CielWin's workflow is names only (6 lines). Commit be146d6.
+- T1 review: assessed high (shell in workflow); consent granted; 4-lens native review APPROVED and
+  acknowledged (lineage review-603d73372e203ef6, authority burned). Reviewed boundary -> be146d6.
+  Non-blocking advisories (follow-ups, not in this candidate): R3-001 WARNING release gated on the
+  headless suite before T2 lands (land T2 before the first tag); R4 no job timeout-minutes / no
+  blame-hang; R1 persist-credentials: false on checkout or split the write job; R1/R3 validate
+  the tag as SemVer before publish; R2 doc said one slice while T1 shipped alone.
