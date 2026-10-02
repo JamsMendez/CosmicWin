@@ -200,6 +200,11 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   facts with the floored expectation); GREEN after: Interop 555 passed / 42 skipped / 0 failed (GPU facts
   measure real pixels).
 
+- 2026-10-02 floor hardware check (Release of feat/tint-brightness-floor a854c92, wallpaper-mode `video`,
+  settings.conf restored byte-identical afterwards): failed -> black space now reads as navy blue inside
+  the letters, bright ring segments/stars stay bright blue; warning -> dark violet with bright violet
+  highlights. Mask +576/+753 ms after show, rendered +31/+17 ms; 0 video-tint failures.
+
 ## Next step
 
-Optional hardware look at the floored tint in video mode; merge the follow-up branch. (ask the maintainer before switching wallpaper-mode to video).
+Done. Merged into main. (ask the maintainer before switching wallpaper-mode to video).
