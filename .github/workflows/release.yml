@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      # Read through $env:TAG, never interpolated into script text: a tag name can contain quotes or $.
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        shell: pwsh
+        # Real-desktop facts need an interactive desktop the hosted runner does not have.
+        run: dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresDesktop"
+
+      - name: Publish self-contained win-x64
+        shell: pwsh
+        run: |
+          $version = $env:TAG.TrimStart("v")
+          dotnet publish CosmicWin.App -c Release -r win-x64 --self-contained true `
+            -o publish/win-x64 -p:Version=$version
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path publish/win-x64/* -DestinationPath CosmicWin-win-x64.zip
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A re-run after a partial failure re-uploads the asset instead of failing on the existing release.
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG CosmicWin-win-x64.zip --clobber
+          } else {
+            # Tags like v1.1.0-rc.1 publish as pre-releases.
+            $flags = @()
+            if ($env:TAG.Contains("-")) { $flags += "--prerelease" }
+            gh release create $env:TAG CosmicWin-win-x64.zip --title "CosmicWin $env:TAG" --generate-notes @flags
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
