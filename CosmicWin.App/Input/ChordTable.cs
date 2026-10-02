@@ -64,10 +64,6 @@ public sealed class ChordTable
         // is about CosmicWin itself rather than about a window or a desktop.
         table.Register(ModifierKeys.Alt, KeyboardKey.T, HotkeyActionKind.ToggleTiling);
 
-        // Also about CosmicWin itself: moves the mini scene window (wallpaper-mode = mini) to the next
-        // corner. Alt+M for MINI; a no-op in every other wallpaper mode.
-        table.Register(ModifierKeys.Alt, KeyboardKey.M, HotkeyActionKind.CycleMiniCorner);
-
         // Shift over the SAME key that closes a window, the way Shift over a desktop digit turns
         // "go there" into "send there". Closing the desktop is the bigger version of closing the
         // thing in front of you, and one modifier keeping one meaning is worth more than a mnemonic.

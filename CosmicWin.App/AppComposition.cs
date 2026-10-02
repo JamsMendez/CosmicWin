@@ -10,7 +10,6 @@ using Windows.Win32.UI.WindowsAndMessaging;
 using CosmicWin.App.Input;
 using CosmicWin.App.Startup;
 using CosmicWin.App.Tray;
-using CosmicWin.App.Wallpaper;
 using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 using CosmicWin.Interop.Win32.VirtualDesktops;
@@ -277,21 +276,10 @@ public sealed class AppComposition : IDisposable
         // via WireProduction -- reads the real system clock. Tests inject a manual TimeProvider so
         // the queue's second-scale deadlines advance deterministically instead of via Thread.Sleep.
         TimeProvider? timeProvider = null,
-        // T4 (mini-scene-window): the corner window that replaces the wallpaper in
-        // WallpaperMode.HtmlMini. Wire never builds it (production builds it on the UI STA in
-        // WireProduction, tests pass a fake); it is only ever touched in mini mode, on the owning
-        // thread. Null in mini mode means "no window": nothing shows, the scene route answers 503.
-        IMiniSceneWindow? miniWindow = null,
-        WallpaperScene wallpaperScene = WallpaperScene.Processing,
-        int wallpaperFps = 60,
-        // The corner the window starts in, and the persist seam Alt+M uses (T5). Already resolved
-        // from Settings before Wire is called, like every other value above.
-        MiniPosition miniPosition = MiniPosition.TopRight,
-        Action<MiniPosition>? persistMiniPosition = null,
         // pause-scene-when-covered T2: tells the html wallpaper scene page to pause (true) or resume
         // (false). Called on the owning thread from the watch tick, ONLY when the covered state
         // changes and ONLY in html wallpaper mode with the host attached; production wires it to
-        // WebViewAlertLayerController.SetScenePaused. Unset (every test that predates it, mini and
+        // WebViewAlertLayerController.SetScenePaused. Unset (every test that predates it,
         // video mode, no alert layer) means there is no scene page to pause.
         Action<bool>? setHtmlWallpaperScenePaused = null)
     {
@@ -458,85 +446,9 @@ public sealed class AppComposition : IDisposable
         // true in practice, not merely wallpaperMode being read once.
         var htmlWallpaperActive = new VolatileFlag();
 
-        // T4 (mini-scene-window): mini mode replaces the wallpaper entirely -- no host, no player,
-        // no wallpaper alert layer -- so it has its own "is it up" signal, true once the window's
-        // Show succeeded. Like the two flags above it is chosen once at Wire time, never mixed.
-        var miniMode = wallpaperMode == WallpaperMode.HtmlMini;
-        var miniWindowActive = new VolatileFlag();
-        var currentMiniPosition = miniPosition;
-
-        // The mini window's rectangle for the PRIMARY display right now. Read live, at the moment of
-        // placement, because the taskbar can move or auto-hide after wiring (the display object
-        // updates itself in place on every watch tick's refreshDisplays call).
-        Rect MiniPlacement(MiniPosition corner)
-        {
-            var primary = treeManager.Primary;
-            return MiniWindowPlacement.Compute(
-                WorkAreaResolver.Resolve(primary), primary.Bounds.Height, corner);
-        }
-
-        // Runs on the owning UI thread (the window's owner). One attempt, no retry loop: a failed
-        // Show is traced and the app carries on without the window.
-        void StartMiniWindow()
-        {
-            if (miniWindow is null)
-            {
-                return;
-            }
-
-            try
-            {
-                var shown = miniWindow.Show(wallpaperScene, wallpaperFps, MiniPlacement(currentMiniPosition));
-                miniWindowActive.Value = shown;
-                desktopTrace?.Record($"mini-window phase=startup shown={shown}");
-            }
-            catch (Exception error) when (IsRecoverableFailure(error))
-            {
-                desktopTrace?.Record($"mini-window phase=startup show-failed error={error.GetType().Name}");
-            }
-        }
-
-        void ReplaceMiniWindow()
-        {
-            if (miniWindow is null || !miniWindowActive.Value)
-            {
-                return;
-            }
-
-            try
-            {
-                miniWindow.MoveTo(MiniPlacement(currentMiniPosition));
-            }
-            catch (Exception error) when (IsRecoverableFailure(error))
-            {
-                desktopTrace?.Record($"mini-window move-failed error={error.GetType().Name}");
-            }
-        }
-
-        // The alert queue's renderer seam: the wallpaper alert layer's Start/End normally, the mini
-        // window's ShowAlert/HideAlert in mini mode. Both take the same AlertShowRequest. The mini
-        // window's members belong to its owning UI thread (they throw elsewhere), and the queue's
-        // callers are not all provably on it -- so both are always posted there, in order.
-        Action<AlertShowRequest>? alertStart = miniMode
-            ? (miniWindow is null ? null : request => onOwningThread(() => RunMiniAlert(() => miniWindow.ShowAlert(request), "show")))
-            : startAlertLayer;
-        Action? alertEnd = miniMode
-            ? (miniWindow is null ? null : () => onOwningThread(() => RunMiniAlert(miniWindow.HideAlert, "hide")))
-            : endAlertLayer;
-
-        // Posted work cannot report back to the queue, so a failure is traced here instead of escaping
-        // into the dispatcher.
-        void RunMiniAlert(Action work, string what)
-        {
-            try
-            {
-                work();
-            }
-            catch (Exception error) when (IsRecoverableFailure(error))
-            {
-                desktopTrace?.Record($"mini-window alert-{what}-failed error={error.GetType().Name}");
-            }
-        }
+        // The alert queue's renderer seam: the wallpaper alert layer's Start/End.
+        var alertStart = startAlertLayer;
+        var alertEnd = endAlertLayer;
 
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
         // never both true at once for longer than one video-wallpaper work item. Without this a
@@ -683,14 +595,6 @@ public sealed class AppComposition : IDisposable
             if (wallpaperMode == WallpaperMode.Html)
             {
                 desktopTrace?.Record($"video-wallpaper phase={phase} skipped reason=html-mode");
-                return false;
-            }
-
-            // T4 (mini-scene-window): mini mode has no wallpaper surface at all, so a video can
-            // neither play nor be imported -- skipped exactly like html mode, with its own reason.
-            if (miniMode)
-            {
-                desktopTrace?.Record($"video-wallpaper phase={phase} skipped reason=mini-mode");
                 return false;
             }
 
@@ -863,14 +767,8 @@ public sealed class AppComposition : IDisposable
         /// </remarks>
         bool HandleWallpaperSceneHttpSwitch(string name)
         {
-            // T4: mini mode switches the corner window instead of the wallpaper alert layer; the rest
-            // of the contract (202 now, switch + persist on the owning thread later) is identical.
-            Func<WallpaperScene, bool>? switchScene = wallpaperMode switch
-            {
-                WallpaperMode.Html => switchHtmlWallpaperScene,
-                WallpaperMode.HtmlMini => miniWindow is null ? null : miniWindow.SwitchScene,
-                _ => null,
-            };
+            Func<WallpaperScene, bool>? switchScene =
+                wallpaperMode == WallpaperMode.Html ? switchHtmlWallpaperScene : null;
             if (switchScene is null)
             {
                 return false;
@@ -998,20 +896,15 @@ public sealed class AppComposition : IDisposable
                 // contradicting the whole point of the demo switch (alerts still toggle the overlay).
                 // Composition wiring only: AlertQueue.Advance and PrimaryMonitorFullscreenDetector
                 // stay exactly as they are.
-                // T4: the mini window is TOPMOST, so nothing can cover it -- unlike a wallpaper, which a
-                // fullscreen window hides -- and its own readiness is the window's IsReady: shown AND its
-                // browser attached (a page still loading holds the alert as pending itself).
                 var desktopVisible = (alertDesktopVisible?.Invoke()
-                    ?? (miniMode
-                        ? miniWindowActive.Value && miniWindow is { IsReady: true }
-                        : (videoWallpaperActive.Value || htmlWallpaperActive.Value)
-                            && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
+                    ?? ((videoWallpaperActive.Value || htmlWallpaperActive.Value)
+                        && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
                     && (alertStart is null || alertRendererReady?.Invoke() != false);
                 active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
             }
 
-            // alertStart is the wallpaper's preloaded WebView2 alert layer, or the mini window in mini mode
-            // (the Direct2D overlay is gone). Unset only in tests that never exercise the overlay at all.
+            // alertStart is the wallpaper's preloaded WebView2 alert layer (the Direct2D overlay is
+            // gone). Unset only in tests that never exercise the overlay at all.
             if (alertStart is null) return;
 
             if (ReferenceEquals(active, displayedAlert)) return;
@@ -1094,8 +987,7 @@ public sealed class AppComposition : IDisposable
         // the primary monitor, so it is paused for exactly that long. The signal is the one that already
         // holds alerts above (isPrimaryMonitorCovered -> PrimaryMonitorFullscreenDetector), polled on
         // the same watch tick; only a CHANGE is sent and traced. Html mode only: video playback is left
-        // alone, and the mini window (a topmost corner window nothing can cover) never reaches this
-        // because its wallpaperMode is HtmlMini and it has no wallpaper page at all.
+        // alone.
         //
         // An alert already on screen when the cover starts is not special-cased: the page stays able to
         // process `hide` while paused and the host-side timing (the queue) still ends it; the queue
@@ -1151,7 +1043,7 @@ public sealed class AppComposition : IDisposable
             desktopTrace?.Record(covered ? "wallpaper-scene paused: desktop covered" : "wallpaper-scene resumed");
         }
 
-        // The catch filter for one feature's recoverable failure (alert layer, mini window, focus border,
+        // The catch filter for one feature's recoverable failure (alert layer, focus border,
         // reload gap...): WebView2/COM/dispatcher-state errors are handled and traced by the caller,
         // while the process-corrupting types are named so they are never mistaken for one feature's
         // problem. (The CLR cannot always deliver StackOverflow/AccessViolation to a catch at all; this
@@ -1518,15 +1410,6 @@ public sealed class AppComposition : IDisposable
             },
             setVideoWallpaperPath: path =>
             {
-                // T4: BEFORE the collaborator check below. Mini production wires no host and no
-                // player, and that branch would otherwise import (copy) the picked video and persist
-                // its path -- a pick that must do nothing in a mode with no wallpaper to play it on.
-                if (miniMode)
-                {
-                    desktopTrace?.Record("video-wallpaper phase=pick skipped reason=mini-mode");
-                    return;
-                }
-
                 if (videoWallpaperHost is null || videoWallpaperPlayer is null)
                 {
                     // Nothing to stop or (re)play -- the same import+persist a composition with no
@@ -1568,50 +1451,6 @@ public sealed class AppComposition : IDisposable
         // does not exist yet up there.
         executor.ToggleTilingRequested = () => trayController.ToggleTiling();
 
-        // T5 (mini-scene-window): Alt+M walks the mini window clockwise to the next corner. The move
-        // and the corner bookkeeping run on the owning UI thread (the window's owner); the chord
-        // itself arrives on a pool thread. Outside mini mode there is no window and the chord is a
-        // traced no-op, so a stray press never persists a corner nobody can see.
-        void CycleMiniCorner()
-        {
-            if (!miniMode || miniWindow is null)
-            {
-                desktopTrace?.Record(
-                    $"mini-corner cycle skipped reason={(miniMode ? "no-window" : "not-mini-mode")}");
-                return;
-            }
-
-            // A window that failed to show, or whose browser is not attached (yet, or any more), has no
-            // corner to move: keep the configured one instead of persisting a corner nobody can see.
-            if (!miniWindowActive.Value || !miniWindow.IsReady)
-            {
-                desktopTrace?.Record("mini-corner cycle skipped reason=not-ready");
-                return;
-            }
-
-            var next = MiniWindowPlacement.Next(currentMiniPosition);
-            try
-            {
-                miniWindow.MoveTo(MiniPlacement(next));
-            }
-            catch (Exception error) when (IsRecoverableFailure(error))
-            {
-                desktopTrace?.Record($"mini-corner cycle move-failed error={error.GetType().Name}");
-                return;
-            }
-
-            currentMiniPosition = next;
-            try
-            {
-                persistMiniPosition?.Invoke(next);
-            }
-            catch (Exception error) when (IsRecoverableFailure(error))
-            {
-                desktopTrace?.Record($"mini-corner cycle persist-failed error={error.GetType().Name}");
-            }
-        }
-
-        executor.CycleMiniCornerRequested = () => onOwningThread(CycleMiniCorner);
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);
@@ -2083,16 +1922,7 @@ public sealed class AppComposition : IDisposable
                     var area = changed.WorkArea;
                     desktopTrace?.Record(
                         $"work area changed on 0x{changed.Handle:X}: " +
-                        $"{area.Left},{area.Top} {area.Width}x{area.Height}");
-
-                    // T4: the mini window hugs a corner of the PRIMARY work area, so a taskbar that
-                    // moved or resized re-places it. Independent of the tiling freeze below: this
-                    // window is not part of any layout. Already on the owning thread (watch tick).
-                    if (miniMode && changed.Equals(treeManager.Primary))
-                    {
-                        ReplaceMiniWindow();
-                    }
-                }
+                        $"{area.Left},{area.Top} {area.Width}x{area.Height}");                }
 
                 if (displaysAwaitingReflow.Count > 0 && !LayoutIsFrozen())
                 {
@@ -2260,16 +2090,7 @@ public sealed class AppComposition : IDisposable
         // itself is attach-only (see AttachHtmlWallpaper) -- no path is required, and a configured one
         // is deliberately ignored (never played) rather than left to a stale ActivateVideoWallpaper
         // call, since the demo's whole point is that an animated HTML scene page is the wallpaper.
-        //
-        // T4 (mini-scene-window): mini mode instead builds NOTHING wallpaper-shaped. The corner window
-        // is shown on the owning UI thread (its owner; WebView2 needs the dispatcher pumping, so it
-        // is posted rather than run inline during wiring) and the video branch below is never
-        // reached -- even if a host/player were handed in and a video path is configured.
-        if (miniMode)
-        {
-            onOwningThread(StartMiniWindow);
-        }
-        else if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
+        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
         {
             if (wallpaperMode == WallpaperMode.Html)
             {
@@ -2288,7 +2109,6 @@ public sealed class AppComposition : IDisposable
                 alertServer?.Dispose();
                 httpAlertServer?.Dispose();
                 alertLayer?.Dispose();
-                miniWindow?.Dispose();
                 disposeVideoWallpaperBase();
             },
             unfollowFocusedWindow: () =>
@@ -2382,27 +2202,21 @@ public sealed class AppComposition : IDisposable
         // cost on every keypress for no benefit, since it carries no per-call state to keep fresh.
         var zOrderSource = new Win32ZOrderSource();
 
-        // T4 (mini-scene-window): mini mode is not a wallpaper at all -- no host, no player, no video
-        // thread and no wallpaper alert layer. The corner window below takes their place.
-        var miniMode = settings.WallpaperMode == WallpaperMode.HtmlMini;
-        Win32VideoWallpaperHost? videoWallpaperHost = miniMode ? null : new Win32VideoWallpaperHost();
-        MediaFoundationVideoWallpaperPlayer? videoWallpaperPlayer = miniMode ? null : new MediaFoundationVideoWallpaperPlayer(onTintDiagnostic: desktopTrace.Record);
-        // Built here, on the owning UI STA (the controller records its thread and every later call must
-        // come from it); shown later, on the pumped dispatcher, by Wire. Null in every other mode.
-        var miniWindow = miniMode ? MiniSceneWindowController.CreateProduction(desktopTrace.Record) : null;
+        var videoWallpaperHost = new Win32VideoWallpaperHost();
+        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer(onTintDiagnostic: desktopTrace.Record);
         // T9a (webview-alert-layer): desktopTrace (constructed further up now, S10) is passed here so
         // BOTH the controller's own lifecycle telemetry and Wire's desktopTrace parameter share the
         // exact same sink -- T6 found production had no alert-layer navigation/render telemetry at
         // all, which left F1/F2 unexplained.
         // Startup runs on the owning STA before its dispatcher synchronization context may
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
-        var alertLayer = settings.AlertsEnabled && !miniMode
-            ? new WebViewAlertLayerController(videoWallpaperHost!, trace: desktopTrace.Record,
+        var alertLayer = settings.AlertsEnabled
+            ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
                 // D3 (html-wallpaper-demo): navigates to the configured scene page and stays visible
                 // permanently once ready, instead of the ordinary alert-only page.
                 htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html,
                 // see-through-video-tint (S4): the letters tint the REAL video, which only exists in video
-                // mode; html / mini modes get no sink and the page is never told to tint.
+                // mode; html mode gets no sink and the page is never told to tint.
                 tintSink: VideoPlayerAlertTintSink.For(settings.WallpaperMode, videoWallpaperPlayer),
                 // D6d (html-wallpaper-demo): which scene and frame-rate cap -- irrelevant in video
                 // mode, where the controller never reads either field.
@@ -2411,7 +2225,7 @@ public sealed class AppComposition : IDisposable
             : null;
         // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
         // wallpaper thread's failure sink can point at it directly with no reordering.
-        var videoWallpaperThread = miniMode ? null : new MtaActionThread(
+        var videoWallpaperThread = new MtaActionThread(
             "CosmicWinVideoWallpaperHost",
             onWorkFailed: errorType => desktopTrace.Record($"video-wallpaper-thread work-failed error={errorType}"));
 
@@ -2455,9 +2269,9 @@ public sealed class AppComposition : IDisposable
             persistWallpaperScene: scene => settingsStore.Update(s => s with { WallpaperScene = scene }),
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
-            shakeAlertVideo: videoWallpaperPlayer is null ? null : duration => videoWallpaperPlayer.Shake(duration),
+            shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
             alertLayer: alertLayer,
-            alertRendererReady: videoWallpaperHost is null ? null : () => videoWallpaperHost.IsCompositionReady,
+            alertRendererReady: () => videoWallpaperHost.IsCompositionReady,
             preloadAlertLayer: alertLayer is null ? null : alertLayer.Preload,
             // T10 (live-alert-wallpaper): the real covered-desktop signal T9 found missing --
             // without it an alert played out unseen under a fullscreen video or browser instead of
@@ -2471,28 +2285,18 @@ public sealed class AppComposition : IDisposable
             // IMFMediaEngine frame-server setup fails when the host D3D11 device is created on STA.
             videoWallpaperHost: videoWallpaperHost,
             videoWallpaperPlayer: videoWallpaperPlayer,
-            scheduleVideoWallpaperWork: videoWallpaperThread is null ? null : videoWallpaperThread.Post,
+            scheduleVideoWallpaperWork: videoWallpaperThread.Post,
             disposeVideoWallpaper: () =>
             {
-                if (videoWallpaperThread is null)
-                {
-                    return;
-                }
-
                 videoWallpaperThread.Invoke(() =>
                 {
-                    videoWallpaperPlayer?.Dispose();
-                    videoWallpaperHost?.Dispose();
+                    videoWallpaperPlayer.Dispose();
+                    videoWallpaperHost.Dispose();
                 });
                 videoWallpaperThread.Dispose();
             },
             videoWallpaperPath: settings.VideoWallpaperPath,
             wallpaperMode: settings.WallpaperMode,
-            miniWindow: miniWindow,
-            wallpaperScene: settings.WallpaperScene,
-            wallpaperFps: settings.WallpaperFps,
-            miniPosition: settings.MiniPosition,
-            persistMiniPosition: corner => settingsStore.Update(s => s with { MiniPosition = corner }),
             setHtmlWallpaperScenePaused: alertLayer is null ? null : alertLayer.SetScenePaused,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);

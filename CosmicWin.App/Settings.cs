@@ -16,27 +16,6 @@ public enum WallpaperMode
 {
     Video,
     Html,
-
-    /// <summary>
-    /// No wallpaper host and no video: a small, always-on-top, click-through scene window sits in
-    /// <see cref="Settings.MiniPosition"/> of the work area, showing the same HTML scene the
-    /// wallpaper would; the desktop background stays as Windows has it. Serialized as
-    /// <c>html-mini</c>; the legacy spelling <c>mini</c> is still read.
-    /// </summary>
-    HtmlMini,
-}
-
-/// <summary>The work-area position the mini scene window sits in: four corners and four side midpoints, ordered clockwise.</summary>
-public enum MiniPosition
-{
-    TopLeft,
-    TopCenter,
-    TopRight,
-    RightCenter,
-    BottomRight,
-    BottomCenter,
-    BottomLeft,
-    LeftCenter,
 }
 
 /// <summary>
@@ -116,10 +95,6 @@ public enum WallpaperScene
 /// on every real animation frame -- i.e. at the display's own refresh rate (over 60fps on any display
 /// faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a no-op default.
 /// </param>
-/// <param name="MiniPosition">
-/// Where in the work area the <see cref="WallpaperMode.HtmlMini"/> window sits (settings key
-/// <c>mini-position</c>, legacy: <c>mini-corner</c>). Defaults to top-right.
-/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -141,8 +116,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool HttpServerEnabled = true,
     int HttpServerPort = AlertHttpProtocol.DefaultPort,
     int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
-    WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60,
-    MiniPosition MiniPosition = MiniPosition.TopRight)
+    WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -181,28 +155,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string WallpaperModeHtmlValue = "html";
 
-    private const string WallpaperModeHtmlMiniValue = "html-mini";
-
-    /// <summary>Legacy spelling of <see cref="WallpaperModeHtmlMiniValue"/>, read but never written.</summary>
-    private const string LegacyWallpaperModeMiniValue = "mini";
-
-    /// <summary>See <see cref="CosmicWin.App.MiniPosition"/>.</summary>
-    private const string MiniPositionKey = "mini-position";
-
-    private const string LegacyMiniPositionKey = "mini-corner";
-
-    private const string MiniPositionTopLeftValue = "top-left";
-
-    private const string MiniPositionTopRightValue = "top-right";
-
-    private const string MiniPositionBottomLeftValue = "bottom-left";
-
-    private const string MiniPositionBottomRightValue = "bottom-right";
-    private const string MiniPositionTopCenterValue = "top-center";
-    private const string MiniPositionRightCenterValue = "right-center";
-    private const string MiniPositionBottomCenterValue = "bottom-center";
-    private const string MiniPositionLeftCenterValue = "left-center";
-
     /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
     private const string WallpaperSceneKey = "wallpaper-scene";
 
@@ -231,10 +183,12 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <remarks>
     /// The LAST assignment of a key wins. A file appended to twice is a thing that happens, and
     /// reading it as its most recent line is the only answer that matches what an editor shows.
-    /// Legacy key names (<c>alerts-enabled</c>, <c>alert-http</c>, <c>alert-http-port</c>,
-    /// <c>mini-corner</c>) are still read, but when a file carries both a legacy key and its
-    /// replacement the NEW key wins whatever the line order. <c>video-wallpaper-http</c> and
-    /// <c>wallpaper-scene-http</c> no longer exist: they are skipped like any unknown key.
+    /// Legacy key names (<c>alerts-enabled</c>, <c>alert-http</c>, <c>alert-http-port</c>) are still
+    /// read, but when a file carries both a legacy key and its replacement the NEW key wins whatever
+    /// the line order. <c>video-wallpaper-http</c>, <c>wallpaper-scene-http</c>, <c>mini-position</c>
+    /// and <c>mini-corner</c> no longer exist: they are skipped like any unknown key. The retired
+    /// <c>html-mini</c> (legacy <c>mini</c>) wallpaper mode is an unrecognised value now, so it keeps
+    /// the default mode.
     /// </remarks>
     public static Settings Parse(string content)
     {
@@ -244,7 +198,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var videoWallpaperPath = Default.VideoWallpaperPath;
         bool? alerts = null, legacyAlerts = null, httpServer = null, legacyHttpServer = null;
         int? httpServerPort = null, legacyHttpServerPort = null;
-        MiniPosition? miniPosition = null, legacyMiniPosition = null;
         var gap = Default.Gap;
         var wallpaperMode = Default.WallpaperMode;
         var wallpaperScene = Default.WallpaperScene;
@@ -343,26 +296,16 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 wallpaperFps = wallpaperFpsValue;
             }
-            else if (key.Equals(MiniPositionKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadMiniPosition(value, out var miniPositionValue))
-            {
-                miniPosition = miniPositionValue;
-            }
-            else if (key.Equals(LegacyMiniPositionKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadMiniPosition(value, out var legacyMiniPositionValue))
-            {
-                legacyMiniPosition = legacyMiniPositionValue;
-            }
-            // video-wallpaper-http and wallpaper-scene-http: per-route toggles that no longer exist.
-            // Deliberately no branch -- the line is skipped like any other unknown key.
+            // video-wallpaper-http and wallpaper-scene-http (per-route toggles) and mini-position /
+            // mini-corner (the retired mini scene window) no longer exist. Deliberately no branch --
+            // the line is skipped like any other unknown key.
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath,
             alerts ?? legacyAlerts ?? Default.AlertsEnabled,
             httpServer ?? legacyHttpServer ?? Default.HttpServerEnabled,
             httpServerPort ?? legacyHttpServerPort ?? Default.HttpServerPort,
-            gap, wallpaperMode, wallpaperScene, wallpaperFps,
-            miniPosition ?? legacyMiniPosition ?? Default.MiniPosition);
+            gap, wallpaperMode, wallpaperScene, wallpaperFps);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -402,8 +345,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {WallpaperModeKey}: `{WallpaperModeHtmlValue}` (default) shows an animated HTML scene as the
          # desktop wallpaper; `{WallpaperModeVideoValue}` plays the configured video instead, with no
-         # HTML scene involved; `{WallpaperModeHtmlMiniValue}` leaves the wallpaper alone and shows a small
-         # always-on-top scene window ({MiniPositionKey}).
+         # HTML scene involved.
          {WallpaperModeKey} = {WallpaperModeValue(WallpaperMode)}
 
          # {WallpaperSceneKey}: which scene the html wallpaper ({WallpaperModeKey} = {WallpaperModeHtmlValue})
@@ -416,33 +358,13 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # the display's own refresh rate.
          {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {MiniPositionKey}: where in the work area the `{WallpaperModeHtmlMiniValue}` window sits: a corner
-         # (`{MiniPositionTopLeftValue}`, `{MiniPositionTopRightValue}` (default), `{MiniPositionBottomLeftValue}`,
-         # `{MiniPositionBottomRightValue}`) or a side midpoint (`{MiniPositionTopCenterValue}`,
-         # `{MiniPositionRightCenterValue}`, `{MiniPositionBottomCenterValue}`, `{MiniPositionLeftCenterValue}`).
-         {MiniPositionKey} = {MiniPositionValue(MiniPosition)}
-
          """;
 
     /// <summary>Maps a <see cref="CosmicWin.App.WallpaperMode"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
     private static string WallpaperModeValue(WallpaperMode mode) => mode switch
     {
         WallpaperMode.Html => WallpaperModeHtmlValue,
-        WallpaperMode.HtmlMini => WallpaperModeHtmlMiniValue,
         _ => WallpaperModeVideoValue,
-    };
-
-    /// <summary>Maps a <see cref="CosmicWin.App.MiniPosition"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
-    private static string MiniPositionValue(MiniPosition corner) => corner switch
-    {
-        MiniPosition.TopLeft => MiniPositionTopLeftValue,
-        MiniPosition.TopRight => MiniPositionTopRightValue,
-        MiniPosition.BottomLeft => MiniPositionBottomLeftValue,
-        MiniPosition.TopCenter => MiniPositionTopCenterValue,
-        MiniPosition.RightCenter => MiniPositionRightCenterValue,
-        MiniPosition.BottomCenter => MiniPositionBottomCenterValue,
-        MiniPosition.LeftCenter => MiniPositionLeftCenterValue,
-        _ => MiniPositionBottomRightValue,
     };
 
     /// <summary>Maps a <see cref="CosmicWin.App.WallpaperScene"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
@@ -548,7 +470,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     }
 
     /// <summary>
-    /// D3 (html-wallpaper-demo): reads <c>video</c>, <c>html</c>, <c>html-mini</c> or the legacy <c>mini</c>, case-insensitively. Same rule as
+    /// D3 (html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively. Same rule as
     /// every other key: anything else keeps the default rather than guessing.
     /// </summary>
     private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
@@ -561,49 +483,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             case WallpaperModeHtmlValue:
                 mode = WallpaperMode.Html;
                 return true;
-            case WallpaperModeHtmlMiniValue or LegacyWallpaperModeMiniValue:
-                mode = WallpaperMode.HtmlMini;
-                return true;
             default:
                 mode = WallpaperMode.Video;
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Reads one of the four fixed corner names, case-insensitively. Same rule as every other key:
-    /// anything else keeps the default (top-right) rather than guessing.
-    /// </summary>
-    private static bool TryReadMiniPosition(string value, out MiniPosition corner)
-    {
-        switch (value.ToLowerInvariant())
-        {
-            case MiniPositionTopLeftValue:
-                corner = MiniPosition.TopLeft;
-                return true;
-            case MiniPositionTopRightValue:
-                corner = MiniPosition.TopRight;
-                return true;
-            case MiniPositionBottomLeftValue:
-                corner = MiniPosition.BottomLeft;
-                return true;
-            case MiniPositionBottomRightValue:
-                corner = MiniPosition.BottomRight;
-                return true;
-            case MiniPositionTopCenterValue:
-                corner = MiniPosition.TopCenter;
-                return true;
-            case MiniPositionRightCenterValue:
-                corner = MiniPosition.RightCenter;
-                return true;
-            case MiniPositionBottomCenterValue:
-                corner = MiniPosition.BottomCenter;
-                return true;
-            case MiniPositionLeftCenterValue:
-                corner = MiniPosition.LeftCenter;
-                return true;
-            default:
-                corner = MiniPosition.TopRight;
                 return false;
         }
     }

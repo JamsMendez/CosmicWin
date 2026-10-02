@@ -5,18 +5,16 @@ using CosmicWin.Interop.Win32;
 namespace CosmicWin.App.Tests.Alerts;
 
 /// <summary>
-/// see-through-video-tint (S4): the tint sink exists ONLY in video wallpaper mode; html / mini modes
+/// see-through-video-tint (S4): the tint sink exists ONLY in video wallpaper mode; html mode
 /// (no video back buffer) get none, so the controller never tells the page to tint there.
 /// </summary>
 public sealed class VideoPlayerAlertTintSinkTests
 {
-    [Theory]
-    [InlineData(WallpaperMode.Html)]
-    [InlineData(WallpaperMode.HtmlMini)]
-    public void HtmlModesGetNoSink(WallpaperMode mode)
+    [Fact]
+    public void HtmlModeGetsNoSink()
     {
         using var player = new MediaFoundationVideoWallpaperPlayer();
-        Assert.Null(VideoPlayerAlertTintSink.For(mode, player));
+        Assert.Null(VideoPlayerAlertTintSink.For(WallpaperMode.Html, player));
     }
 
     [Fact]

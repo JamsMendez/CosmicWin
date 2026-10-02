@@ -758,106 +758,32 @@ public sealed class SettingsTests
     }
 
 
+    /// <summary>
+    /// strip-to-tiling-video T1: the mini scene window is gone. An old settings.conf that still says
+    /// <c>wallpaper-mode = html-mini</c> (or the legacy <c>mini</c>) or carries a mini-position line
+    /// must load without error: the mode falls back to the default and the position lines are ignored.
+    /// </summary>
     [Theory]
     [InlineData("wallpaper-mode = html-mini")]
     [InlineData("wallpaper-mode=mini")]
     [InlineData("  WALLPAPER-MODE   =   Mini  ")]
-    public void WallpaperModeIsReadAsMini_HoweverTheLineIsSpelled(string line)
+    [InlineData("mini-position = bottom-left")]
+    [InlineData("mini-corner = left-center")]
+    [InlineData("wallpaper-mode = html-mini\nmini-position = top-left\nmini-corner = bottom-right")]
+    public void RetiredMiniLines_AreAcceptedAndFallBackToTheDefaults(string content)
     {
-        Assert.Equal(WallpaperMode.HtmlMini, Settings.Parse(line).WallpaperMode);
+        Assert.Equal(Settings.Default, Settings.Parse(content));
     }
 
     [Fact]
-    public void SerializeThenParse_RoundTripsTheMiniWallpaperMode()
+    public void RetiredMiniLines_DoNotDisturbTheSettingsAroundThem()
     {
-        var original = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.HtmlMini);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-        Assert.Contains("wallpaper-mode = html-mini", original.Serialize(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MiniPositionDefaultsToTopRight()
-    {
-        Assert.Equal(MiniPosition.TopRight, Settings.Default.MiniPosition);
-        Assert.Equal(MiniPosition.TopRight, Settings.Parse(string.Empty).MiniPosition);
-    }
-
-    [Theory]
-    [InlineData("mini-corner = top-left", MiniPosition.TopLeft)]
-    [InlineData("mini-corner=top-right", MiniPosition.TopRight)]
-    [InlineData("mini-corner = bottom-left", MiniPosition.BottomLeft)]
-    [InlineData("  MINI-CORNER  =  Bottom-Right ", MiniPosition.BottomRight)]
-    [InlineData("mini-corner = top-center", MiniPosition.TopCenter)]
-    [InlineData("mini-corner = right-center", MiniPosition.RightCenter)]
-    [InlineData("mini-corner = bottom-center", MiniPosition.BottomCenter)]
-    [InlineData("MINI-CORNER = Left-Center", MiniPosition.LeftCenter)]
-    public void LegacyMiniCornerKeyIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
-    {
-        Assert.Equal(expected, Settings.Parse(line).MiniPosition);
-    }
-
-    [Theory]
-    [InlineData("mini-position = top-left", MiniPosition.TopLeft)]
-    [InlineData("mini-position=top-right", MiniPosition.TopRight)]
-    [InlineData("mini-position = bottom-left", MiniPosition.BottomLeft)]
-    [InlineData("  MINI-POSITION  =  Bottom-Right ", MiniPosition.BottomRight)]
-    [InlineData("mini-position = top-center", MiniPosition.TopCenter)]
-    [InlineData("mini-position = right-center", MiniPosition.RightCenter)]
-    [InlineData("mini-position = bottom-center", MiniPosition.BottomCenter)]
-    [InlineData("MINI-POSITION = Left-Center", MiniPosition.LeftCenter)]
-    public void MiniPositionKeyIsRead_HoweverTheLineIsSpelled(string line, MiniPosition expected)
-    {
-        Assert.Equal(expected, Settings.Parse(line).MiniPosition);
-    }
-
-    [Theory]
-    [InlineData("mini-corner = middle")]
-    [InlineData("mini-corner =")]
-    [InlineData("mini-corner")]
-    [InlineData("mini-position = middle")]
-    [InlineData("mini-position =")]
-    [InlineData("mini-position")]
-    public void AnUnreadableMiniPosition_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.Equal(MiniPosition.TopRight, Settings.Parse(line).MiniPosition);
-    }
-
-    [Theory]
-    [InlineData(MiniPosition.TopLeft)]
-    [InlineData(MiniPosition.TopRight)]
-    [InlineData(MiniPosition.BottomLeft)]
-    [InlineData(MiniPosition.BottomRight)]
-    [InlineData(MiniPosition.TopCenter)]
-    [InlineData(MiniPosition.RightCenter)]
-    [InlineData(MiniPosition.BottomCenter)]
-    [InlineData(MiniPosition.LeftCenter)]
-    public void SerializeThenParse_RoundTripsTheMiniPosition(MiniPosition corner)
-    {
-        var original = new Settings(FocusBorder: true, MiniPosition: corner);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    [Fact]
-    public void Serialize_IncludesTheMiniPositionAndListsEachValue()
-    {
-        var serialized = Settings.Default.Serialize();
-
-        Assert.Contains("# mini-position:", serialized, StringComparison.Ordinal);
-        Assert.Contains("mini-position = top-right", serialized, StringComparison.Ordinal);
-        Assert.Contains("top-left", serialized, StringComparison.Ordinal);
-        Assert.Contains("bottom-right", serialized, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MiniPositionIsReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse("focus-border = off\nmini-position = top-left\ntiling = off");
+        var settings = Settings.Parse(
+            "focus-border = off\nwallpaper-mode = html-mini\nmini-position = top-left\ntiling = off");
 
         Assert.False(settings.FocusBorder);
-        Assert.Equal(MiniPosition.TopLeft, settings.MiniPosition);
         Assert.False(settings.Tiling);
+        Assert.Equal(Settings.Default.WallpaperMode, settings.WallpaperMode);
     }
 
     // ---- T10: normalized keys, with migration of the legacy ones ----
@@ -875,7 +801,6 @@ public sealed class SettingsTests
         Assert.Equal(WallpaperMode.Html, d.WallpaperMode);
         Assert.Equal(WallpaperScene.Processing, d.WallpaperScene);
         Assert.Equal(60, d.WallpaperFps);
-        Assert.Equal(MiniPosition.TopRight, d.MiniPosition);
         Assert.Equal(d, Settings.Parse(string.Empty));
     }
 
@@ -884,27 +809,23 @@ public sealed class SettingsTests
     {
         var settings = Settings.Parse(
             "alerts = off\nhttp-server = off\nhttp-server-port = 5555\n"
-            + "wallpaper-mode = html-mini\nmini-position = bottom-left");
+            + "wallpaper-mode = video");
 
         Assert.False(settings.AlertsEnabled);
         Assert.False(settings.HttpServerEnabled);
         Assert.Equal(5555, settings.HttpServerPort);
-        Assert.Equal(WallpaperMode.HtmlMini, settings.WallpaperMode);
-        Assert.Equal(MiniPosition.BottomLeft, settings.MiniPosition);
+        Assert.Equal(WallpaperMode.Video, settings.WallpaperMode);
     }
 
     [Fact]
     public void EachLegacyAlias_IsStillParsed()
     {
         var settings = Settings.Parse(
-            "alerts-enabled = off\nalert-http = off\nalert-http-port = 5556\n"
-            + "wallpaper-mode = mini\nmini-corner = left-center");
+            "alerts-enabled = off\nalert-http = off\nalert-http-port = 5556");
 
         Assert.False(settings.AlertsEnabled);
         Assert.False(settings.HttpServerEnabled);
         Assert.Equal(5556, settings.HttpServerPort);
-        Assert.Equal(WallpaperMode.HtmlMini, settings.WallpaperMode);
-        Assert.Equal(MiniPosition.LeftCenter, settings.MiniPosition);
     }
 
     [Theory]
@@ -929,14 +850,6 @@ public sealed class SettingsTests
     public void NewHttpServerPortKeyWins_InEitherLineOrder(string content)
     {
         Assert.Equal(6001, Settings.Parse(content).HttpServerPort);
-    }
-
-    [Theory]
-    [InlineData("mini-position = top-left\nmini-corner = bottom-right")]
-    [InlineData("mini-corner = bottom-right\nmini-position = top-left")]
-    public void NewMiniPositionKeyWins_InEitherLineOrder(string content)
-    {
-        Assert.Equal(MiniPosition.TopLeft, Settings.Parse(content).MiniPosition);
     }
 
     [Fact]
@@ -967,10 +880,10 @@ public sealed class SettingsTests
 
         Assert.Equal(
             ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "http-server",
-             "http-server-port", "gap", "wallpaper-mode", "wallpaper-scene", "wallpaper-fps", "mini-position"],
+             "http-server-port", "gap", "wallpaper-mode", "wallpaper-scene", "wallpaper-fps"],
             keys);
         foreach (var legacy in new[] { "alerts-enabled", "alert-http =", "alert-http-port", "video-wallpaper-http",
-                     "wallpaper-scene-http", "mini-corner" })
+                     "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini" })
         {
             Assert.DoesNotContain(legacy, text, StringComparison.Ordinal);
         }
@@ -989,9 +902,8 @@ public sealed class SettingsTests
 
         Assert.Equal(legacy, reparsed);
         Assert.Equal(43811, reparsed.HttpServerPort);
-        Assert.Equal(WallpaperMode.HtmlMini, reparsed.WallpaperMode);
+        Assert.Equal(Settings.Default.WallpaperMode, reparsed.WallpaperMode);
         Assert.Equal(WallpaperScene.Idle, reparsed.WallpaperScene);
-        Assert.Equal(MiniPosition.TopRight, reparsed.MiniPosition);
         Assert.True(reparsed.AlertsEnabled);
         Assert.True(reparsed.HttpServerEnabled);
         Assert.Equal(60, reparsed.WallpaperFps);

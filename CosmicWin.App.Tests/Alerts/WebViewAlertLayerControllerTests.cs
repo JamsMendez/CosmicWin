@@ -134,8 +134,8 @@ public sealed class WebViewAlertLayerControllerTests
         Assert.True(start >= 0, "expected a private void PostShow(AlertShowRequest request) method");
         var next = source.IndexOf("\n    private", start + 1, StringComparison.Ordinal);
         var body = source[start..(next > 0 ? next : source.Length)];
-        // The JSON itself now lives in AlertLayerMessages (shared with the mini scene window) and is
-        // asserted behaviorally in MiniSceneWindowControllerTests.
+        // The JSON itself now lives in AlertLayerMessages and is asserted behaviorally in
+        // AlertLayerMessagesTests.
         Assert.Contains("AlertLayerMessages.Show(request)", body);
     }
 

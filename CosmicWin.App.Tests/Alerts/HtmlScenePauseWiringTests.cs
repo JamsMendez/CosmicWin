@@ -186,19 +186,6 @@ public sealed class HtmlScenePauseWiringTests
     }
 
     [Fact]
-    public void InMiniMode_ACoveredDesktopNeverPausesTheScene()
-    {
-        var h = Create(() => true, wallpaperMode: WallpaperMode.HtmlMini);
-        using (h.Composition)
-        {
-            h.Timer.Tick();
-
-            Assert.Empty(h.PauseCalls);
-            Assert.DoesNotContain(h.Trace.Lines, line => line.StartsWith("wallpaper-scene", StringComparison.Ordinal));
-        }
-    }
-
-    [Fact]
     public void WhenTheHostNeverAttaches_ACoveredDesktopSendsNothing()
     {
         var h = Create(() => true, host: new Host { FailAttach = true });
