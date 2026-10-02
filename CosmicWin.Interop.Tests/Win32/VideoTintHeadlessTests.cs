@@ -382,6 +382,36 @@ public sealed class VideoTintDriverTests
         return d;
     }
 
+    /// <summary>
+    /// R3-releasegpu-drops-announced-without-lost / R4-releasegpu-swallows-lost-signal: playback
+    /// stopping (worker exit, e.g. a video re-pick) while a tint was ANNOUNCED takes the tint off the
+    /// screen, so the page must hear Lost and paint its letters again -- otherwise the alert shows no
+    /// letters at all.
+    /// </summary>
+    [Fact]
+    public void ReleaseGpu_AfterTheTintWasAnnounced_RaisesLost()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        Begin(d);
+        d.Complete();
+
+        d.ReleaseGpu();
+
+        Assert.Equal(["rendered", "lost"], _events);
+    }
+
+    [Fact]
+    public void ReleaseGpu_BeforeAnyAnnouncement_RaisesNothing()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+
+        d.ReleaseGpu();
+
+        Assert.Empty(_events);
+    }
+
     [Fact]
     public void Rendered_IsRaisedOnceOnTheFirstSuccessfulFrame()
     {

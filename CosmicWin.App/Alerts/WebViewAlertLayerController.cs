@@ -280,15 +280,17 @@ public sealed class WebViewAlertLayerController : IDisposable
     }
 
     /// <summary>
-    /// The coordinator's page transport (it answers from a thread-pool thread after the PNG decode):
-    /// marshals to the owning dispatcher and posts only while a controller is alive.
+    /// The coordinator's page transport. It is called from the video worker thread (tint-ready when the
+    /// player's first tinted frame rendered, tint-lost when the tint left the screen) and may be called
+    /// from a thread-pool thread too: it marshals to the owning dispatcher and posts only while a
+    /// controller is alive (R2-tint-transport-doc-and-trace-label-stale).
     /// </summary>
     private void PostToPageFromAnyThread(string json)
     {
         _dispatcher.BeginInvoke(() =>
         {
             try { _controller?.CoreWebView2.PostWebMessageAsJson(json); }
-            catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-tint-ready", ex)); }
+            catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-tint", ex)); }
         });
     }
 

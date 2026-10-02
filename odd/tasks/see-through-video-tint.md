@@ -169,6 +169,15 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   frame before its own tint renders (a later failure still sends tint-lost). A full fix needs a request
   token through the Interop API; revisit only if S5 shows a visible flash.
 
+- 2026-10-01 whole-branch review review-436e4f349beef0fa (9047f36..8e7154a) APPROVED and acknowledged. Fixed
+  inline (parent): WARNING R3-releasegpu-drops-announced-without-lost / R4-releasegpu-swallows-lost-signal --
+  ReleaseGpu (playback stopping mid-alert, e.g. a video re-pick) now raises Lost when a tint was announced,
+  so the page paints its letters again. RED: `ReleaseGpu_AfterTheTintWasAnnounced_RaisesLost` got only
+  [rendered]; GREEN after. WARNING R2-tint-transport-doc-and-trace-label-stale: transport doc names the
+  worker-thread caller and both messages; trace label `post-tint`. Interop 553/42/0, App 1484/6/0.
+  Open SUGGESTIONs (not chased): max message chars rationale, source-scan wiring tests, coordinator never
+  unsubscribes sink events, WPF PNG decoder on the thread pool.
+
 ## Next step
 
 S5 hardware (ask the maintainer before switching wallpaper-mode to video).

@@ -205,7 +205,13 @@ internal sealed class VideoTintDriver : IDisposable
     public void ReleaseGpu()
     {
         DisposeRenderer();
-        _announced = null; // the GPU objects are gone; the next good frame announces again
+        if (_announced is not null)
+        {
+            // The tint just left the screen with the GPU objects (R3-releasegpu-drops-announced-without-lost):
+            // the page must hear it and paint its letters again. The next good frame announces again.
+            _announced = null;
+            Raise(Lost);
+        }
     }
 
     public void Dispose()
