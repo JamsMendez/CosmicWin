@@ -100,8 +100,8 @@ public sealed class AlertQueue
     /// Queues <paramref name="command"/>, unless an alert is already showing or waiting at
     /// <paramref name="now"/> (alert-busy-ignore, maintainer decision 2026-09-26), in which case the
     /// request is IGNORED: reported through <see cref="_onDiagnostic"/> and dropped. Either way the
-    /// request is accepted -- the caller (<c>AppComposition.HandleAlertCommand</c>) cannot tell an
-    /// ignored request apart from a queued one, by design, so the pipe/HTTP reply stays identical.
+    /// request is accepted -- the caller cannot tell an ignored request apart from a queued one, by
+    /// design.
     /// </summary>
     /// <remarks>
     /// Drops any already-expired waiting alert first (reusing <see cref="DropExpired"/>, so that drop

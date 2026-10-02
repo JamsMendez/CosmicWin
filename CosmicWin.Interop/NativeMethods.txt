@@ -110,17 +110,6 @@ MFCreateDXGIDeviceManager
 IMFDXGIDeviceManager
 MF_MEDIA_ENGINE_DXGI_MANAGER
 ID3D10Multithread
-CreateNamedPipe
-FILE_FLAGS_AND_ATTRIBUTES
-NAMED_PIPE_MODE
-SECURITY_ATTRIBUTES
-ConvertStringSecurityDescriptorToSecurityDescriptorW
-ConvertSecurityDescriptorToStringSecurityDescriptorW
-SDDL_REVISION_1
-LocalFree
-GetSecurityInfo
-SE_OBJECT_TYPE
-OBJECT_SECURITY_INFORMATION
 IDXGISurface
 DXGI_FORMAT
 WIN32_ERROR

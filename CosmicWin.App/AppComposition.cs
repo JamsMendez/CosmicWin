@@ -185,7 +185,6 @@ public sealed class AppComposition : IDisposable
         Action<Action>? scheduleVideoWallpaperWork = null,
         Action? disposeVideoWallpaper = null,
         bool alertsEnabled = false,
-        Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
         // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
@@ -300,7 +299,6 @@ public sealed class AppComposition : IDisposable
 
         var alertQueueLock = new object();
         var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
-        IAlertCommandServer? alertServer = null;
         ActiveAlert? displayedAlert = null;
         ActiveAlert? shakenAlert = null;
 
@@ -494,36 +492,6 @@ public sealed class AppComposition : IDisposable
                 // there is no need to branch on whether this is the first attach.
                 ActivateVideoWallpaper("pick", imported);
             });
-        }
-
-        string HandleAlertCommand(string text)
-        {
-            var parsed = AlertCommandParser.Parse(text);
-            if (!parsed.Success || parsed.Command is null)
-            {
-                var error = parsed.Error ?? "alert command could not be parsed";
-                desktopTrace?.Record($"alert rejected: {error}");
-                return AlertPipeProtocol.FormatError(error);
-            }
-
-            lock (alertQueueLock)
-            {
-                if (alertQueue is null)
-                {
-                    return AlertPipeProtocol.FormatError("alerts are disabled");
-                }
-
-                alertQueue.Enqueue(parsed.Command, alertClock.GetUtcNow());
-            }
-
-            // T9d (webview-alert-layer): HandleAlertCommand runs on the pipe server thread -- do not
-            // wait for the next 400ms watch tick to show a newly queued alert. UpdateAlertOverlay
-            // itself must stay on the UI thread (it touches the WebView layer and the overlay), and
-            // must not race the watch tick's own call -- onOwningThread already serializes both onto
-            // the same dispatcher, so posting here is safe.
-            onOwningThread(UpdateAlertOverlay);
-
-            return AlertPipeProtocol.OkReply;
         }
 
         void UpdateAlertOverlay()
@@ -1043,11 +1011,6 @@ public sealed class AppComposition : IDisposable
 
         if (alertsEnabled)
         {
-            var serverFactory = createAlertCommandServer
-                ?? ((pipeName, handler, diagnostic) => new NamedPipeAlertCommandServer(pipeName, handler, diagnostic));
-            alertServer = serverFactory(AlertPipeName.Resolve(), HandleAlertCommand,
-                message => desktopTrace?.Record(message));
-            alertServer.Start();
             // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
             // the first alert command -- the whole point of the persistent-preload fix.
             if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
@@ -1615,7 +1578,6 @@ public sealed class AppComposition : IDisposable
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
             focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
             {
-                alertServer?.Dispose();
                 alertLayer?.Dispose();
                 disposeVideoWallpaperBase();
             },
