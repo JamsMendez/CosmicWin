@@ -980,6 +980,108 @@ public sealed class VideoWallpaperPlaybackWiringTests
         }
     }
 
+    /// <summary>
+    /// The settings store can throw (settings.conf locked). By then the video is already off the
+    /// desktop, so the in-memory state must still say "removed", the failure is traced, and it never
+    /// escapes into the video wallpaper thread's work loop -- later work items keep running.
+    /// </summary>
+    [Fact]
+    public void RemovingAnActiveVideo_WhenPersistThrows_StillForgetsTheVideoTracesAndKeepsTheThreadAlive()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var trace = new RecordingDesktopTrace();
+        var persisted = new List<string>();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            importVideoWallpaper: _ => path, desktopTrace: trace,
+            persistVideoWallpaperPath: value =>
+            {
+                if (value.Length == 0)
+                {
+                    throw new IOException("settings.conf is locked");
+                }
+
+                persisted.Add(value);
+            });
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke(); // drains startup activation
+
+            harness.Tray.RemoveVideoWallpaper();
+            var exception = Record.Exception(() => queued.Dequeue().Invoke());
+
+            Assert.Null(exception);
+            Assert.False(harness.Tray.HasVideoWallpaper);
+            Assert.Equal(1, host.DetachCallCount);
+            Assert.Contains("video-wallpaper phase=remove persist-failed error=IOException", trace.Lines);
+            Assert.Equal(
+                "video-wallpaper phase=remove wasConfigured=True wasActive=True",
+                trace.Lines[^1]);
+
+            scheduler.Fire();
+            Assert.Empty(queued);
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(2, player.TryPlayCallCount);
+            Assert.Equal([path], persisted);
+            Assert.True(harness.Tray.HasVideoWallpaper);
+        }
+    }
+
+    /// <summary>
+    /// A pick whose import fails after a removal whose persist failed must not resurrect the removed
+    /// video: the previous path is forgotten in memory regardless of the settings store.
+    /// </summary>
+    [Fact]
+    public void PickAfterRemovalWhosePersistThrew_WhenImportThrows_DoesNotRestoreTheRemovedVideo()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"),
+            persistVideoWallpaperPath: _ => throw new IOException("settings.conf is locked"));
+        using (harness.Composition)
+        {
+            harness.Tray.RemoveVideoWallpaper();
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.Equal(1, player.TryPlayCallCount);
+            Assert.Equal(1, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>No playback collaborators wired: a throwing persist is contained the same way.</summary>
+    [Fact]
+    public void RemovingWithNoCollaboratorsWired_WhenPersistThrows_ForgetsTheVideoAndTraces()
+    {
+        var trace = new RecordingDesktopTrace();
+
+        var harness = Wire(
+            videoWallpaperPath: @"C:\Users\me\AppData\Local\CosmicWin\video-wallpaper.mp4",
+            desktopTrace: trace,
+            persistVideoWallpaperPath: _ => throw new IOException("settings.conf is locked"));
+        using (harness.Composition)
+        {
+            var exception = Record.Exception(harness.Tray.RemoveVideoWallpaper);
+
+            Assert.Null(exception);
+            Assert.False(harness.Tray.HasVideoWallpaper);
+            Assert.Contains("video-wallpaper phase=remove persist-failed error=IOException", trace.Lines);
+        }
+    }
+
     /// <summary>The maintainer deletes the imported file by hand; removing must leave it on disk.</summary>
     [Fact]
     public void Removing_LeavesTheImportedFileOnDisk()

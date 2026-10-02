@@ -468,7 +468,9 @@ public sealed class AppComposition : IDisposable
         /// wallpaper shows again, and persist a BLANK path (<see cref="string.Empty"/>) so neither the
         /// next start nor Reload brings the video back. The imported file is left on disk on purpose.
         /// Removing with nothing configured is harmless: Stop and Detach are both idempotent no-ops
-        /// then, and the blank path is persisted regardless. Traces <c>phase=remove</c>.
+        /// then, and the blank path is persisted regardless. Traces <c>phase=remove</c>. A persist
+        /// failure is traced (<c>phase=remove persist-failed</c>) and contained; the in-memory state
+        /// still reflects the removal.
         /// </summary>
         /// <remarks>
         /// One work item on the SAME video wallpaper thread as <see cref="SwitchVideoWallpaper"/>, so
@@ -482,10 +484,11 @@ public sealed class AppComposition : IDisposable
             {
                 // Nothing to stop or detach -- only the setting to forget, the same inline shape the
                 // collaborator-less pick path uses.
-                desktopTrace?.Record(
-                    $"video-wallpaper phase=remove wasConfigured={videoWallpaperConfigured.Value} wasActive=False");
-                persistVideoWallpaperPath?.Invoke(string.Empty);
+                var wasConfiguredInline = videoWallpaperConfigured.Value;
                 videoWallpaperConfigured.Value = false;
+                PersistRemoval();
+                desktopTrace?.Record(
+                    $"video-wallpaper phase=remove wasConfigured={wasConfiguredInline} wasActive=False");
                 return;
             }
 
@@ -502,13 +505,32 @@ public sealed class AppComposition : IDisposable
                 videoWallpaperActive.Value = false;
                 videoWallpaperHost.Detach();
 
-                persistVideoWallpaperPath?.Invoke(string.Empty);
+                // In-memory state first: the video is already off the desktop, so a settings store
+                // that throws below must not leave the flag (and the keep-alive, and a later failed
+                // pick's "restore") believing it is still configured.
                 currentVideoWallpaperPath = null;
                 videoWallpaperConfigured.Value = false;
+                PersistRemoval();
 
                 desktopTrace?.Record(
                     $"video-wallpaper phase=remove wasConfigured={wasConfigured} wasActive={wasActive}");
             });
+        }
+
+        // Persists the blank path for RemoveVideoWallpaper. A throwing settings store (settings.conf
+        // locked...) is contained and traced, never let out: on the video wallpaper thread it would
+        // escape into the work loop. No path in the trace line, same as phase=pick import-failed.
+        void PersistRemoval()
+        {
+            try
+            {
+                persistVideoWallpaperPath?.Invoke(string.Empty);
+            }
+            catch (Exception error) when (IsRecoverableFailure(error))
+            {
+                desktopTrace?.Record(
+                    $"video-wallpaper phase=remove persist-failed error={error.GetType().Name}");
+            }
         }
 
         // The catch filter for one feature's recoverable failure (focus border, reload gap...):

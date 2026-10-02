@@ -103,6 +103,17 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     // and keeps TaskbarCreated (Explorer restarting) from re-attaching a host nobody wants shown.
     private bool _detached;
 
+    // Test seams (InternalsVisibleTo), null in production: let Win32VideoWallpaperHostDetachTests
+    // make the swapchain release throw and observe/fail DestroyWindow without a desktop session.
+    internal Action? ReleaseSwapChainResourcesForTest { get; set; }
+
+    internal Func<nint, bool>? DestroyWindowForTest { get; set; }
+
+    internal void AdoptHostWindowForTest(nint hwnd) => _hwnd = (HWND)hwnd;
+
+    /// <summary>True only while the host window was destroyed ON PURPOSE by <see cref="Detach"/>.</summary>
+    internal bool IsDetached => _detached;
+
     /// <summary>
     /// The real native handle, once <see cref="TryAttach"/> has created the window. Returns
     /// <c>nint</c>, never a CsWin32 type: CsWin32's generated Win32 types are internal to this
@@ -209,7 +220,9 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// <see cref="RecreateDestroyedHostWindow"/> path R1 uses, on the same device the player built
     /// its device manager on. The hidden <c>TaskbarCreated</c> receiver is kept; while detached it
     /// ignores Explorer restarts. Idempotent, a no-op before the first attach and after
-    /// <see cref="Dispose"/>, and never throws. Must run on the thread that created the window
+    /// <see cref="Dispose"/>, and never throws (only process-corrupting exceptions pass through,
+    /// after the window is destroyed anyway). Marked detached only once the window is really gone.
+    /// Must run on the thread that created the window
     /// (the one that called <see cref="TryAttach"/>) -- <c>DestroyWindow</c> only works there.
     /// </summary>
     public void Detach()
@@ -222,19 +235,32 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         try
         {
             ReleaseSwapChainResources();
+        }
+        catch (Exception ex) when (IsRecoverableFailure(ex))
+        {
+            // Interface contract: never throws. Whatever was released stays released; the window
+            // is still taken down below, so a failed release never leaves it on the desktop.
+        }
+        finally
+        {
+            // Even a fatal exception (which the filter above lets through) still takes the window
+            // off the desktop on its way out.
             if (PInvoke.IsWindow(_hwnd))
             {
-                PInvoke.DestroyWindow(_hwnd);
+                DestroyHostWindow(_hwnd);
             }
-        }
-        catch
-        {
-            // Interface contract: never throws. Whatever was released stays released; the flag
-            // below still routes the next TryAttach through a full window recreation.
-        }
 
-        _detached = true;
+            // Only once the window is really gone: a surviving one stays attached as far as this
+            // object knows, so Dispose still destroys it and the next TryAttach reuses it instead
+            // of recreating over (and leaking) a live handle. A later Detach retries the destroy.
+            _detached = !PInvoke.IsWindow(_hwnd);
+        }
     }
+
+    // Same corruption-class exclusion as CosmicWin.App's AppComposition.IsRecoverableFailure: those
+    // are never mistaken for one call's recoverable failure.
+    private static bool IsRecoverableFailure(Exception ex) =>
+        ex is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 
     /// <summary>
     /// True once the composition device AND a window-bound target/root/swapchain visual tree all
@@ -275,7 +301,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             // Detached: _hwnd is a handle Detach already destroyed -- never destroy it twice.
             if (!_detached)
             {
-                PInvoke.DestroyWindow(_hwnd);
+                DestroyHostWindow(_hwnd);
             }
 
             _hwnd = default;
@@ -295,6 +321,9 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             _hInstance = default;
         }
     }
+
+    private bool DestroyHostWindow(HWND hwnd) =>
+        DestroyWindowForTest is { } destroyForTest ? destroyForTest(hwnd) : PInvoke.DestroyWindow(hwnd);
 
     /// <summary>First-ever attach: creates the window, then attaches it, then creates D3D.</summary>
     private bool CreateAndAttach()
@@ -1156,6 +1185,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     /// </summary>
     private void ReleaseSwapChainResources()
     {
+        if (ReleaseSwapChainResourcesForTest is { } releaseForTest)
+        {
+            releaseForTest();
+            return;
+        }
+
         ReleaseComObject(_rtv);
         ReleaseComObject(_backBuffer);
         ReleaseComObject(_swapChain);

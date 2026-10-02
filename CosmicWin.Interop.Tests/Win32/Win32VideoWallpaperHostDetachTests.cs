@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -35,4 +36,133 @@ public sealed class Win32VideoWallpaperHostDetachTests
 
         Assert.Null(exception);
     }
+
+    /// <summary>
+    /// Releasing the swapchain throws: the host window must still be destroyed (it would otherwise
+    /// stay alive and visible on the desktop), and Dispose must not destroy it a second time.
+    /// </summary>
+    [Fact]
+    public void Detach_WhenReleasingTheSwapChainThrows_StillDestroysTheWindowExactlyOnce()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var destroyed = new List<nint>();
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => throw new InvalidOperationException("release failed"),
+                DestroyWindowForTest = window =>
+                {
+                    destroyed.Add(window);
+                    return DestroyWindow(window);
+                },
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            var exception = Record.Exception(host.Detach);
+
+            Assert.Null(exception);
+            Assert.False(IsWindow(hwnd));
+            Assert.True(host.IsDetached);
+
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+
+            Assert.Equal([hwnd], destroyed);
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
+    /// <summary>
+    /// The window survives Detach (DestroyWindow failed): it must not be marked detached, or Dispose
+    /// would skip it and a later TryAttach would overwrite the handle and leak a live window.
+    /// </summary>
+    [Fact]
+    public void Detach_WhenTheWindowSurvives_StaysAttachedSoDisposeDestroysIt()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var destroyCalls = 0;
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => throw new InvalidOperationException("release failed"),
+                DestroyWindowForTest = window => ++destroyCalls > 1 && DestroyWindow(window),
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            host.Detach();
+
+            Assert.True(IsWindow(hwnd));
+            Assert.False(host.IsDetached);
+
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+
+            Assert.False(IsWindow(hwnd));
+            Assert.Equal(2, destroyCalls);
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
+    /// <summary>A fatal exception from the release is not swallowed, but the window still goes.</summary>
+    [Fact]
+    public void Detach_WhenReleasingThrowsAFatalException_PropagatesItButStillDestroysTheWindow()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => throw new OutOfMemoryException(),
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            Assert.Throws<OutOfMemoryException>(host.Detach);
+
+            Assert.False(IsWindow(hwnd));
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
+    // A hidden, unparented STATIC window owned by the test thread: real enough for IsWindow and
+    // DestroyWindow, and needs no interactive desktop (it is never shown or attached).
+    private static nint CreatePlainWindow()
+    {
+        var hwnd = CreateWindowEx(0, "STATIC", "cosmicwin-detach-test", 0, 0, 0, 1, 1, 0, 0, 0, 0);
+        Assert.NotEqual(0, hwnd);
+        return hwnd;
+    }
+
+    private static void DestroyIfAlive(nint hwnd)
+    {
+        if (IsWindow(hwnd))
+        {
+            DestroyWindow(hwnd);
+        }
+    }
+
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateWindowEx(
+        uint exStyle, string className, string windowName, uint style, int x, int y, int width, int height,
+        nint parent, nint menu, nint instance, nint param);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(nint hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyWindow(nint hwnd);
 }
