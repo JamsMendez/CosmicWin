@@ -79,8 +79,10 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
 - [ ] S3b S3 review follow-ups (review-a59141cc1a4f388a, review-e3244d34e2dab4cb): WARNING
   R4-recreate-target-bypasses-backoff (a repeating RECREATE_TARGET rebuilds every tick), WARNING
   R3-transfertinted-fallback-untested, WARNING R3-tint-target-pin-blocks-resize-while-engaged, SUGGESTION
-  R4-tint-failures-silent (no trace of tint failures). Route: delegated writer, before S5 so the hardware
-  run has traces.
+  R4-tint-failures-silent (no trace of tint failures); plus S4 review review-909e6b6f8dc7fd6e: WARNING
+  R3-export-throw-kills-render-loop (a throwing toDataURL kills the page render loop -> alert stuck),
+  WARNING R3-seq-zero-applies-when-no-show-active (a mask with seq 0 and no active show still tints).
+  Route: delegated writer, before S5 so the hardware run has traces.
 - [ ] S5 Hardware check in `Video` mode (failed blue, warning violet, mosaic, shake), restore settings.
 
 ## Acceptance
