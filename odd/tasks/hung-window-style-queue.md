@@ -80,3 +80,9 @@ Maintainer request, 2026-09-30: "podemos atacar los pendientes?".
   existed; mutation `if (false && maximized)` in the adapter's fallback fails it (Expected 1, Actual 0);
   restored byte-identical.
 - Suites: Interop 554 passed / 42 skipped / 0 failed; App 1485 passed / 6 skipped / 0 failed.
+- Review review-f9c6cffb594f27eb (670fe11..ab27235) APPROVED and acknowledged. WARNING
+  R3-slot-release-ordering-flake: not a flake today (slot and count are released under ONE lock), but the
+  fact waited on WorkerCount and its comment wrongly said they are released separately. Now it retries
+  admission within the bound (a refused attempt starts nothing): passes regardless of release order;
+  with the slot release commented out it fails deterministically at the 5 s bound; restored byte-identical.
+  Interop 555/42/0.

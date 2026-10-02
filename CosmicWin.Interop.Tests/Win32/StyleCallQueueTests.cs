@@ -249,8 +249,11 @@ public sealed class StyleCallQueueTests
     /// <summary>
     /// R3-independent-lane-release-unproved: once the parked independent call finally returns, its
     /// window's slot must be FREE again -- otherwise every later restore on that window is refused
-    /// forever. A worker count back at zero does not prove it (the count and the slot are released
-    /// separately), so the proof is a new call on the same window actually running and landing.
+    /// forever. A worker count back at zero does not prove it (a mutation that drops only the slot
+    /// release still brings the count to zero), so the proof is a new call on the same window actually
+    /// running and landing. It retries admission instead of waiting on the count, so it does not depend
+    /// on the order the worker releases the two (R3-slot-release-ordering-flake): correct code is
+    /// admitted within the bound, a slot that is never freed is refused every time and fails.
     /// </summary>
     [Fact]
     public void AfterTheParkedIndependentCallReturns_TheWindowsSlotIsFree_AndANewCallRuns()
@@ -267,10 +270,12 @@ public sealed class StyleCallQueueTests
             Assert.Equal(StyleWriteOutcome.TimedOut, queue.RunIndependent(7, () => true, TimeSpan.FromMilliseconds(1)));
 
             release.Set();
-            Assert.True(SpinWait.SpinUntil(() => queue.WorkerCount == 0, Plenty));
 
+            // A refused attempt starts nothing, so retrying is free; the first admitted one runs to the end.
             var ran = false;
-            Assert.Equal(StyleWriteOutcome.Applied, queue.RunIndependent(7, () => { ran = true; return true; }, Plenty));
+            Assert.True(SpinWait.SpinUntil(
+                () => queue.RunIndependent(7, () => { ran = true; return true; }, Plenty) == StyleWriteOutcome.Applied,
+                Plenty));
             Assert.True(ran);
         }
         finally
