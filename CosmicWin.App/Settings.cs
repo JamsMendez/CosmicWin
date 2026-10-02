@@ -24,20 +24,7 @@ namespace CosmicWin.App;
 /// way to run this app forever, not a half-configured one.
 /// </param>
 /// <param name="AlertsEnabled">
-/// Whether live alert commands are accepted over the named pipe and the HTTP alerts route, and drawn
-/// over the wallpaper. Settings key <c>alerts</c> (legacy: <c>alerts-enabled</c>).
-/// </param>
-/// <param name="HttpServerEnabled">
-/// The ONE switch for the local HTTP server (settings key <c>http-server</c>, legacy:
-/// <c>alert-http</c>). When on, every route is served -- <c>/v1/alerts</c> and
-/// <c>/v1/wallpaper/video</c>.
-/// ON by default (maintainer's decision, S9): loopback-only (127.0.0.1 / localhost, never reachable
-/// over the network) and gated by a bearer token nothing outside this machine can read.
-/// </param>
-/// <param name="HttpServerPort">
-/// The loopback TCP port the HTTP server listens on when <see cref="HttpServerEnabled"/> is on
-/// (settings key <c>http-server-port</c>, legacy: <c>alert-http-port</c>). Defaults to
-/// <see cref="AlertHttpProtocol.DefaultPort"/>, the same constant the server itself falls back to.
+/// Whether live alert commands are accepted over the named pipe and drawn over the wallpaper. Settings key <c>alerts</c> (legacy: <c>alerts-enabled</c>).
 /// </param>
 /// <param name="Gap">
 /// Whole pixels of space CosmicWin draws around and between tiled windows, and around and between an
@@ -63,8 +50,7 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool HttpServerEnabled = true,
-    int HttpServerPort = AlertHttpProtocol.DefaultPort,
+    string? VideoWallpaperPath = null, bool AlertsEnabled = true,
     int Gap = TreeArranger.DefaultGap)
 {
     /// <summary>
@@ -87,14 +73,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string LegacyAlertsKey = "alerts-enabled";
 
-    private const string HttpServerKey = "http-server";
-
-    private const string LegacyHttpServerKey = "alert-http";
-
-    private const string HttpServerPortKey = "http-server-port";
-
-    private const string LegacyHttpServerPortKey = "alert-http-port";
-
     private const string GapKey = "gap";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
@@ -107,11 +85,12 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <remarks>
     /// The LAST assignment of a key wins. A file appended to twice is a thing that happens, and
     /// reading it as its most recent line is the only answer that matches what an editor shows.
-    /// Legacy key names (<c>alerts-enabled</c>, <c>alert-http</c>, <c>alert-http-port</c>) are still
-    /// read, but when a file carries both a legacy key and its replacement the NEW key wins whatever
-    /// the line order. <c>video-wallpaper-http</c>, <c>wallpaper-scene-http</c>, <c>mini-position</c>,
-    /// <c>mini-corner</c>, <c>wallpaper-mode</c>, <c>wallpaper-scene</c> and <c>wallpaper-fps</c> no
-    /// longer exist: they are skipped like any unknown key. There is no wallpaper mode any more -- the
+    /// The legacy key name <c>alerts-enabled</c> is still read, but when a file carries both it and
+    /// <c>alerts</c> the NEW key wins whatever the line order. <c>http-server</c>,
+    /// <c>http-server-port</c>, <c>alert-http</c>, <c>alert-http-port</c>, <c>video-wallpaper-http</c>,
+    /// <c>wallpaper-scene-http</c>, <c>mini-position</c>, <c>mini-corner</c>, <c>wallpaper-mode</c>,
+    /// <c>wallpaper-scene</c> and <c>wallpaper-fps</c> no longer exist: they are skipped like any
+    /// unknown key. There is no local HTTP server any more. There is no wallpaper mode any more -- the
     /// video plays whenever <c>video-wallpaper-path</c> is set.
     /// </remarks>
     public static Settings Parse(string content)
@@ -120,8 +99,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var borderColor = Default.BorderColor;
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
-        bool? alerts = null, legacyAlerts = null, httpServer = null, legacyHttpServer = null;
-        int? httpServerPort = null, legacyHttpServerPort = null;
+        bool? alerts = null, legacyAlerts = null;
         var gap = Default.Gap;
 
         foreach (var rawLine in content.Split('\n'))
@@ -177,41 +155,20 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 legacyAlerts = legacyAlertsFlag;
             }
-            else if (key.Equals(HttpServerKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var httpServerFlag))
-            {
-                httpServer = httpServerFlag;
-            }
-            else if (key.Equals(LegacyHttpServerKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var legacyHttpServerFlag))
-            {
-                legacyHttpServer = legacyHttpServerFlag;
-            }
-            else if (key.Equals(HttpServerPortKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadPort(value, out var port))
-            {
-                httpServerPort = port;
-            }
-            else if (key.Equals(LegacyHttpServerPortKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadPort(value, out var legacyPort))
-            {
-                legacyHttpServerPort = legacyPort;
-            }
             else if (key.Equals(GapKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadGap(value, out var gapValue))
             {
                 gap = gapValue;
             }
-            // video-wallpaper-http and wallpaper-scene-http (per-route toggles), mini-position /
-            // mini-corner (the retired mini scene window) and wallpaper-mode / wallpaper-scene /
-            // wallpaper-fps (the retired html wallpaper) no longer exist. Deliberately no branch --
-            // the line is skipped like any other unknown key.
+            // http-server / http-server-port and their legacy alert-http / alert-http-port names (the
+            // retired local HTTP server), video-wallpaper-http and wallpaper-scene-http (its
+            // per-route toggles), mini-position / mini-corner (the retired mini scene window) and
+            // wallpaper-mode / wallpaper-scene / wallpaper-fps (the retired html wallpaper) no longer
+            // exist. Deliberately no branch -- the line is skipped like any other unknown key.
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath,
             alerts ?? legacyAlerts ?? Default.AlertsEnabled,
-            httpServer ?? legacyHttpServer ?? Default.HttpServerEnabled,
-            httpServerPort ?? legacyHttpServerPort ?? Default.HttpServerPort,
             gap);
     }
 
@@ -233,18 +190,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # or blank for none.
          {VideoWallpaperPathKey} = {VideoWallpaperPath ?? ""}
 
-         # {AlertsKey}: on to accept live alert commands (named pipe and HTTP), off to ignore them.
+         # {AlertsKey}: on to accept live alert commands (named pipe), off to ignore them.
          {AlertsKey} = {(AlertsEnabled ? "on" : "off")}
-
-         # {HttpServerKey}: on (default) to run the local HTTP server that serves every route
-         # (alerts, video wallpaper). Loopback-only (127.0.0.1 / localhost, never
-         # reachable over the network); its bearer token lives in
-         # %LOCALAPPDATA%\CosmicWin\alert-http.token, created the first time the server starts.
-         # Off to leave the port closed.
-         {HttpServerKey} = {(HttpServerEnabled ? "on" : "off")}
-
-         # {HttpServerPortKey}: the loopback TCP port the HTTP server listens on when {HttpServerKey} is on.
-         {HttpServerPortKey} = {HttpServerPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          # {GapKey}: whole pixels of space around and between tiled windows, and around and between
          # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
@@ -309,23 +256,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
         colour = digits.Length == 6 ? parsed : Expand(parsed);
         return true;
-    }
-
-    /// <summary>
-    /// Reads a TCP port, 1-65535. Same rule as every other key: anything outside that range, or not
-    /// a whole number at all, keeps the default rather than opening a port that makes no sense.
-    /// </summary>
-    private static bool TryReadPort(string value, out int port)
-    {
-        if (int.TryParse(value, System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out port)
-            && port is >= 1 and <= 65535)
-        {
-            return true;
-        }
-
-        port = 0;
-        return false;
     }
 
     /// <summary>

@@ -1,5 +1,3 @@
-using CosmicWin.Interop;
-
 namespace CosmicWin.App.Tests;
 
 /// <summary>
@@ -332,145 +330,6 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// ON unless the file says otherwise, since S9 (wallpaper-scene-http-endpoint, 2026-09-27,
-    /// maintainer's decision: "alertas tambien debe estar prendidas") -- loopback-only and gated by a
-    /// bearer token, so a fresh install opens this port as an accepted consequence, the same call S8
-    /// made for the (since removed) per-route scene switch.
-    /// </summary>
-    [Fact]
-    public void HttpServerIsOn_UnlessTheFileSaysOtherwise()
-    {
-        Assert.True(Settings.Default.HttpServerEnabled);
-        Assert.True(Settings.Parse(string.Empty).HttpServerEnabled);
-    }
-
-    [Theory]
-    [InlineData("http-server = on")]
-    [InlineData("alert-http=on")]
-    [InlineData("  ALERT-HTTP   =   On  ")]
-    [InlineData("alert-http = true")]
-    [InlineData("alert-http = 1")]
-    public void HttpServerIsTurnedOn_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.True(Settings.Parse(line).HttpServerEnabled);
-    }
-
-    [Theory]
-    [InlineData("http-server = off")]
-    [InlineData("alert-http = off")]
-    [InlineData("alert-http = false")]
-    [InlineData("alert-http = 0")]
-    public void HttpServerIsTurnedOff_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.False(Settings.Parse(line).HttpServerEnabled);
-    }
-
-    [Theory]
-    [InlineData("http-server = perhaps")]
-    [InlineData("alert-http = perhaps")]
-    [InlineData("alert-http =")]
-    [InlineData("alert-http")]
-    public void AnUnreadableHttpServerValue_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.True(Settings.Parse(line).HttpServerEnabled);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void SerializeThenParse_RoundTripsTheHttpServerSwitch(bool alertHttpEnabled)
-    {
-        var original = new Settings(FocusBorder: true, HttpServerEnabled: alertHttpEnabled);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    /// <summary>
-    /// <see cref="CosmicWin.Interop.AlertHttpProtocol.DefaultPort"/> unless the file says otherwise --
-    /// the exact port the endpoint would actually bind to, so a default settings file and a default
-    /// server agree on where the endpoint lives.
-    /// </summary>
-    [Fact]
-    public void HttpServerPortDefaultsToTheProtocolConstant()
-    {
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Default.HttpServerPort);
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(string.Empty).HttpServerPort);
-    }
-
-    [Theory]
-    [InlineData("http-server-port = 8080")]
-    [InlineData("alert-http-port=8080")]
-    [InlineData("  ALERT-HTTP-PORT   =   8080  ")]
-    [InlineData("alert-http-port = 1")]
-    [InlineData("alert-http-port = 65535")]
-    public void HttpServerPortIsRead_HoweverTheLineIsSpelled(string line)
-    {
-        var expected = int.Parse(line.Split('=')[1].Trim());
-
-        Assert.Equal(expected, Settings.Parse(line).HttpServerPort);
-    }
-
-    /// <summary>
-    /// Same rule as every other key: a port outside 1-65535, or not a whole number at all, keeps the
-    /// default rather than opening a port that does not make sense.
-    /// </summary>
-    [Theory]
-    [InlineData("alert-http-port = 0")]
-    [InlineData("alert-http-port = 70000")]
-    [InlineData("alert-http-port = -1")]
-    [InlineData("alert-http-port = abc")]
-    [InlineData("alert-http-port =")]
-    [InlineData("alert-http-port")]
-    public void AnInvalidHttpServerPort_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.Equal(CosmicWin.Interop.AlertHttpProtocol.DefaultPort, Settings.Parse(line).HttpServerPort);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(47811)]
-    [InlineData(65535)]
-    public void SerializeThenParse_RoundTripsTheHttpServerPort(int port)
-    {
-        var original = new Settings(FocusBorder: true, HttpServerPort: port);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    [Fact]
-    public void Serialize_IncludesTheHttpServerSwitchAndPortWithComments()
-    {
-        var serialized = new Settings(FocusBorder: true, HttpServerEnabled: true, HttpServerPort: 8080).Serialize();
-
-        Assert.Contains("# http-server:", serialized, StringComparison.Ordinal);
-        Assert.Contains("http-server = on", serialized, StringComparison.Ordinal);
-        Assert.Contains("# http-server-port:", serialized, StringComparison.Ordinal);
-        Assert.Contains("http-server-port = 8080", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>The comment tells the user where the token lives and that the endpoint never leaves the machine.</summary>
-    [Fact]
-    public void TheHttpServerComment_NamesTheTokenFileAndLoopbackOnly()
-    {
-        var serialized = new Settings(FocusBorder: true).Serialize();
-
-        Assert.Contains("alert-http.token", serialized, StringComparison.Ordinal);
-        Assert.Contains("loopback", serialized, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
-    [Fact]
-    public void HttpServerSettingsAreReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse("focus-border = off\nalert-http = on\nalert-http-port = 9999");
-
-        Assert.False(settings.FocusBorder);
-        Assert.True(settings.HttpServerEnabled);
-        Assert.Equal(9999, settings.HttpServerPort);
-    }
-
-
-    /// <summary>
     /// T5 (alert-tile-mosaic, maintainer decision 2026-09-26): <see cref="TreeArranger.DefaultGap"/>
     /// unless the file says otherwise, the exact value <c>TreeArranger.Gap</c> was hard-set to before
     /// this key existed -- a settings file that has never been written must draw the same gap it
@@ -601,31 +460,23 @@ public sealed class SettingsTests
         Assert.True(d.FocusBorder);
         Assert.True(d.Tiling);
         Assert.True(d.AlertsEnabled);
-        Assert.True(d.HttpServerEnabled);
-        Assert.Equal(AlertHttpProtocol.DefaultPort, d.HttpServerPort);
         Assert.Equal(d, Settings.Parse(string.Empty));
     }
 
     [Fact]
     public void EachNewKey_IsParsed()
     {
-        var settings = Settings.Parse(
-            "alerts = off\nhttp-server = off\nhttp-server-port = 5555");
+        var settings = Settings.Parse("alerts = off");
 
         Assert.False(settings.AlertsEnabled);
-        Assert.False(settings.HttpServerEnabled);
-        Assert.Equal(5555, settings.HttpServerPort);
     }
 
     [Fact]
     public void EachLegacyAlias_IsStillParsed()
     {
-        var settings = Settings.Parse(
-            "alerts-enabled = off\nalert-http = off\nalert-http-port = 5556");
+        var settings = Settings.Parse("alerts-enabled = off");
 
         Assert.False(settings.AlertsEnabled);
-        Assert.False(settings.HttpServerEnabled);
-        Assert.Equal(5556, settings.HttpServerPort);
     }
 
     [Theory]
@@ -636,37 +487,51 @@ public sealed class SettingsTests
         Assert.False(Settings.Parse(content).AlertsEnabled);
     }
 
-    [Theory]
-    [InlineData("http-server = off\nalert-http = on")]
-    [InlineData("alert-http = on\nhttp-server = off")]
-    public void NewHttpServerKeyWins_InEitherLineOrder(string content)
-    {
-        Assert.False(Settings.Parse(content).HttpServerEnabled);
-    }
-
-    [Theory]
-    [InlineData("http-server-port = 6001\nalert-http-port = 7001")]
-    [InlineData("alert-http-port = 7001\nhttp-server-port = 6001")]
-    public void NewHttpServerPortKeyWins_InEitherLineOrder(string content)
-    {
-        Assert.Equal(6001, Settings.Parse(content).HttpServerPort);
-    }
-
     [Fact]
     public void AnUnreadableNewKey_DoesNotShadowAReadableLegacyOne()
     {
-        var settings = Settings.Parse("http-server = perhaps\nalert-http = off");
+        var settings = Settings.Parse("alerts = perhaps\nalerts-enabled = off");
 
-        Assert.False(settings.HttpServerEnabled);
+        Assert.False(settings.AlertsEnabled);
     }
 
+    /// <summary>
+    /// strip-to-tiling-video (T3): the local HTTP server is gone, and with it its switch, its port and
+    /// every per-route toggle. An old settings.conf that still carries <c>http-server</c>,
+    /// <c>http-server-port</c>, their legacy names <c>alert-http</c> / <c>alert-http-port</c>, or the
+    /// earlier-removed <c>video-wallpaper-http</c> / <c>wallpaper-scene-http</c> must load without
+    /// error: every one of those lines is ignored, whatever its value.
+    /// </summary>
     [Theory]
+    [InlineData("http-server = off")]
+    [InlineData("http-server = on")]
+    [InlineData("http-server = perhaps")]
+    [InlineData("http-server-port = 5555")]
+    [InlineData("http-server-port = 70000")]
+    [InlineData("alert-http = off")]
+    [InlineData("  ALERT-HTTP   =   On  ")]
+    [InlineData("alert-http")]
+    [InlineData("alert-http-port = 43811")]
+    [InlineData("alert-http-port = abc")]
     [InlineData("video-wallpaper-http = off")]
     [InlineData("wallpaper-scene-http = off")]
     [InlineData("video-wallpaper-http = on\nwallpaper-scene-http = on")]
-    public void RemovedPerRouteKeys_AreAcceptedAndIgnored(string content)
+    [InlineData("http-server = off\nhttp-server-port = 6001\nalert-http = on\nalert-http-port = 7001")]
+    public void RetiredHttpLines_AreAcceptedAndIgnored(string content)
     {
         Assert.Equal(Settings.Default, Settings.Parse(content));
+    }
+
+    [Fact]
+    public void RetiredHttpLines_DoNotDisturbTheSettingsAroundThem()
+    {
+        var settings = Settings.Parse(
+            "focus-border = off\nhttp-server = off\nhttp-server-port = 9999\nalerts = off\n"
+            + "alert-http = on\nalert-http-port = 7001\ngap = 12");
+
+        Assert.False(settings.FocusBorder);
+        Assert.False(settings.AlertsEnabled);
+        Assert.Equal(12, settings.Gap);
     }
 
     [Fact]
@@ -679,8 +544,7 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "http-server",
-             "http-server-port", "gap"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "gap"],
             keys);
         foreach (var legacy in new[] { "alerts-enabled", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",
@@ -688,6 +552,9 @@ public sealed class SettingsTests
         {
             Assert.DoesNotContain(legacy, text, StringComparison.Ordinal);
         }
+
+        // Neither a retired key nor its comment: the file no longer mentions an HTTP server at all.
+        Assert.DoesNotContain("http", text, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The maintainer's real-world legacy file shape survives a save unchanged in meaning.</summary>
@@ -702,8 +569,7 @@ public sealed class SettingsTests
         var reparsed = Settings.Parse(legacy.Serialize());
 
         Assert.Equal(legacy, reparsed);
-        Assert.Equal(43811, reparsed.HttpServerPort);
         Assert.True(reparsed.AlertsEnabled);
-        Assert.True(reparsed.HttpServerEnabled);
+        Assert.Equal(Settings.Default, reparsed);
     }
 }

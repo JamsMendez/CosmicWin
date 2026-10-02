@@ -177,16 +177,6 @@ public sealed class AppComposition : IDisposable
         Func<int>? loadGap = null,
         // Optional, same as the persistX delegates above.
         Action<string>? persistVideoWallpaperPath = null,
-        // noop-followups, F1: reads a point-in-time VideoFileSnapshot (identity + size + last-write)
-        // of the path it is given, or null on any failure. Production wires
-        // VideoWallpaperImport.TryReadSnapshot; null (the default in every test that predates this
-        // parameter, and every test that predated same-video-noop's isSameVideoFile before it)
-        // means "never take a snapshot", so the http path always reloads exactly as it did before
-        // either parameter existed. SwitchVideoWallpaper never calls this directly -- always through
-        // the SafeReadSnapshot wrapper below, which also catches an exception from an INJECTED
-        // reader (a real GetFileInformationByHandle-backed one never throws, but a test double is
-        // free to) and treats it the same way: as "no snapshot".
-        Func<string, VideoWallpaperImport.VideoFileSnapshot?>? readVideoFileSnapshot = null,
         // The T3/T4 collaborators. Both null (the default in every test that predates T6) means
         // "nothing to attach or play" -- construction alone never attaches or plays anything, only
         // TryAttach/TryPlay do, and those only run when a path is ALSO present (see below).
@@ -196,17 +186,6 @@ public sealed class AppComposition : IDisposable
         Action? disposeVideoWallpaper = null,
         bool alertsEnabled = false,
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
-        // The ONE switch for the local HTTP server (settings key http-server). When on, every route
-        // is in the routing table: alerts (which additionally needs alertsEnabled -- there is no
-        // alert queue to answer through otherwise) and video, each keeping its own 503 behaviour. Default off: no port opened, token file never touched.
-        // createLocalHttpCommandServer mirrors createAlertCommandServer's seam, with a trailing
-        // handleVideoWallpaperSwitch delegate; loadAlertHttpToken
-        // mirrors it for AlertHttpTokenFile.LoadOrCreate, so a wiring test never binds a real port
-        // or touches %LOCALAPPDATA%.
-        bool httpServerEnabled = false,
-        int httpServerPort = AlertHttpProtocol.DefaultPort,
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
-        Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
         // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
@@ -322,7 +301,6 @@ public sealed class AppComposition : IDisposable
         var alertQueueLock = new object();
         var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
         IAlertCommandServer? alertServer = null;
-        IAlertCommandServer? httpAlertServer = null;
         ActiveAlert? displayedAlert = null;
         ActiveAlert? shakenAlert = null;
 
@@ -409,33 +387,6 @@ public sealed class AppComposition : IDisposable
         // set on the UI thread, cleared on the video-wallpaper thread.
         var videoWallpaperKeepAlivePending = new VolatileFlag();
 
-        // noop-followups, F1: the SNAPSHOT of the played file taken the moment playback last
-        // actually started -- read here, on the video wallpaper thread, never re-read at compare
-        // time. Re-reading the imported destination fresh at compare time cannot detect an
-        // in-place edit (see VideoFileSnapshot's remarks: a hard-linked destination and its source
-        // are literally the same file, so a fresh read of either always agrees with a fresh read
-        // of the other, edited or not); only a comparison against a STALE snapshot taken before
-        // the edit can. Cleared to null whenever videoWallpaperActive itself is cleared, so the two
-        // always agree: no snapshot is ever kept around for a video that is not actually playing.
-        VideoWallpaperImport.VideoFileSnapshot? currentVideoSnapshot = null;
-
-        // noop-followups, F1 (R3-predicate-throw-not-contained): every call to the INJECTED
-        // readVideoFileSnapshot delegate goes through here, never direct -- a test double is free
-        // to throw where the real, production TryReadSnapshot never does, and a throw from either
-        // must read as "no snapshot" (same as a null result) rather than escape the video
-        // wallpaper work item and take the whole switch down with it.
-        VideoWallpaperImport.VideoFileSnapshot? SafeReadSnapshot(string path)
-        {
-            try
-            {
-                return readVideoFileSnapshot?.Invoke(path);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         void ActivateVideoWallpaper(string phase, string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
@@ -444,16 +395,6 @@ public sealed class AppComposition : IDisposable
             }
 
             var pathExists = File.Exists(path);
-
-            // F1: snapshot the path about to (re)start -- the IMPORTED destination on every
-            // caller (startup's configured path, a restore's previous import, or a fresh
-            // switch's own import result), never the raw source a caller passed to
-            // SwitchVideoWallpaper. Read BEFORE TryPlay opens the file (R3-snapshot-after-play-window):
-            // an in-place edit landing while the player opens it then differs from this baseline
-            // and the next repeat request reloads, instead of becoming the baseline and being
-            // skipped as unchanged. Kept only when playback actually comes up, matching
-            // videoWallpaperActive itself.
-            var snapshotBeforePlay = SafeReadSnapshot(path);
             var attached = videoWallpaperHost.TryAttach();
             bool? played = null;
             if (attached)
@@ -462,7 +403,6 @@ public sealed class AppComposition : IDisposable
             }
 
             videoWallpaperActive.Value = attached && played == true;
-            currentVideoSnapshot = videoWallpaperActive.Value ? snapshotBeforePlay : null;
 
             desktopTrace?.Record(
                 $"video-wallpaper phase={phase} pathExists={pathExists} " +
@@ -472,34 +412,11 @@ public sealed class AppComposition : IDisposable
         /// <summary>
         /// The "stop, import, persist, (re)activate" sequence <c>setVideoWallpaperPath</c> below
         /// used to run as an inline closure, now a named operation next to
-        /// <see cref="ActivateVideoWallpaper"/> so a second caller -- the HTTP video-wallpaper
-        /// endpoint (V4) -- can trigger the exact same switch without duplicating it (the V4
-        /// constraint: imports must stay serialized on this one path, never a second caller of
-        /// <c>importVideoWallpaper</c> directly). Posts the work and returns at once: never blocks
-        /// whichever thread calls this. Returns whether the switch was actually POSTED for
-        /// dispatch -- never whether it finished, since the caller is told before the work item
-        /// even runs -- so the HTTP endpoint can answer 503 instead of 202 when there is nothing
-        /// to switch on this composition; the tray call site below ignores the return value and
-        /// behaves exactly as it always has.
+        /// <see cref="ActivateVideoWallpaper"/>. Posts the work and returns at once: never blocks
+        /// whichever thread calls this. Every pick reloads, even a re-pick of the video already
+        /// playing. Traces <c>phase=pick</c>; the restore branch, taken when the import fails and
+        /// a previous video exists, traces <c>phase=restore</c>.
         /// </summary>
-        /// <param name="phase">
-        /// Recorded on every trace line this switch produces, so an HTTP-initiated switch reads
-        /// distinctly from a tray pick (<c>phase=http</c> vs the tray's own default
-        /// <c>phase=pick</c>) without duplicating this whole method for one word. The restore
-        /// branch, taken by either caller when the import fails and a previous video exists,
-        /// always traces <c>phase=restore</c> regardless of what switched it -- restoring is the
-        /// same fallback either way, not a per-caller outcome.
-        /// </param>
-        /// <param name="skipIfUnchanged">
-        /// same-video-noop, S2 (snapshot comparison per noop-followups F1): HTTP only (decision 1
-        /// -- a tray re-pick keeps reloading exactly as today, so <c>setVideoWallpaperPath</c>'s
-        /// call site below never passes this). When true AND playback is genuinely active AND a
-        /// fresh <c>SafeReadSnapshot</c> of <paramref name="path"/> equals <c>currentVideoSnapshot</c>
-        /// -- the snapshot taken when that playback actually started -- the whole
-        /// stop/import/persist/(re)activate sequence is skipped -- the request is still accepted
-        /// for dispatch (this method still returns <see langword="true"/>), it just does nothing
-        /// once it runs.
-        /// </param>
         /// <remarks>
         /// Checks its own collaborators the same way <see cref="ActivateVideoWallpaper"/> does,
         /// rather than trusting a caller's earlier check -- redundant for
@@ -507,11 +424,11 @@ public sealed class AppComposition : IDisposable
         /// already checked, the same redundancy the startup activation further down this method
         /// accepts by checking before calling <see cref="ActivateVideoWallpaper"/> itself.
         /// </remarks>
-        bool SwitchVideoWallpaper(string path, string phase = "pick", bool skipIfUnchanged = false)
+        void SwitchVideoWallpaper(string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
             {
-                return false;
+                return;
             }
 
             // T1 fix: the WHOLE sequence -- stop, import, persist, (re)activate -- now runs as
@@ -523,31 +440,6 @@ public sealed class AppComposition : IDisposable
             // for as long as the copy took.
             onVideoWallpaperThread(() =>
             {
-                // same-video-noop, S2: read and checked HERE, inside the work item, for the same
-                // reason `previous` below is -- work items run in order, so this sees whatever an
-                // earlier queued switch actually landed, not a stale value read before this one was
-                // even posted. Requires playback to be genuinely ACTIVE, not merely configured: a
-                // died playback (attach or play failed last time) must still let a repeat request
-                // revive it, exactly as it does today.
-                //
-                // noop-followups, F1 (R3-inplace-edit-hardlink): compares a FRESH read of the
-                // REQUESTED path against the STALE currentVideoSnapshot captured when playback
-                // started -- never a fresh-vs-fresh comparison, which a hard-linked import would
-                // always pass regardless of an in-place edit (see VideoFileSnapshot's remarks). A
-                // missing currentVideoSnapshot, a failed SafeReadSnapshot on the requested path
-                // (missing file, access denied, or an injected reader throwing --
-                // R3-predicate-throw-not-contained), or an unequal snapshot all read as "different"
-                // and fall through to the ordinary switch below.
-                if (skipIfUnchanged
-                    && videoWallpaperActive.Value
-                    && currentVideoSnapshot is { } activeSnapshot
-                    && SafeReadSnapshot(path) is { } requestedSnapshot
-                    && requestedSnapshot.Equals(activeSnapshot))
-                {
-                    desktopTrace?.Record($"video-wallpaper phase={phase} unchanged");
-                    return;
-                }
-
                 // Idempotent and never throws, per the interface contract -- releases the fixed
                 // destination file so the import below can overwrite it.
                 videoWallpaperPlayer.Stop();
@@ -559,12 +451,8 @@ public sealed class AppComposition : IDisposable
                 // (ActivateVideoWallpaper, on both the restore and the pick-success branches
                 // further down) overwrites this with the real outcome; only the "import threw
                 // and there is no previous path to restore" branch returns without calling it,
-                // and this is what keeps that branch honest too. currentVideoSnapshot follows the
-                // same rule (F1, noop-followups): no snapshot is ever kept for a video that is not
-                // actually playing, and the same two ActivateVideoWallpaper branches below are what
-                // set it back to a real value.
+                // and this is what keeps that branch honest too.
                 videoWallpaperActive.Value = false;
-                currentVideoSnapshot = null;
 
                 // Read HERE, inside the work item, never on the caller's thread before posting it.
                 // Work items run one at a time in order, so this sees whatever the switch queued
@@ -586,7 +474,7 @@ public sealed class AppComposition : IDisposable
                     // bug 1 itself reported; not persisting means the failed switch never gets
                     // remembered as if it had landed on disk.
                     desktopTrace?.Record(
-                        $"video-wallpaper phase={phase} import-failed error={error.GetType().Name}");
+                        $"video-wallpaper phase=pick import-failed error={error.GetType().Name}");
                     if (previous is not null)
                     {
                         ActivateVideoWallpaper("restore", previous);
@@ -604,39 +492,9 @@ public sealed class AppComposition : IDisposable
                 // configured yet) and every later re-switch identically: TryAttach is documented
                 // idempotent and TryPlay is documented to tear down and restart cleanly, so
                 // there is no need to branch on whether this is the first attach.
-                ActivateVideoWallpaper(phase, imported);
+                ActivateVideoWallpaper("pick", imported);
             });
-
-            return true;
         }
-
-        /// <summary>
-        /// V4: the HTTP video-wallpaper route's delegate, handed to <see
-        /// cref="createLocalHttpCommandServer"/>'s <c>handleVideoWallpaperSwitch</c> parameter
-        /// when <paramref name="httpServerEnabled"/> is on. Never calls
-        /// <see cref="VideoWallpaperImport.Import"/> itself, and never any import logic directly
-        /// -- it goes through <see cref="SwitchVideoWallpaper"/>, the SAME serialized path the
-        /// tray uses, so a concurrent tray pick and HTTP request can never race the shared
-        /// temp-name import (Review 2's R3-temp-sweep-races-concurrent-import constraint).
-        /// </summary>
-        /// <remarks>
-        /// Answers "not available" (503) rather than dispatching when THIS composition has no
-        /// dedicated video-wallpaper thread of its own (<paramref name="scheduleVideoWallpaperWork"/>
-        /// unset) -- checked here, on the raw constructor parameter, before <see
-        /// cref="SwitchVideoWallpaper"/> ever runs. Without a dedicated thread,
-        /// <c>onVideoWallpaperThread</c> falls back to <c>onOwningThread</c>, which itself
-        /// defaults to running inline on whichever thread calls it -- fine for a tray click (it
-        /// always ran that way before this task), but it would mean the import's multi-gigabyte
-        /// copy runs SYNCHRONOUSLY on this HTTP server's one request-handling thread, which <see
-        /// cref="LocalHttpCommandServer"/>'s own contract for this delegate forbids. Answering 503
-        /// is the least surprising choice for a composition that was never going to switch
-        /// anything asynchronously in the first place, and it costs nothing beyond this one null
-        /// check -- no new thread is spun up just to make the endpoint technically answer 202.
-        /// </remarks>
-        bool HandleVideoWallpaperHttpSwitch(string path) =>
-            scheduleVideoWallpaperWork is null
-                ? false
-                : SwitchVideoWallpaper(path, phase: "http", skipIfUnchanged: true);
 
         string HandleAlertCommand(string text)
         {
@@ -1193,62 +1051,6 @@ public sealed class AppComposition : IDisposable
             // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
             // the first alert command -- the whole point of the persistent-preload fix.
             if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
-        }
-
-        // The shared HTTP server starts when http-server is on and serves every route. Only the
-        // alerts route also needs alertsEnabled (see HandleAlertCommand above); when alerts are
-        // off it is left out of the table and answers as it does for a disabled feature.
-        var alertHttpRouteOn = alertsEnabled;
-        if (httpServerEnabled)
-        {
-            try
-            {
-                // The pipe above (when alertsEnabled) has already started by the time this runs, so
-                // any failure below -- a bad port, a listener that cannot bind, the token file being
-                // unreadable -- is caught and traced here rather than left to unwind Wire and take the
-                // pipe down with it. The two servers stay independent on purpose.
-                var loadToken = loadAlertHttpToken
-                    ?? (() => AlertHttpTokenFile.LoadOrCreate(message => desktopTrace?.Record(message)));
-                var token = loadToken();
-                if (token is null)
-                {
-                    desktopTrace?.Record("alert-http token unavailable, HTTP alert endpoint not started");
-                }
-                else
-                {
-                    var httpServerFactory = createLocalHttpCommandServer
-                        ?? ((port, t, handler, diagnostic, videoSwitch) =>
-                            new LocalHttpCommandServer(port, t, handler, diagnostic, videoSwitch));
-                    httpAlertServer = httpServerFactory(
-                        httpServerPort, token,
-                        alertHttpRouteOn ? HandleAlertCommand : null,
-                        message => desktopTrace?.Record(message),
-                        HandleVideoWallpaperHttpSwitch);
-                    httpAlertServer.Start();
-                    // H5b: Start() never throws -- a port already in use is reported by the server
-                    // itself as "alert http: failed to start listening ..." through this same sink
-                    // -- so these lines must not claim the endpoint is listening.
-                    if (alertHttpRouteOn)
-                    {
-                        desktopTrace?.Record($"alert-http start requested port={httpServerPort}");
-                    }
-
-                    // V4: which routes ended up in the routing table. The video route is always
-                    // registered now (http-server is the one switch for the whole server), so its
-                    // flag is a constant kept in the line for the readers of this trace; only the
-                    // alerts route still depends on alertsEnabled.
-                    desktopTrace?.Record(
-                        $"http-server start requested port={httpServerPort} " +
-                        $"alerts-route={alertHttpRouteOn} video-route=True");
-                }
-            }
-            // Same corruption-class exclusion IsRecoverableFailure already applies to a
-            // per-alert render failure below: a bad port or a listener refusal is this server's
-            // problem, not a reason to treat the whole composition as unsafe to continue.
-            catch (Exception ex) when (IsRecoverableFailure(ex))
-            {
-                desktopTrace?.Record($"alert-http-start-failed {ex.GetType().Name}: {ex.Message}");
-            }
         }
 
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
@@ -1814,7 +1616,6 @@ public sealed class AppComposition : IDisposable
             focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
             {
                 alertServer?.Dispose();
-                httpAlertServer?.Dispose();
                 alertLayer?.Dispose();
                 disposeVideoWallpaperBase();
             },
@@ -1957,10 +1758,7 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
             persistVideoWallpaperPath: path => settingsStore.Update(s => s with { VideoWallpaperPath = path }),
-            readVideoFileSnapshot: VideoWallpaperImport.TryReadSnapshot,
             alertsEnabled: settings.AlertsEnabled,
-            httpServerEnabled: settings.HttpServerEnabled,
-            httpServerPort: settings.HttpServerPort,
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),

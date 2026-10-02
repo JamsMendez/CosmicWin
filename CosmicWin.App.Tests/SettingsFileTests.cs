@@ -119,15 +119,14 @@ public sealed class SettingsFileTests : IDisposable
     }
 
     /// <summary>
-    /// S9's other maintainer decision folded into the same first-run write: alerts and alert-http
-    /// itself both come up on for a fresh install.
+    /// S9's other maintainer decision folded into the same first-run write: alerts come up on for a
+    /// fresh install.
     /// </summary>
     [Fact]
     public void MissingFile_LoadOrCreate_TheWrittenDefaultsMatchTheS9Decisions()
     {
         var settings = SettingsFile.LoadOrCreate(Path_);
 
-        Assert.True(settings.HttpServerEnabled);
         Assert.True(settings.AlertsEnabled);
     }
 
@@ -138,7 +137,7 @@ public sealed class SettingsFileTests : IDisposable
     [Fact]
     public void ExistingFile_LoadOrCreate_IsNeverRewritten()
     {
-        var original = "focus-border = off\nalert-http = off\n";
+        var original = "focus-border = off\nalerts = off\n";
         Directory.CreateDirectory(_directory);
         File.WriteAllText(Path_, original);
         var writeTimeBefore = File.GetLastWriteTimeUtc(Path_);
@@ -148,7 +147,7 @@ public sealed class SettingsFileTests : IDisposable
         Assert.Equal(original, File.ReadAllText(Path_), StringComparer.Ordinal);
         Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(Path_));
         Assert.False(settings.FocusBorder);
-        Assert.False(settings.HttpServerEnabled);
+        Assert.False(settings.AlertsEnabled);
     }
 
     /// <summary>

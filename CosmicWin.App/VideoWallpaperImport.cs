@@ -1,11 +1,10 @@
 using System.IO;
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 
 namespace CosmicWin.App;
 
 /// <summary>
-/// Imports the video the user picked from the tray menu (or the HTTP endpoint) into
+/// Imports the video the user picked from the tray menu into
 /// <c>%LOCALAPPDATA%\CosmicWin\</c>, so playback survives the user moving or deleting the original
 /// file. When the source lives on the same volume, the import is a HARD LINK rather than a byte
 /// copy -- see decision 5 in <c>odd/tasks/video-wallpaper-http-endpoint.md</c> -- so switching to a
@@ -142,91 +141,6 @@ public static class VideoWallpaperImport
 
         return destination;
     }
-
-    /// <summary>
-    /// noop-followups, F1: a point-in-time fingerprint of a file's NTFS identity (volume serial
-    /// number plus file index) AND its size and last-write time -- everything
-    /// <c>GetFileInformationByHandle</c> reports that can tell two moments of the SAME file apart.
-    /// Value equality (a <see langword="record struct"/>) is exactly what a same-video comparison
-    /// needs: two snapshots taken of the same on-disk state must compare equal, one taken before
-    /// and one taken after an in-place edit must not.
-    /// </summary>
-    /// <remarks>
-    /// Identity ALONE (what the superseded <c>IsSameFile</c> compared) cannot detect an in-place
-    /// edit -- a video re-encoded or edited without ever being renamed keeps its volume serial and
-    /// file index. Comparing size/last-write of the REQUESTED path against a FRESH read of the
-    /// imported destination cannot detect it either: with a hard-linked import the two names are
-    /// the same file, so a fresh read of either always agrees with a fresh read of the other,
-    /// edited or not -- both readings simply describe whatever the file currently is. Detecting an
-    /// edit requires comparing a fresh read against a STALE snapshot taken before the edit, which
-    /// is why <c>AppComposition</c> caches one of these the moment playback actually starts,
-    /// rather than re-reading the imported path at compare time.
-    /// </remarks>
-    // `public`, not `internal` like TryReadSnapshot below and the rest of this class: this type
-    // appears in AppComposition.Wire's own public readVideoFileSnapshot parameter (a Func<string,
-    // VideoFileSnapshot?>), and C# requires a public member's signature to expose nothing less
-    // accessible than the member itself. The reader method that PRODUCES one stays internal --
-    // only the shape of the value needs to be visible outside this assembly.
-    public readonly record struct VideoFileSnapshot(
-        uint VolumeSerialNumber, ulong FileIndex, long Size, long LastWriteTime);
-
-    /// <summary>
-    /// Reads <paramref name="path"/>'s current <see cref="VideoFileSnapshot"/>, or
-    /// <see langword="null"/> on any failure -- a missing file, a locked file, or anything else
-    /// that keeps <c>GetFileInformationByHandle</c> from answering. Never throws: the caller
-    /// (<c>AppComposition</c>'s <c>SafeReadSnapshot</c>) additionally wraps every call to the
-    /// INJECTED reader in a try/catch of its own, since a test double is free to throw where this
-    /// real implementation never does; either way, a failure here reads as "no snapshot", which
-    /// <c>SwitchVideoWallpaper</c>'s skip check treats the same as "different" -- a false "same"
-    /// would silently swallow a real switch, while a false "different" only costs the reload this
-    /// check exists to avoid.
-    /// </summary>
-    /// <remarks>
-    /// Opened for read attributes only, sharing read/write/delete with every other handle -- this
-    /// check must never itself block a concurrent import's Stop/copy/move sequence, or hold a
-    /// delete open against a file some other code is about to replace.
-    /// </remarks>
-    internal static VideoFileSnapshot? TryReadSnapshot(string path)
-    {
-        try
-        {
-            using var handle = File.OpenHandle(
-                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (!GetFileInformationByHandle(handle, out var info))
-            {
-                return null;
-            }
-
-            return new VideoFileSnapshot(
-                info.VolumeSerialNumber,
-                ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow,
-                ((long)info.FileSizeHigh << 32) | info.FileSizeLow,
-                info.LastWriteTime);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct BY_HANDLE_FILE_INFORMATION
-    {
-        public uint FileAttributes;
-        public long CreationTime;
-        public long LastAccessTime;
-        public long LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 
     private static string NewTempPath(string directory, string extension) =>
         Path.Combine(directory, $"video-wallpaper{extension}.tmp-{Guid.NewGuid():N}");
