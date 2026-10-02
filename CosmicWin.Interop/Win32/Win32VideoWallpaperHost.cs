@@ -97,6 +97,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
     private bool _disposed;
 
+    // Set by Detach: the host window was destroyed ON PURPOSE (the tray's "Quitar wallpaper de
+    // video"), not by Explorer. _hwnd keeps the dead handle's value, so the next TryAttach must not
+    // trust IsWindow on it -- this flag routes it straight to RecreateDestroyedHostWindow instead,
+    // and keeps TaskbarCreated (Explorer restarting) from re-attaching a host nobody wants shown.
+    private bool _detached;
+
     /// <summary>
     /// The real native handle, once <see cref="TryAttach"/> has created the window. Returns
     /// <c>nint</c>, never a CsWin32 type: CsWin32's generated Win32 types are internal to this
@@ -151,7 +157,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
             // stale handle would otherwise make every AttachToDesktop call below fail forever.
             // Checked before EnsureTaskbarMessageWindow/AttachToDesktop, which both assume _hwnd
             // is at least a live window even if not yet correctly parented.
-            if (!PInvoke.IsWindow(_hwnd))
+            if (_detached || !PInvoke.IsWindow(_hwnd))
             {
                 return RecreateDestroyedHostWindow() && EnsureTaskbarMessageWindow() && IsD3DReady();
             }
@@ -196,6 +202,41 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     }
 
     /// <summary>
+    /// Takes the host off the desktop: releases the window-bound swapchain/composition tree and
+    /// destroys the host window, so Explorer paints Windows' own wallpaper again. The D3D11 device,
+    /// its context and the composition device survive -- exactly what Explorer destroying the window
+    /// leaves behind -- so the next <see cref="TryAttach"/> recovers through the same
+    /// <see cref="RecreateDestroyedHostWindow"/> path R1 uses, on the same device the player built
+    /// its device manager on. The hidden <c>TaskbarCreated</c> receiver is kept; while detached it
+    /// ignores Explorer restarts. Idempotent, a no-op before the first attach and after
+    /// <see cref="Dispose"/>, and never throws. Must run on the thread that created the window
+    /// (the one that called <see cref="TryAttach"/>) -- <c>DestroyWindow</c> only works there.
+    /// </summary>
+    public void Detach()
+    {
+        if (_disposed || _detached || _hwnd.IsNull)
+        {
+            return;
+        }
+
+        try
+        {
+            ReleaseSwapChainResources();
+            if (PInvoke.IsWindow(_hwnd))
+            {
+                PInvoke.DestroyWindow(_hwnd);
+            }
+        }
+        catch
+        {
+            // Interface contract: never throws. Whatever was released stays released; the flag
+            // below still routes the next TryAttach through a full window recreation.
+        }
+
+        _detached = true;
+    }
+
+    /// <summary>
     /// True once the composition device AND a window-bound target/root/swapchain visual tree all
     /// exist for the CURRENT host window.
     /// </summary>
@@ -231,7 +272,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 
         if (!_hwnd.IsNull)
         {
-            PInvoke.DestroyWindow(_hwnd);
+            // Detached: _hwnd is a handle Detach already destroyed -- never destroy it twice.
+            if (!_detached)
+            {
+                PInvoke.DestroyWindow(_hwnd);
+            }
+
             _hwnd = default;
         }
 
@@ -297,6 +343,10 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
         }
 
         _hwnd = newHwnd;
+
+        // A live window again: from here on the ordinary IsWindow checks apply, whether or not the
+        // attach below succeeds (a failed one is retried against this window, as it always was).
+        _detached = false;
 
         if (!AttachToDesktop(newHwnd))
         {
@@ -1054,7 +1104,9 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
     {
         if (_taskbarCreatedMessage != 0 && msg == _taskbarCreatedMessage)
         {
-            if (!_disposed)
+            // Not while detached: the user removed the video wallpaper, and an Explorer restart
+            // must not bring its host back. A later pick re-attaches through TryAttach itself.
+            if (!_disposed && !_detached)
             {
                 TryAttach();
             }

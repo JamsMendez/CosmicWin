@@ -26,6 +26,12 @@ public enum TrayMenuEntry
     /// <summary>Opens a file picker for the MP4 that plays, looping, as the desktop wallpaper.</summary>
     VideoWallpaper,
 
+    /// <summary>
+    /// Stops the video wallpaper and takes it off the desktop, so Windows' own wallpaper shows
+    /// again, and forgets the configured path. Leaves the imported file on disk.
+    /// </summary>
+    RemoveVideoWallpaper,
+
     /// <summary>Stops and resumes the keyboard hook, and with it every chord.</summary>
     Pause,
 

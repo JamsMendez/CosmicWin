@@ -14,7 +14,8 @@ public sealed class TrayMenuController(
     Action reload, Action exit,
     Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
     Func<bool>? getTiling = null, Action<bool>? setTiling = null,
-    Action<string>? setVideoWallpaperPath = null)
+    Action<string>? setVideoWallpaperPath = null,
+    Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -115,6 +116,24 @@ public sealed class TrayMenuController(
     /// same separation <see cref="SetBorderColor"/> keeps from the colour it forwards.
     /// </remarks>
     public void SetVideoWallpaperPath(string filePath) => setVideoWallpaperPath?.Invoke(filePath);
+
+    /// <summary>
+    /// Whether a video wallpaper is configured right now. Drives the remove item's visibility: it
+    /// is shown only while this is true, re-read on every menu open because a pick or a removal can
+    /// change it between two opens.
+    /// </summary>
+    /// <remarks>
+    /// Answers NO when no getter was wired: nothing says a video is loaded, and the item is only
+    /// ever offered for one that is.
+    /// </remarks>
+    public bool HasVideoWallpaper => getHasVideoWallpaper?.Invoke() ?? false;
+
+    /// <summary>
+    /// Takes the video wallpaper away through the injected delegate: stop, off the desktop, and
+    /// forget the configured path. Forwarded, never interpreted -- the delegate owns the playback
+    /// thread, the host and the settings file, exactly as <see cref="SetVideoWallpaperPath"/>'s does.
+    /// </summary>
+    public void RemoveVideoWallpaper() => removeVideoWallpaper?.Invoke();
 
     /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();

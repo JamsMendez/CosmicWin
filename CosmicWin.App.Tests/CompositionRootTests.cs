@@ -241,6 +241,24 @@ public sealed class CompositionRootTests
         Assert.True(hook.IsPaused);
     }
 
+    /// <summary>The remove item and its greyed state reach the controller through the composition root.</summary>
+    [Fact]
+    public void BuildTrayMenuController_ForwardsRemoveVideoWallpaperAndItsConfiguredGetter()
+    {
+        using var hook = new LowLevelKeyboardHook(Channel.CreateUnbounded<HotkeyAction>().Writer);
+        var exceptionStore = new ExceptionListStore(ExceptionList.Empty);
+        var removeCount = 0;
+        var controller = CompositionRoot.BuildTrayMenuController(
+            hook, exceptionStore, () => ExceptionList.Empty, () => true, _ => { }, () => { },
+            getTiling: () => true, setTiling: _ => { },
+            removeVideoWallpaper: () => removeCount++, getHasVideoWallpaper: () => false);
+
+        controller.RemoveVideoWallpaper();
+
+        Assert.Equal(1, removeCount);
+        Assert.False(controller.HasVideoWallpaper);
+    }
+
     /// <summary>Salir's trigger -- <see cref="CompositionRoot.BuildTrayMenuController"/> wires Exit onto the injected exit action exactly once.</summary>
     [Fact]
     public void BuildTrayMenuController_Exit_InvokesInjectedExitAction_ExactlyOnce()

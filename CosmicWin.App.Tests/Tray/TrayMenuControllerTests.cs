@@ -299,4 +299,57 @@ public sealed class TrayMenuControllerTests
 
         controller.SetVideoWallpaperPath(@"C:\videos\clip.mp4");
     }
+
+    [Fact]
+    public void RemoveVideoWallpaper_InvokesInjectedDelegate_Once()
+    {
+        var removeCount = 0;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            removeVideoWallpaper: () => removeCount++);
+
+        controller.RemoveVideoWallpaper();
+
+        Assert.Equal(1, removeCount);
+    }
+
+    /// <summary>Unwired, a click on the remove item must never throw.</summary>
+    [Fact]
+    public void WithNoRemoveDelegateWired_RemoveVideoWallpaper_DoesNotThrow()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        controller.RemoveVideoWallpaper();
+    }
+
+    /// <summary>
+    /// Read through the getter on every menu open: the remove item is VISIBLE exactly when a video
+    /// is configured (hidden otherwise, not greyed), and a pick or a removal changes that between
+    /// two opens.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void HasVideoWallpaper_ReflectsTheInjectedGetter(bool configured)
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getHasVideoWallpaper: () => configured);
+
+        Assert.Equal(configured, controller.HasVideoWallpaper);
+    }
+
+    /// <summary>
+    /// Unwired, no video is known to be loaded, so the remove item stays hidden -- it is shown
+    /// only when a video wallpaper is actually configured.
+    /// </summary>
+    [Fact]
+    public void WithNoHasVideoWallpaperGetterWired_HasVideoWallpaper_IsFalse()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.False(controller.HasVideoWallpaper);
+    }
 }

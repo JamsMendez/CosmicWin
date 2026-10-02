@@ -256,6 +256,36 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
     }
 
     /// <summary>
+    /// The tray's "Quitar wallpaper de video": <see cref="Win32VideoWallpaperHost.Detach"/> takes the
+    /// host window off the desktop and drops its composition tree, and a later
+    /// <see cref="Win32VideoWallpaperHost.TryAttach"/> (picking a video again) brings back a live,
+    /// correctly-parented window on the SAME D3D11 device.
+    /// </summary>
+    [RequiresDesktopSessionFact]
+    public void Detach_RemovesTheHostWindowAndALaterTryAttachRecreatesItOnTheSameDevice()
+    {
+        using var host = new Win32VideoWallpaperHost();
+        Assert.True(host.TryAttach());
+        var firstHwnd = host.Hwnd;
+        var firstDevice = host.Device;
+
+        host.Detach();
+        host.Detach(); // idempotent
+
+        Assert.False(PInvoke.IsWindow(new HWND(firstHwnd)), "Detach should destroy the host window.");
+        Assert.False(host.IsCompositionReady);
+
+        Assert.True(host.TryAttach());
+
+        HWND newHwnd = new(host.Hwnd);
+        Assert.True(PInvoke.IsWindow(newHwnd), "TryAttach after Detach should recreate the window.");
+        Assert.True(PInvoke.IsWindowVisible(newHwnd).Value != 0);
+        Assert.Equal(ResolveExpectedDesktopParent(), PInvoke.GetParent(newHwnd));
+        Assert.Same(firstDevice, host.Device);
+        Assert.True(host.IsCompositionReady);
+    }
+
+    /// <summary>
     /// T3 (video-wallpaper-repick-and-slideshow): T2 proved live on this same raised-desktop
     /// layout that the Windows wallpaper slideshow inserts a NEW wallpaper WorkerW directly after
     /// <c>SHELLDLL_DefView</c> -- i.e. directly ABOVE the host -- every time it changes image, and

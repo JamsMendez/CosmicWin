@@ -96,6 +96,7 @@ Right-click the CosmicWin icon in the notification area.
 | **Borde de foco** | Draw CosmicWin's own focus border, or not. |
 | **Color del borde** | **Elegir...** picks a colour; **Acento del sistema** goes back to the accent colour. |
 | **Wallpaper de video...** | Pick an MP4 to loop as the desktop wallpaper — see [Video wallpaper](#video-wallpaper). |
+| **Quitar wallpaper de video** | Shown only while a video wallpaper is set. Stops it and brings back Windows' own wallpaper. |
 | **Pausar** / **Reanudar** | Stop, or restart, the keyboard hook: while paused no chord works and new windows are not tiled. |
 | **Reload** | Re-read the window exception list and `gap` from `settings.conf`. |
 | **Salir** | Exit CosmicWin. |
@@ -189,6 +190,11 @@ picked file is imported into `%LOCALAPPDATA%\CosmicWin\video-wallpaper<ext>` bef
 Either way the wallpaper keeps playing if you later move or delete the original. Re-picking
 overwrites the previous import; there is only ever one active video, recorded at
 `video-wallpaper-path` in `settings.conf`. Playback goes through Media Foundation.
+
+**Quitar wallpaper de video** stops the video, takes it off the desktop so Windows' own wallpaper
+shows again, and blanks `video-wallpaper-path`, so the video does not come back on the next start.
+The imported `video-wallpaper<ext>` file stays in `%LOCALAPPDATA%\CosmicWin`; delete it by hand if
+you want the space back. Picking a video again works as before.
 
 If Explorer restarts (a crash, or `explorer.exe /restart`), CosmicWin listens for the shell's own
 `TaskbarCreated` broadcast and re-attaches the video host to the desktop automatically, without

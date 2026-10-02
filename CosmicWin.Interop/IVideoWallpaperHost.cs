@@ -67,4 +67,15 @@ public interface IVideoWallpaperHost : IDisposable
     /// during the first successful <see cref="TryAttach"/>.
     /// </summary>
     void Present();
+
+    /// <summary>
+    /// Takes the host off the desktop so Windows' own wallpaper shows again: releases the
+    /// window-bound swapchain/composition tree and destroys the host window, keeping the D3D11
+    /// device (a player may have built resources on it). While detached, an Explorer restart
+    /// (<c>TaskbarCreated</c>) does NOT re-attach. A later <see cref="TryAttach"/> brings the host
+    /// back exactly as it recovers from a destroyed window. Idempotent; a no-op before the first
+    /// attach and after <see cref="IDisposable.Dispose"/>. Never throws. Must run on the thread
+    /// that called <see cref="TryAttach"/>, which owns the host window.
+    /// </summary>
+    void Detach();
 }

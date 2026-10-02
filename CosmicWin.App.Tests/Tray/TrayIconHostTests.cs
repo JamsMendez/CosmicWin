@@ -19,7 +19,8 @@ public sealed class TrayIconHostTests
     }
 
     /// <summary>
-    /// The mode switch first, then the border and its colour, then the pause, then the two items
+    /// The mode switch first, then the border and its colour, then the video wallpaper picker and
+    /// its remove item right after it, then the pause, then the two items
     /// that end something.
     /// </summary>
     /// <remarks>
@@ -28,7 +29,7 @@ public sealed class TrayIconHostTests
     /// in its own literal would assert nothing but its own copy.
     /// </remarks>
     [Fact]
-    public void TheMenuIsOrdered_TilingThenBorderThenVideoWallpaperThenPauseThenReloadThenExit()
+    public void TheMenuIsOrdered_TilingThenBorderThenVideoWallpaperThenRemoveVideoThenPauseThenReloadThenExit()
     {
         Assert.Equal(
             [
@@ -36,11 +37,33 @@ public sealed class TrayIconHostTests
                 TrayMenuEntry.FocusBorder,
                 TrayMenuEntry.BorderColor,
                 TrayMenuEntry.VideoWallpaper,
+                TrayMenuEntry.RemoveVideoWallpaper,
                 TrayMenuEntry.Pause,
                 TrayMenuEntry.Reload,
                 TrayMenuEntry.Exit,
             ],
             TrayIconHost.MenuOrder);
+    }
+
+    /// <summary>
+    /// "Quitar wallpaper de video" is shown only while a video wallpaper is loaded and HIDDEN (not
+    /// greyed) otherwise. The same refresh runs at construction and on every menu Opening, so the
+    /// item appears after a pick and disappears after a removal.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void RefreshRemoveVideoWallpaperItem_ShowsTheItemOnlyWhileAVideoIsLoaded(bool loaded)
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getHasVideoWallpaper: () => loaded);
+        using var item = new System.Windows.Forms.ToolStripMenuItem { Available = !loaded };
+
+        TrayIconHost.RefreshRemoveVideoWallpaperItem(item, controller);
+
+        Assert.Equal(loaded, item.Available);
+        Assert.True(item.Enabled);
     }
 
     /// <summary>Every entry the menu knows about is placed. A new one must not be silently dropped.</summary>

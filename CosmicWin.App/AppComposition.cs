@@ -347,6 +347,12 @@ public sealed class AppComposition : IDisposable
         // set on the UI thread, cleared on the video-wallpaper thread.
         var videoWallpaperKeepAlivePending = new VolatileFlag();
 
+        // Whether a video wallpaper is CONFIGURED (a path is set), as opposed to genuinely playing
+        // (videoWallpaperActive). Read on the UI thread by the tray's menu Opening to decide whether
+        // "Quitar wallpaper de video" is shown at all; written wherever the configured path changes
+        // (a successful pick, a removal), on the video wallpaper thread -- hence a VolatileFlag.
+        var videoWallpaperConfigured = new VolatileFlag { Value = videoWallpaperPath is not null };
+
         void ActivateVideoWallpaper(string phase, string path)
         {
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
@@ -445,6 +451,7 @@ public sealed class AppComposition : IDisposable
 
                 persistVideoWallpaperPath?.Invoke(imported);
                 currentVideoWallpaperPath = imported;
+                videoWallpaperConfigured.Value = true;
 
                 // (Re)start playback with the IMPORTED path -- never the raw one the caller
                 // passed in, since that is what actually landed on disk. Handles both the
@@ -453,6 +460,54 @@ public sealed class AppComposition : IDisposable
                 // idempotent and TryPlay is documented to tear down and restart cleanly, so
                 // there is no need to branch on whether this is the first attach.
                 ActivateVideoWallpaper("pick", imported);
+            });
+        }
+
+        /// <summary>
+        /// "Quitar wallpaper de video": stop playback, take the host off the desktop so Windows' own
+        /// wallpaper shows again, and persist a BLANK path (<see cref="string.Empty"/>) so neither the
+        /// next start nor Reload brings the video back. The imported file is left on disk on purpose.
+        /// Removing with nothing configured is harmless: Stop and Detach are both idempotent no-ops
+        /// then, and the blank path is persisted regardless. Traces <c>phase=remove</c>.
+        /// </summary>
+        /// <remarks>
+        /// One work item on the SAME video wallpaper thread as <see cref="SwitchVideoWallpaper"/>, so
+        /// a removal and a pick run strictly in the order they were clicked and never interleave.
+        /// <c>currentVideoWallpaperPath</c> is cleared too, so a later pick whose import fails has
+        /// nothing to "restore" and cannot resurrect the video the user just removed.
+        /// </remarks>
+        void RemoveVideoWallpaper()
+        {
+            if (videoWallpaperHost is null || videoWallpaperPlayer is null)
+            {
+                // Nothing to stop or detach -- only the setting to forget, the same inline shape the
+                // collaborator-less pick path uses.
+                desktopTrace?.Record(
+                    $"video-wallpaper phase=remove wasConfigured={videoWallpaperConfigured.Value} wasActive=False");
+                persistVideoWallpaperPath?.Invoke(string.Empty);
+                videoWallpaperConfigured.Value = false;
+                return;
+            }
+
+            onVideoWallpaperThread(() =>
+            {
+                var wasConfigured = currentVideoWallpaperPath is not null;
+                var wasActive = videoWallpaperActive.Value;
+
+                videoWallpaperPlayer.Stop();
+
+                // Down BEFORE the detach: the watch tick reads this to decide whether to post a
+                // keep-alive TryAttach, and a keep-alive is exactly what would put the host back.
+                // One already queued behind this item re-checks the flag before attaching.
+                videoWallpaperActive.Value = false;
+                videoWallpaperHost.Detach();
+
+                persistVideoWallpaperPath?.Invoke(string.Empty);
+                currentVideoWallpaperPath = null;
+                videoWallpaperConfigured.Value = false;
+
+                desktopTrace?.Record(
+                    $"video-wallpaper phase=remove wasConfigured={wasConfigured} wasActive={wasActive}");
             });
         }
 
@@ -834,6 +889,7 @@ public sealed class AppComposition : IDisposable
                     // callback exercises.
                     var importedInline = importVideoWallpaper(path);
                     persistVideoWallpaperPath?.Invoke(importedInline);
+                    videoWallpaperConfigured.Value = true;
                     return;
                 }
 
@@ -853,7 +909,9 @@ public sealed class AppComposition : IDisposable
             reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap),
             // T11: so a throwing half of Reload is reported the same way every
             // other recoverable per-tick failure in this file already is, instead of vanishing.
-            desktopTrace: desktopTrace);
+            desktopTrace: desktopTrace,
+            removeVideoWallpaper: RemoveVideoWallpaper,
+            getHasVideoWallpaper: () => videoWallpaperConfigured.Value);
         // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
         // flip. Everything that makes the switch honest -- persisting it, and putting the layout
         // back when it comes on -- lives in the setTiling closure above, and a chord reaching past
@@ -1379,6 +1437,15 @@ public sealed class AppComposition : IDisposable
                 onVideoWallpaperThread(() =>
                 {
                     videoWallpaperKeepAlivePending.Value = false;
+
+                    // Re-checked HERE, on the video wallpaper thread: the tick saw the flag up on
+                    // the UI thread, but a removal queued ahead of this item may have run since,
+                    // and re-attaching now would put the removed video's host back on the desktop.
+                    if (!videoWallpaperActive.Value)
+                    {
+                        return;
+                    }
+
                     // A transient attach failure must not disable the next watch tick's retry.
                     // Activation/Stop own the playback flag; keep-alive only restores attachment.
                     videoWallpaperHost.TryAttach();
@@ -1553,7 +1620,10 @@ public sealed class AppComposition : IDisposable
             persistBorderColor: rgb => settingsStore.Update(s => s with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
-            persistVideoWallpaperPath: path => settingsStore.Update(s => s with { VideoWallpaperPath = path }),
+            // A blank path is the tray removal's "no video": stored as null, the same value a
+            // never-configured machine has, so the settings file writes an empty key.
+            persistVideoWallpaperPath: path => settingsStore.Update(
+                s => s with { VideoWallpaperPath = path.Length == 0 ? null : path }),
             // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
             // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
             // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.

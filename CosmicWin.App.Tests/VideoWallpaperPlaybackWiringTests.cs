@@ -99,6 +99,14 @@ public sealed class VideoWallpaperPlaybackWiringTests
         {
         }
 
+        public int DetachCallCount { get; private set; }
+
+        public void Detach()
+        {
+            DetachCallCount++;
+            events?.Add("host.Detach");
+        }
+
         public void Dispose()
         {
             DisposeCallCount++;
@@ -741,6 +749,261 @@ public sealed class VideoWallpaperPlaybackWiringTests
 
             Assert.Equal(1, player.StopCallCount);
             Assert.Equal([path], imports);
+        }
+    }
+
+    /// <summary>
+    /// "Quitar wallpaper de video": after a pick, removing stops playback, takes the host off the
+    /// desktop (so Windows' own wallpaper shows again) and persists a blank path so neither the next
+    /// start nor Reload brings the video back.
+    /// </summary>
+    [Fact]
+    public void RemovingAfterAPick_StopsDetachesPersistsBlankAndTraces()
+    {
+        var events = new List<string>();
+        var host = new FakeVideoWallpaperHost(events);
+        var player = new FakeVideoWallpaperPlayer(events);
+        var persisted = new List<string>();
+        var trace = new RecordingDesktopTrace();
+        var imported = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, desktopTrace: trace,
+            importVideoWallpaper: _ => imported, persistVideoWallpaperPath: persisted.Add);
+        using (harness.Composition)
+        {
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+            events.Clear();
+
+            harness.Tray.RemoveVideoWallpaper();
+
+            Assert.Equal(["player.Stop", "host.Detach"], events);
+            Assert.Equal([imported, string.Empty], persisted);
+            Assert.Equal(
+                "video-wallpaper phase=remove wasConfigured=True wasActive=True",
+                trace.Lines[^1]);
+        }
+    }
+
+    [Fact]
+    public void RemovingAnActiveVideo_ReconcileTickPostsNoKeepAlive()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke(); // drains startup activation
+
+            harness.Tray.RemoveVideoWallpaper();
+            Assert.Single(queued);
+            queued.Dequeue().Invoke();
+
+            scheduler.Fire();
+
+            Assert.Empty(queued);
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, host.DetachCallCount);
+        }
+    }
+
+    /// <summary>
+    /// The tick reads the active flag on the UI thread, so it can post a keep-alive while a removal
+    /// is already queued ahead of it. That keep-alive must not bring the detached host back.
+    /// </summary>
+    [Fact]
+    public void KeepAliveQueuedBehindARemoval_DoesNotReattach()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke(); // drains startup activation
+
+            harness.Tray.RemoveVideoWallpaper();
+            scheduler.Fire();
+            Assert.Equal(2, queued.Count);
+
+            while (queued.Count > 0)
+            {
+                queued.Dequeue().Invoke();
+            }
+
+            Assert.Equal(1, host.TryAttachCallCount);
+            Assert.Equal(1, host.DetachCallCount);
+        }
+    }
+
+    [Fact]
+    public void PickingAfterARemoval_AttachesAndPlaysAgainAndTheKeepAliveResumes()
+    {
+        var scheduler = new Scheduler();
+        var queued = new Queue<Action>();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var persisted = new List<string>();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            scheduleVideoWallpaperWork: queued.Enqueue, scheduleReconcile: scheduler.Schedule,
+            importVideoWallpaper: _ => path, persistVideoWallpaperPath: persisted.Add);
+        using (harness.Composition)
+        {
+            queued.Dequeue().Invoke(); // drains startup activation
+            harness.Tray.RemoveVideoWallpaper();
+            queued.Dequeue().Invoke();
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+            queued.Dequeue().Invoke();
+
+            Assert.Equal(2, host.TryAttachCallCount);
+            Assert.Equal(2, player.TryPlayCallCount);
+            Assert.Equal(path, player.LastVideoPath);
+            Assert.Equal([string.Empty, path], persisted);
+            Assert.True(harness.Tray.HasVideoWallpaper);
+
+            scheduler.Fire();
+
+            Assert.Single(queued);
+        }
+    }
+
+    /// <summary>Nothing configured: removing touches nothing on screen but still persists blank.</summary>
+    [Fact]
+    public void RemovingWithNoVideo_PlaysNothingAndOnlyPersistsBlank()
+    {
+        var scheduler = new Scheduler();
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var persisted = new List<string>();
+        var trace = new RecordingDesktopTrace();
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: null,
+            persistVideoWallpaperPath: persisted.Add, desktopTrace: trace,
+            scheduleReconcile: scheduler.Schedule);
+        using (harness.Composition)
+        {
+            Assert.False(harness.Tray.HasVideoWallpaper);
+
+            var exception = Record.Exception(harness.Tray.RemoveVideoWallpaper);
+            scheduler.Fire();
+
+            Assert.Null(exception);
+            Assert.Equal(0, host.TryAttachCallCount);
+            Assert.Equal(0, player.TryPlayCallCount);
+            Assert.Equal([string.Empty], persisted);
+            Assert.Equal(
+                ["video-wallpaper phase=remove wasConfigured=False wasActive=False"],
+                trace.Lines);
+        }
+    }
+
+    /// <summary>No playback collaborators wired: the removal still forgets the configured path.</summary>
+    [Fact]
+    public void RemovingWithNoCollaboratorsWired_PersistsBlankAndDoesNotThrow()
+    {
+        var persisted = new List<string>();
+
+        var harness = Wire(
+            videoWallpaperPath: @"C:\Users\me\AppData\Local\CosmicWin\video-wallpaper.mp4",
+            persistVideoWallpaperPath: persisted.Add);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Tray.HasVideoWallpaper);
+
+            harness.Tray.RemoveVideoWallpaper();
+
+            Assert.Equal([string.Empty], persisted);
+            Assert.False(harness.Tray.HasVideoWallpaper);
+        }
+    }
+
+    [Fact]
+    public void HasVideoWallpaper_FollowsStartupRemovalAndPick()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: _ => path);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Tray.HasVideoWallpaper);
+
+            harness.Tray.RemoveVideoWallpaper();
+            Assert.False(harness.Tray.HasVideoWallpaper);
+
+            harness.Tray.SetVideoWallpaperPath(path);
+            Assert.True(harness.Tray.HasVideoWallpaper);
+        }
+    }
+
+    /// <summary>
+    /// The removed video is forgotten as a fallback too: a later pick whose import fails has nothing
+    /// to restore, rather than resurrecting the video the user just took away.
+    /// </summary>
+    [Fact]
+    public void PickAfterRemoval_WhenImportThrows_DoesNotRestoreTheRemovedVideo()
+    {
+        var host = new FakeVideoWallpaperHost();
+        var player = new FakeVideoWallpaperPlayer();
+        var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
+
+        var harness = Wire(
+            videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
+            importVideoWallpaper: _ => throw new IOException("sharing violation"));
+        using (harness.Composition)
+        {
+            harness.Tray.RemoveVideoWallpaper();
+
+            harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
+
+            Assert.Equal(1, player.TryPlayCallCount);
+            Assert.Equal(1, host.TryAttachCallCount);
+        }
+    }
+
+    /// <summary>The maintainer deletes the imported file by hand; removing must leave it on disk.</summary>
+    [Fact]
+    public void Removing_LeavesTheImportedFileOnDisk()
+    {
+        var imported = Path.Combine(Path.GetTempPath(), $"cosmicwin-remove-{Guid.NewGuid():N}.mp4");
+        File.WriteAllText(imported, "not really a video");
+        try
+        {
+            var host = new FakeVideoWallpaperHost();
+            var player = new FakeVideoWallpaperPlayer();
+
+            var harness = Wire(
+                videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: imported);
+            using (harness.Composition)
+            {
+                harness.Tray.RemoveVideoWallpaper();
+
+                Assert.Equal(1, host.DetachCallCount);
+                Assert.True(File.Exists(imported));
+            }
+        }
+        finally
+        {
+            File.Delete(imported);
         }
     }
 }

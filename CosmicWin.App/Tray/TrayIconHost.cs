@@ -72,6 +72,12 @@ public sealed class TrayIconHost : IDisposable
         var videoWallpaperItem = new ToolStripMenuItem("Wallpaper de video...");
         videoWallpaperItem.Click += (_, _) => PickVideoWallpaper(controller);
 
+        // Shown only while a video is loaded -- HIDDEN, not greyed, otherwise. Refreshed here and on
+        // every Opening below, so it appears after a pick and disappears after a removal.
+        var removeVideoWallpaperItem = new ToolStripMenuItem("Quitar wallpaper de video");
+        removeVideoWallpaperItem.Click += (_, _) => controller.RemoveVideoWallpaper();
+        RefreshRemoveVideoWallpaperItem(removeVideoWallpaperItem, controller);
+
         var reloadItem = new ToolStripMenuItem("Reload")
         {
             Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
@@ -98,6 +104,7 @@ public sealed class TrayIconHost : IDisposable
             [TrayMenuEntry.FocusBorder] = borderItem,
             [TrayMenuEntry.BorderColor] = colorItem,
             [TrayMenuEntry.VideoWallpaper] = videoWallpaperItem,
+            [TrayMenuEntry.RemoveVideoWallpaper] = removeVideoWallpaperItem,
             [TrayMenuEntry.Pause] = _pauseItem,
             [TrayMenuEntry.Reload] = reloadItem,
             [TrayMenuEntry.Exit] = exitItem,
@@ -113,7 +120,11 @@ public sealed class TrayIconHost : IDisposable
         // the tick for the click it just handled; this is what keeps it true for every flip it did
         // not. A tick left saying "on" over a window manager that stopped tiling is worse than no
         // tick at all -- and this item exists to say what the mode IS.
-        menu.Opening += (_, _) => tilingItem.Checked = controller.IsTilingEnabled;
+        menu.Opening += (_, _) =>
+        {
+            tilingItem.Checked = controller.IsTilingEnabled;
+            RefreshRemoveVideoWallpaperItem(removeVideoWallpaperItem, controller);
+        };
 
         _ownedIcon = LoadTrayIcon();
         _icon = new NotifyIcon
@@ -153,6 +164,14 @@ public sealed class TrayIconHost : IDisposable
     public static string PauseLabel(bool isPaused) => isPaused ? "Reanudar" : "Pausar";
 
     /// <summary>
+    /// Shows the remove item only while a video wallpaper is loaded. <see cref="ToolStripItem.Available"/>
+    /// rather than <c>Visible</c>: it is the placed-or-not state itself, readable before the menu
+    /// is ever shown, where <c>Visible</c> also folds in whether the parent menu is on screen.
+    /// </summary>
+    internal static void RefreshRemoveVideoWallpaperItem(ToolStripItem item, TrayMenuController controller) =>
+        item.Available = controller.HasVideoWallpaper;
+
+    /// <summary>
     /// The order the items appear in: the mode switch first, then the border and its colour, then
     /// the video wallpaper picker, then the pause, then the two that end something.
     /// </summary>
@@ -165,6 +184,7 @@ public sealed class TrayIconHost : IDisposable
     /// VideoWallpaper sits right after BorderColor: the two are the menu's visual-customization
     /// items, and both open a picker rather than flip a switch -- unlike Tiling/FocusBorder, which
     /// state a mode, or Pause/Reload/Exit, which do something to the running process.
+    /// RemoveVideoWallpaper follows the picker it undoes, and is only shown while a video is loaded.
     /// </remarks>
     /// <remarks>
     /// The constructor ADDS its items by walking this list, which is what makes it the decision
@@ -178,6 +198,7 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.FocusBorder,
         TrayMenuEntry.BorderColor,
         TrayMenuEntry.VideoWallpaper,
+        TrayMenuEntry.RemoveVideoWallpaper,
         TrayMenuEntry.Pause,
         TrayMenuEntry.Reload,
         TrayMenuEntry.Exit,

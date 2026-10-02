@@ -40,5 +40,9 @@ internal sealed class FakeVideoWallpaperHost : IVideoWallpaperHost
 
     public void Present() => PresentCallCount++;
 
+    public int DetachCallCount { get; private set; }
+
+    public void Detach() => DetachCallCount++;
+
     public void Dispose() => DisposeCallCount++;
 }
