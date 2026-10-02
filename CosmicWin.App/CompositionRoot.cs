@@ -111,12 +111,12 @@ public static class CompositionRoot
     /// and the cost of dropping them is higher still: the controller answers "tiling is on" when it
     /// is not wired, so a silent omission would leave the user with a menu item that ticks itself
     /// back on and a window manager that never stopped tiling.
-    /// <paramref name="reloadGap"/> is T5's (alert-tile-mosaic) settings-reload hook: invoked
+    /// <paramref name="reloadGap"/> is T5's settings-reload hook: invoked
     /// ALONGSIDE the exception-list reload above, on the SAME WE-3 trigger -- there is no second
     /// menu item, "Reload" reloads everything settings.conf carries. Optional, and unset (every
     /// caller before this parameter existed) leaves Reload doing exactly what it always did:
     /// exceptions only. <paramref name="desktopTrace"/> is where a failing half of Reload is
-    /// reported (T11, alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure) --
+    /// reported (T11, review R3-reload-gap-skipped-on-exception-failure) --
     /// optional, same as every other trace sink in this codebase, so a caller without one loses
     /// nothing but the trace line itself (the failure then goes to <see cref="Trace"/> instead).
     /// </summary>
@@ -141,16 +141,15 @@ public static class CompositionRoot
             setVideoWallpaperPath);
 
     /// <summary>
-    /// T11 (alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure): the exception-list
+    /// T11 (review R3-reload-gap-skipped-on-exception-failure): the exception-list
     /// reload and the gap reload are two independent things that happen to share one tray trigger --
     /// before this, they were two statements in a row, so a throwing <paramref name="loadExceptions"/>
     /// propagated straight out and <paramref name="reloadGap"/> never ran (and the reverse: a
     /// throwing <paramref name="reloadGap"/> would have looked identical from the caller's side, since
     /// by then the exceptions reload had already succeeded, but nothing recorded WHICH half failed).
     /// Each half now runs in its OWN try/catch, so one failing half costs only itself, and each
-    /// failure is traced (never silently swallowed) the same way
-    /// <c>AppComposition.UpdateAlertOverlay</c> already reports its own recoverable per-tick
-    /// failures.
+    /// failure is traced (never silently swallowed), the same way <c>AppComposition</c> reports its
+    /// other recoverable per-tick failures.
     /// </summary>
     private static void Reload(
         ExceptionListStore exceptions, Func<ExceptionList> loadExceptions, Action? reloadGap,

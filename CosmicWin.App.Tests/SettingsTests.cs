@@ -20,7 +20,6 @@ public sealed class SettingsTests
         var settings = Settings.Parse(string.Empty);
 
         Assert.True(settings.FocusBorder);
-        Assert.True(settings.AlertsEnabled);
         Assert.Equal(Settings.Default, settings);
     }
 
@@ -59,7 +58,7 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// <c>gap</c> USED to be the unknown key this fact exercised, before T5 (alert-tile-mosaic) gave
+    /// <c>gap</c> USED to be the unknown key this fact exercised, before T5 gave
     /// it a real meaning -- rewritten to a key nothing will ever recognise, so this still proves
     /// what it always proved (an unknown key costs nothing, the known one beside it still lands)
     /// instead of quietly becoming a second <c>gap</c> test.
@@ -280,57 +279,8 @@ public sealed class SettingsTests
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
 
-    [Theory]
-    [InlineData("alerts = off")]
-    [InlineData("alerts-enabled=off")]
-    [InlineData("  ALERTS-ENABLED   =   Off  ")]
-    [InlineData("alerts-enabled = false")]
-    [InlineData("alerts-enabled = 0")]
-    public void AlertsAreTurnedOff_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.False(Settings.Parse(line).AlertsEnabled);
-    }
-
-    [Theory]
-    [InlineData("alerts-enabled = on")]
-    [InlineData("alerts-enabled = true")]
-    [InlineData("alerts-enabled = 1")]
-    public void AlertsAreTurnedOn_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.True(Settings.Parse(line).AlertsEnabled);
-    }
-
-    [Theory]
-    [InlineData("alerts-enabled = perhaps")]
-    [InlineData("alerts-enabled =")]
-    [InlineData("alerts-enabled")]
-    public void AnUnreadableAlertsValue_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.True(Settings.Parse(line).AlertsEnabled);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void SerializeThenParse_RoundTripsTheAlertsSwitch(bool alertsEnabled)
-    {
-        var original = new Settings(FocusBorder: true, BorderColor: null, Tiling: true,
-            VideoWallpaperPath: null, AlertsEnabled: alertsEnabled);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    [Fact]
-    public void Serialize_IncludesTheAlertsSwitchAndComment()
-    {
-        var serialized = new Settings(FocusBorder: true, AlertsEnabled: false).Serialize();
-
-        Assert.Contains("# alerts:", serialized, StringComparison.Ordinal);
-        Assert.Contains("alerts = off", serialized, StringComparison.Ordinal);
-    }
-
     /// <summary>
-    /// T5 (alert-tile-mosaic, maintainer decision 2026-09-26): <see cref="TreeArranger.DefaultGap"/>
+    /// T5 (maintainer decision 2026-09-26): <see cref="TreeArranger.DefaultGap"/>
     /// unless the file says otherwise, the exact value <c>TreeArranger.Gap</c> was hard-set to before
     /// this key existed -- a settings file that has never been written must draw the same gap it
     /// always did.
@@ -459,40 +409,35 @@ public sealed class SettingsTests
 
         Assert.True(d.FocusBorder);
         Assert.True(d.Tiling);
-        Assert.True(d.AlertsEnabled);
         Assert.Equal(d, Settings.Parse(string.Empty));
     }
 
-    [Fact]
-    public void EachNewKey_IsParsed()
-    {
-        var settings = Settings.Parse("alerts = off");
-
-        Assert.False(settings.AlertsEnabled);
-    }
-
-    [Fact]
-    public void EachLegacyAlias_IsStillParsed()
-    {
-        var settings = Settings.Parse("alerts-enabled = off");
-
-        Assert.False(settings.AlertsEnabled);
-    }
-
+    /// <summary>
+    /// strip-to-tiling-video (T5): the alert layer is gone, and with it the <c>alerts</c> switch and
+    /// its legacy name <c>alerts-enabled</c>. An old settings.conf that still carries either must load
+    /// without error: every one of those lines is ignored, whatever its value.
+    /// </summary>
     [Theory]
+    [InlineData("alerts = off")]
+    [InlineData("alerts = on")]
+    [InlineData("alerts-enabled=off")]
+    [InlineData("  ALERTS-ENABLED   =   Off  ")]
+    [InlineData("alerts-enabled = perhaps")]
+    [InlineData("alerts-enabled")]
     [InlineData("alerts = off\nalerts-enabled = on")]
-    [InlineData("alerts-enabled = on\nalerts = off")]
-    public void NewAlertsKeyWins_InEitherLineOrder(string content)
+    public void RetiredAlertLines_AreAcceptedAndIgnored(string content)
     {
-        Assert.False(Settings.Parse(content).AlertsEnabled);
+        Assert.Equal(Settings.Default, Settings.Parse(content));
     }
 
     [Fact]
-    public void AnUnreadableNewKey_DoesNotShadowAReadableLegacyOne()
+    public void RetiredAlertLines_DoNotDisturbTheSettingsAroundThem()
     {
-        var settings = Settings.Parse("alerts = perhaps\nalerts-enabled = off");
+        var settings = Settings.Parse("tiling = off\nalerts = off\nalerts-enabled = on\ngap = 7");
 
-        Assert.False(settings.AlertsEnabled);
+        Assert.False(settings.Tiling);
+        Assert.Equal(7, settings.Gap);
+        Assert.Equal(Settings.Default with { Tiling = false, Gap = 7 }, settings);
     }
 
     /// <summary>
@@ -530,7 +475,6 @@ public sealed class SettingsTests
             + "alert-http = on\nalert-http-port = 7001\ngap = 12");
 
         Assert.False(settings.FocusBorder);
-        Assert.False(settings.AlertsEnabled);
         Assert.Equal(12, settings.Gap);
     }
 
@@ -544,9 +488,9 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "gap"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap"],
             keys);
-        foreach (var legacy in new[] { "alerts-enabled", "alert-http =", "alert-http-port", "video-wallpaper-http",
+        foreach (var legacy in new[] { "alerts", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",
                      "wallpaper-scene", "wallpaper-fps" })
         {
@@ -569,7 +513,6 @@ public sealed class SettingsTests
         var reparsed = Settings.Parse(legacy.Serialize());
 
         Assert.Equal(legacy, reparsed);
-        Assert.True(reparsed.AlertsEnabled);
         Assert.Equal(Settings.Default, reparsed);
     }
 }

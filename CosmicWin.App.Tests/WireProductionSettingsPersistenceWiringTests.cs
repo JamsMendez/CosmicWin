@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace CosmicWin.App.Tests.Alerts;
+namespace CosmicWin.App.Tests;
 
 /// <summary>
 /// S10 (wallpaper-scene-http-endpoint, R3-production-loadorcreate-wiring-untested): proves
@@ -9,7 +9,7 @@ namespace CosmicWin.App.Tests.Alerts;
 /// missing file -- rather than the side-effect-free <see cref="SettingsFile.Load()"/>.
 /// </summary>
 /// <remarks>
-/// <c>WireProduction</c> constructs real Win32/WebView2 collaborators and is not exercised directly by any test in this
+/// <c>WireProduction</c> constructs real Win32 collaborators and is not exercised directly by any test in this
 /// project, so a source-text check is what can be honestly claimed here, not a behavioural guarantee.
 /// The review finding this pins (S8/S9 review, 2026-09-27) was that nothing actually proved
 /// <c>WireProduction</c> calls <c>LoadOrCreate</c> rather than <c>Load</c> -- both compile, both
@@ -20,7 +20,7 @@ public sealed class WireProductionSettingsPersistenceWiringTests
     private static string ReadAppCompositionSource([CallerFilePath] string testFilePath = "")
     {
         var testProjectDir = Path.GetDirectoryName(testFilePath)!;
-        var path = Path.GetFullPath(Path.Combine(testProjectDir, "..", "..", "CosmicWin.App", "AppComposition.cs"));
+        var path = Path.GetFullPath(Path.Combine(testProjectDir, "..", "CosmicWin.App", "AppComposition.cs"));
         return File.ReadAllText(path);
     }
 

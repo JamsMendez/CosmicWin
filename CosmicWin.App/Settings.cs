@@ -23,12 +23,9 @@ namespace CosmicWin.App;
 /// for none -- which is what every machine has before anyone has picked a video, and a legitimate
 /// way to run this app forever, not a half-configured one.
 /// </param>
-/// <param name="AlertsEnabled">
-/// Whether live alert commands are accepted over the named pipe and drawn over the wallpaper. Settings key <c>alerts</c> (legacy: <c>alerts-enabled</c>).
-/// </param>
 /// <param name="Gap">
-/// Whole pixels of space CosmicWin draws around and between tiled windows, and around and between an
-/// alert's tiles -- the SAME value drives both (<c>TreeArranger.Gap</c>). Whole pixels 0-64;
+/// Whole pixels of space CosmicWin draws around and between tiled windows (<c>TreeArranger.Gap</c>).
+/// Whole pixels 0-64;
 /// defaults to <see cref="TreeArranger.DefaultGap"/>, the value <c>TreeArranger.Gap</c> was hard-set
 /// to before this was a settings key at all.
 /// </param>
@@ -50,8 +47,7 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, bool AlertsEnabled = true,
-    int Gap = TreeArranger.DefaultGap)
+    string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -69,10 +65,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string VideoWallpaperPathKey = "video-wallpaper-path";
 
-    private const string AlertsKey = "alerts";
-
-    private const string LegacyAlertsKey = "alerts-enabled";
-
     private const string GapKey = "gap";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
@@ -85,13 +77,12 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// <remarks>
     /// The LAST assignment of a key wins. A file appended to twice is a thing that happens, and
     /// reading it as its most recent line is the only answer that matches what an editor shows.
-    /// The legacy key name <c>alerts-enabled</c> is still read, but when a file carries both it and
-    /// <c>alerts</c> the NEW key wins whatever the line order. <c>http-server</c>,
-    /// <c>http-server-port</c>, <c>alert-http</c>, <c>alert-http-port</c>, <c>video-wallpaper-http</c>,
+    /// <c>alerts</c>, <c>alerts-enabled</c>, <c>http-server</c>, <c>http-server-port</c>,
+    /// <c>alert-http</c>, <c>alert-http-port</c>, <c>video-wallpaper-http</c>,
     /// <c>wallpaper-scene-http</c>, <c>mini-position</c>, <c>mini-corner</c>, <c>wallpaper-mode</c>,
     /// <c>wallpaper-scene</c> and <c>wallpaper-fps</c> no longer exist: they are skipped like any
-    /// unknown key. There is no local HTTP server any more. There is no wallpaper mode any more -- the
-    /// video plays whenever <c>video-wallpaper-path</c> is set.
+    /// unknown key. There are no alerts and no local HTTP server any more. There is no wallpaper mode
+    /// any more -- the video plays whenever <c>video-wallpaper-path</c> is set.
     /// </remarks>
     public static Settings Parse(string content)
     {
@@ -99,7 +90,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var borderColor = Default.BorderColor;
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
-        bool? alerts = null, legacyAlerts = null;
         var gap = Default.Gap;
 
         foreach (var rawLine in content.Split('\n'))
@@ -145,31 +135,20 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 videoWallpaperPath = value;
             }
-            else if (key.Equals(AlertsKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var alertsFlag))
-            {
-                alerts = alertsFlag;
-            }
-            else if (key.Equals(LegacyAlertsKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadFlag(value, out var legacyAlertsFlag))
-            {
-                legacyAlerts = legacyAlertsFlag;
-            }
             else if (key.Equals(GapKey, StringComparison.OrdinalIgnoreCase)
                 && TryReadGap(value, out var gapValue))
             {
                 gap = gapValue;
             }
-            // http-server / http-server-port and their legacy alert-http / alert-http-port names (the
-            // retired local HTTP server), video-wallpaper-http and wallpaper-scene-http (its
+            // alerts / alerts-enabled (the retired alert layer), http-server / http-server-port and
+            // their legacy alert-http / alert-http-port names (the retired local HTTP server),
+            // video-wallpaper-http and wallpaper-scene-http (its
             // per-route toggles), mini-position / mini-corner (the retired mini scene window) and
             // wallpaper-mode / wallpaper-scene / wallpaper-fps (the retired html wallpaper) no longer
             // exist. Deliberately no branch -- the line is skipped like any other unknown key.
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath,
-            alerts ?? legacyAlerts ?? Default.AlertsEnabled,
-            gap);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -190,11 +169,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # or blank for none.
          {VideoWallpaperPathKey} = {VideoWallpaperPath ?? ""}
 
-         # {AlertsKey}: on to accept live alert commands (named pipe), off to ignore them.
-         {AlertsKey} = {(AlertsEnabled ? "on" : "off")}
-
-         # {GapKey}: whole pixels of space around and between tiled windows, and around and between
-         # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
+         # {GapKey}: whole pixels of space around and between tiled windows. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;

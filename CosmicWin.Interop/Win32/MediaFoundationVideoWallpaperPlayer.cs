@@ -73,173 +73,13 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopJoinTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly TimeProvider _timeProvider;
-
     private Thread? _workerThread;
     private ManualResetEventSlim? _stopSignal;
 
     private volatile IMFMediaEngine? _engine;
     private volatile MediaEngineNotify? _notify;
 
-    // Serialize shake replacement with transform updates: an expired tick must not clear a
-    // newer shake's transform after the UI thread restarts it.
-    private readonly object _shakeGate = new();
-    private ShakeState? _shakeState;
-    private IVideoWallpaperHost? _shakeHost;
-
     private bool _disposed;
-
-    // See-through tint (see-through-video-tint S3). Constructing the driver creates no GPU object.
-    private static readonly TimeSpan TintFailureBackoff = TimeSpan.FromSeconds(5);
-    private readonly VideoTintDriver _tint;
-
-    /// <param name="timeProvider">Clock for the shake and the tint back-off.</param>
-    /// <param name="onTintDiagnostic">
-    /// Optional trace sink (called on the worker thread) for the tint pass: <c>video-tint failed ...</c>
-    /// once per back-off window, <c>video-tint retry</c>, <c>video-tint recovered</c>. HRESULT and
-    /// exception type only, never a message.
-    /// </param>
-    public MediaFoundationVideoWallpaperPlayer(TimeProvider? timeProvider = null, Action<string>? onTintDiagnostic = null)
-    {
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _tint = new VideoTintDriver(_timeProvider, static () => new D2DVideoTintRenderer(), TintFailureBackoff, onTintDiagnostic);
-        _tint.Rendered += () => TintRendered?.Invoke();
-        _tint.Lost += () => TintLost?.Invoke();
-    }
-
-    /// <summary>
-    /// Raised on the worker thread when the requested tint first actually reached the back buffer (and
-    /// again after a <see cref="TintLost"/> recovery). Not raised for a request that was cleared or
-    /// replaced meanwhile. Subscribers must be quick and must not call back into the player.
-    /// </summary>
-    public event Action? TintRendered;
-
-    /// <summary>
-    /// Raised on the worker thread when a tint that had been rendering stopped (the pass failed and
-    /// backed off); the video is untinted until <see cref="TintRendered"/> fires again.
-    /// </summary>
-    public event Action? TintLost;
-
-    /// <summary>
-    /// While set, the pixels covered by <paramref name="maskAlpha"/> show the video tinted by
-    /// luminance: output = luma(video) * (<paramref name="r"/>, <paramref name="g"/>, <paramref name="b"/>),
-    /// blended by the mask value (0 = untouched video, 255 = fully tinted, in between = soft edge).
-    /// </summary>
-    /// <param name="maskAlpha">
-    /// 8 bits per pixel, row-major, tightly packed (<c>width * height</c> bytes), top row first. Any
-    /// size works; it is scaled (nearest neighbour) to the video back buffer, though a mask of the
-    /// back buffer's own pixel size avoids the resample. The bytes are copied before this returns.
-    /// </param>
-    /// <remarks>
-    /// Callable from any thread. The worker thread picks the latest request up at its next tick (a
-    /// later call replaces an earlier one). No GPU object exists until the first request and all are
-    /// released by <see cref="ClearTint"/>; with no request the frame path is exactly the untinted one.
-    /// A Direct2D failure never reaches the caller: the video keeps playing untinted and the pass is
-    /// retried after a back-off.
-    /// </remarks>
-    /// <exception cref="ArgumentException">The size is not positive or does not match the mask length.</exception>
-    public void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b)
-    {
-        _tint.Set(new VideoTintRequest(maskAlpha.Span, width, height, r, g, b));
-    }
-
-    /// <summary>Removes the tint; the worker releases its Direct2D objects at the next tick. Callable from any thread.</summary>
-    public void ClearTint() => _tint.Clear();
-
-    /// <summary>Test-only observability: whether a tint is currently requested.</summary>
-    internal bool IsTintRequestedForTests => _tint.IsEngaged;
-
-    /// <summary>
-    /// Starts (or restarts) a native shake of the video, matching the alert page's own dropped
-    /// canvas shake (<c>applyFailureShake</c>, T1's remarks) for the `failed` kind -- the video
-    /// itself shakes instead. <paramref name="duration"/> bounds how long this player keeps applying
-    /// an effect at all; the effect's own decay always reaches identity by
-    /// <see cref="VideoShakeMath.DurationMilliseconds"/> regardless (see
-    /// <see cref="VideoShakeMath.Compute"/>) -- production wiring always passes exactly that many
-    /// milliseconds, matching the page's own <c>shakeMs</c> constant. Calling this again while
-    /// a shake is already active restarts the elapsed clock rather than being ignored or queued --
-    /// there is only ever one video to shake. Thread-safe: called from the wiring's UI thread while
-    /// the tick loop that applies it runs on this player's own dedicated worker thread.
-    /// </summary>
-    public void Shake(TimeSpan duration)
-    {
-        lock (_shakeGate)
-        {
-            _shakeState = new ShakeState(_timeProvider.GetUtcNow(), duration);
-        }
-    }
-
-    /// <summary>Test-only observability: whether a shake is currently active.</summary>
-    internal bool IsShakingForTests
-    {
-        get { lock (_shakeGate) return _shakeState is not null; }
-    }
-
-    /// <summary>
-    /// Test-only entry point into the exact per-tick shake logic <see cref="Tick"/> calls, with no
-    /// real <see cref="IMFMediaEngine"/> anywhere near it.
-    /// </summary>
-    internal void ApplyShakeForTests(IVideoWallpaperHost host) => ApplyShakeTransform(host);
-
-    /// <summary>
-    /// Applies (or clears) the video's composition-visual transform for the current shake, if any --
-    /// called once per tick, from this player's own worker thread, alongside the ordinary
-    /// transfer/present pipeline. When no shake is active, only the short state lock is taken.
-    /// Once the shake's own duration has elapsed,
-    /// <see cref="IVideoWallpaperHost.ClearVideoTransform"/> is called exactly once and the field is
-    /// cleared, so every later tick avoids host calls -- never a per-tick
-    /// identity transform applied forever. A transform failure must never affect video playback,
-    /// same as every other host call this class makes; see <see cref="TickCore"/>'s own remarks.
-    /// </summary>
-    private void ApplyShakeTransform(IVideoWallpaperHost host)
-    {
-        lock (_shakeGate)
-        {
-            ShakeState? state = _shakeState;
-            if (state is null)
-            {
-                return;
-            }
-
-            _shakeHost = host;
-            TimeSpan elapsed = _timeProvider.GetUtcNow() - state.StartedAt;
-            if (elapsed >= state.Duration)
-            {
-                _shakeState = null;
-                _shakeHost = null;
-                try
-                {
-                    host.ClearVideoTransform();
-                }
-                catch
-                {
-                    // See the class remarks: a shake failure must never affect video playback.
-                }
-
-                return;
-            }
-
-            try
-            {
-                (int width, int height) = host.BackBufferSize;
-                VideoShakeTransform transform = VideoShakeMath.Compute(elapsed.TotalMilliseconds, width, height);
-                host.SetVideoTransform(
-                    centerX: width / 2f,
-                    centerY: height / 2f,
-                    offsetX: (float)transform.Dx,
-                    offsetY: (float)transform.Dy,
-                    angleDegrees: (float)transform.AngleDegrees,
-                    scale: (float)transform.Scale);
-            }
-            catch
-            {
-                // See the class remarks: a shake failure must never affect video playback.
-            }
-        }
-    }
-
-    /// <summary>Carries one active shake's start time and requested duration -- see <see cref="Shake"/>.</summary>
-    private sealed record ShakeState(DateTimeOffset StartedAt, TimeSpan Duration);
 
     /// <summary>Test-only observability: whether an engine is currently set up to be ticked.</summary>
     internal bool IsPlayingForTests => _engine is not null;
@@ -319,10 +159,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         _disposed = true;
 
         StopPlaybackOnly();
-        ClearShake();
-
-        // Only the request: the worker thread (already stopped, or about to exit) releases the GPU objects.
-        _tint.Clear();
     }
 
     /// <summary>
@@ -345,25 +181,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
         }
 
         StopPlaybackOnly();
-        ClearShake();
-    }
-
-    private void ClearShake()
-    {
-        lock (_shakeGate)
-        {
-            _shakeState = null;
-            IVideoWallpaperHost? host = _shakeHost;
-            _shakeHost = null;
-            try
-            {
-                host?.ClearVideoTransform();
-            }
-            catch
-            {
-                // Transform failures must not affect playback teardown.
-            }
-        }
     }
 
     /// <summary>
@@ -481,9 +298,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             {
                 _engine = null;
                 _notify = null;
-
-                // D3D/D2D objects die on the thread that made them, before the host can go away.
-                _tint.ReleaseGpu();
             }
         }
 
@@ -620,11 +434,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
     private void Tick(IMFMediaEngine engine, IVideoWallpaperHost host)
     {
-        // T4 (webview-alert-layer): applied before the ordinary pipeline. A no-op call (see
-        // ApplyShakeTransform's remarks) when no shake is active, which is every tick outside a
-        // `failed` alert's own 230 ms.
-        ApplyShakeTransform(host);
-
         try
         {
             // IMFMediaEngine::OnVideoStreamTick is documented to return S_OK when a new frame is
@@ -638,16 +447,8 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
 
             ID3D11Texture2D backBuffer = host.GetBackBuffer();
             backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
-
-            if (_tint.IsEngaged)
-            {
-                TransferTinted(engine, host, backBuffer, desc);
-            }
-            else
-            {
-                RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
-                engine.TransferVideoFrame(backBuffer, null, &destRect, null);
-            }
+            RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
+            engine.TransferVideoFrame(backBuffer, null, &destRect, null);
 
             host.Present();
         }
@@ -656,29 +457,6 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             // The frame pump must never crash the process or tear down the host window -- a bad
             // tick is skipped and playback is retried on the next tick.
         }
-    }
-
-    /// <summary>
-    /// The tinted frame path, kept out of <see cref="Tick"/> so the untinted one stays byte-for-byte
-    /// what it was: frame into the tint pass's intermediate texture, then the pass composes it into
-    /// the back buffer. Any failure falls back to the plain transfer for this very frame (the pass
-    /// has already backed itself off), so a tint problem can never cost a frame.
-    /// </summary>
-    private void TransferTinted(IMFMediaEngine engine, IVideoWallpaperHost host, ID3D11Texture2D backBuffer, D3D11_TEXTURE2D_DESC desc)
-    {
-        ID3D11Texture2D? target = null;
-        TintedFrameTransfer.Run(
-            tryBegin: () => _tint.TryBegin(host.Device, backBuffer, in desc, out target) && target is not null,
-            transferIntoTarget: () => TransferFrame(engine, target!, desc),
-            complete: _tint.Complete,
-            abort: _tint.Abort,
-            transferPlain: () => TransferFrame(engine, backBuffer, desc));
-    }
-
-    private static void TransferFrame(IMFMediaEngine engine, ID3D11Texture2D destination, D3D11_TEXTURE2D_DESC desc)
-    {
-        RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
-        engine.TransferVideoFrame(destination, null, &destRect, null);
     }
 
     private static void CleanupEngineResources(

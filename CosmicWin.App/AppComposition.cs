@@ -2,7 +2,6 @@
 using System.IO;
 using System.Threading.Channels;
 using System.Windows.Threading;
-using CosmicWin.App.Alerts;
 using CosmicWin.App.Diagnostics;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -169,7 +168,7 @@ public sealed class AppComposition : IDisposable
         Action<uint?>? persistBorderColor = null,
         bool tilingEnabled = true,
         Action<bool>? persistTiling = null,
-        // T5 (alert-tile-mosaic): mirrors loadExceptions -- a fresh read of settings.conf's `gap`
+        // T5: mirrors loadExceptions -- a fresh read of settings.conf's `gap`
         // key, invoked from the local function ReloadGap (defined further down in this method) on
         // the SAME WE-3 "Reload" trigger the exception list already uses. Unset -- as in every test
         // that predates this parameter -- Reload never touches TreeArranger.Gap, exactly the
@@ -184,16 +183,6 @@ public sealed class AppComposition : IDisposable
         IVideoWallpaperPlayer? videoWallpaperPlayer = null,
         Action<Action>? scheduleVideoWallpaperWork = null,
         Action? disposeVideoWallpaper = null,
-        bool alertsEnabled = false,
-        Func<bool>? alertDesktopVisible = null,
-        // T10 (live-alert-wallpaper): the real production signal for "something is covering the
-        // primary monitor right now" (a fullscreen video, browser tab, etc.) -- see
-        // PrimaryMonitorFullscreenDetector.IsPrimaryMonitorCoveredByFullscreenWindow, wired by
-        // WireProduction. Kept separate from alertDesktopVisible, which stays the full override
-        // escape hatch a test uses to bypass this composition entirely: unset (every test that
-        // predates T10, and any caller that overrides alertDesktopVisible directly) reads as "never
-        // covered", exactly the T8 behaviour this task is fixing.
-        Func<bool>? isPrimaryMonitorCovered = null,
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
@@ -209,26 +198,8 @@ public sealed class AppComposition : IDisposable
         // each reported ONCE. A delegate for the reason zOrder is: the only real answer is
         // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
         // test that predates it -- the work area stays what it was at startup, exactly as before.
-        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
-        Action<AlertShowRequest>? startAlertLayer = null,
-        Action? endAlertLayer = null,
-        Action<TimeSpan>? shakeAlertVideo = null,
-        IDisposable? alertLayer = null,
-        Func<bool>? alertRendererReady = null,
-        // T9c (webview-alert-layer): begins keeping ONE WebView2 controller alive for the process's
-        // life (feature doc, "Idle cost (superseded 2026-09-24)") instead of the old create/dispose
-        // per alert. Called once, on the owning UI thread once it is pumping, when alerts are
-        // enabled -- never gates alertRendererReady, which stays the host's own composition
-        // readiness; a Start before the layer is ready is held as a pending show instead (see
-        // WebViewAlertLayerController.Start/AlertLayerPreloadState).
-        Action? preloadAlertLayer = null,
-        // Where the alert queue's own time reads (Enqueue/Advance and the remaining-duration
-        // check below) come from. Unset -- as every test predating this parameter, and production
-        // via WireProduction -- reads the real system clock. Tests inject a manual TimeProvider so
-        // the queue's second-scale deadlines advance deterministically instead of via Thread.Sleep.
-        TimeProvider? timeProvider = null)
+        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null)
     {
-        var alertClock = timeProvider ?? TimeProvider.System;
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
         // all have to read ONE decision, and whichever of them kept its own copy would become a
@@ -296,11 +267,6 @@ public sealed class AppComposition : IDisposable
             videoWallpaperPlayer?.Dispose();
             videoWallpaperHost?.Dispose();
         });
-
-        var alertQueueLock = new object();
-        var alertQueue = alertsEnabled ? new AlertQueue(onDiagnostic: message => desktopTrace?.Record(message)) : null;
-        ActiveAlert? displayedAlert = null;
-        ActiveAlert? shakenAlert = null;
 
         // What the border was last told to do. Three focus-border defects have been fixed so far and
         // every one of them was verified by a unit fact or by eye, never by a timestamp -- and the
@@ -373,10 +339,6 @@ public sealed class AppComposition : IDisposable
         // F5: a VolatileFlag, not a plain bool -- written on the video-wallpaper thread, read on
         // the UI thread's watch tick.
         var videoWallpaperActive = new VolatileFlag();
-
-        // The alert queue's renderer seam: the wallpaper alert layer's Start/End.
-        var alertStart = startAlertLayer;
-        var alertEnd = endAlertLayer;
 
         // Set the moment a keep-alive TryAttach is posted, cleared the moment it actually runs --
         // never both true at once for longer than one video-wallpaper work item. Without this a
@@ -494,111 +456,8 @@ public sealed class AppComposition : IDisposable
             });
         }
 
-        void UpdateAlertOverlay()
-        {
-            if (!alertsEnabled || alertQueue is null)
-            {
-                return;
-            }
-
-            ActiveAlert? active;
-            lock (alertQueueLock)
-            {
-                // T10 (live-alert-wallpaper): the real predicate is "a video is playing AND nothing
-                // fullscreen covers the primary monitor" -- T9 proved the T8 fallback (video playing
-                // alone) plays an alert out unseen under a fullscreen window instead of holding it.
-                // alertDesktopVisible, when supplied, still overrides this composition entirely (the
-                // seam every test predating T10 uses); isPrimaryMonitorCovered is the new, narrower
-                // seam for the coverage half alone, wired to the real Win32 check by WireProduction.
-                var desktopVisible = (alertDesktopVisible?.Invoke()
-                    ?? (videoWallpaperActive.Value
-                        && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
-                    && (alertStart is null || alertRendererReady?.Invoke() != false);
-                active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
-            }
-
-            // alertStart is the wallpaper's preloaded WebView2 alert layer (the Direct2D overlay is
-            // gone). Unset only in tests that never exercise the overlay at all.
-            if (alertStart is null) return;
-
-            if (ReferenceEquals(active, displayedAlert)) return;
-            if (displayedAlert is not null)
-            {
-                alertEnd?.Invoke();
-                // Torn down, not yet replaced: leave nothing marked displayed until a start
-                // below actually succeeds, so a failed retry never re-ends the same layer.
-                displayedAlert = null;
-            }
-            if (active is null) return;
-            // The queue's deadline starts when Advance promotes the command, not when the
-            // renderer starts. Never grant an extra watch interval to a late UI tick.
-            var remaining = active.Command.Duration - (alertClock.GetUtcNow() - active.StartedAt);
-            if (remaining <= TimeSpan.Zero) return;
-            var failed = active.Command.Groups.Any(group => group.Kind == AlertKind.Failed);
-            if (failed && !ReferenceEquals(shakenAlert, active))
-            {
-                // Shake once per alert: startAlertLayer below can fail and retry this same
-                // alert across several ticks, and the shake must not repeat on retry.
-                shakenAlert = active;
-                shakeAlertVideo?.Invoke(TimeSpan.FromMilliseconds(120));
-            }
-            try
-            {
-                // Started before recording displayedAlert on purpose: on failure the alert
-                // must not count as shown, so the next tick retries it while duration remains.
-                // The alert page itself waits 120ms before revealing, so shaking here ahead of
-                // a not-yet-confirmed start is harmless.
-                // alert-tile-mosaic: the full ordered tile list/grid (AlertTileLayout) replaces the
-                // single collapsed "failed"/"warning" kind this used to pass -- every per-kind count
-                // the parser already accepted now reaches the layer instead of being thrown away.
-                // Gap is read from TreeArranger.Gap HERE, at show time, so a settings change takes
-                // effect on the next alert without AlertShowRequest/the preload state/the controller
-                // ever having to know about settings.
-                var layout = AlertTileLayout.From(active.Command);
-                var tiles = layout.Tiles.Select(kind => kind == AlertKind.Failed ? "failed" : "warning").ToArray();
-                // T7 (alert-tile-mosaic, 2026-09-26): the work area is read HERE, at show time, same
-                // reason as Gap just below -- the taskbar can move/auto-hide between wiring and an
-                // alert firing. treeManager.Primary is a live lookup (TreeManager.Primary), and the
-                // IDisplay object it returns updates itself IN PLACE on every watch tick's
-                // refreshDisplays() call (Win32Display.Refresh), so this always sees the latest known
-                // reading without a fresh GetMonitorInfo call of its own -- exactly the "existing
-                // work-area tracking code" the task asks to reuse. Never allowed to fail the alert:
-                // any exception here (there should never be one against these plain property reads)
-                // degrades to AlertLayerWorkArea.Unavailable, which the page already treats as "lay
-                // out on the whole canvas", the pre-T7 behaviour.
-                AlertLayerWorkArea workArea;
-                try
-                {
-                    var alertDisplay = treeManager.Primary;
-                    workArea = AlertLayerWorkArea.Resolve(alertDisplay.Bounds, alertDisplay.WorkArea);
-                }
-                catch (Exception ex)
-                {
-                    desktopTrace?.Record($"alert-layer-workarea-failed {ex.GetType().Name}: {ex.Message}");
-                    workArea = AlertLayerWorkArea.Unavailable;
-                }
-                // R3-negative-gap-blocks-alert: TreeArranger.Gap is a shared mutable static nothing
-                // stops another caller from setting negative (T5's settings.conf `gap` key itself
-                // rejects anything outside 0-64, but that guard lives in Settings.Parse, not on the
-                // static field) -- WebViewAlertLayerController.Start throws on a negative Gap, so
-                // clamped here rather than letting a stray negative value take the whole alert down.
-                alertStart(new AlertShowRequest(
-                    tiles, layout.Columns, layout.Rows, Math.Max(0, TreeArranger.Gap),
-                    Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds)),
-                    workArea.Left, workArea.Top, workArea.Width, workArea.Height));
-            }
-            catch (Exception ex) when (IsRecoverableFailure(ex))
-            {
-                // Recorded, not swallowed, and not re-thrown into the watch tick: an escaping
-                // exception here would also skip that tick's UpdateFocusBorder call.
-                desktopTrace?.Record($"alert-layer-start-failed {ex.GetType().Name}: {ex.Message}");
-                return;
-            }
-            displayedAlert = active;
-        }
-
-        // The catch filter for one feature's recoverable failure (alert layer, focus border,
-        // reload gap...): WebView2/COM/dispatcher-state errors are handled and traced by the caller,
+        // The catch filter for one feature's recoverable failure (focus border, reload gap...):
+        // COM/dispatcher-state errors are handled and traced by the caller,
         // while the process-corrupting types are named so they are never mistaken for one feature's
         // problem. (The CLR cannot always deliver StackOverflow/AccessViolation to a catch at all; this
         // filter only keeps them out of the handled class.)
@@ -849,7 +708,7 @@ public sealed class AppComposition : IDisposable
 
         // Extracted from the loop ResumeTiling used to run inline, so a live settings-reload gap
         // change (ReloadGap, below) can put the new spacing on screen through the SAME "walk every
-        // display and arrange it" step, rather than a second copy of this loop (T5, alert-tile-mosaic).
+        // display and arrange it" step, rather than a second copy of this loop (T5).
         void RearrangeEveryDisplay()
         {
             foreach (var display in treeManager.Displays)
@@ -862,9 +721,9 @@ public sealed class AppComposition : IDisposable
             }
         }
 
-        // T5 (alert-tile-mosaic): WE-3's "Reload" trigger re-reads settings.conf's `gap` key here
-        // and puts it into effect. TreeArranger.Gap is the one shared static both the tiling engine
-        // and the alert mosaic read, so this is the one place a live gap change has to land. Unset
+        // T5: WE-3's "Reload" trigger re-reads settings.conf's `gap` key here
+        // and puts it into effect. TreeArranger.Gap is the shared static the tiling engine reads,
+        // so this is the one place a live gap change has to land. Unset
         // loadGap (every composition that predates this parameter) means this never runs, matching
         // the exceptions-only Reload this project has always had.
         void ReloadGap()
@@ -881,8 +740,7 @@ public sealed class AppComposition : IDisposable
                 // Mirrors ToggleTiling's OFF branch, just below: while tiling is off, every window is
                 // deliberately left exactly where the layout last put it, and a live gap change must
                 // not reach in and move windows a mode promised not to touch. The new value still
-                // lands in TreeArranger.Gap, so it is there the moment tiling resumes, and it already
-                // reaches the alert mosaic (read at show time, above) regardless of the tiling switch.
+                // lands in TreeArranger.Gap, so it is there the moment tiling resumes.
                 if (tiling)
                 {
                     RearrangeEveryDisplay();
@@ -890,7 +748,7 @@ public sealed class AppComposition : IDisposable
             }
             catch (Exception ex) when (IsRecoverableFailure(ex))
             {
-                // T13 (alert-tile-mosaic, review R4-reload-swallow-without-trace): traced HERE, not
+                // T13 (review R4-reload-swallow-without-trace): traced HERE, not
                 // relying on CompositionRoot.Reload's own try/catch around reloadGap?.Invoke() below
                 // -- that one only ever wraps the SYNCHRONOUS call to onOwningThread(ReloadGap), which
                 // in production (scheduleOnOwningThread: RunOnUiThread, i.e. Dispatcher.BeginInvoke)
@@ -991,9 +849,9 @@ public sealed class AppComposition : IDisposable
             },
             // On the owning thread, the same one ResumeTiling's onOwningThread(ResumeTiling) uses a
             // few lines above -- this arrives from a tray click too, and ReloadGap can rearrange
-            // trees and reach the overlay through AfterArrange (T5, alert-tile-mosaic).
+            // trees and reach the overlay through AfterArrange (T5).
             reloadGap: loadGap is null ? null : () => onOwningThread(ReloadGap),
-            // T11 (alert-tile-mosaic): so a throwing half of Reload is reported the same way every
+            // T11: so a throwing half of Reload is reported the same way every
             // other recoverable per-tick failure in this file already is, instead of vanishing.
             desktopTrace: desktopTrace);
         // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
@@ -1008,13 +866,6 @@ public sealed class AppComposition : IDisposable
         var tray = buildTray(trayController);
 
         _ = dispatcher.RunAsync(CancellationToken.None);
-
-        if (alertsEnabled)
-        {
-            // T9c: preload the alert layer once, on the owning UI thread, rather than waiting for
-            // the first alert command -- the whole point of the persistent-preload fix.
-            if (preloadAlertLayer is not null) onOwningThread(preloadAlertLayer);
-        }
 
         // WT-1: SetWinEventHook is a best-effort notifier, not a guarantee -- a window created
         // hidden, an event dropped under load, or a hook briefly not pumped all leave the tree
@@ -1534,7 +1385,6 @@ public sealed class AppComposition : IDisposable
                 });
             }
 
-            UpdateAlertOverlay();
             UpdateFocusBorder();
         }
 
@@ -1576,11 +1426,7 @@ public sealed class AppComposition : IDisposable
 
         return new AppComposition(
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
-            focusBorder, videoWallpaperHost, videoWallpaperPlayer, () =>
-            {
-                alertLayer?.Dispose();
-                disposeVideoWallpaperBase();
-            },
+            focusBorder, videoWallpaperHost, videoWallpaperPlayer, disposeVideoWallpaperBase,
             unfollowFocusedWindow: () =>
             {
                 if (followFocusedWindow is not null)
@@ -1612,10 +1458,9 @@ public sealed class AppComposition : IDisposable
 
         var desktops = new Win32VirtualDesktopService();
 
-        // S10 (wallpaper-scene-http-endpoint, R3-first-run-write-failure-silent): desktopTrace now
-        // constructed HERE, ahead of the settings load below, instead of after it (T9a originally put
-        // it right before the alert layer, further down) -- so a failed first-run settings.conf write
-        // has somewhere to report to. Moving it earlier costs nothing: FileDesktopTrace's constructor
+        // S10 (wallpaper-scene-http-endpoint, R3-first-run-write-failure-silent): desktopTrace is
+        // constructed HERE, ahead of the settings load below -- so a failed first-run settings.conf
+        // write has somewhere to report to. Moving it earlier costs nothing: FileDesktopTrace's constructor
         // only resolves a path, it opens no file and depends on no other collaborator built below.
         var desktopTrace = new FileDesktopTrace(FileDesktopTrace.ResolveDefaultPath());
 
@@ -1630,7 +1475,7 @@ public sealed class AppComposition : IDisposable
 
         // Read ONCE here rather than inside Wire, so every test drives the same composition with the
         // value stated explicitly instead of whatever this machine's file happens to say. Moved
-        // ahead of the gap assignment below (T5, alert-tile-mosaic) so TreeArranger.Gap can start
+        // ahead of the gap assignment below (T5) so TreeArranger.Gap can start
         // from the settings file's own gap key instead of always starting from the compiled-in
         // default and waiting for a Reload to correct it.
         //
@@ -1642,8 +1487,8 @@ public sealed class AppComposition : IDisposable
 
         // Spacing is a production choice, not a property of the tiling arithmetic -- the engine and
         // every geometry fact in the suite work in exact, gapless rectangles. Opting in here keeps
-        // the knob in one visible place instead of baked into TreeArranger's default. T5
-        // (alert-tile-mosaic): now the settings file's own value, which itself defaults to
+        // the knob in one visible place instead of baked into TreeArranger's default. T5: now the
+        // settings file's own value, which itself defaults to
         // TreeArranger.DefaultGap when the `gap` key is absent or unreadable (Settings.Parse).
         TreeArranger.Gap = settings.Gap;
 
@@ -1673,20 +1518,9 @@ public sealed class AppComposition : IDisposable
         var zOrderSource = new Win32ZOrderSource();
 
         var videoWallpaperHost = new Win32VideoWallpaperHost();
-        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer(onTintDiagnostic: desktopTrace.Record);
-        // T9a (webview-alert-layer): desktopTrace (constructed further up now, S10) is passed here so
-        // BOTH the controller's own lifecycle telemetry and Wire's desktopTrace parameter share the
-        // exact same sink -- T6 found production had no alert-layer navigation/render telemetry at
-        // all, which left F1/F2 unexplained.
-        // Startup runs on the owning STA before its dispatcher synchronization context may
-        // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
-        var alertLayer = settings.AlertsEnabled
-            ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
-                // see-through-video-tint (S4): the letters tint the REAL video.
-                tintSink: VideoPlayerAlertTintSink.For(videoWallpaperPlayer))
-            : null;
-        // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
-        // wallpaper thread's failure sink can point at it directly with no reordering.
+        var videoWallpaperPlayer = new MediaFoundationVideoWallpaperPlayer();
+        // desktopTrace already exists above, so the video wallpaper thread's failure sink can point
+        // at it directly with no reordering.
         var videoWallpaperThread = new MtaActionThread(
             "CosmicWinVideoWallpaperHost",
             onWorkFailed: errorType => desktopTrace.Record($"video-wallpaper-thread work-failed error={errorType}"));
@@ -1698,7 +1532,7 @@ public sealed class AppComposition : IDisposable
             scheduleReconcile: ScheduleOnUiThread,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
-            // T5 (alert-tile-mosaic): mirrors loadExceptions -- a FRESH read on every Reload, not
+            // T5: mirrors loadExceptions -- a FRESH read on every Reload, not
             // the one-time `settings` value captured above, so hand-editing settings.conf's `gap`
             // key and clicking Reload behaves exactly the way editing exceptions.conf already does.
             loadGap: () => SettingsFile.Load().Gap,
@@ -1720,18 +1554,6 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
             persistVideoWallpaperPath: path => settingsStore.Update(s => s with { VideoWallpaperPath = path }),
-            alertsEnabled: settings.AlertsEnabled,
-            startAlertLayer: alertLayer is null ? null : alertLayer.Start,
-            endAlertLayer: alertLayer is null ? null : alertLayer.End,
-            shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
-            alertLayer: alertLayer,
-            alertRendererReady: () => videoWallpaperHost.IsCompositionReady,
-            preloadAlertLayer: alertLayer is null ? null : alertLayer.Preload,
-            // T10 (live-alert-wallpaper): the real covered-desktop signal T9 found missing --
-            // without it an alert played out unseen under a fullscreen video or browser instead of
-            // being held. Reused, not re-invented: PrimaryMonitorFullscreenDetector applies the SAME
-            // fullscreen definition a023fac proved for the tiling engine.
-            isPrimaryMonitorCovered: PrimaryMonitorFullscreenDetector.IsPrimaryMonitorCoveredByFullscreenWindow,
             // Constructed unconditionally, mirroring windowShown: new Win32WindowShownWatcher()
             // above. Construction alone attaches/plays nothing -- only TryAttach/TryPlay do, gated
             // in Wire by videoWallpaperPath being non-null (startup) or the tray pick itself.

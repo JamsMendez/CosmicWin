@@ -309,7 +309,7 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// T5 (alert-tile-mosaic): the optional <c>reloadGap</c> parameter runs ALONGSIDE the exception
+    /// T5: the optional <c>reloadGap</c> parameter runs ALONGSIDE the exception
     /// reload above, on the exact same WE-3 trigger -- not instead of it, and not on a second menu
     /// item. Proven with a recording exception source too, so a regression that made <c>reloadGap</c>
     /// swallow or replace the exceptions reload would fail this fact as well as the one above.
@@ -339,7 +339,7 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// Unset -- as every caller before T5 (alert-tile-mosaic) added <c>reloadGap</c> -- Reload must
+    /// Unset -- as every caller before T5 added <c>reloadGap</c> -- Reload must
     /// keep doing exactly what it always did: reload the exception list and nothing else. A default
     /// that silently required the new parameter would break every existing tray composition.
     /// </summary>
@@ -365,7 +365,7 @@ public sealed class CompositionRootTests
         Assert.Equal(1, exceptionsReloadCount);
     }
 
-    /// <summary>Mirrors every other private recording trace fake in this test project (e.g. <c>WebViewAlertCompositionWiringTests.RecordingDesktopTrace</c>).</summary>
+    /// <summary>Mirrors every other private recording trace fake in this test project.</summary>
     private sealed class RecordingDesktopTrace : IDesktopTrace
     {
         public List<string> Lines { get; } = [];
@@ -374,7 +374,7 @@ public sealed class CompositionRootTests
     }
 
     /// <summary>
-    /// T11 (alert-tile-mosaic, review R3-reload-gap-skipped-on-exception-failure): before this, the
+    /// T11 (review R3-reload-gap-skipped-on-exception-failure): before this, the
     /// composed Reload delegate ran <c>exceptions.Reload(loadExceptions())</c> then
     /// <c>reloadGap?.Invoke()</c> as two statements in a row -- a throwing <c>loadExceptions</c>
     /// propagated straight out of Reload and <c>reloadGap</c> never ran at all. Each half now costs

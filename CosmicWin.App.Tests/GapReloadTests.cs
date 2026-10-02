@@ -8,7 +8,7 @@ using CosmicWin.Layout.Filters;
 namespace CosmicWin.App.Tests;
 
 /// <summary>
-/// T5 (alert-tile-mosaic, maintainer decision 2026-09-26): the new <c>gap</c> settings key, driven
+/// T5 (maintainer decision 2026-09-26): the new <c>gap</c> settings key, driven
 /// through <see cref="AppComposition.Wire"/>'s <c>loadGap</c> parameter and WE-3's existing "Reload"
 /// tray trigger -- see <see cref="CompositionRoot.BuildTrayMenuController"/>'s <c>reloadGap</c>
 /// parameter, which this file's <see cref="TrayMenuController.Reload"/> calls exercise end to end.
@@ -22,7 +22,7 @@ namespace CosmicWin.App.Tests;
 public sealed class GapReloadTests
 {
     /// <summary>
-    /// T11 (alert-tile-mosaic, review R3-immediate-scheduler-never-fires): renamed from
+    /// T11 (review R3-immediate-scheduler-never-fires): renamed from
     /// "ImmediateScheduler" -- that name promised the reconcile callback fired right away, but it was
     /// only ever stored and discarded, never invoked. Every fact in this file drives everything
     /// through explicit calls (<see cref="Tray"/>'s own methods, <c>Workspace.RaiseWindowAdded</c>),
@@ -109,9 +109,8 @@ public sealed class GapReloadTests
 
     /// <summary>
     /// <c>TreeArranger.Gap</c> is a shared mutable static (see its own remarks on why that is
-    /// normally risky); set and restored here explicitly, the same convention <see
-    /// cref="Alerts.WebViewAlertCompositionWiringTests.MultiGroupCommand_ThreadsTheFullTileListGridAndGapToTheLayer"/>
-    /// uses, rather than trusting whatever ambient value an earlier test left behind -- this
+    /// normally risky); set and restored here explicitly, rather than trusting whatever ambient
+    /// value an earlier test left behind -- this
     /// assembly's static field starts at the CLR default (0), not <see cref="TreeArranger.DefaultGap"/>.
     /// </summary>
     [Fact]
@@ -146,8 +145,8 @@ public sealed class GapReloadTests
     /// Mirrors <c>ToggleTiling</c>'s OFF-branch invariant (<see
     /// cref="TilingModeTests.WithTilingOff_ADraggedWindowIsNoLongerSnappedBack"/>): while tiling is
     /// off, every window is deliberately left exactly where the layout last put it. A live gap
-    /// change must still update <c>TreeArranger.Gap</c> (so it is there the moment tiling resumes,
-    /// and it already reaches the alert mosaic regardless of the tiling switch), but must not reach
+    /// change must still update <c>TreeArranger.Gap</c> (so it is there the moment tiling resumes),
+    /// but must not reach
     /// in and rearrange windows that mode promised not to touch.
     /// </summary>
     /// <remarks>
@@ -193,7 +192,7 @@ public sealed class GapReloadTests
     }
 
     /// <summary>
-    /// T13 (alert-tile-mosaic, review R4-reload-swallow-without-trace): <c>CompositionRoot.Reload</c>'s
+    /// T13 (review R4-reload-swallow-without-trace): <c>CompositionRoot.Reload</c>'s
     /// own try/catch around <c>reloadGap?.Invoke()</c> only ever observes a SYNCHRONOUS failure. Every
     /// other fact in this file relies on <c>AppComposition.Wire</c>'s default (synchronous)
     /// <c>scheduleOnOwningThread</c>, which happens to run <c>ReloadGap</c> inline -- masking a real

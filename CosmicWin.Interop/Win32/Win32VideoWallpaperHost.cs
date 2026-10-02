@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 using CosmicWin.Interop;
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.Graphics.Direct2D.Common;
 using Windows.Win32.Graphics.Direct3D;
 using Windows.Win32.Graphics.Direct3D11;
 using Windows.Win32.Graphics.DirectComposition;
@@ -46,34 +45,20 @@ namespace CosmicWin.Interop.Win32;
 /// measured.
 /// </para>
 /// <para>
-/// T2 (webview-alert-layer): the swapchain is always a DirectComposition one now (proven by the T0
-/// spike, <c>spike/webview-alert-t0</c>, commits <c>b77366a</c>/<c>26fa64b</c>) -- a root visual with
-/// the swapchain visual at the bottom, rebuilt in <see cref="RebuildCompositionTarget"/> whenever
-/// the host window is (re)created, so a later caller (T3's WebView2 composition layer) can add ONE
-/// overlay visual above the video via <see cref="AddCompositionOverlayVisual"/>. <b>Composition
-/// threading</b>: DirectComposition objects are documented free-threaded (<c>IAgileObject</c>), but
-/// their RCWs are apartment-bound -- T0 measured an RCW minted on this class's own thread (the
-/// video-wallpaper thread) throwing <c>E_NOINTERFACE</c> when QI'd from the WPF UI (STA) thread that
-/// calls <see cref="AddCompositionOverlayVisual"/>/<see cref="RemoveCompositionOverlayVisual"/>/
-/// <see cref="CommitComposition"/>. The fix: every composition object that might be touched from a
-/// different thread than the one that created it (device, root visual, swapchain visual, overlay
-/// visual) is reduced to a raw <c>IUnknown</c> pointer the moment it is created, never cached as an
-/// RCW; <see cref="CallerContextDComp{T}"/> mints a fresh RCW over that pointer for whichever thread
-/// is calling right now, used for exactly one call and disposed before returning -- unlike the T0
-/// spike, which minted the same wrapper once and intentionally leaked it forever.
-/// </para>
-/// <para>
-/// R2 (fix): the five raw pointers above are ALSO touched by those same three threads with no
-/// synchronization of their own -- <see cref="_compositionLock"/> guards every read-then-use and
-/// write/release of them, held for the whole operation (the short DComp calls made while holding it
-/// are fine -- free-threaded, fast). Always the innermost lock: never held while calling back into a
+/// The swapchain is a DirectComposition one (<c>CreateSwapChainForComposition</c>) -- a root visual
+/// with the swapchain visual as its only child, rebuilt in <see cref="RebuildCompositionTarget"/>
+/// whenever the host window is (re)created. <b>Composition threading</b>: DirectComposition objects
+/// are documented free-threaded (<c>IAgileObject</c>), but their RCWs are apartment-bound, so every
+/// composition object (device, target, root visual, swapchain visual) is reduced to a raw
+/// <c>IUnknown</c> pointer the moment it is created, never cached as an RCW.
+/// <see cref="_compositionLock"/> guards every read-then-use and write/release of those pointers,
+/// held for the whole operation. Always the innermost lock: never held while calling back into a
 /// caller or another lock.
 /// </para>
 /// </remarks>
-public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompositionOverlaySurface
+public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost
 {
-    /// <summary>Class-name prefix; each instance appends <c>-{guid}</c>. Internal so
-    /// <see cref="PrimaryMonitorFullscreenDetector"/> can recognise the host as the wallpaper itself.</summary>
+    /// <summary>Class-name prefix; each instance appends <c>-{guid}</c>.</summary>
     internal const string ClassName = "CosmicWinVideoWallpaperHost";
 
     /// <summary>
@@ -99,31 +84,24 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
     private ID3D11Texture2D? _backBuffer;
     private ID3D11RenderTargetView? _rtv;
 
-    // T2 (webview-alert-layer): raw IUnknown pointers, not cached RCWs -- see the class remarks
-    // "Composition threading". _dcompDevicePtr mirrors _device/_context: built once (in
-    // EnsureCompositionDevice) and kept for the life of this object. _dcompTargetPtr/
-    // _dcompRootVisualPtr/_dcompSwapChainVisualPtr mirror _swapChain/_backBuffer/_rtv: window-bound,
-    // dropped and rebuilt together with them in RebuildCompositionTarget. _dcompOverlayVisualPtr is
-    // the ONE overlay visual a caller (T3) has added via AddCompositionOverlayVisual, if any -- it
-    // belongs to the window-bound tree above it and is dropped (never carried over) on a rebuild.
+    // Raw IUnknown pointers, not cached RCWs -- see the class remarks "Composition threading".
+    // _dcompDevicePtr mirrors _device/_context: built once (in EnsureCompositionDevice) and kept for
+    // the life of this object. _dcompTargetPtr/_dcompRootVisualPtr/_dcompSwapChainVisualPtr mirror
+    // _swapChain/_backBuffer/_rtv: window-bound, dropped and rebuilt together with them in
+    // RebuildCompositionTarget.
     private nint _dcompDevicePtr;
     private nint _dcompTargetPtr;
     private nint _dcompRootVisualPtr;
     private nint _dcompSwapChainVisualPtr;
-    private nint _dcompOverlayVisualPtr;
-    private readonly object _compositionLock = new(); // R2 (fix): guards the five pointers above.
+    private readonly object _compositionLock = new(); // Guards the four pointers above.
 
     private bool _disposed;
 
     /// <summary>
-    /// The real native handle, once <see cref="TryAttach"/> has created the window. Public (not on
-    /// <see cref="IVideoWallpaperHost"/>, same reasoning as <see cref="AddCompositionOverlayVisual"/>
-    /// below): T3's WebView2 composition layer needs it to create a
-    /// <c>CoreWebView2CompositionController</c> against, from <c>CosmicWin.App</c> -- an assembly
-    /// this one does not grant <c>InternalsVisibleTo</c>. Returns <c>nint</c>, never a CsWin32 type,
-    /// for the same reason <see cref="AddCompositionOverlayVisual"/> returns <see cref="object"/>:
-    /// CsWin32's generated Win32 types are internal to this assembly by default (design D1/D8), and
-    /// a public member returning one would itself be a compile error. Also used directly by tests.
+    /// The real native handle, once <see cref="TryAttach"/> has created the window. Returns
+    /// <c>nint</c>, never a CsWin32 type: CsWin32's generated Win32 types are internal to this
+    /// assembly by default (design D1/D8), and a public member returning one would itself be a
+    /// compile error. Used directly by tests.
     /// </summary>
     public nint Hwnd => (nint)_hwnd.Value;
 
@@ -219,8 +197,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
 
     /// <summary>
     /// True once the composition device AND a window-bound target/root/swapchain visual tree all
-    /// exist for the CURRENT host window -- the earliest point at which
-    /// <see cref="AddCompositionOverlayVisual"/> can succeed.
+    /// exist for the CURRENT host window.
     /// </summary>
     public bool IsCompositionReady
     {
@@ -237,287 +214,9 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
     /// <summary>
     /// Bumped every time the window-bound composition target/visual tree is (re)built by
     /// <see cref="RebuildCompositionTarget"/> -- once after the first successful attach, and again
-    /// whenever the host window is recreated (Explorer restart). A caller holding an overlay visual
-    /// from <see cref="AddCompositionOverlayVisual"/> must treat a changed generation as "that
-    /// visual's tree is gone" (<see cref="RebuildCompositionTarget"/> already dropped it) and add a
-    /// fresh one.
+    /// whenever the host window is recreated (Explorer restart).
     /// </summary>
     public int CompositionGeneration { get; private set; }
-
-    /// <summary>
-    /// Adds ONE DirectComposition visual as a child of the root visual, directly above the video
-    /// swapchain visual, commits, and returns it typed as <see cref="object"/> so a caller in another
-    /// assembly (T3's WebView2 composition layer) can assign it straight to
-    /// <c>CoreWebView2CompositionController.RootVisualTarget</c> -- itself typed <see cref="object"/>
-    /// for exactly this reason -- without this assembly ever exposing a DirectComposition type across
-    /// the boundary. The "clean interop seam" the task asks for, instead of an
-    /// <c>InternalsVisibleTo</c> hack (design D1/D8: only <c>CosmicWin.Interop</c> touches Win32).
-    /// </summary>
-    /// <remarks>
-    /// At most one overlay visual exists at a time: a second call replaces the first, exactly like
-    /// this method's own <c>Remove</c> counterpart. Returns <see langword="null"/> when
-    /// <see cref="IsCompositionReady"/> is false or on any DirectComposition failure -- a caller must
-    /// treat a null return as "not ready yet, try again", never as an exception to catch (a DComp
-    /// failure must never stop video playback, which this whole seam sits beside, not inside).
-    /// Safe to call from a thread other than the one that built the composition tree -- see the class
-    /// remarks "Composition threading" and <see cref="CallerContextDComp{T}"/>.
-    /// </remarks>
-    public object? AddCompositionOverlayVisual()
-    {
-        lock (_compositionLock)
-        {
-            return AddCompositionOverlayVisualUnlocked();
-        }
-    }
-
-    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
-    private object? AddCompositionOverlayVisualUnlocked()
-    {
-        if (!IsCompositionReady)
-        {
-            return null;
-        }
-
-        try
-        {
-            RemoveOverlayVisualCore();
-
-            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
-            using var root = new CallerContextDComp<IDCompositionVisual>(_dcompRootVisualPtr);
-            using var below = new CallerContextDComp<IDCompositionVisual>(_dcompSwapChainVisualPtr);
-
-            device.Value.CreateVisual(out IDCompositionVisual overlay);
-            root.Value.AddVisual(overlay, true, below.Value);
-            device.Value.Commit();
-
-            // Tracked as a raw pointer (see the class remarks) so RemoveCompositionOverlayVisual and
-            // a later rebuild can find and release it, even from a different thread than this call.
-            // The AddRef inside GetIUnknownForObject is what keeps the object alive once the RCW
-            // returned here (which the caller owns from this point on) is eventually released.
-            _dcompOverlayVisualPtr = Marshal.GetIUnknownForObject(overlay);
-            return overlay;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Removes the overlay visual added by <see cref="AddCompositionOverlayVisual"/>, if any, and
-    /// commits. Idempotent and never throws -- safe to call when nothing was ever added, when the
-    /// composition tree is gone (a rebuild already dropped it), or from a different thread than the
-    /// one that added it.
-    /// </summary>
-    public void RemoveCompositionOverlayVisual()
-    {
-        lock (_compositionLock)
-        {
-            RemoveCompositionOverlayVisualUnlocked();
-        }
-    }
-
-    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
-    private void RemoveCompositionOverlayVisualUnlocked()
-    {
-        try
-        {
-            RemoveOverlayVisualCore();
-        }
-        catch
-        {
-            // A DComp failure must never propagate into caller code -- see the class remarks.
-        }
-    }
-
-    /// <summary>
-    /// Commits pending DirectComposition changes -- a caller that sets
-    /// <c>CoreWebView2CompositionController.RootVisualTarget</c> to the visual returned by
-    /// <see cref="AddCompositionOverlayVisual"/> must call this afterwards or the change never
-    /// reaches the screen (matches the T0 spike's <c>SpikeCommit</c>). A no-op, never throwing, when
-    /// no composition device exists yet.
-    /// </summary>
-    public void CommitComposition()
-    {
-        lock (_compositionLock)
-        {
-            CommitCompositionUnlocked();
-        }
-    }
-
-    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
-    private void CommitCompositionUnlocked()
-    {
-        if (_dcompDevicePtr == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
-            device.Value.Commit();
-        }
-        catch
-        {
-            // A DComp failure must never propagate into caller code -- see the class remarks.
-        }
-    }
-
-    /// <summary>
-    /// T4 (webview-alert-layer): plain ints, unlike <see cref="Device"/>/<see cref="GetBackBuffer"/>
-    /// -- <see cref="MediaFoundationVideoWallpaperPlayer"/>'s native shake needs the size from
-    /// <c>CosmicWin.App</c>'s point of view too, which is not an <c>InternalsVisibleTo</c> friend.
-    /// </summary>
-    public (int Width, int Height) BackBufferSize
-    {
-        get
-        {
-            if (_backBuffer is null)
-            {
-                return (0, 0);
-            }
-
-            try
-            {
-                _backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
-                return ((int)desc.Width, (int)desc.Height);
-            }
-            catch
-            {
-                return (0, 0);
-            }
-        }
-    }
-
-    /// <summary>
-    /// T4 (webview-alert-layer): rotates and uniformly scales the VIDEO's own swapchain composition
-    /// visual about (<paramref name="centerX"/>, <paramref name="centerY"/>), then translates by
-    /// (<paramref name="offsetX"/>, <paramref name="offsetY"/>) -- never touches a single decoded
-    /// frame pixel, unlike the alternative the task itself offered (an intermediate texture redrawn
-    /// with Direct2D every tick). Composed as one <see cref="D2D_MATRIX_3X2_F"/> (D2D's row-vector
-    /// convention: <c>x' = m11*x + m21*y + dx</c>, <c>y' = m12*x + m22*y + dy</c>) so a single
-    /// <c>SetTransform</c>/<c>Commit</c> pair does the whole effect for this tick, exactly as cheap
-    /// as <see cref="AddCompositionOverlayVisual"/>'s own DComp calls. Same threading and failure
-    /// containment as every other member here -- see the class remarks "Composition threading".
-    /// </summary>
-    public void SetVideoTransform(
-        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
-    {
-        lock (_compositionLock)
-        {
-            SetVideoTransformUnlocked(centerX, centerY, offsetX, offsetY, angleDegrees, scale);
-        }
-    }
-
-    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
-    private void SetVideoTransformUnlocked(
-        float centerX, float centerY, float offsetX, float offsetY, float angleDegrees, float scale)
-    {
-        if (_dcompSwapChainVisualPtr == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            double radians = angleDegrees * Math.PI / 180.0;
-            float m11 = (float)(Math.Cos(radians) * scale);
-            float m12 = (float)(Math.Sin(radians) * scale);
-            float m21 = (float)(-Math.Sin(radians) * scale);
-            float m22 = (float)(Math.Cos(radians) * scale);
-            float dx = centerX - (centerX * m11 + centerY * m21) + offsetX;
-            float dy = centerY - (centerX * m12 + centerY * m22) + offsetY;
-
-            D2D_MATRIX_3X2_F matrix = default;
-            matrix.m11 = m11;
-            matrix.m12 = m12;
-            matrix.m21 = m21;
-            matrix.m22 = m22;
-            matrix.dx = dx;
-            matrix.dy = dy;
-
-            using var visual = new CallerContextDComp<IDCompositionVisual>(_dcompSwapChainVisualPtr);
-            visual.Value.SetTransform(&matrix);
-            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
-            device.Value.Commit();
-        }
-        catch
-        {
-            // A DComp failure must never propagate into caller code -- see the class remarks. Above
-            // all, it must never affect video playback: a shake that silently fails to draw is a far
-            // smaller defect than one that takes the video down with it.
-        }
-    }
-
-    /// <summary>Resets the video's composition visual to its identity transform. Idempotent, never throws.</summary>
-    public void ClearVideoTransform()
-    {
-        lock (_compositionLock)
-        {
-            ClearVideoTransformUnlocked();
-        }
-    }
-
-    /// <summary>R2 (fix): body unchanged; always called while holding <see cref="_compositionLock"/>.</summary>
-    private void ClearVideoTransformUnlocked()
-    {
-        if (_dcompSwapChainVisualPtr == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            using var visual = new CallerContextDComp<IDCompositionVisual>(_dcompSwapChainVisualPtr);
-            visual.Value.SetTransform((IDCompositionTransform)null!);
-            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
-            device.Value.Commit();
-        }
-        catch
-        {
-            // See SetVideoTransform's remarks.
-        }
-    }
-
-    private void RemoveOverlayVisualCore()
-    {
-        if (_dcompOverlayVisualPtr == 0)
-        {
-            return;
-        }
-
-        if (_dcompDevicePtr != 0 && _dcompRootVisualPtr != 0)
-        {
-            using var device = new CallerContextDComp<IDCompositionDevice>(_dcompDevicePtr);
-            using var root = new CallerContextDComp<IDCompositionVisual>(_dcompRootVisualPtr);
-            using var overlay = new CallerContextDComp<IDCompositionVisual>(_dcompOverlayVisualPtr);
-            root.Value.RemoveVisual(overlay.Value);
-            device.Value.Commit();
-        }
-
-        ReleaseRawPointer(ref _dcompOverlayVisualPtr);
-    }
-
-    /// <summary>
-    /// Mints a COM RCW for <paramref name="ptr"/> in the CALLING thread's context, and releases it
-    /// (via <see cref="ReleaseComObject"/>) when this wrapper is disposed -- never cached, never
-    /// reused across a call. See the class remarks "Composition threading" for why: an RCW minted on
-    /// one thread cannot be QI'd from another for one of these interfaces (<c>E_NOINTERFACE</c>,
-    /// proven on hardware in the T0 spike), even though the underlying object is free-threaded.
-    /// </summary>
-    private readonly struct CallerContextDComp<T> : IDisposable
-        where T : class
-    {
-        public T Value { get; }
-
-        public CallerContextDComp(nint ptr)
-        {
-            Value = (T)Marshal.GetUniqueObjectForIUnknown(ptr);
-        }
-
-        public void Dispose() => ReleaseComObject(Value);
-    }
 
     public void Dispose()
     {
@@ -868,7 +567,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
                 SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
                 BufferUsage = DXGI_USAGE.DXGI_USAGE_RENDER_TARGET_OUTPUT,
                 BufferCount = 2,
-                // T2 (webview-alert-layer): CreateSwapChainForComposition requires FLIP_SEQUENTIAL,
+                // CreateSwapChainForComposition requires FLIP_SEQUENTIAL,
                 // not FLIP_DISCARD -- proven in the T0 spike. Scaling is left at its default
                 // (STRETCH, value 0), the only value that API accepts.
                 SwapEffect = DXGI_SWAP_EFFECT.DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
@@ -1030,7 +729,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
                 SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
                 BufferUsage = DXGI_USAGE.DXGI_USAGE_RENDER_TARGET_OUTPUT,
                 BufferCount = 2,
-                // T2 (webview-alert-layer): see the matching comment in
+                // See the matching comment in
                 // CreateSwapChainAndPresentTestPattern -- composition requires FLIP_SEQUENTIAL.
                 SwapEffect = DXGI_SWAP_EFFECT.DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                 AlphaMode = DXGI_ALPHA_MODE.DXGI_ALPHA_MODE_IGNORE,
@@ -1144,14 +843,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
     /// <summary>
     /// Builds (or rebuilds, after the host window was recreated) the DirectComposition target and
     /// visual tree for <paramref name="hwnd"/> -- root visual with the swapchain (video) visual as
-    /// its only child so far, bound to the window via <see cref="IDCompositionTarget"/>, committed.
-    /// A caller (T3) adds its own overlay visual above the swapchain one afterwards, via
-    /// <see cref="AddCompositionOverlayVisual"/>. Window-bound, like <see cref="_swapChain"/>/
+    /// its only child, bound to the window via <see cref="IDCompositionTarget"/>, committed.
+    /// Window-bound, like <see cref="_swapChain"/>/
     /// <see cref="_backBuffer"/>/<see cref="_rtv"/> -- rebuilt fresh every time the window itself is
     /// fresh; <see cref="_dcompDevicePtr"/> is not, for the same reason <see cref="_device"/> is not
     /// (built once on the DXGI device, which survives the window dying). Bumps
-    /// <see cref="CompositionGeneration"/> and drops any tracked overlay visual, since it belonged to
-    /// the tree this just replaced.
+    /// <see cref="CompositionGeneration"/>.
     /// </summary>
     private bool RebuildCompositionTarget(HWND hwnd)
     {
@@ -1186,7 +883,6 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
             device.Commit();
 
             ReleaseWindowBoundCompositionPointers();
-            ReleaseRawPointer(ref _dcompOverlayVisualPtr);
 
             _dcompTargetPtr = Marshal.GetIUnknownForObject(target);
             _dcompRootVisualPtr = Marshal.GetIUnknownForObject(rootVisual);
@@ -1243,13 +939,12 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
             return HWND.Null;
         }
 
-        // T11 (live-alert-wallpaper): the whole MONITOR, not the work area -- sizing to rcWork used
+        // The whole MONITOR, not the work area -- sizing to rcWork used
         // to letterbox an ultrawide video with black bars top and bottom on a monitor whose taskbar
         // is docked right (measured: 3440x1440 monitor, 3392x1440 work area). The swapchain is sized
         // from this same window's GetWindowRect further down (CreateSwapChainAndPresentTestPattern /
         // CreateSwapChainOnExistingDevice), so this one change is enough to size both -- the video
-        // now runs under the taskbar too. The alert tile layout stays confined to the work area; see
-        // AppComposition, which now maps its tiles into these same back-buffer coordinates.
+        // now runs under the taskbar too.
         RECT monitorRect = GetPrimaryMonitorRect();
         var width = monitorRect.right - monitorRect.left;
         var height = monitorRect.bottom - monitorRect.top;
@@ -1258,7 +953,7 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
         // touches the GDI-era layered/UpdateLayeredWindow path.
         // Hidden and WS_EX_NOACTIVATE (video-host-foreground-hold): a visible, activatable,
         // monitor-sized popup took the foreground right after start and stayed foreground after
-        // SetParent, so the covered-desktop check held every alert. AttachToDesktop shows it, without
+        // SetParent. AttachToDesktop shows it, without
         // activation, only once it is a WS_CHILD behind the icons.
         return PInvoke.CreateWindowEx(
             WINDOW_EX_STYLE.WS_EX_NOACTIVATE,
@@ -1312,11 +1007,9 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
     }
 
     /// <summary>
-    /// T11 (live-alert-wallpaper): <c>rcMonitor</c>, the WHOLE primary monitor -- renamed from the
-    /// former <c>GetPrimaryWorkArea</c> (which returned <c>rcWork</c>) now that the host window
-    /// spans the taskbar too. The alert overlay is the one caller that still needs the work area
-    /// specifically (so tiles are not drawn under the taskbar); it reads that separately, from
-    /// <c>IDisplay.WorkArea</c> in <c>AppComposition</c>, not from this host.
+    /// <c>rcMonitor</c>, the WHOLE primary monitor -- renamed from the former
+    /// <c>GetPrimaryWorkArea</c> (which returned <c>rcWork</c>) now that the host window spans the
+    /// taskbar too.
     /// </summary>
     private static RECT GetPrimaryMonitorRect()
     {
@@ -1388,11 +1081,11 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
         ReleaseSwapChainResources();
         ReleaseComObject(_context);
         ReleaseComObject(_device);
-        // T2 (webview-alert-layer): released here, not in ReleaseSwapChainResources, for the same
+        // Released here, not in ReleaseSwapChainResources, for the same
         // reason _device is not -- built once on the DXGI device, survives a window recreate; see
         // RebuildCompositionTarget. A raw pointer (see the class remarks), so this is a direct
         // Release, not ReleaseComObject -- there is no RCW field to dispose.
-        // R2 (fix): guarded by _compositionLock, like every other read/write of this pointer.
+        // Guarded by _compositionLock, like every other read/write of this pointer.
         lock (_compositionLock)
         {
             ReleaseRawPointer(ref _dcompDevicePtr);
@@ -1414,13 +1107,11 @@ public sealed unsafe class Win32VideoWallpaperHost : IVideoWallpaperHost, ICompo
         ReleaseComObject(_rtv);
         ReleaseComObject(_backBuffer);
         ReleaseComObject(_swapChain);
-        // T2: window-bound, like the swapchain itself -- released and rebuilt together with it. The
-        // overlay visual (if any) belonged to this same tree, so it goes too.
-        // R2 (fix): guarded by _compositionLock, like every other read/write of these pointers.
+        // Window-bound, like the swapchain itself -- released and rebuilt together with it.
+        // Guarded by _compositionLock, like every other read/write of these pointers.
         lock (_compositionLock)
         {
             ReleaseWindowBoundCompositionPointers();
-            ReleaseRawPointer(ref _dcompOverlayVisualPtr);
         }
         _rtv = null;
         _backBuffer = null;

@@ -202,7 +202,7 @@ public static class VideoWallpaperImport
         }
     }
 
-    // Single-use, like WebViewAlertLayerController's own inline DllImport -- this file is the only
+    // Single-use, inline DllImport -- this file is the only
     // caller in the solution, so a shared NativeMethods home in CosmicWin.Interop would just add an
     // indirection for one P/Invoke.
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

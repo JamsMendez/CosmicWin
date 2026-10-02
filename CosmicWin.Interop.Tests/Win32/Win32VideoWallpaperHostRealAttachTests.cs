@@ -60,7 +60,7 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
     }
 
     /// <summary>
-    /// T11 (live-alert-wallpaper): on a monitor whose taskbar is not docked bottom -- an ultrawide
+    /// T11: on a monitor whose taskbar is not docked bottom -- an ultrawide
     /// with it docked RIGHT is what the maintainer measured -- sizing the host to the work area
     /// letterboxes an ultrawide video with black bars, because the work area is narrower/shorter than
     /// the monitor itself. The host must span the whole monitor (<c>rcMonitor</c>), not the work area
@@ -88,7 +88,7 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
 
     /// <summary>
     /// video-host-foreground-hold: the host used to be created as a visible, activatable popup, so
-    /// right after start it took the foreground and the covered-desktop check held every alert.
+    /// right after start it took the foreground and kept it.
     /// It must be non-activatable on first creation AND when recreated after an Explorer restart.
     /// </summary>
     [RequiresDesktopSessionFact]
@@ -102,34 +102,6 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         Assert.True(PInvoke.DestroyWindow(new HWND(host.Hwnd)));
         Assert.True(host.TryAttach());
         AssertNonActivatable(new HWND(host.Hwnd));
-    }
-
-    /// <summary>
-    /// Links the detector's host exclusion to the REAL class name the host registers, so a change to
-    /// the host's class-name format cannot silently stop the exclusion from matching while the
-    /// detector's own unit test (which hardcodes the format) keeps passing.
-    /// </summary>
-    [RequiresDesktopSessionFact]
-    public void TheLiveHostWindowClass_IsExcludedFromCoverage()
-    {
-        using var host = new Win32VideoWallpaperHost();
-        Assert.True(host.TryAttach());
-
-        Span<char> buffer = stackalloc char[256];
-        int written;
-        fixed (char* pBuffer = buffer)
-        {
-            written = PInvoke.GetClassName(new HWND(host.Hwnd), pBuffer, buffer.Length);
-        }
-
-        Assert.True(written > 0, "GetClassName should read the live host window's class.");
-        string className = new(buffer[..written]);
-
-        // exStyle 0 and isShellWindow false on purpose: they isolate the class-name rule. The live
-        // window's real values could let the test pass through another exclusion path instead.
-        Assert.True(
-            PrimaryMonitorFullscreenDetector.IsExcludedFromCoverage(className, exStyle: 0, isShellWindow: false),
-            $"The live host class '{className}' should be excluded from coverage.");
     }
 
     private static void AssertNonActivatable(HWND hwnd)
@@ -242,13 +214,12 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
     }
 
     /// <summary>
-    /// T2 (webview-alert-layer): the DirectComposition target/root/swapchain-visual tree is built
-    /// the moment attach succeeds, on the SAME device/swapchain the D3D assertions above already
-    /// cover -- proves the production host now always presents through composition (no env var),
-    /// per the T0 spike (<c>spike/webview-alert-t0</c>, commits <c>b77366a</c>/<c>26fa64b</c>).
+    /// The DirectComposition target/root/swapchain-visual tree is built the moment attach succeeds,
+    /// on the SAME device/swapchain the D3D assertions above already cover -- proves the production
+    /// host always presents through composition.
     /// </summary>
     [RequiresDesktopSessionFact]
-    public void TryAttach_BuildsACompositionTreeReadyForAnOverlayVisual()
+    public void TryAttach_BuildsACompositionTree()
     {
         using var host = new Win32VideoWallpaperHost();
 
@@ -256,35 +227,6 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
 
         Assert.True(host.IsCompositionReady);
         Assert.True(host.CompositionGeneration >= 1);
-    }
-
-    /// <summary>
-    /// T2: the seam T3's WebView2 composition layer will use -- add ONE overlay visual above the
-    /// video, get it back as <see cref="object"/>, commit, then remove it again. None of this may
-    /// touch the D3D/video pipeline: <see cref="Win32VideoWallpaperHost.Present"/> must keep working
-    /// throughout.
-    /// </summary>
-    [RequiresDesktopSessionFact]
-    public void AddCompositionOverlayVisual_ThenRemove_NeverDisturbsVideoPresentation()
-    {
-        using var host = new Win32VideoWallpaperHost();
-        Assert.True(host.TryAttach());
-
-        var overlay = host.AddCompositionOverlayVisual();
-        Assert.NotNull(overlay);
-
-        var commitException = Record.Exception(host.CommitComposition);
-        Assert.Null(commitException);
-
-        var presentAfterAddException = Record.Exception(host.Present);
-        Assert.Null(presentAfterAddException);
-
-        var removeException = Record.Exception(host.RemoveCompositionOverlayVisual);
-        Assert.Null(removeException);
-
-        // Idempotent: removing twice (nothing left to remove the second time) still never throws.
-        var secondRemoveException = Record.Exception(host.RemoveCompositionOverlayVisual);
-        Assert.Null(secondRemoveException);
     }
 
     /// <summary>
@@ -311,48 +253,6 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
         Assert.NotEqual(firstHwnd, host.Hwnd);
         Assert.True(host.IsCompositionReady);
         Assert.True(host.CompositionGeneration > firstGeneration);
-    }
-
-    /// <summary>
-    /// T2: the exact failure T0 proved on hardware -- a DirectComposition RCW minted on the thread
-    /// that built the tree (this test thread, standing in for the video-wallpaper thread) throws
-    /// <c>E_NOINTERFACE</c> when QI'd from a different apartment. <see
-    /// cref="Win32VideoWallpaperHost.AddCompositionOverlayVisual"/> must succeed when called from a
-    /// genuine STA thread instead (T3's WPF UI thread), never throw across the boundary, and commit
-    /// cleanly.
-    /// </summary>
-    [RequiresDesktopSessionFact]
-    public void AddCompositionOverlayVisual_FromAnSTAThread_SucceedsWithoutCrossThreadFailure()
-    {
-        using var host = new Win32VideoWallpaperHost();
-        Assert.True(host.TryAttach());
-
-        object? overlay = null;
-        Exception? threadException = null;
-
-        var staThread = new Thread(() =>
-        {
-            try
-            {
-                overlay = host.AddCompositionOverlayVisual();
-                host.CommitComposition();
-            }
-            catch (Exception ex)
-            {
-                threadException = ex;
-            }
-        });
-        staThread.SetApartmentState(ApartmentState.STA);
-        staThread.Start();
-        staThread.Join(TimeSpan.FromSeconds(10));
-
-        Assert.Null(threadException);
-        Assert.NotNull(overlay);
-
-        // Present, back on THIS thread, must still work -- a DComp failure (or a working seam) may
-        // never disturb the video pipeline.
-        var presentAfterCrossThreadException = Record.Exception(host.Present);
-        Assert.Null(presentAfterCrossThreadException);
     }
 
     /// <summary>
@@ -422,68 +322,5 @@ public sealed unsafe class Win32VideoWallpaperHostRealAttachTests
                 PInvoke.DestroyWindow(simulatedSlideshowLayer);
             }
         }
-    }
-
-    /// <summary>
-    /// R2 (fix): regression for a native review finding -- the five raw DirectComposition pointer
-    /// fields had no lock across the UI/player/video-wallpaper threads, so a concurrent
-    /// <c>Marshal.Release</c> could zero a pointer another thread was about to pass to
-    /// <c>Marshal.GetUniqueObjectForIUnknown</c> (a native use-after-free, not a catchable exception).
-    /// The race is not deterministically reproducible, so this hammers the seam from two threads while
-    /// the host window is destroyed/rebuilt; before <c>_compositionLock</c> existed this reliably
-    /// crashed the process outright. Passing proves the lock holds.
-    /// </summary>
-    [RequiresDesktopSessionFact]
-    public void CompositionSeam_HammeredFromTwoThreadsWhileTheHostWindowIsRebuilt_NeverCrashesOrThrows()
-    {
-        using var host = new Win32VideoWallpaperHost();
-        Assert.True(host.TryAttach());
-
-        var stop = new CancellationTokenSource();
-        var exceptions = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
-
-        Task RunUntilStopped(Action action) => Task.Run(() =>
-        {
-            try
-            {
-                while (!stop.IsCancellationRequested)
-                {
-                    action();
-                }
-            }
-            catch (Exception ex)
-            {
-                exceptions.Enqueue(ex);
-            }
-        });
-
-        var overlayTask = RunUntilStopped(() =>
-        {
-            host.AddCompositionOverlayVisual();
-            host.CommitComposition();
-            host.RemoveCompositionOverlayVisual();
-        });
-        var transformTask = RunUntilStopped(() =>
-        {
-            host.SetVideoTransform(0, 0, 1, 1, 5, 1.1f);
-            host.ClearVideoTransform();
-        });
-
-        for (var i = 0; i < 25 && exceptions.IsEmpty; i++)
-        {
-            HWND current = new(host.Hwnd);
-            if (!current.IsNull)
-            {
-                PInvoke.DestroyWindow(current);
-            }
-
-            host.TryAttach();
-        }
-
-        stop.Cancel();
-        Task.WaitAll([overlayTask, transformTask], TimeSpan.FromSeconds(10));
-
-        Assert.Empty(exceptions);
-        Assert.True(host.IsCompositionReady);
     }
 }

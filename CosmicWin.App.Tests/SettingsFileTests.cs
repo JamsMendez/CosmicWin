@@ -119,25 +119,13 @@ public sealed class SettingsFileTests : IDisposable
     }
 
     /// <summary>
-    /// S9's other maintainer decision folded into the same first-run write: alerts come up on for a
-    /// fresh install.
-    /// </summary>
-    [Fact]
-    public void MissingFile_LoadOrCreate_TheWrittenDefaultsMatchTheS9Decisions()
-    {
-        var settings = SettingsFile.LoadOrCreate(Path_);
-
-        Assert.True(settings.AlertsEnabled);
-    }
-
-    /// <summary>
     /// The other half of "created once": a file that already exists is data the maintainer may have
     /// hand-edited, and LoadOrCreate must never overwrite it -- not even to normalise formatting.
     /// </summary>
     [Fact]
     public void ExistingFile_LoadOrCreate_IsNeverRewritten()
     {
-        var original = "focus-border = off\nalerts = off\n";
+        var original = "focus-border = off\ntiling = off\n";
         Directory.CreateDirectory(_directory);
         File.WriteAllText(Path_, original);
         var writeTimeBefore = File.GetLastWriteTimeUtc(Path_);
@@ -147,7 +135,7 @@ public sealed class SettingsFileTests : IDisposable
         Assert.Equal(original, File.ReadAllText(Path_), StringComparer.Ordinal);
         Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(Path_));
         Assert.False(settings.FocusBorder);
-        Assert.False(settings.AlertsEnabled);
+        Assert.False(settings.Tiling);
     }
 
     /// <summary>
