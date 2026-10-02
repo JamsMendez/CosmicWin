@@ -39,6 +39,9 @@ public sealed class WebViewAlertLayerController : IDisposable
     private readonly DispatcherTimer _poll;
     private readonly Action<string>? _trace;
     private readonly AlertLayerPreloadState _state;
+    // see-through-video-tint (S4): null unless a tint sink was supplied (video wallpaper mode only), in
+    // which case every use below is skipped and the page is never told to tint.
+    private readonly AlertTintCoordinator? _tint;
     // D3 (html-wallpaper-demo): true only for the demo's html wallpaper mode -- see
     // WebViewAlertLayerVisibility and the mode branches in CreateAsync/TryMarkReady/End/OnMessage.
     // False (the default) reproduces exactly what this class did before D3.
@@ -91,7 +94,8 @@ public sealed class WebViewAlertLayerController : IDisposable
 
     public WebViewAlertLayerController(ICompositionOverlaySurface host, Action<string>? trace = null,
         Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
-        WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60)
+        WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60,
+        IAlertTintSink? tintSink = null)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("A WPF UI STA is required.");
@@ -102,6 +106,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         _htmlWallpaperFps = htmlWallpaperFps;
         _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
+        _tint = tintSink is null ? null : new AlertTintCoordinator(tintSink, PostToPageFromAnyThread, trace);
         _poll = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
             (_, _) => Poll(), _dispatcher);
     }
@@ -145,6 +150,9 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (request.DurationMilliseconds <= 0)
             throw new ArgumentOutOfRangeException(nameof(request), "Duration must be positive.");
         _trace?.Invoke(AlertLayerTrace.Show(request));
+        // The previous alert's tint must be gone before the new reveal starts (a pending show applied
+        // later by TryMarkReady goes through PostShow, which clears again).
+        _tint?.Clear();
         // Safety net: the queue must never lose a Start because production forgot to call Preload
         // first. Calling it here when it was already called is a no-op.
         Preload();
@@ -201,6 +209,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         // alert-survives-scene-switch: the new page loads without the alert on screen; requeue it for its
         // remaining time so TryMarkReady re-shows it once the new page is ready.
         _state.PageReloading();
+        _tint?.Clear();
         _navigateStopwatch = Stopwatch.StartNew();
         _navigation.BeforeHostNavigate();
         _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
@@ -238,6 +247,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         CheckAccess();
         _trace?.Invoke(AlertLayerTrace.Hide());
         _state.Hide();
+        _tint?.Clear();
         if (_controller is null) return;
         try
         {
@@ -258,10 +268,28 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (_controller is null) return;
         try
         {
-            _controller.CoreWebView2.PostWebMessageAsJson(AlertLayerMessages.Show(request));
+            // BeginShow clears the previous tint and returns this show's sequence id; the page echoes it
+            // in its mask, so a late mask can never tint a later alert.
+            var show = _tint is null
+                ? AlertLayerMessages.Show(request)
+                : AlertLayerMessages.ShowTinted(request, _tint.BeginShow());
+            _controller.CoreWebView2.PostWebMessageAsJson(show);
             _controller.IsVisible = true;
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-show", ex)); }
+    }
+
+    /// <summary>
+    /// The coordinator's page transport (it answers from a thread-pool thread after the PNG decode):
+    /// marshals to the owning dispatcher and posts only while a controller is alive.
+    /// </summary>
+    private void PostToPageFromAnyThread(string json)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            try { _controller?.CoreWebView2.PostWebMessageAsJson(json); }
+            catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-tint-ready", ex)); }
+        });
     }
 
     private void Poll()
@@ -455,12 +483,19 @@ public sealed class WebViewAlertLayerController : IDisposable
                 _pageReportedReady = true;
                 TryMarkReady();
             }
+            else if (message is { Length: > 0 } && message[0] == '{')
+            {
+                // A JSON object from the page: today only the see-through letters mask. The
+                // coordinator validates, decodes off this thread and never throws.
+                if (_tint is not null) _ = _tint.HandleMessageAsync(message);
+            }
             else if (message == "done")
             {
                 _trace?.Invoke(AlertLayerTrace.Done());
                 // The page reports nothing else: the QUEUE owns ending the alert (AppComposition
                 // calls End() itself once it advances) -- this only reflects the page's own state.
                 _state.PageDone();
+                _tint?.Clear();
                 // D3: in html wallpaper mode the page's own "done" must never hide the WebView2 layer
                 // either -- it is the wallpaper, not a one-off alert. Video mode is unchanged.
                 if (WebViewAlertLayerVisibility.HideOnEndOrDone(_htmlWallpaperMode) && _controller is not null)
@@ -520,6 +555,7 @@ public sealed class WebViewAlertLayerController : IDisposable
     /// </summary>
     private void TearDown(string reason, bool dropEnvironment = false)
     {
+        _tint?.Clear();
         _state.ControllerLost();
         ++_epoch;
         _navigationCompleted = false;

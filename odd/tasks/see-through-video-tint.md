@@ -70,12 +70,17 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   bitmap around ResizeBuffers/re-attach, back off after a device failure, keep it out of the inline
   frame pump. API sketch: `SetTint(mask pixels+size, tint color)` / `ClearTint()`, thread-safe
   handoff to the worker thread.
-- [ ] S4 Page + controller: in video mode only (C# says so in the `show` message), when the reveal
+- [x] S4 Page + controller: in video mode only (C# says so in the `show` message), when the reveal
   ends the page renders a dedicated mask canvas (opaque letters, no shadow/alpha/pixelation, back
   buffer pixel size) and posts it (PNG data URL) to C#; the controller decodes it and calls SetTint
   with the kind's color (failed blue, warning violet); after C# acks, the page stops drawing the
   letter fill so the tinted video reads through. `hide`/`done`/scene reload -> ClearTint. Mosaic:
   one mask covers every tile.
+- [ ] S3b S3 review follow-ups (review-a59141cc1a4f388a, review-e3244d34e2dab4cb): WARNING
+  R4-recreate-target-bypasses-backoff (a repeating RECREATE_TARGET rebuilds every tick), WARNING
+  R3-transfertinted-fallback-untested, WARNING R3-tint-target-pin-blocks-resize-while-engaged, SUGGESTION
+  R4-tint-failures-silent (no trace of tint failures). Route: delegated writer, before S5 so the hardware
+  run has traces.
 - [ ] S5 Hardware check in `Video` mode (failed blue, warning violet, mosaic, shake), restore settings.
 
 ## Acceptance
@@ -123,6 +128,20 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   errors. Not covered yet: the live Tick/TransferTinted path on the host's shared MT-protected device
   (S5 hardware); GPU frame cost; RECREATE_TARGET real HRESULT path.
 
+- 2026-10-01 S4 DONE (delegated writer). `show` gains `tint:true, seq` only in Video mode
+  (AlertLayerMessages.ShowTinted; html/mini output byte-identical). Page -> C#: one
+  `{type:mask, seq, kind, width, height, png}` when the reveal ends; C# -> page `{type:tint-ready, seq}`.
+  The page painted a translucent per-tile WASH over the letters too, so on tint-ready it cuts the letter
+  shape out of the wash (destination-out) and stops the letter fill; frame and modules unchanged. Mixed
+  mosaic: one mask for the first tile's kind (failed sorts first); the other kind keeps normal letters.
+  AlertTintCoordinator: BeginShow clears + new seq; mask decoded (WPF PNG, alpha only) on the pool, seq
+  rechecked under lock before SetTint; bounded sizes; malformed/stale/duplicate traced and ignored; Clear on
+  Start, End, done, SwitchScene, TearDown. Colors: AlertTintColors.Failed (40,110,255), Warning
+  (150,70,255). Sink only in Video mode (VideoPlayerAlertTintSink.For). TDD RED: harness 5 failing of 28,
+  C# 14 of 34 on stubs, wiring 2 of 5; characterization cases noted. Parent spot check: harness 28/28,
+  App 1473 passed / 6 skipped / 0 failed (was 1434/6). S5 risks: toDataURL hitch at 3440x1440, halo at
+  the wash cut-out edge, <=1 px mask offset at tile edges, a possible one-frame gap at tint-ready.
+
 ## Next step
 
-S4: page exports the mask, controller calls SetTint/ClearTint.
+S3b (review follow-ups), then S5 hardware.

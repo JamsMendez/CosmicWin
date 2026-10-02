@@ -196,11 +196,18 @@ function drawFailureModules(g, frame, counter, overlayBits) {
   }
 }
 
-function drawFailureOverlay(g, counter, theme) {
-  var minD = Math.min(W, H);
+// The overlay's inner frame inside the CURRENT tile (W/H), shared by the visible overlay and the
+// see-through mask so both place the letters identically.
+function overlayFrame() {
   var frame = { x: W * 0.038, y: H * 0.064 };
   frame.w = W - frame.x * 2;
   frame.h = H - frame.y * 2;
+  return frame;
+}
+
+function drawFailureOverlay(g, counter, theme) {
+  var minD = Math.min(W, H);
+  var frame = overlayFrame();
   var rails = failureRails(frame);
 
   g.save();
@@ -219,15 +226,27 @@ function drawFailureOverlay(g, counter, theme) {
   // Letters are rendered into an offscreen buffer so one shadowed blit (below) covers the whole
   // title at once, instead of shadowing each of drawFailureTitle's two clipped fragments separately.
   var letters = failureLayer(0);
-  letters.fillStyle = theme.letters;
-  drawFailureTitle(letters, frame, theme.title);
-  g.save();
-  g.shadowColor = "rgba(0,0,0,0.8)";
-  g.shadowBlur = minD * 0.03 * canvasScaleX;
-  g.shadowOffsetY = minD * 0.008 * canvasScaleY;
-  g.globalAlpha = 0.86;
-  g.drawImage(letters.canvas, 0, 0, W, H);
-  g.restore();
+  if (tintActive && theme === FAILURE_OVERLAY_THEMES[tintKind]) {
+    // see-through-video-tint: C# now tints the real video inside the letters, so the page must not
+    // paint them. The letter shape is ERASED from the wash instead (destination-out, no shadow, no
+    // alpha), otherwise the translucent wash would sit on top of the tinted video and muddy it.
+    letters.fillStyle = "rgb(0,0,0)";
+    drawFailureTitle(letters, frame, theme.title);
+    g.save();
+    g.globalCompositeOperation = "destination-out";
+    g.drawImage(letters.canvas, 0, 0, W, H);
+    g.restore();
+  } else {
+    letters.fillStyle = theme.letters;
+    drawFailureTitle(letters, frame, theme.title);
+    g.save();
+    g.shadowColor = "rgba(0,0,0,0.8)";
+    g.shadowBlur = minD * 0.03 * canvasScaleX;
+    g.shadowOffsetY = minD * 0.008 * canvasScaleY;
+    g.globalAlpha = 0.86;
+    g.drawImage(letters.canvas, 0, 0, W, H);
+    g.restore();
+  }
 
   g.strokeStyle = "rgba(255,255,255,0.9)";
   g.lineWidth = Math.max(2, minD * 0.004);
@@ -341,6 +360,18 @@ function advanceKindState(ms, kind) {
 // layer costs ~0% GPU (the feature doc's Idle cost condition). "show" while already showing restarts
 // from zero with the new tiles/grid/gap/duration, same as a fresh "show" on an idle page.
 
+// see-through-video-tint (S4): video wallpaper mode only. C# sends tint:true and a per-show seq in the
+// "show" message; when the reveal of the tinted kind ends the page exports ONE mask of those letters
+// (see exportLettersMask) and, once C# answers {type:"tint-ready", seq}, stops painting the letter fill
+// (tintActive) so the tinted real video shows through. A mosaic mixing both kinds tints the kind of its
+// FIRST tile (the C# side orders failed first); tiles of the other kind keep painting normally.
+var tintEnabled = false;
+var tintSeq = 0;
+var tintKind = "warning";
+var maskSent = false;
+var tintActive = false;
+var maskCanvas = null;
+
 var animating = false;
 var doneSignaled = false;
 var durationMs = 5000;
@@ -445,7 +476,7 @@ function resetKindState() {
 // list with a 1x1 grid and zero gap, which tileRects already renders exactly like the old
 // single-layer page. workArea (T7): {left, top, width, height} in PHYSICAL pixels, or missing/null --
 // treated the same as an unresolved work area (gridAreaRect falls back to the whole canvas).
-function startShowing(newTiles, columns, rows, gap, duration, workArea) {
+function startShowing(newTiles, columns, rows, gap, duration, workArea, tint) {
   tiles = Array.isArray(newTiles) && newTiles.length > 0
     ? newTiles.map(function (tile) { return tile === "failed" ? "failed" : "warning"; })
     : ["warning"];
@@ -467,6 +498,12 @@ function startShowing(newTiles, columns, rows, gap, duration, workArea) {
   durationMs = isFinite(duration) && duration > 0 ? duration : 5000;
   showStartMs = null;
   resetKindState();
+  resetTint();
+  if (tint) {
+    tintEnabled = true;
+    tintSeq = tint.seq;
+    tintKind = tiles[0];
+  }
   doneSignaled = false;
   if (!animating) {
     animating = true;
@@ -474,10 +511,61 @@ function startShowing(newTiles, columns, rows, gap, duration, workArea) {
   }
 }
 
+function resetTint() {
+  tintEnabled = false;
+  tintSeq = 0;
+  maskSent = false;
+  tintActive = false;
+}
+
 function hide() {
   stopAndClear();
   showStartMs = null;
   resetKindState();
+  resetTint();
+}
+
+// Renders the opaque letters of every tile of tintKind into a dedicated canvas of the MAIN canvas'
+// pixel size (same layout, mirroring and mosaic tiles as the visible letters; no shadow, no alpha, no
+// pixelation) and posts it once as a PNG data URL. The host reads only its alpha channel.
+function exportLettersMask() {
+  maskSent = true;
+  if (!maskCanvas) maskCanvas = document.createElement("canvas");
+  if (maskCanvas.width !== canvas.width || maskCanvas.height !== canvas.height) {
+    maskCanvas.width = canvas.width;
+    maskCanvas.height = canvas.height;
+  }
+  var g = maskCanvas.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  g.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0);
+  var theme = FAILURE_OVERLAY_THEMES[tintKind];
+  var rects = tileRects();
+  var savedW = W;
+  var savedH = H;
+  for (var i = 0; i < tiles.length && i < rects.length; i++) {
+    if (tiles[i] !== tintKind) continue;
+    W = rects[i].w;
+    H = rects[i].h;
+    g.save();
+    g.beginPath();
+    g.rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h);
+    g.clip();
+    g.translate(rects[i].x, rects[i].y);
+    g.fillStyle = "rgb(255,255,255)";
+    drawFailureTitle(g, overlayFrame(), theme.title);
+    g.restore();
+  }
+  W = savedW;
+  H = savedH;
+  postToHost(JSON.stringify({
+    type: "mask",
+    seq: tintSeq,
+    kind: tintKind,
+    width: maskCanvas.width,
+    height: maskCanvas.height,
+    png: maskCanvas.toDataURL("image/png"),
+  }));
 }
 
 function signalDoneIfElapsed(ms) {
@@ -521,6 +609,10 @@ function render(ms) {
     renderTile(rects[i], tiles[i], ms);
   }
 
+  if (tintEnabled && !maskSent && kindState[tintKind].state === "shown") {
+    exportLettersMask();
+  }
+
   if (signalDoneIfElapsed(ms)) {
     stopAndClear();
     return;
@@ -536,7 +628,7 @@ function handleHostMessage(event) {
     if (Array.isArray(data.tiles)) {
       startShowing(
         data.tiles, Number(data.columns), Number(data.rows), Number(data.gap), Number(data.duration),
-        data.workArea);
+        data.workArea, data.tint === true ? { seq: Number(data.seq) || 0 } : undefined);
     } else {
       // Back-compat: the old single-kind message shape, {type:"show", kind, duration} -- kept
       // trivial since production (WebViewAlertLayerController) always sends "tiles" now; this only
@@ -546,6 +638,9 @@ function handleHostMessage(event) {
     }
   } else if (data.type === "hide") {
     hide();
+  } else if (data.type === "tint-ready") {
+    // Only the answer to THIS show's mask counts; anything stale or early is ignored.
+    if (tintEnabled && maskSent && Number(data.seq) === tintSeq) tintActive = true;
   }
 }
 

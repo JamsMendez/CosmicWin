@@ -65,8 +65,24 @@ function make2dContext() {
 function loadPage(options) {
   options = options || {};
   var ctx2d = make2dContext();
-  var canvasElement = { width: 0, height: 0, getContext: function () { return ctx2d; } };
+  // see-through-video-tint (S4): toDataURL records the canvas size at call time so a case can prove
+  // which canvas was exported and at what pixel size; createdCanvases lists every offscreen canvas.
+  var toDataUrlCalls = [];
+  var createdCanvases = [];
+  function stubCanvas() {
+    var element = {
+      width: 0, height: 0,
+      getContext: function () { return ctx2d; },
+      toDataURL: function (type) {
+        toDataUrlCalls.push({ type: type, width: element.width, height: element.height });
+        return "data:image/png;base64,TUFTSw==";
+      },
+    };
+    return element;
+  }
+  var canvasElement = stubCanvas();
   var postedMessages = [];
+  var hostHandlers = [];
 
   var windowMock = {
     innerWidth: options.innerWidth || 1000,
@@ -80,7 +96,7 @@ function loadPage(options) {
       ? {
           webview: {
             postMessage: function (message) { postedMessages.push(message); },
-            addEventListener: function () { },
+            addEventListener: function (type, handler) { hostHandlers.push(handler); },
           },
         }
       : undefined,
@@ -90,7 +106,9 @@ function loadPage(options) {
     getElementById: function (id) { return id === "alert-layer-canvas" ? canvasElement : null; },
     createElement: function (tag) {
       if (tag !== "canvas") throw new Error("unexpected document.createElement(" + tag + ")");
-      return { width: 0, height: 0, getContext: function () { return ctx2d; } };
+      var element = stubCanvas();
+      createdCanvases.push(element);
+      return element;
     },
   };
 
@@ -105,7 +123,16 @@ function loadPage(options) {
   vm.createContext(sandbox);
   vm.runInContext(pageSource, sandbox, { filename: scriptPath });
 
-  return { sandbox: sandbox, postedMessages: postedMessages, fillStyleHistory: ctx2d.__fillStyleHistory };
+  return {
+    sandbox: sandbox,
+    postedMessages: postedMessages,
+    fillStyleHistory: ctx2d.__fillStyleHistory,
+    toDataUrlCalls: toDataUrlCalls,
+    createdCanvases: createdCanvases,
+    canvas: canvasElement,
+    // Delivers a host -> page message the way WebView2 does (event.data is the parsed JSON).
+    sendHostMessage: function (data) { hostHandlers.forEach(function (h) { h({ data: data }); }); },
+  };
 }
 
 // ---- Tiny test runner -------------------------------------------------------------------------
@@ -363,6 +390,165 @@ test("mixed failed+warning mosaic never paints either fake band color", function
     "expected the warning band color to never be painted in a mixed mosaic");
   assertKindPainted(page, "failed");
   assertKindPainted(page, "warning");
+});
+
+// ---- Cases: see-through video tint (S4) -----------------------------------------------------------
+// In video mode C# sends tint:true plus a per-show seq. When the reveal ends the page posts ONE mask
+// (as a JSON string, so the host's string-message path stays the only one) and, once C# answers
+// tint-ready with the same seq, stops painting the letter fill. tint false/absent changes nothing.
+
+function maskMessages(page) {
+  return page.postedMessages
+    .filter(function (m) { return typeof m === "string" && m.charAt(0) === "{"; })
+    .map(function (m) { return JSON.parse(m); })
+    .filter(function (m) { return m.type === "mask"; });
+}
+
+function showTinted(page, tilesList, columns, seq) {
+  page.sendHostMessage({
+    type: "show", tiles: tilesList, columns: columns, rows: 1, gap: 0, duration: 5000,
+    workArea: { left: 0, top: 0, width: 0, height: 0 }, tint: true, seq: seq,
+  });
+}
+
+function paintedLetterColorSince(page, kind, historyLength) {
+  var theme = page.sandbox.FAILURE_OVERLAY_THEMES[kind];
+  return page.fillStyleHistory.slice(historyLength).indexOf(theme.letters) !== -1;
+}
+
+test("tint: no mask is posted while the reveal is still running", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 7);
+  page.sandbox.render(0);
+  page.sandbox.render(200); // revealing
+  assert.strictEqual(maskMessages(page).length, 0);
+});
+
+test("tint: exactly one mask is posted when the reveal ends, with the canvas pixel size and a png data url", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600, devicePixelRatio: 1.5 });
+  showTinted(page, ["failed"], 1, 7);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600); // shown
+  page.sandbox.render(700);
+  page.sandbox.render(800);
+  var masks = maskMessages(page);
+  assert.strictEqual(masks.length, 1);
+  assert.strictEqual(masks[0].seq, 7);
+  assert.strictEqual(masks[0].kind, "failed");
+  assert.strictEqual(masks[0].width, 1200);
+  assert.strictEqual(masks[0].height, 900);
+  assert.strictEqual(masks[0].width, page.canvas.width);
+  assert.strictEqual(masks[0].height, page.canvas.height);
+  assert.ok(/^data:image\/png;base64,/.test(masks[0].png));
+  assert.strictEqual(page.toDataUrlCalls.length, 1);
+  assert.strictEqual(page.toDataUrlCalls[0].type, "image/png");
+  assert.strictEqual(page.toDataUrlCalls[0].width, 1200);
+  assert.strictEqual(page.toDataUrlCalls[0].height, 900);
+});
+
+test("tint off (flag absent): never exports a mask and keeps painting the letter fill", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  page.sendHostMessage({
+    type: "show", tiles: ["failed"], columns: 1, rows: 1, gap: 0, duration: 5000,
+    workArea: { left: 0, top: 0, width: 0, height: 0 },
+  });
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600);
+  var before = page.fillStyleHistory.length;
+  page.sandbox.render(700);
+  assert.strictEqual(maskMessages(page).length, 0);
+  assert.strictEqual(page.toDataUrlCalls.length, 0);
+  assert.ok(paintedLetterColorSince(page, "failed", before));
+  // A tint-ready without a tinted show is ignored too.
+  page.sendHostMessage({ type: "tint-ready", seq: 0 });
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(800);
+  assert.ok(paintedLetterColorSince(page, "failed", before));
+});
+
+test("tint: a mosaic of failed+warning exports ONE mask for the first tile's kind", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 1000, innerHeight: 400 });
+  showTinted(page, ["failed", "warning"], 2, 3);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(800); // both shown
+  page.sandbox.render(900);
+  var masks = maskMessages(page);
+  assert.strictEqual(masks.length, 1);
+  assert.strictEqual(masks[0].kind, "failed");
+});
+
+test("tint: no mask after hide, and a new show re-arms the export", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 1);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sendHostMessage({ type: "hide" });
+  page.sandbox.render(600); // animation stopped: must not export
+  assert.strictEqual(maskMessages(page).length, 0);
+
+  showTinted(page, ["warning"], 1, 2);
+  page.sandbox.render(1000);
+  page.sandbox.render(1800); // shown (700 ms reveal)
+  page.sandbox.render(1900);
+  var masks = maskMessages(page);
+  assert.strictEqual(masks.length, 1);
+  assert.strictEqual(masks[0].seq, 2);
+  assert.strictEqual(masks[0].kind, "warning");
+});
+
+test("tint: tint-ready stops painting the letter fill but keeps the wash", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 5);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600);
+  var before = page.fillStyleHistory.length;
+  page.sandbox.render(700);
+  assert.ok(paintedLetterColorSince(page, "failed", before), "letters are painted until tint-ready");
+
+  page.sendHostMessage({ type: "tint-ready", seq: 5 });
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(800);
+  assert.ok(!paintedLetterColorSince(page, "failed", before), "letter fill must not be painted after tint-ready");
+  var theme = page.sandbox.FAILURE_OVERLAY_THEMES.failed;
+  assert.ok(page.fillStyleHistory.slice(before).indexOf(theme.wash) !== -1, "the wash is still painted");
+});
+
+test("tint: a tint-ready with another seq (or before any mask) is ignored", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 5);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sendHostMessage({ type: "tint-ready", seq: 5 }); // no mask exported yet
+  page.sandbox.render(600);
+  page.sendHostMessage({ type: "tint-ready", seq: 4 }); // stale seq
+  var before = page.fillStyleHistory.length;
+  page.sandbox.render(700);
+  assert.ok(paintedLetterColorSince(page, "failed", before), "letters keep painting");
+});
+
+test("tint: hide and a new untinted show restore the letter fill", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 5);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600);
+  page.sendHostMessage({ type: "tint-ready", seq: 5 });
+  page.sendHostMessage({ type: "hide" });
+  page.sendHostMessage({
+    type: "show", tiles: ["failed"], columns: 1, rows: 1, gap: 0, duration: 5000,
+    workArea: { left: 0, top: 0, width: 0, height: 0 },
+  });
+  page.sandbox.render(2000);
+  page.sandbox.render(2200);
+  page.sandbox.render(2600); // shown, untinted
+  var before = page.fillStyleHistory.length;
+  page.sandbox.render(2700);
+  assert.ok(paintedLetterColorSince(page, "failed", before), "untinted show paints the letters again");
+  assert.strictEqual(maskMessages(page).length, 1); // only the first show's mask
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

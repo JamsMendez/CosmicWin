@@ -2401,6 +2401,9 @@ public sealed class AppComposition : IDisposable
                 // D3 (html-wallpaper-demo): navigates to the configured scene page and stays visible
                 // permanently once ready, instead of the ordinary alert-only page.
                 htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html,
+                // see-through-video-tint (S4): the letters tint the REAL video, which only exists in video
+                // mode; html / mini modes get no sink and the page is never told to tint.
+                tintSink: VideoPlayerAlertTintSink.For(settings.WallpaperMode, videoWallpaperPlayer),
                 // D6d (html-wallpaper-demo): which scene and frame-rate cap -- irrelevant in video
                 // mode, where the controller never reads either field.
                 htmlWallpaperScene: settings.WallpaperScene,

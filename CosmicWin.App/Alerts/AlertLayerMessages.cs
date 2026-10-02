@@ -35,4 +35,15 @@ internal static class AlertLayerMessages
             + $"\"rows\":{request.Rows},\"gap\":{request.Gap},\"workArea\":{workAreaJson},"
             + $"\"duration\":{request.DurationMilliseconds}}}";
     }
+
+    /// <summary>
+    /// see-through-video-tint (S4): <see cref="Show"/> plus <c>"tint":true,"seq":N</c> -- video mode
+    /// only, sent when a tint sink is wired. The page echoes <paramref name="seq"/> in its mask so a
+    /// late mask can never tint a later alert.
+    /// </summary>
+    public static string ShowTinted(AlertShowRequest request, int seq) =>
+        Show(request)[..^1] + ",\"tint\":true,\"seq\":" + seq + "}";
+
+    /// <summary>The answer to a page's mask once the tint is applied: the page stops painting the letters.</summary>
+    public static string TintReady(int seq) => "{\"type\":\"tint-ready\",\"seq\":" + seq + "}";
 }
