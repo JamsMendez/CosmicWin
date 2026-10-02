@@ -1,23 +1,12 @@
 namespace CosmicWin.App.Alerts;
 
 /// <summary>
-/// The JSON messages the scene/alert pages understand, shared by every WebView2 layer that forwards
-/// alerts to a page (<see cref="WebViewAlertLayerController"/> and the mini scene window).
+/// The JSON messages the alert page understands, posted by <see cref="WebViewAlertLayerController"/>.
 /// </summary>
 internal static class AlertLayerMessages
 {
     /// <summary>Tells the page to hide its alert overlay.</summary>
     public const string Hide = "{\"type\":\"hide\"}";
-
-    /// <summary>
-    /// Tells the html wallpaper scene page to stop drawing and arm no animation frame while a
-    /// fullscreen window covers the desktop (shared/js/render-loop.js setWallpaperPaused). Never sent
-    /// to the mini scene window, which is always visible.
-    /// </summary>
-    public const string Pause = "{\"type\":\"pause\"}";
-
-    /// <summary>Tells a paused html wallpaper scene page to start drawing again.</summary>
-    public const string Resume = "{\"type\":\"resume\"}";
 
     /// <summary>
     /// The <c>{type:"show",...}</c> message for <paramref name="request"/>. The work area is physical

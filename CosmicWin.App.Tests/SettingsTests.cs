@@ -552,238 +552,43 @@ public sealed class SettingsTests
     }
 
     /// <summary>
-    /// S8 (wallpaper-scene-http-endpoint, 2026-09-27): <see cref="WallpaperMode.Html"/> unless the
-    /// file says otherwise -- the html wallpaper (built as D3's demo, html-wallpaper-demo) graduated
-    /// to CosmicWin's default renderer. <see cref="WallpaperMode.Video"/> remains fully supported for
-    /// anyone who sets `wallpaper-mode = video`.
+    /// strip-to-tiling-video: the html wallpaper (T2) and the mini scene window (T1) are gone, and with
+    /// them every wallpaper mode -- the video plays whenever <c>video-wallpaper-path</c> is set. An old
+    /// settings.conf that still carries <c>wallpaper-mode</c> (any value, including the retired
+    /// <c>html-mini</c>/<c>mini</c>), <c>wallpaper-scene</c>, <c>wallpaper-fps</c>, <c>mini-position</c>
+    /// or <c>mini-corner</c> must load without error: every one of those lines is ignored.
     /// </summary>
-    [Fact]
-    public void WallpaperModeDefaultsToHtml()
-    {
-        Assert.Equal(WallpaperMode.Html, Settings.Default.WallpaperMode);
-        Assert.Equal(WallpaperMode.Html, Settings.Parse(string.Empty).WallpaperMode);
-    }
-
     [Theory]
     [InlineData("wallpaper-mode = html")]
-    [InlineData("wallpaper-mode=html")]
-    [InlineData("  WALLPAPER-MODE   =   Html  ")]
-    public void WallpaperModeIsReadAsHtml_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.Equal(WallpaperMode.Html, Settings.Parse(line).WallpaperMode);
-    }
-
-    [Theory]
     [InlineData("wallpaper-mode = video")]
-    [InlineData("wallpaper-mode=video")]
-    [InlineData("  WALLPAPER-MODE   =   Video  ")]
-    public void WallpaperModeIsReadAsVideo_HoweverTheLineIsSpelled(string line)
-    {
-        Assert.Equal(WallpaperMode.Video, Settings.Parse(line).WallpaperMode);
-    }
-
-    /// <summary>Same rule as every other key: a value nobody recognises keeps the default rather than guessing.</summary>
-    [Theory]
-    [InlineData("wallpaper-mode = perhaps")]
-    [InlineData("wallpaper-mode =")]
-    [InlineData("wallpaper-mode")]
-    public void AnUnreadableWallpaperMode_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.Equal(WallpaperMode.Html, Settings.Parse(line).WallpaperMode);
-    }
-
-    [Theory]
-    [InlineData(WallpaperMode.Video)]
-    [InlineData(WallpaperMode.Html)]
-    public void SerializeThenParse_RoundTripsTheWallpaperMode(WallpaperMode wallpaperMode)
-    {
-        var original = new Settings(FocusBorder: true, WallpaperMode: wallpaperMode);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    /// <summary>The written file's comment names the default and describes the alternative, not a demo disclaimer.</summary>
-    [Fact]
-    public void Serialize_IncludesTheWallpaperModeAndDescribesEachValue()
-    {
-        var serialized = new Settings(FocusBorder: true, WallpaperMode: WallpaperMode.Html).Serialize();
-
-        Assert.Contains("# wallpaper-mode:", serialized, StringComparison.Ordinal);
-        Assert.Contains("html` (default)", serialized, StringComparison.Ordinal);
-        Assert.Contains("wallpaper-mode = html", serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
-    [Fact]
-    public void WallpaperModeIsReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse("focus-border = off\nwallpaper-mode = html\ntiling = off");
-
-        Assert.False(settings.FocusBorder);
-        Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
-        Assert.False(settings.Tiling);
-    }
-
-    /// <summary>
-    /// D6d (html-wallpaper-demo, 2026-09-27): <see cref="WallpaperScene.Processing"/> unless the file
-    /// says otherwise -- a settings file that has never been written must not switch the html
-    /// wallpaper away from the one scene that shipped before D6d.
-    /// </summary>
-    [Fact]
-    public void WallpaperSceneDefaultsToProcessing()
-    {
-        Assert.Equal(WallpaperScene.Processing, Settings.Default.WallpaperScene);
-        Assert.Equal(WallpaperScene.Processing, Settings.Parse(string.Empty).WallpaperScene);
-    }
-
-    [Theory]
-    [InlineData("wallpaper-scene = explorer", WallpaperScene.Explorer)]
-    [InlineData("wallpaper-scene=explorer", WallpaperScene.Explorer)]
-    [InlineData("  WALLPAPER-SCENE   =   Explorer  ", WallpaperScene.Explorer)]
-    [InlineData("wallpaper-scene = idle", WallpaperScene.Idle)]
-    [InlineData("wallpaper-scene = IDLE", WallpaperScene.Idle)]
-    [InlineData("wallpaper-scene = raphael", WallpaperScene.Raphael)]
-    [InlineData("wallpaper-scene = Raphael", WallpaperScene.Raphael)]
-    [InlineData("wallpaper-scene = processing", WallpaperScene.Processing)]
-    [InlineData("wallpaper-scene = PROCESSING", WallpaperScene.Processing)]
-    public void WallpaperSceneIsReadAsEachOfTheFourFixedValues_HoweverTheLineIsSpelled(
-        string line, WallpaperScene expected)
-    {
-        Assert.Equal(expected, Settings.Parse(line).WallpaperScene);
-    }
-
-    /// <summary>Same rule as every other key: a value nobody recognises keeps the default rather than guessing.</summary>
-    [Theory]
-    [InlineData("wallpaper-scene = perhaps")]
-    [InlineData("wallpaper-scene =")]
-    [InlineData("wallpaper-scene")]
-    public void AnUnreadableWallpaperScene_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.Equal(WallpaperScene.Processing, Settings.Parse(line).WallpaperScene);
-    }
-
-    [Theory]
-    [InlineData(WallpaperScene.Processing)]
-    [InlineData(WallpaperScene.Explorer)]
-    [InlineData(WallpaperScene.Idle)]
-    [InlineData(WallpaperScene.Raphael)]
-    public void SerializeThenParse_RoundTripsTheWallpaperScene(WallpaperScene wallpaperScene)
-    {
-        var original = new Settings(FocusBorder: true, WallpaperScene: wallpaperScene);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    /// <summary>The written file's comment names the default scene and lists the other three, not a demo disclaimer.</summary>
-    [Fact]
-    public void Serialize_IncludesTheWallpaperSceneAndDescribesEachValue()
-    {
-        var serialized = new Settings(FocusBorder: true, WallpaperScene: WallpaperScene.Raphael).Serialize();
-
-        Assert.Contains("# wallpaper-scene:", serialized, StringComparison.Ordinal);
-        Assert.Contains("processing` (default)", serialized, StringComparison.Ordinal);
-        Assert.Contains("wallpaper-scene = raphael", serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// D6d: <c>60</c> unless the file says otherwise -- a settings file that has never been written
-    /// must not cap the html wallpaper's frame rate below its own historical, uncapped behaviour.
-    /// </summary>
-    [Fact]
-    public void WallpaperFpsDefaultsTo60()
-    {
-        Assert.Equal(60, Settings.Default.WallpaperFps);
-        Assert.Equal(60, Settings.Parse(string.Empty).WallpaperFps);
-    }
-
-    [Theory]
-    [InlineData("wallpaper-fps = 30", 30)]
-    [InlineData("wallpaper-fps=30", 30)]
-    [InlineData("  WALLPAPER-FPS   =   30  ", 30)]
-    [InlineData("wallpaper-fps = 60", 60)]
-    [InlineData("wallpaper-fps=60", 60)]
-    public void WallpaperFpsIsReadAsEachOfTheTwoFixedValues_HoweverTheLineIsSpelled(string line, int expected)
-    {
-        Assert.Equal(expected, Settings.Parse(line).WallpaperFps);
-    }
-
-    /// <summary>Same rule as every other key: a value nobody recognises -- including any OTHER number -- keeps the default.</summary>
-    [Theory]
-    [InlineData("wallpaper-fps = 45")]
-    [InlineData("wallpaper-fps = 0")]
-    [InlineData("wallpaper-fps = -30")]
-    [InlineData("wallpaper-fps = perhaps")]
-    [InlineData("wallpaper-fps =")]
-    [InlineData("wallpaper-fps")]
-    public void AnUnreadableWallpaperFps_KeepsTheDefaultRatherThanGuessing(string line)
-    {
-        Assert.Equal(60, Settings.Parse(line).WallpaperFps);
-    }
-
-    [Theory]
-    [InlineData(30)]
-    [InlineData(60)]
-    public void SerializeThenParse_RoundTripsTheWallpaperFps(int wallpaperFps)
-    {
-        var original = new Settings(FocusBorder: true, WallpaperFps: wallpaperFps);
-
-        Assert.Equal(original, Settings.Parse(original.Serialize()));
-    }
-
-    /// <summary>The written file's comment names the default frame rate and the other fixed value, not a demo disclaimer.</summary>
-    [Fact]
-    public void Serialize_IncludesTheWallpaperFpsAndDescribesEachValue()
-    {
-        var serialized = new Settings(FocusBorder: true, WallpaperFps: 30).Serialize();
-
-        Assert.Contains("# wallpaper-fps:", serialized, StringComparison.Ordinal);
-        Assert.Contains("60` (default)", serialized, StringComparison.Ordinal);
-        Assert.Contains("wallpaper-fps = 30", serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain("DEMO ONLY", serialized, StringComparison.Ordinal);
-    }
-
-    /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
-    [Fact]
-    public void WallpaperSceneAndFpsAreReadIndependentlyOfTheOtherSettings()
-    {
-        var settings = Settings.Parse(
-            "focus-border = off\nwallpaper-scene = idle\nwallpaper-fps = 30\ntiling = off");
-
-        Assert.False(settings.FocusBorder);
-        Assert.Equal(WallpaperScene.Idle, settings.WallpaperScene);
-        Assert.Equal(30, settings.WallpaperFps);
-        Assert.False(settings.Tiling);
-    }
-
-
-    /// <summary>
-    /// strip-to-tiling-video T1: the mini scene window is gone. An old settings.conf that still says
-    /// <c>wallpaper-mode = html-mini</c> (or the legacy <c>mini</c>) or carries a mini-position line
-    /// must load without error: the mode falls back to the default and the position lines are ignored.
-    /// </summary>
-    [Theory]
     [InlineData("wallpaper-mode = html-mini")]
     [InlineData("wallpaper-mode=mini")]
     [InlineData("  WALLPAPER-MODE   =   Mini  ")]
+    [InlineData("wallpaper-mode = perhaps")]
+    [InlineData("wallpaper-mode")]
+    [InlineData("wallpaper-scene = raphael")]
+    [InlineData("wallpaper-scene=idle")]
+    [InlineData("wallpaper-fps = 30")]
+    [InlineData("wallpaper-fps = 45")]
     [InlineData("mini-position = bottom-left")]
     [InlineData("mini-corner = left-center")]
     [InlineData("wallpaper-mode = html-mini\nmini-position = top-left\nmini-corner = bottom-right")]
-    public void RetiredMiniLines_AreAcceptedAndFallBackToTheDefaults(string content)
+    [InlineData("wallpaper-mode = html\nwallpaper-scene = explorer\nwallpaper-fps = 60")]
+    public void RetiredWallpaperLines_AreAcceptedAndIgnored(string content)
     {
         Assert.Equal(Settings.Default, Settings.Parse(content));
     }
 
     [Fact]
-    public void RetiredMiniLines_DoNotDisturbTheSettingsAroundThem()
+    public void RetiredWallpaperLines_DoNotDisturbTheSettingsAroundThem()
     {
         var settings = Settings.Parse(
-            "focus-border = off\nwallpaper-mode = html-mini\nmini-position = top-left\ntiling = off");
+            "focus-border = off\nwallpaper-mode = html\nwallpaper-scene = idle\nwallpaper-fps = 30\n"
+            + "mini-position = top-left\nvideo-wallpaper-path = C:\\videos\\x.mp4\ntiling = off");
 
         Assert.False(settings.FocusBorder);
         Assert.False(settings.Tiling);
-        Assert.Equal(Settings.Default.WallpaperMode, settings.WallpaperMode);
+        Assert.Equal(@"C:\videos\x.mp4", settings.VideoWallpaperPath);
     }
 
     // ---- T10: normalized keys, with migration of the legacy ones ----
@@ -798,9 +603,6 @@ public sealed class SettingsTests
         Assert.True(d.AlertsEnabled);
         Assert.True(d.HttpServerEnabled);
         Assert.Equal(AlertHttpProtocol.DefaultPort, d.HttpServerPort);
-        Assert.Equal(WallpaperMode.Html, d.WallpaperMode);
-        Assert.Equal(WallpaperScene.Processing, d.WallpaperScene);
-        Assert.Equal(60, d.WallpaperFps);
         Assert.Equal(d, Settings.Parse(string.Empty));
     }
 
@@ -808,13 +610,11 @@ public sealed class SettingsTests
     public void EachNewKey_IsParsed()
     {
         var settings = Settings.Parse(
-            "alerts = off\nhttp-server = off\nhttp-server-port = 5555\n"
-            + "wallpaper-mode = video");
+            "alerts = off\nhttp-server = off\nhttp-server-port = 5555");
 
         Assert.False(settings.AlertsEnabled);
         Assert.False(settings.HttpServerEnabled);
         Assert.Equal(5555, settings.HttpServerPort);
-        Assert.Equal(WallpaperMode.Video, settings.WallpaperMode);
     }
 
     [Fact]
@@ -880,10 +680,11 @@ public sealed class SettingsTests
 
         Assert.Equal(
             ["focus-border", "border-color", "tiling", "video-wallpaper-path", "alerts", "http-server",
-             "http-server-port", "gap", "wallpaper-mode", "wallpaper-scene", "wallpaper-fps"],
+             "http-server-port", "gap"],
             keys);
         foreach (var legacy in new[] { "alerts-enabled", "alert-http =", "alert-http-port", "video-wallpaper-http",
-                     "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini" })
+                     "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",
+                     "wallpaper-scene", "wallpaper-fps" })
         {
             Assert.DoesNotContain(legacy, text, StringComparison.Ordinal);
         }
@@ -902,10 +703,7 @@ public sealed class SettingsTests
 
         Assert.Equal(legacy, reparsed);
         Assert.Equal(43811, reparsed.HttpServerPort);
-        Assert.Equal(Settings.Default.WallpaperMode, reparsed.WallpaperMode);
-        Assert.Equal(WallpaperScene.Idle, reparsed.WallpaperScene);
         Assert.True(reparsed.AlertsEnabled);
         Assert.True(reparsed.HttpServerEnabled);
-        Assert.Equal(60, reparsed.WallpaperFps);
     }
 }

@@ -519,11 +519,11 @@ public sealed class AlertTintCoordinatorTests
             "..", "..", "CosmicWin.App", "Alerts", "WebViewAlertLayerController.cs")));
 
     [Fact]
-    public void ControllerClearsTheTintWhenTheSceneReloads()
+    public void ControllerClearsTheTintWhenTheControllerIsTornDown()
     {
         var source = ReadControllerSource();
-        // SwitchScene (PageReloading) and TearDown (host change, process failure, dispose) both clear.
-        foreach (var marker in new[] { "_state.PageReloading();", "private void TearDown(string reason" })
+        // TearDown (host change, process failure, dispose) clears.
+        foreach (var marker in new[] { "private void TearDown(string reason" })
         {
             var start = source.IndexOf(marker, StringComparison.Ordinal);
             Assert.True(start >= 0, marker);

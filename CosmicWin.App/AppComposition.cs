@@ -198,15 +198,14 @@ public sealed class AppComposition : IDisposable
         Func<string, Func<string, string>, Action<string>?, IAlertCommandServer>? createAlertCommandServer = null,
         // The ONE switch for the local HTTP server (settings key http-server). When on, every route
         // is in the routing table: alerts (which additionally needs alertsEnabled -- there is no
-        // alert queue to answer through otherwise), video and scene, each keeping its own mode
-        // guard and 503 behaviour. Default off: no port opened, token file never touched.
-        // createLocalHttpCommandServer mirrors createAlertCommandServer's seam, with trailing
-        // handleVideoWallpaperSwitch and handleWallpaperSceneSwitch delegates; loadAlertHttpToken
+        // alert queue to answer through otherwise) and video, each keeping its own 503 behaviour. Default off: no port opened, token file never touched.
+        // createLocalHttpCommandServer mirrors createAlertCommandServer's seam, with a trailing
+        // handleVideoWallpaperSwitch delegate; loadAlertHttpToken
         // mirrors it for AlertHttpTokenFile.LoadOrCreate, so a wiring test never binds a real port
         // or touches %LOCALAPPDATA%.
         bool httpServerEnabled = false,
         int httpServerPort = AlertHttpProtocol.DefaultPort,
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? createLocalHttpCommandServer = null,
         Func<string?>? loadAlertHttpToken = null,
         Func<bool>? alertDesktopVisible = null,
         // T10 (live-alert-wallpaper): the real production signal for "something is covering the
@@ -220,32 +219,6 @@ public sealed class AppComposition : IDisposable
         // Already-resolved from Settings before Wire is called, same as focusBorderColor/
         // tilingEnabled above -- not re-read from disk in here.
         string? videoWallpaperPath = null,
-        // D3 (html-wallpaper-demo): both modes are real, supported behaviour. Video: startup attaches
-        // AND plays videoWallpaperPath exactly as before this parameter existed. Html (CosmicWin's
-        // default renderer since S8, wallpaper-scene-http-endpoint): startup attaches the SAME host
-        // with no player involved at all (see AttachHtmlWallpaper below), regardless of whether a path
-        // happens to be configured, because an animated HTML scene page is the wallpaper instead. See
-        // odd/tasks/html-wallpaper-demo.md.
-        //
-        // This default stays Video: it is a TEST SEAM, not the product default (production always
-        // passes wallpaperMode: settings.WallpaperMode from WireProduction, whose own default is now
-        // Html -- see Settings.WallpaperMode). Every video-playback wiring test in
-        // AppCompositionTests/VideoWallpaperPlaybackWiringTests calls Wire() without naming
-        // wallpaperMode at all, relying on this parameter default to stay Video; flipping it to Html
-        // would silently turn every one of those into an html-mode test instead of what it actually
-        // exercises.
-        WallpaperMode wallpaperMode = WallpaperMode.Video,
-        // The abstraction Wire operates on for the concrete WebViewAlertLayerController.SwitchScene
-        // method (mirroring startAlertLayer/endAlertLayer/preloadAlertLayer above, which do the same
-        // for Start/End/Preload) -- returns whether the switch was accepted for dispatch, exactly
-        // like handleVideoWallpaperSwitch's own contract. Unset (every test that predates S4, and
-        // production when no alert layer exists) means the composition has no live scene switch to
-        // offer at all: the HTTP handler answers false (503) without dispatching anything.
-        Func<WallpaperScene, bool>? switchHtmlWallpaperScene = null,
-        // Mirrors persistVideoWallpaperPath above, for the SAME reason: an optional seam so a test
-        // never touches real disk. Production (WireProduction) saves the scene into settings.conf,
-        // exactly like the video route persists its own path.
-        Action<WallpaperScene>? persistWallpaperScene = null,
         // The desktop's windows, TOPMOST FIRST -- what ActionExecutor.ResolveFloatingWindows needs
         // to answer an untiled focus chord's stack pass. A delegate rather than a new IWorkspace
         // member: IWorkspace.Snapshot is dictionary-insertion order, not z-order, and every
@@ -275,13 +248,7 @@ public sealed class AppComposition : IDisposable
         // check below) come from. Unset -- as every test predating this parameter, and production
         // via WireProduction -- reads the real system clock. Tests inject a manual TimeProvider so
         // the queue's second-scale deadlines advance deterministically instead of via Thread.Sleep.
-        TimeProvider? timeProvider = null,
-        // pause-scene-when-covered T2: tells the html wallpaper scene page to pause (true) or resume
-        // (false). Called on the owning thread from the watch tick, ONLY when the covered state
-        // changes and ONLY in html wallpaper mode with the host attached; production wires it to
-        // WebViewAlertLayerController.SetScenePaused. Unset (every test that predates it,
-        // video mode, no alert layer) means there is no scene page to pause.
-        Action<bool>? setHtmlWallpaperScenePaused = null)
+        TimeProvider? timeProvider = null)
     {
         var alertClock = timeProvider ?? TimeProvider.System;
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
@@ -431,21 +398,6 @@ public sealed class AppComposition : IDisposable
         // the UI thread's watch tick.
         var videoWallpaperActive = new VolatileFlag();
 
-        // D3 (html-wallpaper-demo): the html-mode equivalent of videoWallpaperActive above -- true
-        // once AttachHtmlWallpaper's TryAttach has actually succeeded, false otherwise. Never touched
-        // by ActivateVideoWallpaper/SwitchVideoWallpaper, exactly as videoWallpaperActive is never
-        // touched by AttachHtmlWallpaper: wallpaperMode is chosen once, at Wire time, and the two
-        // flags describe two mutually exclusive modes that are never mixed within one running process.
-        //
-        // S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): before S7 this
-        // last claim was aspirational only for the SWITCH side -- wallpaperMode being chosen once
-        // says nothing about SwitchVideoWallpaper, which had no mode check of its own, so a tray
-        // pick or an HTTP video switch reaching this composition in html mode WOULD have set
-        // videoWallpaperActive right here too, alongside htmlWallpaperActive from startup. It is
-        // SwitchVideoWallpaper's own html-mode guard (see its remarks) that now makes "never mixed"
-        // true in practice, not merely wallpaperMode being read once.
-        var htmlWallpaperActive = new VolatileFlag();
-
         // The alert queue's renderer seam: the wallpaper alert layer's Start/End.
         var alertStart = startAlertLayer;
         var alertEnd = endAlertLayer;
@@ -518,28 +470,6 @@ public sealed class AppComposition : IDisposable
         }
 
         /// <summary>
-        /// D3 (html-wallpaper-demo): the html-mode startup activation -- attaches the SAME
-        /// <paramref name="videoWallpaperHost"/> a video path would use, with NO player involved at
-        /// all: D1 proved TryAttach alone builds the composition swapchain (D3D device + one
-        /// black test-pattern Present), which is all the WebView2 overlay above it needs to render
-        /// over. Never calls TryPlay, even if a video path happens to be configured -- html mode
-        /// always wins over a stale video-wallpaper-path setting. videoWallpaperPlayer's own Shake()
-        /// becomes an unreachable no-op with no active playback session (D1); left as-is on purpose,
-        /// the scene page shakes itself instead.
-        /// </summary>
-        void AttachHtmlWallpaper(string phase)
-        {
-            if (videoWallpaperHost is null)
-            {
-                return;
-            }
-
-            var attached = videoWallpaperHost.TryAttach();
-            htmlWallpaperActive.Value = attached;
-            desktopTrace?.Record($"video-wallpaper phase={phase} mode=html attached={attached}");
-        }
-
-        /// <summary>
         /// The "stop, import, persist, (re)activate" sequence <c>setVideoWallpaperPath</c> below
         /// used to run as an inline closure, now a named operation next to
         /// <see cref="ActivateVideoWallpaper"/> so a second caller -- the HTTP video-wallpaper
@@ -579,25 +509,6 @@ public sealed class AppComposition : IDisposable
         /// </remarks>
         bool SwitchVideoWallpaper(string path, string phase = "pick", bool skipIfUnchanged = false)
         {
-            // S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): html mode
-            // owns the wallpaper surface -- BOTH callers of this method (the tray pick's
-            // setVideoWallpaperPath closure below, and HandleVideoWallpaperHttpSwitch right after
-            // this method) reach it, and only it, to stop/import/persist/(re)activate a video, so
-            // ONE guard here -- checked first, before the collaborator-null check that follows --
-            // covers both entry points without duplicating it at either call site. False on every
-            // video-mode call, exactly as before this task, so video-mode behaviour is untouched.
-            // No import, no persist, no player touch happens below this line when it fires -- and
-            // it fires BEFORE onVideoWallpaperThread ever posts anything, so nothing is queued
-            // either. Traced with THIS caller's own phase, matching the file's existing
-            // "video-wallpaper phase=<phase> ..." vocabulary (see ActivateVideoWallpaper below): a
-            // skipped tray pick reads "phase=pick skipped reason=html-mode" and a skipped HTTP
-            // switch reads "phase=http skipped reason=html-mode".
-            if (wallpaperMode == WallpaperMode.Html)
-            {
-                desktopTrace?.Record($"video-wallpaper phase={phase} skipped reason=html-mode");
-                return false;
-            }
-
             if (videoWallpaperHost is null || videoWallpaperPlayer is null)
             {
                 return false;
@@ -722,126 +633,10 @@ public sealed class AppComposition : IDisposable
         /// anything asynchronously in the first place, and it costs nothing beyond this one null
         /// check -- no new thread is spun up just to make the endpoint technically answer 202.
         /// </remarks>
-        /// <remarks>
-        /// S7 (wallpaper-scene-http-endpoint, R3-html-mode-video-switch-not-guarded): also answers
-        /// 503 in html mode, exactly like the video route's video-mode-only contract requires. This
-        /// method has no mode check of its own -- <see cref="SwitchVideoWallpaper"/>'s own guard,
-        /// which fires first, covers it, the same guard the tray pick below relies on.
-        /// </remarks>
         bool HandleVideoWallpaperHttpSwitch(string path) =>
             scheduleVideoWallpaperWork is null
                 ? false
                 : SwitchVideoWallpaper(path, phase: "http", skipIfUnchanged: true);
-
-        /// <summary>
-        /// S4 (wallpaper-scene-http-endpoint): the HTTP wallpaper-scene route's delegate, handed to
-        /// <see cref="createLocalHttpCommandServer"/>'s <c>handleWallpaperSceneSwitch</c> parameter
-        /// when <paramref name="httpServerEnabled"/> is on. <paramref name="name"/> is
-        /// already validated against the closed allow-list by <see
-        /// cref="WallpaperSceneHttpProtocol.TryValidate"/> before this runs -- <see
-        /// cref="TryParseWallpaperScene"/> failing is only a defensive fallback, never expected in
-        /// production.
-        /// </summary>
-        /// <remarks>
-        /// Answers "not available" (503) rather than dispatching outside html wallpaper mode, or
-        /// when this composition has no live scene switch to offer at all (<paramref
-        /// name="switchHtmlWallpaperScene"/> unset -- no alert layer exists). Both checked BEFORE
-        /// posting anything, mirroring <see cref="HandleVideoWallpaperHttpSwitch"/>'s own
-        /// scheduleVideoWallpaperWork check. The actual switch (and, on success, the persist) runs
-        /// on <c>onOwningThread</c> -- the STA UI thread <see cref="WebViewAlertLayerController"/>
-        /// requires -- NEVER <c>onVideoWallpaperThread</c> (an MTA thread; WebView2 throws off its
-        /// own dispatcher). Non-blocking, same contract as the video route: this returns whether the
-        /// switch was accepted for dispatch, not its eventual outcome.
-        /// </remarks>
-        /// <remarks>
-        /// S6 (wallpaper-scene-http-endpoint, R3-owning-thread-work-unguarded): the posted work runs
-        /// AFTER the HTTP 202 reply already went out, so a throw here has nowhere left to go but the
-        /// owning dispatcher -- guarded exactly like <see cref="SwitchVideoWallpaper"/>'s own posted
-        /// work item guards <c>importVideoWallpaper</c>: caught, reported through
-        /// <c>desktopTrace</c> by exception TYPE NAME ONLY (never <c>Message</c>, the same rule
-        /// <c>SwitchVideoWallpaper</c>'s own <c>import-failed</c> line follows), and never rethrown.
-        /// The switch and the persist are guarded SEPARATELY, each with its own trace tag, so a
-        /// persist failure (the switch itself succeeded) never reads as a switch failure. A throwing
-        /// switch returns early -- exactly like not calling <c>persistWallpaperScene</c> when the
-        /// switch reports <see langword="false"/> above, nothing to persist means nothing runs.
-        /// </remarks>
-        bool HandleWallpaperSceneHttpSwitch(string name)
-        {
-            Func<WallpaperScene, bool>? switchScene =
-                wallpaperMode == WallpaperMode.Html ? switchHtmlWallpaperScene : null;
-            if (switchScene is null)
-            {
-                return false;
-            }
-
-            if (!TryParseWallpaperScene(name, out var scene))
-            {
-                return false;
-            }
-
-            onOwningThread(() =>
-            {
-                bool switched;
-                try
-                {
-                    switched = switchScene(scene);
-                }
-                catch (Exception error)
-                {
-                    desktopTrace?.Record(
-                        $"wallpaper-scene-http switch-failed error={error.GetType().Name}");
-                    return;
-                }
-
-                if (!switched)
-                {
-                    return;
-                }
-
-                try
-                {
-                    persistWallpaperScene?.Invoke(scene);
-                }
-                catch (Exception error)
-                {
-                    desktopTrace?.Record(
-                        $"wallpaper-scene-http persist-failed error={error.GetType().Name}");
-                }
-            });
-
-            return true;
-        }
-
-        /// <summary>
-        /// S4: maps the canonical lowercase name <see cref="WallpaperSceneHttpProtocol.TryValidate"/>
-        /// already validated back to its <see cref="WallpaperScene"/> member. This class references
-        /// <c>CosmicWin.Interop</c>'s <see cref="WallpaperSceneHttpProtocol"/> for the closed
-        /// allow-list, but that project cannot reference THIS enum back, so the mapping lives here --
-        /// the one place a protocol/settings string ever becomes a <see cref="WallpaperScene"/>, the
-        /// same role <see cref="CosmicWin.App.Settings.Parse"/>'s own private
-        /// <c>TryReadWallpaperScene</c> plays for the settings file.
-        /// </summary>
-        static bool TryParseWallpaperScene(string name, out WallpaperScene scene)
-        {
-            switch (name)
-            {
-                case "processing":
-                    scene = WallpaperScene.Processing;
-                    return true;
-                case "explorer":
-                    scene = WallpaperScene.Explorer;
-                    return true;
-                case "idle":
-                    scene = WallpaperScene.Idle;
-                    return true;
-                case "raphael":
-                    scene = WallpaperScene.Raphael;
-                    return true;
-                default:
-                    scene = WallpaperScene.Processing;
-                    return false;
-            }
-        }
 
         string HandleAlertCommand(string text)
         {
@@ -889,15 +684,8 @@ public sealed class AppComposition : IDisposable
                 // alertDesktopVisible, when supplied, still overrides this composition entirely (the
                 // seam every test predating T10 uses); isPrimaryMonitorCovered is the new, narrower
                 // seam for the coverage half alone, wired to the real Win32 check by WireProduction.
-                // D3 (html-wallpaper-demo): htmlWallpaperActive generalizes the SAME "is the
-                // wallpaper actually up" signal videoWallpaperActive already provides here -- in html
-                // mode nothing ever sets videoWallpaperActive (no player is ever started, by design),
-                // so without this an alert command would sit pending forever and eventually expire,
-                // contradicting the whole point of the demo switch (alerts still toggle the overlay).
-                // Composition wiring only: AlertQueue.Advance and PrimaryMonitorFullscreenDetector
-                // stay exactly as they are.
                 var desktopVisible = (alertDesktopVisible?.Invoke()
-                    ?? ((videoWallpaperActive.Value || htmlWallpaperActive.Value)
+                    ?? (videoWallpaperActive.Value
                         && !(isPrimaryMonitorCovered?.Invoke() ?? false)))
                     && (alertStart is null || alertRendererReady?.Invoke() != false);
                 active = alertQueue.Advance(alertClock.GetUtcNow(), desktopVisible);
@@ -981,66 +769,6 @@ public sealed class AppComposition : IDisposable
                 return;
             }
             displayedAlert = active;
-        }
-
-        // pause-scene-when-covered T2: the html scene page is invisible while a fullscreen window covers
-        // the primary monitor, so it is paused for exactly that long. The signal is the one that already
-        // holds alerts above (isPrimaryMonitorCovered -> PrimaryMonitorFullscreenDetector), polled on
-        // the same watch tick; only a CHANGE is sent and traced. Html mode only: video playback is left
-        // alone.
-        //
-        // An alert already on screen when the cover starts is not special-cased: the page stays able to
-        // process `hide` while paused and the host-side timing (the queue) still ends it; the queue
-        // never STARTS one while covered.
-        var htmlScenePaused = false;
-        var htmlScenePauseFailing = false;
-        void UpdateHtmlScenePause()
-        {
-            if (setHtmlWallpaperScenePaused is null
-                || wallpaperMode != WallpaperMode.Html
-                || !htmlWallpaperActive.Value)
-            {
-                return;
-            }
-
-            bool covered;
-            try
-            {
-                covered = isPrimaryMonitorCovered?.Invoke() ?? false;
-            }
-            catch (Exception ex) when (IsRecoverableFailure(ex))
-            {
-                desktopTrace?.Record($"wallpaper-scene cover-check-failed {ex.GetType().Name}: {ex.Message}");
-                return;
-            }
-
-            if (covered == htmlScenePaused)
-            {
-                return;
-            }
-
-            // Apply, then commit: the stored state and the transition trace only change once the setter
-            // succeeded, so a failed send is retried by the next tick instead of being forgotten (which
-            // would leave the scene frozen while the desktop is visible). A persistent failure would
-            // repeat every tick, so only the FIRST failure of a streak is traced; a success ends it.
-            try
-            {
-                setHtmlWallpaperScenePaused(covered);
-            }
-            catch (Exception ex) when (IsRecoverableFailure(ex))
-            {
-                if (!htmlScenePauseFailing)
-                {
-                    htmlScenePauseFailing = true;
-                    desktopTrace?.Record($"wallpaper-scene pause-failed {ex.GetType().Name}: {ex.Message}");
-                }
-
-                return;
-            }
-
-            htmlScenePauseFailing = false;
-            htmlScenePaused = covered;
-            desktopTrace?.Record(covered ? "wallpaper-scene paused: desktop covered" : "wallpaper-scene resumed");
         }
 
         // The catch filter for one feature's recoverable failure (alert layer, focus border,
@@ -1489,16 +1217,13 @@ public sealed class AppComposition : IDisposable
                 else
                 {
                     var httpServerFactory = createLocalHttpCommandServer
-                        ?? ((port, t, handler, diagnostic, videoSwitch, sceneSwitch) =>
-                            new LocalHttpCommandServer(
-                                port, t, handler, diagnostic, videoSwitch,
-                                handleWallpaperSceneSwitch: sceneSwitch));
+                        ?? ((port, t, handler, diagnostic, videoSwitch) =>
+                            new LocalHttpCommandServer(port, t, handler, diagnostic, videoSwitch));
                     httpAlertServer = httpServerFactory(
                         httpServerPort, token,
                         alertHttpRouteOn ? HandleAlertCommand : null,
                         message => desktopTrace?.Record(message),
-                        HandleVideoWallpaperHttpSwitch,
-                        HandleWallpaperSceneHttpSwitch);
+                        HandleVideoWallpaperHttpSwitch);
                     httpAlertServer.Start();
                     // H5b: Start() never throws -- a port already in use is reported by the server
                     // itself as "alert http: failed to start listening ..." through this same sink
@@ -1508,13 +1233,13 @@ public sealed class AppComposition : IDisposable
                         desktopTrace?.Record($"alert-http start requested port={httpServerPort}");
                     }
 
-                    // V4: which routes ended up in the routing table. The video and scene routes are
-                    // always registered now (http-server is the one switch for the whole server), so
-                    // their flags are constants kept in the line for the readers of this trace; only
-                    // the alerts route still depends on alertsEnabled.
+                    // V4: which routes ended up in the routing table. The video route is always
+                    // registered now (http-server is the one switch for the whole server), so its
+                    // flag is a constant kept in the line for the readers of this trace; only the
+                    // alerts route still depends on alertsEnabled.
                     desktopTrace?.Record(
                         $"http-server start requested port={httpServerPort} " +
-                        $"alerts-route={alertHttpRouteOn} video-route=True scene-route=True");
+                        $"alerts-route={alertHttpRouteOn} video-route=True");
                 }
             }
             // Same corruption-class exclusion IsRecoverableFailure already applies to a
@@ -2031,12 +1756,7 @@ public sealed class AppComposition : IDisposable
             // tick is what actually notices; gated on videoWallpaperActive so a never-activated or
             // failed video wallpaper posts nothing, and on the pending flag so a slow
             // video-wallpaper thread never gets a second one queued behind the one it has not run.
-            //
-            // D3 (html-wallpaper-demo): the SAME re-raise applies verbatim to html mode's own
-            // composition swapchain -- htmlWallpaperActive is that mode's equivalent of
-            // videoWallpaperActive, so this tick must also fire while the host is attached in html
-            // mode, not only while a video is genuinely playing.
-            if ((videoWallpaperActive.Value || htmlWallpaperActive.Value)
+            if (videoWallpaperActive.Value
                 && videoWallpaperHost is not null && !videoWallpaperKeepAlivePending.Value)
             {
                 videoWallpaperKeepAlivePending.Value = true;
@@ -2049,7 +1769,6 @@ public sealed class AppComposition : IDisposable
                 });
             }
 
-            UpdateHtmlScenePause();
             UpdateAlertOverlay();
             UpdateFocusBorder();
         }
@@ -2085,21 +1804,9 @@ public sealed class AppComposition : IDisposable
         // pump the host window: Win32VideoWallpaperHost's own doc comment requires this (its
         // TaskbarCreated re-attach depends on being pumped), and onOwningThread is already how every
         // other Win32-window-touching callback in this method reaches that thread.
-        //
-        // D3 (html-wallpaper-demo): the SAME threading rule applies in html mode, but the activation
-        // itself is attach-only (see AttachHtmlWallpaper) -- no path is required, and a configured one
-        // is deliberately ignored (never played) rather than left to a stale ActivateVideoWallpaper
-        // call, since the demo's whole point is that an animated HTML scene page is the wallpaper.
-        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null)
+        if (videoWallpaperHost is not null && videoWallpaperPlayer is not null && videoWallpaperPath is not null)
         {
-            if (wallpaperMode == WallpaperMode.Html)
-            {
-                onVideoWallpaperThread(() => AttachHtmlWallpaper("startup"));
-            }
-            else if (videoWallpaperPath is not null)
-            {
-                onVideoWallpaperThread(() => ActivateVideoWallpaper("startup", videoWallpaperPath));
-            }
+            onVideoWallpaperThread(() => ActivateVideoWallpaper("startup", videoWallpaperPath));
         }
 
         return new AppComposition(
@@ -2184,7 +1891,7 @@ public sealed class AppComposition : IDisposable
         //
         // S6 (wallpaper-scene-http-endpoint, R3-persist-shared-stored-capture): this used to be a
         // bare mutable local, and every persistXyz closure below did its own unsynchronized
-        // `SettingsFile.Save(stored = stored with { ... })`. Focus-border/border-colour/tiling/scene
+        // `SettingsFile.Save(stored = stored with { ... })`. Focus-border/border-colour/tiling
         // run on the UI STA thread; the video path persists from the video-wallpaper MTA thread
         // (`SwitchVideoWallpaper`'s posted work item) -- two of those closures firing concurrently
         // could both read the SAME pre-update snapshot and race their `with`, one silently clobbering
@@ -2193,7 +1900,7 @@ public sealed class AppComposition : IDisposable
         //
         // S10: the save delegate now reports a failed write through the SAME OnSettingsSaveFailed
         // the first-run LoadOrCreate above uses, so every persistXyz closure below (focus border,
-        // border colour, tiling, video path, scene) gets the same observability, not just first run.
+        // border colour, tiling, video path) gets the same observability, not just first run.
         var settingsStore = new SynchronizedSettingsStore(
             settings, s => SettingsFile.Save(s, OnSettingsSaveFailed));
 
@@ -2212,16 +1919,8 @@ public sealed class AppComposition : IDisposable
         // be installed. WebView2 creation is deferred until the pumped reconciliation tick.
         var alertLayer = settings.AlertsEnabled
             ? new WebViewAlertLayerController(videoWallpaperHost, trace: desktopTrace.Record,
-                // D3 (html-wallpaper-demo): navigates to the configured scene page and stays visible
-                // permanently once ready, instead of the ordinary alert-only page.
-                htmlWallpaperMode: settings.WallpaperMode == WallpaperMode.Html,
-                // see-through-video-tint (S4): the letters tint the REAL video, which only exists in video
-                // mode; html mode gets no sink and the page is never told to tint.
-                tintSink: VideoPlayerAlertTintSink.For(settings.WallpaperMode, videoWallpaperPlayer),
-                // D6d (html-wallpaper-demo): which scene and frame-rate cap -- irrelevant in video
-                // mode, where the controller never reads either field.
-                htmlWallpaperScene: settings.WallpaperScene,
-                htmlWallpaperFps: settings.WallpaperFps)
+                // see-through-video-tint (S4): the letters tint the REAL video.
+                tintSink: VideoPlayerAlertTintSink.For(videoWallpaperPlayer))
             : null;
         // desktopTrace already exists above (created ahead of the alert layer for T9a), so the video
         // wallpaper thread's failure sink can point at it directly with no reordering.
@@ -2262,11 +1961,6 @@ public sealed class AppComposition : IDisposable
             alertsEnabled: settings.AlertsEnabled,
             httpServerEnabled: settings.HttpServerEnabled,
             httpServerPort: settings.HttpServerPort,
-            // S4 (wallpaper-scene-http-endpoint): null (no live switch to offer) when no alert layer
-            // exists, exactly the same shape startAlertLayer/endAlertLayer/preloadAlertLayer below
-            // already use for the SAME alertLayer collaborator.
-            switchHtmlWallpaperScene: alertLayer is null ? null : alertLayer.SwitchScene,
-            persistWallpaperScene: scene => settingsStore.Update(s => s with { WallpaperScene = scene }),
             startAlertLayer: alertLayer is null ? null : alertLayer.Start,
             endAlertLayer: alertLayer is null ? null : alertLayer.End,
             shakeAlertVideo: duration => videoWallpaperPlayer.Shake(duration),
@@ -2296,8 +1990,6 @@ public sealed class AppComposition : IDisposable
                 videoWallpaperThread.Dispose();
             },
             videoWallpaperPath: settings.VideoWallpaperPath,
-            wallpaperMode: settings.WallpaperMode,
-            setHtmlWallpaperScenePaused: alertLayer is null ? null : alertLayer.SetScenePaused,
             zOrder: zOrderSource.EnumerateTopLevelWindows,
             refreshDisplays: displayManager.Refresh);
     }

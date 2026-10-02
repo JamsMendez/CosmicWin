@@ -3,39 +3,6 @@ using CosmicWin.Interop;
 namespace CosmicWin.App;
 
 /// <summary>
-/// Which renderer draws the desktop wallpaper. <see cref="Video"/> loops the MP4 at
-/// <see cref="Settings.VideoWallpaperPath"/>, exactly as CosmicWin always has. <see cref="Html"/>
-/// attaches the same wallpaper host (see <c>AppComposition.Wire</c>'s <c>AttachHtmlWallpaper</c>)
-/// with no video ever playing, purely so an animated HTML scene page can be composited over it,
-/// driven by the same alert commands the video layer answers -- CosmicWin's default renderer since
-/// S8 (wallpaper-scene-http-endpoint, 2026-09-27), after it first shipped as D3's demo. See
-/// <c>odd/tasks/html-wallpaper-demo.md</c> for how it was built and
-/// <c>odd/tasks/wallpaper-scene-http-endpoint.md</c> for S8's graduation decision.
-/// </summary>
-public enum WallpaperMode
-{
-    Video,
-    Html,
-}
-
-/// <summary>
-/// D6d (html-wallpaper-demo, 2026-09-27): which of the four ported scenes the
-/// html wallpaper (<see cref="WallpaperMode.Html"/>) shows. Each member maps to exactly one fixed
-/// folder name under <c>CosmicWin.App/Wallpaper/Web/</c> (see
-/// <c>WebViewAlertLayerController.SceneFolderName</c>) -- a closed, compile-time-fixed set, so no
-/// text from this settings file (or anywhere else) can ever reach the scene page's URL as a raw,
-/// unvalidated folder segment. <see cref="Processing"/> is the default: today's only shipped scene
-/// before D6d, unchanged for anyone who never edits this key.
-/// </summary>
-public enum WallpaperScene
-{
-    Processing,
-    Explorer,
-    Idle,
-    Raphael,
-}
-
-/// <summary>
 /// The handful of preferences CosmicWin keeps between runs.
 /// </summary>
 /// <param name="FocusBorder">
@@ -62,8 +29,8 @@ public enum WallpaperScene
 /// </param>
 /// <param name="HttpServerEnabled">
 /// The ONE switch for the local HTTP server (settings key <c>http-server</c>, legacy:
-/// <c>alert-http</c>). When on, every route is served -- <c>/v1/alerts</c>,
-/// <c>/v1/wallpaper/video</c> and <c>/v1/wallpaper/scene</c> -- each keeping its own mode guard.
+/// <c>alert-http</c>). When on, every route is served -- <c>/v1/alerts</c> and
+/// <c>/v1/wallpaper/video</c>.
 /// ON by default (maintainer's decision, S9): loopback-only (127.0.0.1 / localhost, never reachable
 /// over the network) and gated by a bearer token nothing outside this machine can read.
 /// </param>
@@ -77,23 +44,6 @@ public enum WallpaperScene
 /// alert's tiles -- the SAME value drives both (<c>TreeArranger.Gap</c>). Whole pixels 0-64;
 /// defaults to <see cref="TreeArranger.DefaultGap"/>, the value <c>TreeArranger.Gap</c> was hard-set
 /// to before this was a settings key at all.
-/// </param>
-/// <param name="WallpaperMode">
-/// S8 (wallpaper-scene-http-endpoint, 2026-09-27): <see cref="CosmicWin.App.WallpaperMode.Html"/>
-/// unless the file says otherwise -- the html wallpaper (first built as D3's demo, html-wallpaper-
-/// demo) graduated to CosmicWin's default renderer. <see cref="CosmicWin.App.WallpaperMode.Video"/>
-/// remains fully supported for anyone who sets <c>wallpaper-mode = video</c>.
-/// </param>
-/// <param name="WallpaperScene">
-/// D6d (html-wallpaper-demo, 2026-09-27): which scene the html wallpaper shows, one of the four
-/// fixed <see cref="CosmicWin.App.WallpaperScene"/> members. Defaults to <see
-/// cref="CosmicWin.App.WallpaperScene.Processing"/> -- the only scene that shipped before D6d.
-/// </param>
-/// <param name="WallpaperFps">
-/// D6d (html-wallpaper-demo, 2026-09-27): caps how many times per second the html wallpaper's scene
-/// and alert overlay draw, 30 or 60. Defaults to 60. Before D6d the scene had no cap at all and drew
-/// on every real animation frame -- i.e. at the display's own refresh rate (over 60fps on any display
-/// faster than 60Hz) -- so 60 is a REDUCTION for anyone on such a display, not a no-op default.
 /// </param>
 /// <remarks>
 /// <para>
@@ -115,8 +65,7 @@ public enum WallpaperScene
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, bool AlertsEnabled = true, bool HttpServerEnabled = true,
     int HttpServerPort = AlertHttpProtocol.DefaultPort,
-    int Gap = TreeArranger.DefaultGap, WallpaperMode WallpaperMode = WallpaperMode.Html,
-    WallpaperScene WallpaperScene = WallpaperScene.Processing, int WallpaperFps = 60)
+    int Gap = TreeArranger.DefaultGap)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -148,31 +97,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
     private const string GapKey = "gap";
 
-    /// <summary>D3 (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperMode"/>.</summary>
-    private const string WallpaperModeKey = "wallpaper-mode";
-
-    private const string WallpaperModeVideoValue = "video";
-
-    private const string WallpaperModeHtmlValue = "html";
-
-    /// <summary>D6d (html-wallpaper-demo): see <see cref="CosmicWin.App.WallpaperScene"/>.</summary>
-    private const string WallpaperSceneKey = "wallpaper-scene";
-
-    private const string WallpaperSceneProcessingValue = "processing";
-
-    private const string WallpaperSceneExplorerValue = "explorer";
-
-    private const string WallpaperSceneIdleValue = "idle";
-
-    private const string WallpaperSceneRaphaelValue = "raphael";
-
-    /// <summary>D6d (html-wallpaper-demo): caps the html wallpaper's own frame rate.</summary>
-    private const string WallpaperFpsKey = "wallpaper-fps";
-
-    private const string WallpaperFps30Value = "30";
-
-    private const string WallpaperFps60Value = "60";
-
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
 
@@ -185,10 +109,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     /// reading it as its most recent line is the only answer that matches what an editor shows.
     /// Legacy key names (<c>alerts-enabled</c>, <c>alert-http</c>, <c>alert-http-port</c>) are still
     /// read, but when a file carries both a legacy key and its replacement the NEW key wins whatever
-    /// the line order. <c>video-wallpaper-http</c>, <c>wallpaper-scene-http</c>, <c>mini-position</c>
-    /// and <c>mini-corner</c> no longer exist: they are skipped like any unknown key. The retired
-    /// <c>html-mini</c> (legacy <c>mini</c>) wallpaper mode is an unrecognised value now, so it keeps
-    /// the default mode.
+    /// the line order. <c>video-wallpaper-http</c>, <c>wallpaper-scene-http</c>, <c>mini-position</c>,
+    /// <c>mini-corner</c>, <c>wallpaper-mode</c>, <c>wallpaper-scene</c> and <c>wallpaper-fps</c> no
+    /// longer exist: they are skipped like any unknown key. There is no wallpaper mode any more -- the
+    /// video plays whenever <c>video-wallpaper-path</c> is set.
     /// </remarks>
     public static Settings Parse(string content)
     {
@@ -199,9 +123,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         bool? alerts = null, legacyAlerts = null, httpServer = null, legacyHttpServer = null;
         int? httpServerPort = null, legacyHttpServerPort = null;
         var gap = Default.Gap;
-        var wallpaperMode = Default.WallpaperMode;
-        var wallpaperScene = Default.WallpaperScene;
-        var wallpaperFps = Default.WallpaperFps;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -281,23 +202,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 gap = gapValue;
             }
-            else if (key.Equals(WallpaperModeKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadWallpaperMode(value, out var wallpaperModeValue))
-            {
-                wallpaperMode = wallpaperModeValue;
-            }
-            else if (key.Equals(WallpaperSceneKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadWallpaperScene(value, out var wallpaperSceneValue))
-            {
-                wallpaperScene = wallpaperSceneValue;
-            }
-            else if (key.Equals(WallpaperFpsKey, StringComparison.OrdinalIgnoreCase)
-                && TryReadWallpaperFps(value, out var wallpaperFpsValue))
-            {
-                wallpaperFps = wallpaperFpsValue;
-            }
-            // video-wallpaper-http and wallpaper-scene-http (per-route toggles) and mini-position /
-            // mini-corner (the retired mini scene window) no longer exist. Deliberately no branch --
+            // video-wallpaper-http and wallpaper-scene-http (per-route toggles), mini-position /
+            // mini-corner (the retired mini scene window) and wallpaper-mode / wallpaper-scene /
+            // wallpaper-fps (the retired html wallpaper) no longer exist. Deliberately no branch --
             // the line is skipped like any other unknown key.
         }
 
@@ -305,7 +212,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             alerts ?? legacyAlerts ?? Default.AlertsEnabled,
             httpServer ?? legacyHttpServer ?? Default.HttpServerEnabled,
             httpServerPort ?? legacyHttpServerPort ?? Default.HttpServerPort,
-            gap, wallpaperMode, wallpaperScene, wallpaperFps);
+            gap);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -330,7 +237,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          {AlertsKey} = {(AlertsEnabled ? "on" : "off")}
 
          # {HttpServerKey}: on (default) to run the local HTTP server that serves every route
-         # (alerts, video wallpaper, wallpaper scene). Loopback-only (127.0.0.1 / localhost, never
+         # (alerts, video wallpaper). Loopback-only (127.0.0.1 / localhost, never
          # reachable over the network); its bearer token lives in
          # %LOCALAPPDATA%\CosmicWin\alert-http.token, created the first time the server starts.
          # Off to leave the port closed.
@@ -343,38 +250,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # an alert's tiles -- the SAME value drives both. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {WallpaperModeKey}: `{WallpaperModeHtmlValue}` (default) shows an animated HTML scene as the
-         # desktop wallpaper; `{WallpaperModeVideoValue}` plays the configured video instead, with no
-         # HTML scene involved.
-         {WallpaperModeKey} = {WallpaperModeValue(WallpaperMode)}
-
-         # {WallpaperSceneKey}: which scene the html wallpaper ({WallpaperModeKey} = {WallpaperModeHtmlValue})
-         # shows: `{WallpaperSceneProcessingValue}` (default), `{WallpaperSceneExplorerValue}`,
-         # `{WallpaperSceneIdleValue}`, or `{WallpaperSceneRaphaelValue}`.
-         {WallpaperSceneKey} = {WallpaperSceneValue(WallpaperScene)}
-
-         # {WallpaperFpsKey}: caps the html wallpaper's own frame rate: `{WallpaperFps30Value}` or
-         # `{WallpaperFps60Value}` (default). Before this setting existed the scene drew uncapped, at
-         # the display's own refresh rate.
-         {WallpaperFpsKey} = {WallpaperFps.ToString(System.Globalization.CultureInfo.InvariantCulture)}
-
          """;
-
-    /// <summary>Maps a <see cref="CosmicWin.App.WallpaperMode"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
-    private static string WallpaperModeValue(WallpaperMode mode) => mode switch
-    {
-        WallpaperMode.Html => WallpaperModeHtmlValue,
-        _ => WallpaperModeVideoValue,
-    };
-
-    /// <summary>Maps a <see cref="CosmicWin.App.WallpaperScene"/> to the exact literal <see cref="Serialize"/> writes for it.</summary>
-    private static string WallpaperSceneValue(WallpaperScene scene) => scene switch
-    {
-        WallpaperScene.Explorer => WallpaperSceneExplorerValue,
-        WallpaperScene.Idle => WallpaperSceneIdleValue,
-        WallpaperScene.Raphael => WallpaperSceneRaphaelValue,
-        _ => WallpaperSceneProcessingValue,
-    };
 
     /// <summary>
     /// Accepts the three spellings a person actually types. Deliberately NOT
@@ -467,76 +343,6 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
         gap = 0;
         return false;
-    }
-
-    /// <summary>
-    /// D3 (html-wallpaper-demo): reads <c>video</c> or <c>html</c>, case-insensitively. Same rule as
-    /// every other key: anything else keeps the default rather than guessing.
-    /// </summary>
-    private static bool TryReadWallpaperMode(string value, out WallpaperMode mode)
-    {
-        switch (value.ToLowerInvariant())
-        {
-            case WallpaperModeVideoValue:
-                mode = WallpaperMode.Video;
-                return true;
-            case WallpaperModeHtmlValue:
-                mode = WallpaperMode.Html;
-                return true;
-            default:
-                mode = WallpaperMode.Video;
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// D6d (html-wallpaper-demo): reads one of the four fixed scene names, case-insensitively. Same
-    /// rule as every other key: anything else keeps the default rather than guessing -- and, since
-    /// <see cref="WallpaperScene"/> is a closed enum, this is also the ONLY place raw settings text
-    /// ever turns into a scene value at all.
-    /// </summary>
-    private static bool TryReadWallpaperScene(string value, out WallpaperScene scene)
-    {
-        switch (value.ToLowerInvariant())
-        {
-            case WallpaperSceneProcessingValue:
-                scene = WallpaperScene.Processing;
-                return true;
-            case WallpaperSceneExplorerValue:
-                scene = WallpaperScene.Explorer;
-                return true;
-            case WallpaperSceneIdleValue:
-                scene = WallpaperScene.Idle;
-                return true;
-            case WallpaperSceneRaphaelValue:
-                scene = WallpaperScene.Raphael;
-                return true;
-            default:
-                scene = WallpaperScene.Processing;
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// D6d (html-wallpaper-demo): reads exactly <c>30</c> or <c>60</c>. Same rule as every other key:
-    /// anything else -- including a number that merely isn't one of those two -- keeps the default
-    /// (60) rather than guessing. 60 is a CAP, not the historical behaviour: before this setting
-    /// existed the scene drew uncapped, at the display's own refresh rate.
-    /// </summary>
-    private static bool TryReadWallpaperFps(string value, out int fps)
-    {
-        switch (value)
-        {
-            case WallpaperFps30Value:
-                fps = 30;
-                return true;
-            case WallpaperFps60Value:
-                fps = 60;
-                return true;
-            default:
-                fps = 60;
-                return false;
-        }
     }
 
     /// <summary>Doubles each of the three nibbles: <c>0xF80</c> becomes <c>0xFF8800</c>.</summary>

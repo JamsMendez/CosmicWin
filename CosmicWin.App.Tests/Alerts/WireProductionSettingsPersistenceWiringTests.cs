@@ -9,8 +9,7 @@ namespace CosmicWin.App.Tests.Alerts;
 /// missing file -- rather than the side-effect-free <see cref="SettingsFile.Load()"/>.
 /// </summary>
 /// <remarks>
-/// Same technique as <see cref="WireProductionHtmlWallpaperSettingsWiringTests"/>: <c>WireProduction</c>
-/// constructs real Win32/WebView2 collaborators and is not exercised directly by any test in this
+/// <c>WireProduction</c> constructs real Win32/WebView2 collaborators and is not exercised directly by any test in this
 /// project, so a source-text check is what can be honestly claimed here, not a behavioural guarantee.
 /// The review finding this pins (S8/S9 review, 2026-09-27) was that nothing actually proved
 /// <c>WireProduction</c> calls <c>LoadOrCreate</c> rather than <c>Load</c> -- both compile, both
@@ -80,8 +79,7 @@ public sealed class WireProductionSettingsPersistenceWiringTests
             "SettingsFile.LoadOrCreate(onDiagnostic: OnSettingsSaveFailed)",
             source[methodStart..], StringComparison.Ordinal);
         // Anchored on the call's start/end rather than the exact line-wrapping in between, which
-        // CRLF/formatting differences make fragile (same reasoning as
-        // WireProductionHtmlWallpaperSettingsWiringTests' own closeMarker anchor).
+        // CRLF/formatting differences make fragile.
         var storeCallStart = source.IndexOf(
             "new SynchronizedSettingsStore(", methodStart, StringComparison.Ordinal);
         Assert.True(storeCallStart >= 0, "expected a `new SynchronizedSettingsStore(...)` call inside WireProduction");

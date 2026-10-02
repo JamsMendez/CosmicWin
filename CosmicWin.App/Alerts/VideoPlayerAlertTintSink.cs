@@ -4,7 +4,7 @@ namespace CosmicWin.App.Alerts;
 
 /// <summary>
 /// see-through-video-tint (S4): adapts the concrete video player's SetTint/ClearTint to <see
-/// cref="IAlertTintSink"/>, and decides WHEN a sink exists at all: only in video wallpaper mode.
+/// cref="IAlertTintSink"/>, and decides WHEN a sink exists at all: only when a video player exists.
 /// </summary>
 internal sealed class VideoPlayerAlertTintSink : IAlertTintSink
 {
@@ -12,9 +12,9 @@ internal sealed class VideoPlayerAlertTintSink : IAlertTintSink
 
     private VideoPlayerAlertTintSink(MediaFoundationVideoWallpaperPlayer player) => _player = player;
 
-    /// <summary>The sink for <paramref name="mode"/>: <see langword="null"/> unless it is video mode with a player.</summary>
-    public static IAlertTintSink? For(WallpaperMode mode, MediaFoundationVideoWallpaperPlayer? player) =>
-        mode == WallpaperMode.Video && player is not null ? new VideoPlayerAlertTintSink(player) : null;
+    /// <summary>The sink for <paramref name="player"/>: <see langword="null"/> when there is no player.</summary>
+    public static IAlertTintSink? For(MediaFoundationVideoWallpaperPlayer? player) =>
+        player is not null ? new VideoPlayerAlertTintSink(player) : null;
 
     public event Action? TintRendered
     {

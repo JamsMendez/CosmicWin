@@ -73,10 +73,8 @@ public sealed class SynchronizedSettingsStoreTests
     /// case, not a production reachability claim: <c>_current</c> is assigned BEFORE <c>save</c> is
     /// called, so a throwing save (for any reason at all) still leaves memory holding the new value;
     /// <see cref="SynchronizedSettingsStore.Update"/> does not catch that throw itself, so it
-    /// propagates to the caller -- exactly what
-    /// <c>AppComposition.HandleWallpaperSceneHttpSwitch</c>'s own try/catch around
-    /// <c>persistWallpaperScene?.Invoke</c> already assumes (it wraps the call precisely because
-    /// <c>Update</c> might throw). The NEXT successful <see cref="SynchronizedSettingsStore.Update"/>
+    /// propagates to the caller, which must guard its own persist call if it cannot tolerate a
+    /// throw. The NEXT successful <see cref="SynchronizedSettingsStore.Update"/>
     /// starts its own <c>change</c> from that same ahead-of-disk <c>_current</c>, so its saved
     /// snapshot ends up carrying BOTH the failed update's field and its own -- one save behind,
     /// never lost.

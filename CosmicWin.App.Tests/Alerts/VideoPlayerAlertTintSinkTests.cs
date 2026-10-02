@@ -5,29 +5,22 @@ using CosmicWin.Interop.Win32;
 namespace CosmicWin.App.Tests.Alerts;
 
 /// <summary>
-/// see-through-video-tint (S4): the tint sink exists ONLY in video wallpaper mode; html mode
-/// (no video back buffer) get none, so the controller never tells the page to tint there.
+/// see-through-video-tint (S4): the tint sink exists ONLY when there is a video player to tint;
+/// with none the controller never tells the page to tint.
 /// </summary>
 public sealed class VideoPlayerAlertTintSinkTests
 {
     [Fact]
-    public void HtmlModeGetsNoSink()
+    public void NoPlayerGetsNoSink()
     {
-        using var player = new MediaFoundationVideoWallpaperPlayer();
-        Assert.Null(VideoPlayerAlertTintSink.For(WallpaperMode.Html, player));
+        Assert.Null(VideoPlayerAlertTintSink.For(null));
     }
 
     [Fact]
-    public void VideoModeWithoutAPlayerGetsNoSink()
-    {
-        Assert.Null(VideoPlayerAlertTintSink.For(WallpaperMode.Video, null));
-    }
-
-    [Fact]
-    public void VideoModeGetsASinkThatForwardsToThePlayerWithoutThrowing()
+    public void APlayerGetsASinkThatForwardsToThePlayerWithoutThrowing()
     {
         using var player = new MediaFoundationVideoWallpaperPlayer();
-        var sink = VideoPlayerAlertTintSink.For(WallpaperMode.Video, player);
+        var sink = VideoPlayerAlertTintSink.For(player);
         Assert.NotNull(sink);
         sink.SetTint(new byte[4], 2, 2, 1, 2, 3); // no worker running: just records the request
         sink.ClearTint();
@@ -49,7 +42,7 @@ public sealed class VideoPlayerAlertTintSinkTests
     public void TheSinkForwardsTheRenderedAndLostEventsSubscriptionsToThePlayer()
     {
         using var player = new MediaFoundationVideoWallpaperPlayer();
-        var sink = VideoPlayerAlertTintSink.For(WallpaperMode.Video, player)!;
+        var sink = VideoPlayerAlertTintSink.For(player)!;
         Action handler = () => { };
 
         sink.TintRendered += handler;
@@ -59,9 +52,9 @@ public sealed class VideoPlayerAlertTintSinkTests
     }
 
     [Fact]
-    public void AppCompositionWiresTheSinkOnlyThroughTheModeGate()
+    public void AppCompositionWiresTheSinkToTheVideoPlayer()
     {
         var source = ReadCompositionSource();
-        Assert.Contains("tintSink: VideoPlayerAlertTintSink.For(settings.WallpaperMode, videoWallpaperPlayer)", source);
+        Assert.Contains("tintSink: VideoPlayerAlertTintSink.For(videoWallpaperPlayer)", source);
     }
 }

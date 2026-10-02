@@ -4,7 +4,7 @@ namespace CosmicWin.App;
 /// S6 (wallpaper-scene-http-endpoint, R3-persist-shared-stored-capture): the ONE place every
 /// <c>persistXyz</c> closure <c>AppComposition.WireProduction</c> hands out reads and rewrites the
 /// captured settings snapshot -- serialized, so two of those closures firing from different threads
-/// (the UI STA thread for focus-border/border-colour/tiling/scene, the video-wallpaper MTA thread for
+/// (the UI STA thread for focus-border/border-colour/tiling, the video-wallpaper MTA thread for
 /// the video path) can never interleave their own read-modify-write of the SAME snapshot.
 /// </summary>
 /// <remarks>
@@ -18,19 +18,18 @@ namespace CosmicWin.App;
 /// </remarks>
 /// <remarks>
 /// Deliberately minimal (the task's own instruction): no queueing, no async, no batching. Every
-/// caller is a fire-and-forget settings toggle (a checkbox flip, an imported video path, a scene
-/// switch) -- nothing waits on <see cref="Update"/>'s result, so holding a lock for the sub-millisecond
-/// duration of an in-memory record `with` plus one small file write costs no more than what each
-/// individual unsynchronized closure already paid on its own.
+/// caller is a fire-and-forget settings toggle (a checkbox flip, an imported video path) -- nothing
+/// waits on <see cref="Update"/>'s result, so holding a lock for the sub-millisecond duration of an
+/// in-memory record `with` plus one small file write costs no more than what each individual
+/// unsynchronized closure already paid on its own.
 /// </remarks>
 /// <remarks>
 /// S10 (wallpaper-scene-http-endpoint, R3-settings-store-save-failure-semantics-unproved): a
 /// throwing <paramref name="save"/> is NOT caught here. <see cref="Update"/> assigns
 /// <see cref="_current"/> BEFORE calling <paramref name="save"/>, so memory always reflects the
 /// change regardless of whether persisting it succeeded, then lets a save failure propagate to the
-/// caller uncaught -- exactly what <c>AppComposition.HandleWallpaperSceneHttpSwitch</c>'s own
-/// try/catch around <c>persistWallpaperScene?.Invoke</c> already assumes. In production this never
-/// actually fires for the two failure modes it exists to tolerate: <c>save</c> is
+/// caller uncaught, so every caller that cannot tolerate a throw guards its own persist call. In
+/// production this never actually fires for the two failure modes it exists to tolerate: <c>save</c> is
 /// <c>SettingsFile.Save</c>, which itself swallows <see cref="IOException"/>/<see
 /// cref="UnauthorizedAccessException"/> (reporting them through its own <c>onDiagnostic</c> callback
 /// instead, S10's other change). The result is eventually convergent, one save behind: the NEXT

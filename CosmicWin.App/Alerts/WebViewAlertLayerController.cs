@@ -42,36 +42,6 @@ public sealed class WebViewAlertLayerController : IDisposable
     // see-through-video-tint (S4): null unless a tint sink was supplied (video wallpaper mode only), in
     // which case every use below is skipped and the page is never told to tint.
     private readonly AlertTintCoordinator? _tint;
-    // D3 (html-wallpaper-demo): true only for the demo's html wallpaper mode -- see
-    // WebViewAlertLayerVisibility and the mode branches in CreateAsync/TryMarkReady/End/OnMessage.
-    // False (the default) reproduces exactly what this class did before D3.
-    private readonly bool _htmlWallpaperMode;
-    // D6a (html-wallpaper-demo): every scene page shares one virtual host mapping (see the
-    // CoreWebView2.SetVirtualHostNameToFolderMapping/Navigate calls below), so only the scene
-    // SEGMENT of the navigated URL needs to change to switch scenes.
-    // D6d: that segment comes from the wallpaper-scene setting, mapped to its fixed folder name by
-    // SceneFolderName -- a closed switch over a compile-time enum, so raw settings text (or anything
-    // else) can never reach the Navigate URL as an unvalidated scene segment.
-    // S3 (wallpaper-scene-http-endpoint): MUTABLE, unlike every other field seeded from a constructor
-    // parameter in this class -- SwitchScene (below) updates it live, after CreateAsync has already
-    // navigated once. CreateAsync's own Navigate call reads THIS field, never the constructor's
-    // htmlWallpaperScene parameter directly, which is also what makes a later recreate (TearDown from
-    // a host change, then Poll calling CreateAsync again) navigate to whatever scene is CURRENT --
-    // TearDown never touches this field. Seeded from the constructor's htmlWallpaperScene parameter,
-    // still literally "processing" by default (WallpaperScene.Processing), same as before S3.
-    private WallpaperScene _currentScene;
-    // D6d: caps how many times per second the scene page draws, forwarded to the page as the `fps`
-    // query param on the Navigate URL below (shared/js/render-loop.js parses it). 30 or 60, same
-    // fixed set Settings.WallpaperFps itself accepts; irrelevant in video mode.
-    private readonly int _htmlWallpaperFps;
-    // pause-scene-when-covered T2: the DESIRED pause state of the html scene page, kept here (not only
-    // posted) because a page that is not ready yet, or is recreated/re-navigated later (Explorer
-    // restart, process failure, scene switch), starts out running and must be told again once ready.
-    private bool _scenePaused;
-    // What the live page was last successfully told (a fresh page starts running = false). Kept apart
-    // from the desired state so a FAILED post is retried by the caller's next SetScenePaused call
-    // instead of being suppressed as "unchanged".
-    private bool _scenePostedPaused;
     private CoreWebView2Environment? _environment;
     private CoreWebView2CompositionController? _controller;
     private int _generation;
@@ -93,17 +63,12 @@ public sealed class WebViewAlertLayerController : IDisposable
     private readonly AlertLayerNavigation _navigation = new();
 
     public WebViewAlertLayerController(ICompositionOverlaySurface host, Action<string>? trace = null,
-        Func<DateTimeOffset>? clock = null, bool htmlWallpaperMode = false,
-        WallpaperScene htmlWallpaperScene = WallpaperScene.Processing, int htmlWallpaperFps = 60,
-        IAlertTintSink? tintSink = null)
+        Func<DateTimeOffset>? clock = null, IAlertTintSink? tintSink = null)
     {
         if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
             throw new InvalidOperationException("A WPF UI STA is required.");
         _host = host;
         _trace = trace;
-        _htmlWallpaperMode = htmlWallpaperMode;
-        _currentScene = htmlWallpaperScene;
-        _htmlWallpaperFps = htmlWallpaperFps;
         _state = new AlertLayerPreloadState(clock);
         _dispatcher = Dispatcher.CurrentDispatcher;
         _tint = tintSink is null ? null : new AlertTintCoordinator(tintSink, PostToPageFromAnyThread, trace);
@@ -162,84 +127,6 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (_state.RequestShow(request) is { } show) PostShow(show);
     }
 
-    /// <summary>
-    /// S3 (wallpaper-scene-http-endpoint): switches the live html-wallpaper scene without tearing
-    /// down or recreating the WebView2 controller -- the HTTP route's whole point is a live switch
-    /// with no restart. Returns <see langword="false"/> outside <see cref="_htmlWallpaperMode"/>:
-    /// there is no scene to switch while the video wallpaper is showing, and the caller
-    /// (<c>AppComposition</c>'s HTTP handler) reads that as "answer 503, dispatch nothing".
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Decision (feature doc): requesting the CURRENT scene again is a no-op re-navigate but still
-    /// returns <see langword="true"/> -- the request was accepted, it simply had nothing to do.
-    /// </para>
-    /// <para>
-    /// When <see cref="_controller"/> has not been created yet (the host is not attached, or <see
-    /// cref="CreateAsync"/> has not run), only <see cref="_currentScene"/> is updated: the next <see
-    /// cref="CreateAsync"/> call reads it directly, so no separate "pending scene" state is needed.
-    /// </para>
-    /// </remarks>
-    public bool SwitchScene(WallpaperScene scene)
-    {
-        CheckAccess();
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_htmlWallpaperMode)
-        {
-            return false;
-        }
-
-        if (_currentScene == scene)
-        {
-            return true;
-        }
-
-        _currentScene = scene;
-        if (_controller is null)
-        {
-            // Recorded above -- the next CreateAsync call reads _currentScene directly.
-            return true;
-        }
-
-        // Mirrors the Navigate step of CreateAsync: reset the ready-state flags the SAME way, so
-        // OnNavigationCompleted/OnMessage's "ready" handshake runs again for the new page instead of
-        // treating this controller as already ready for a page it has not actually loaded yet.
-        _navigationCompleted = false;
-        _pageReportedReady = false;
-        // alert-survives-scene-switch: the new page loads without the alert on screen; requeue it for its
-        // remaining time so TryMarkReady re-shows it once the new page is ready.
-        _state.PageReloading();
-        _tint?.Clear();
-        _navigateStopwatch = Stopwatch.StartNew();
-        _navigation.BeforeHostNavigate();
-        _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
-        return true;
-    }
-
-    /// <summary>
-    /// pause-scene-when-covered T2: pauses (<paramref name="paused"/> true) or resumes the html wallpaper
-    /// scene page while a fullscreen window covers the desktop. Html wallpaper mode only; a no-op in
-    /// video mode. Safe at any time: while the page is not ready the state is just remembered and
-    /// <see cref="TryMarkReady"/> posts it once the page can receive it. A failed post propagates to
-    /// the caller (which traces it) and is re-attempted by the next call with the same value.
-    /// </summary>
-    public void SetScenePaused(bool paused)
-    {
-        CheckAccess();
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_htmlWallpaperMode) return;
-        _scenePaused = paused;
-        if (_navigationCompleted && _pageReportedReady && _scenePostedPaused != _scenePaused) PostScenePause();
-    }
-
-    private void PostScenePause()
-    {
-        if (_controller is null) return;
-        _controller.CoreWebView2.PostWebMessageAsJson(
-            _scenePaused ? AlertLayerMessages.Pause : AlertLayerMessages.Resume);
-        _scenePostedPaused = _scenePaused;
-    }
-
     public void End() => End("end");
 
     private void End(string reason)
@@ -252,13 +139,7 @@ public sealed class WebViewAlertLayerController : IDisposable
         try
         {
             _controller.CoreWebView2.PostWebMessageAsJson(AlertLayerMessages.Hide);
-            // D3: in html wallpaper mode the page IS the wallpaper and must stay visible permanently
-            // once ready -- End() still tells the page to hide its own alert overlay above, it just
-            // never hides the WebView2 layer itself. Video mode is unchanged.
-            if (WebViewAlertLayerVisibility.HideOnEndOrDone(_htmlWallpaperMode))
-            {
-                _controller.IsVisible = false;
-            }
+            _controller.IsVisible = false;
         }
         catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error($"end-{reason}", ex)); }
     }
@@ -358,25 +239,8 @@ public sealed class WebViewAlertLayerController : IDisposable
             if (!StillCurrent(epoch, hwnd, generation)) return;
             candidate.RootVisualTarget = visual;
             _host.CommitComposition();
-            // D3 (html-wallpaper-demo): html wallpaper mode maps and later navigates to the active
-            // SCENE page under its OWN reserved example domain, never cosmicwin-alert.example --
-            // kept as two separate literal branches, not a shared variable, so video mode's own
-            // literals stay byte-for-byte what they were before D3 (see
-            // WebViewAlertLayerControllerTests). D6a: the mapping now covers the WHOLE Wallpaper\Web
-            // folder (not just one scene's own subfolder), since every scene page now loads
-            // Wallpaper\Web\shared\... siblings (the shared alert overlay) -- HtmlWallpaperSceneName
-            // is the single place the active scene folder name lives (see its own remarks above).
-            if (_htmlWallpaperMode)
-            {
-                candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-scene.example",
-                    Path.Combine(AppContext.BaseDirectory, "Wallpaper", "Web"),
-                    CoreWebView2HostResourceAccessKind.DenyCors);
-            }
-            else
-            {
-                candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.example",
-                    Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
-            }
+            candidate.CoreWebView2.SetVirtualHostNameToFolderMapping("cosmicwin-alert.example",
+                Path.Combine(AppContext.BaseDirectory, "Alerts", "Web"), CoreWebView2HostResourceAccessKind.DenyCors);
             candidate.CoreWebView2.WebMessageReceived += OnMessage;
             candidate.CoreWebView2.NavigationStarting += OnNavigationStarting;
             candidate.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
@@ -394,21 +258,8 @@ public sealed class WebViewAlertLayerController : IDisposable
             _navigateStopwatch = Stopwatch.StartNew();
             // No kind/duration hash any more (T9b): the page loads idle and is driven by show/hide
             // messages once it is ready.
-            if (_htmlWallpaperMode)
-            {
-                // D6d: the scene segment comes from the closed enum -> folder-name mapping (SceneUrl
-                // -> SceneFolderName below), and `fps` is a plain integer (30 or 60, from
-                // Settings.WallpaperFps) -- neither can ever inject an unexpected path segment or
-                // query into this URL. S3: _currentScene, not the constructor's own
-                // htmlWallpaperScene parameter -- see that field's own remarks for why.
-                _navigation.BeforeHostNavigate();
-                _controller.CoreWebView2.Navigate(SceneUrl(_currentScene, _htmlWallpaperFps));
-            }
-            else
-            {
-                _navigation.BeforeHostNavigate();
-                _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
-            }
+            _navigation.BeforeHostNavigate();
+            _controller.CoreWebView2.Navigate("https://cosmicwin-alert.example/alert-layer.html");
         }
         catch (Exception ex)
         {
@@ -498,9 +349,7 @@ public sealed class WebViewAlertLayerController : IDisposable
                 // calls End() itself once it advances) -- this only reflects the page's own state.
                 _state.PageDone();
                 _tint?.Clear();
-                // D3: in html wallpaper mode the page's own "done" must never hide the WebView2 layer
-                // either -- it is the wallpaper, not a one-off alert. Video mode is unchanged.
-                if (WebViewAlertLayerVisibility.HideOnEndOrDone(_htmlWallpaperMode) && _controller is not null)
+                if (_controller is not null)
                 {
                     _controller.IsVisible = false;
                 }
@@ -515,21 +364,6 @@ public sealed class WebViewAlertLayerController : IDisposable
         if (!_navigationCompleted || !_pageReportedReady) return;
         _state.MarkReady();
         _trace?.Invoke(AlertLayerTrace.PageReady());
-        // D3: in html wallpaper mode becoming ready shows the layer on its own, with no Start ever
-        // required -- the page IS the wallpaper. Runs again after every recreation (Explorer restart,
-        // process failure), so the layer becomes visible again once the new controller is ready.
-        // Video mode is unchanged: the layer stays hidden until an alert actually starts it.
-        if (WebViewAlertLayerVisibility.ShowOnReady(_htmlWallpaperMode) && _controller is not null)
-        {
-            _controller.IsVisible = true;
-        }
-        // A fresh page always starts running: tell it again if the desktop is covered right now.
-        _scenePostedPaused = false;
-        if (_htmlWallpaperMode && _scenePaused)
-        {
-            try { PostScenePause(); }
-            catch (Exception ex) { Debug.WriteLine(ex); _trace?.Invoke(AlertLayerTrace.Error("post-scene-pause", ex)); }
-        }
         if (_state.ApplyPendingShowIfDue() is { } pending)
         {
             _trace?.Invoke(AlertLayerTrace.PendingShowApplied(pending));
@@ -586,34 +420,6 @@ public sealed class WebViewAlertLayerController : IDisposable
     {
         if (!_dispatcher.CheckAccess()) throw new InvalidOperationException("Use the owning UI dispatcher.");
     }
-
-    /// <summary>
-    /// D6d (html-wallpaper-demo): the ONLY place a <see cref="WallpaperScene"/> value becomes a folder
-    /// name -- a closed switch over a compile-time-fixed enum, so no settings text (or anything else)
-    /// can ever reach <see cref="CreateAsync"/>'s Navigate URL as an unvalidated scene segment. An
-    /// enum value outside the defined members (never produced by <c>Settings.Parse</c>'s own
-    /// <c>TryReadWallpaperScene</c>, which only ever returns a defined member) falls back to
-    /// <c>"processing"</c>, the same folder <see cref="WallpaperScene.Processing"/> itself maps to --
-    /// internal so <c>WebViewAlertLayerControllerTests</c> can exercise this pure mapping directly.
-    /// </summary>
-    internal static string SceneFolderName(WallpaperScene scene) => scene switch
-    {
-        WallpaperScene.Explorer => "explorer",
-        WallpaperScene.Idle => "idle",
-        WallpaperScene.Raphael => "raphael",
-        _ => "processing",
-    };
-
-    /// <summary>
-    /// S3 (wallpaper-scene-http-endpoint): the exact URL <see cref="CreateAsync"/> and <see
-    /// cref="SwitchScene"/> both navigate to for <paramref name="scene"/> -- pulled out as a pure,
-    /// directly-testable function (unlike the rest of this class's WebView2-only behaviour, see the
-    /// class remarks) since both call sites need to build the identical URL. Internal so
-    /// <c>WebViewAlertLayerControllerTests</c> can exercise it directly.
-    /// </summary>
-    internal static string SceneUrl(WallpaperScene scene, int fps, string? variant = null) =>
-        $"https://cosmicwin-scene.example/{SceneFolderName(scene)}/index.html?fps={fps}"
-        + (variant is null ? "" : $"&variant={variant}");
 
     public void Dispose()
     {

@@ -119,15 +119,14 @@ public sealed class SettingsFileTests : IDisposable
     }
 
     /// <summary>
-    /// S9's other maintainer decision folded into the same first-run write: html mode, the scene
-    /// route, alerts and now alert-http itself all come up on for a fresh install.
+    /// S9's other maintainer decision folded into the same first-run write: alerts and alert-http
+    /// itself both come up on for a fresh install.
     /// </summary>
     [Fact]
     public void MissingFile_LoadOrCreate_TheWrittenDefaultsMatchTheS9Decisions()
     {
         var settings = SettingsFile.LoadOrCreate(Path_);
 
-        Assert.Equal(WallpaperMode.Html, settings.WallpaperMode);
         Assert.True(settings.HttpServerEnabled);
         Assert.True(settings.AlertsEnabled);
     }

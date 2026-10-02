@@ -65,13 +65,13 @@ public sealed class HttpAlertCompositionWiringTests
     private sealed record Harness(
         AppComposition Composition, FakeServer? Pipe, RecordingDesktopTrace Trace,
         List<string> HttpFactoryCalls, int TokenLoadCalls, Func<string, string>? HttpHandler,
-        Func<string, bool>? HttpVideoSwitchHandler, Func<string, bool>? HttpSceneSwitchHandler,
+        Func<string, bool>? HttpVideoSwitchHandler,
         IAlertCommandServer? HttpServer, List<string> Events);
 
     private static Harness Wire(
         bool alertsEnabled = true, bool httpEnabled = false, int httpPort = 47811,
         string? token = "test-token",
-        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
+        Func<int, string, Func<string, string>?, Action<string>?, Func<string, bool>?, IAlertCommandServer>? httpFactory = null)
     {
         var primary = new FakeDisplay(
             new IntPtr(1), Rectangle.FromSize(0, 0, 1920, 1080), Rectangle.FromSize(0, 0, 1920, 1080), 1.0, true);
@@ -83,16 +83,14 @@ public sealed class HttpAlertCompositionWiringTests
         var tokenLoadCalls = 0;
         Func<string, string>? httpHandler = null;
         Func<string, bool>? httpVideoSwitchHandler = null;
-        Func<string, bool>? httpSceneSwitchHandler = null;
         IAlertCommandServer? httpServer = null;
         var events = new List<string>();
 
-        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic, videoSwitch, sceneSwitch) =>
+        var resolvedHttpFactory = httpFactory ?? ((port, tok, handler, diagnostic, videoSwitch) =>
         {
             httpFactoryCalls.Add($"port={port} token={tok}");
             httpHandler = handler;
             httpVideoSwitchHandler = videoSwitch;
-            httpSceneSwitchHandler = sceneSwitch;
             var server = new FakeServer(handler ?? (_ => throw new InvalidOperationException(
                 "the alerts route is off -- this fake never routes to it")));
             httpServer = server;
@@ -133,7 +131,7 @@ public sealed class HttpAlertCompositionWiringTests
 
         return new Harness(
             composition, pipe, trace, httpFactoryCalls, tokenLoadCalls, httpHandler,
-            httpVideoSwitchHandler, httpSceneSwitchHandler, httpServer, events);
+            httpVideoSwitchHandler, httpServer, events);
     }
 
     [Fact]
@@ -150,10 +148,10 @@ public sealed class HttpAlertCompositionWiringTests
 
     /// <summary>
     /// The single http-server switch serves every route: with alerts fully disabled the shared
-    /// server still starts, carrying no alert handler but the video and scene handlers.
+    /// server still starts, carrying no alert handler but the video handler.
     /// </summary>
     [Fact]
-    public void ServerOn_AlertsDisabled_StartsHttpServerWithVideoAndSceneButNoAlertHandler()
+    public void ServerOn_AlertsDisabled_StartsHttpServerWithVideoButNoAlertHandler()
     {
         var h = Wire(alertsEnabled: false, httpEnabled: true, httpPort: 6001);
         using (h.Composition)
@@ -161,18 +159,16 @@ public sealed class HttpAlertCompositionWiringTests
             Assert.Equal(["port=6001 token=test-token"], h.HttpFactoryCalls);
             Assert.Null(h.HttpHandler);
             Assert.NotNull(h.HttpVideoSwitchHandler);
-            Assert.NotNull(h.HttpSceneSwitchHandler);
             Assert.True(((FakeServer)h.HttpServer!).Started);
             Assert.DoesNotContain(
                 h.Trace.Lines, l => l.StartsWith("alert-http start requested", StringComparison.Ordinal));
             Assert.Contains(
                 h.Trace.Lines,
-                l => l == "http-server start requested port=6001 alerts-route=False video-route=True "
-                    + "scene-route=True");
+                l => l == "http-server start requested port=6001 alerts-route=False video-route=True");
         }
     }
 
-    /// <summary>Server on and alerts on: all three routes are in the table, with no per-route toggles.</summary>
+    /// <summary>Server on and alerts on: both routes are in the table, with no per-route toggles.</summary>
     [Fact]
     public void ServerOn_AlertsEnabled_ServesEveryRoute()
     {
@@ -181,12 +177,10 @@ public sealed class HttpAlertCompositionWiringTests
         {
             Assert.NotNull(h.HttpHandler);
             Assert.NotNull(h.HttpVideoSwitchHandler);
-            Assert.NotNull(h.HttpSceneSwitchHandler);
             Assert.Contains(h.Trace.Lines, l => l == "alert-http start requested port=6003");
             Assert.Contains(
                 h.Trace.Lines,
-                l => l == "http-server start requested port=6003 alerts-route=True video-route=True "
-                    + "scene-route=True");
+                l => l == "http-server start requested port=6003 alerts-route=True video-route=True");
         }
     }
 
@@ -244,7 +238,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpFactoryThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _, _, _) => throw new InvalidOperationException("factory boom"));
+            httpFactory: (_, _, _, _, _) => throw new InvalidOperationException("factory boom"));
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
@@ -261,7 +255,7 @@ public sealed class HttpAlertCompositionWiringTests
     public void HttpServerStartThrows_PipeStillStartedAndComposingContinues()
     {
         var h = Wire(alertsEnabled: true, httpEnabled: true,
-            httpFactory: (_, _, _, _, _, _) => new ThrowingStartServer());
+            httpFactory: (_, _, _, _, _) => new ThrowingStartServer());
         using (h.Composition)
         {
             Assert.True(h.Pipe!.Started);
