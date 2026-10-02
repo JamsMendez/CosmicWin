@@ -42,4 +42,4 @@ Route for every code task: delegated direct (one writer; 2+ non-trivial files).
 T1-T7 done (commits in this branch's git log).
 
 ## Next step
-Maintainer decides: merge feat/strip-to-tiling-video into main, copy the stripped build into run/, and whether to delete the ignored docs/great-sage/ and docs/media/.
+Merged ff into main (5c7544b). Follow-up on main: tray item "Quitar wallpaper de video" (b61700c..9559f16, reviewed). Release build of main copied to run/ (not launched). Open: the maintainer pushes, and decides whether to delete the ignored docs/great-sage/ and docs/media/.

@@ -142,7 +142,9 @@ answer -- which windows MOVE when a chord fires.
 A trace is also written by the running app rather than a test:
 `%LOCALAPPDATA%\CosmicWin\desktop-trace.log` records every virtual-desktop chord — action, count
 and index before and after, and the error — plus any chord that matched NO entry, which is otherwise
-invisible and reads exactly like a broken feature.
+invisible and reads exactly like a broken feature. The video wallpaper logs there too, one
+`video-wallpaper phase=startup|pick|restore|remove` line per change, plus
+`phase=remove persist-failed error=<Type>` when blanking `video-wallpaper-path` fails.
 
 Run one with the detailed logger, or its output is swallowed:
 

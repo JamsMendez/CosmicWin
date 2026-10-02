@@ -198,7 +198,7 @@ you want the space back. Picking a video again works as before.
 
 If Explorer restarts (a crash, or `explorer.exe /restart`), CosmicWin listens for the shell's own
 `TaskbarCreated` broadcast and re-attaches the video host to the desktop automatically, without
-losing the running video.
+losing the running video. After **Quitar wallpaper de video**, an Explorer restart leaves the desktop alone: the video stays removed until you pick one again.
 
 ## Settings
 
@@ -230,8 +230,8 @@ CosmicWin does not install itself. Autostart is opt-in, and it is a Scheduled Ta
 UAC prompt at every logon.
 
 ```powershell
-CosmicWin.exe --install-task     # register the logon task
-CosmicWin.exe --uninstall-task   # remove it
+CosmicWin.App.exe --install-task     # register the logon task
+CosmicWin.App.exe --uninstall-task   # remove it
 ```
 
 Both commands do their work and exit immediately; neither starts the window manager. Run them from
@@ -241,7 +241,7 @@ operation.
 Four things worth knowing before you rely on it:
 
 - **The task points at the executable you invoked**, resolved at install time. Install from the copy
-  you actually run — `run\CosmicWin.exe` after `run.ps1`, not the build tree, which `run.ps1`
+  you actually run — `run\CosmicWin.App.exe` after `run.ps1`, not the build tree, which `run.ps1`
   deliberately leaves unlocked. Move or delete that copy and the task starts nothing.
 - **Quitting from the tray disables the trigger.** Exiting is read as "not right now", so the task
   stays registered but stops firing, and the next logon is quiet. Re-run `--install-task` to turn it
