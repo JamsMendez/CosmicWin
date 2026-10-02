@@ -111,6 +111,147 @@ public sealed class Win32VideoWallpaperHostDetachTests
         }
     }
 
+    /// <summary>
+    /// A removal is a removal even when DestroyWindow fails: an Explorer restart (TaskbarCreated)
+    /// arriving afterwards must not re-attach the surviving window and bring the video back.
+    /// </summary>
+    [Fact]
+    public void TaskbarCreated_AfterADetachWhoseDestroyFailed_DoesNotReattach()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var attachCalls = new List<nint>();
+            var destroyCalls = 0;
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => { },
+                DestroyWindowForTest = window => ++destroyCalls > 1 && DestroyWindow(window),
+                AttachToDesktopForTest = window =>
+                {
+                    attachCalls.Add(window);
+                    return false;
+                },
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            host.Detach();
+            Assert.True(IsWindow(hwnd));
+
+            host.RaiseTaskbarCreatedForTest();
+
+            Assert.Empty(attachCalls);
+            Assert.Equal(hwnd, host.Hwnd);
+
+            host.Dispose();
+            Assert.False(IsWindow(hwnd));
+            Assert.Equal(2, destroyCalls);
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
+    /// <summary>
+    /// A new pick after a removal whose destroy failed reuses the surviving window (no second window
+    /// is created over it, so nothing leaks), clears the removal so Explorer restarts re-attach it
+    /// again, and Dispose still destroys that one window exactly once.
+    /// </summary>
+    [Fact]
+    public void TryAttach_AfterADetachWhoseDestroyFailed_ReusesTheSurvivingWindowAndDisposeDestroysItOnce()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var destroyed = new List<nint>();
+            var attachCalls = new List<nint>();
+            var failNextDestroy = true;
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => { },
+                DestroyWindowForTest = window =>
+                {
+                    destroyed.Add(window);
+                    if (failNextDestroy)
+                    {
+                        failNextDestroy = false;
+                        return false;
+                    }
+
+                    return DestroyWindow(window);
+                },
+                AttachToDesktopForTest = window =>
+                {
+                    attachCalls.Add(window);
+                    return false; // Stops before D3D: no swapchain on a test window.
+                },
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            host.Detach();
+            Assert.True(IsWindow(hwnd));
+
+            host.TryAttach();
+
+            Assert.Equal([hwnd], attachCalls);
+            Assert.Equal(hwnd, host.Hwnd);
+
+            // The pick cleared the removal: an Explorer restart re-attaches the shown host again.
+            host.RaiseTaskbarCreatedForTest();
+            Assert.Equal([hwnd, hwnd], attachCalls);
+
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+
+            Assert.False(IsWindow(hwnd));
+            Assert.Equal([hwnd, hwnd], destroyed);
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
+    /// <summary>A second Detach after a failed destroy retries it, and Dispose then leaves the window alone.</summary>
+    [Fact]
+    public void Detach_AfterADetachWhoseDestroyFailed_RetriesTheDestroy()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var destroyed = new List<nint>();
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => { },
+                DestroyWindowForTest = window =>
+                {
+                    destroyed.Add(window);
+                    return destroyed.Count > 1 && DestroyWindow(window);
+                },
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            host.Detach();
+            Assert.True(IsWindow(hwnd));
+            Assert.False(host.IsDetached);
+
+            host.Detach();
+
+            Assert.False(IsWindow(hwnd));
+            Assert.True(host.IsDetached);
+
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+
+            Assert.Equal([hwnd, hwnd], destroyed);
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
     /// <summary>A fatal exception from the release is not swallowed, but the window still goes.</summary>
     [Fact]
     public void Detach_WhenReleasingThrowsAFatalException_PropagatesItButStillDestroysTheWindow()

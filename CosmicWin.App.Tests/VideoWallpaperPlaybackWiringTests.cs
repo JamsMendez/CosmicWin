@@ -1047,18 +1047,25 @@ public sealed class VideoWallpaperPlaybackWiringTests
         var player = new FakeVideoWallpaperPlayer();
         var path = typeof(VideoWallpaperPlaybackWiringTests).Assembly.Location;
 
+        var trace = new RecordingDesktopTrace();
+
         var harness = Wire(
             videoWallpaperHost: host, videoWallpaperPlayer: player, videoWallpaperPath: path,
             importVideoWallpaper: _ => throw new IOException("sharing violation"),
-            persistVideoWallpaperPath: _ => throw new IOException("settings.conf is locked"));
+            persistVideoWallpaperPath: _ => throw new IOException("settings.conf is locked"),
+            desktopTrace: trace);
         using (harness.Composition)
         {
             harness.Tray.RemoveVideoWallpaper();
+
+            Assert.False(harness.Tray.HasVideoWallpaper);
+            Assert.Contains("video-wallpaper phase=remove persist-failed error=IOException", trace.Lines);
 
             harness.Tray.SetVideoWallpaperPath(@"C:\Users\me\Videos\clip.mp4");
 
             Assert.Equal(1, player.TryPlayCallCount);
             Assert.Equal(1, host.TryAttachCallCount);
+            Assert.False(harness.Tray.HasVideoWallpaper);
         }
     }
 
