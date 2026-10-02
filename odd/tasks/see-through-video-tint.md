@@ -83,7 +83,7 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   R3-export-throw-kills-render-loop (a throwing toDataURL kills the page render loop -> alert stuck),
   WARNING R3-seq-zero-applies-when-no-show-active (a mask with seq 0 and no active show still tints).
   Route: delegated writer, before S5 so the hardware run has traces.
-- [ ] S5 Hardware check in `Video` mode (failed blue, warning violet, mosaic, shake), restore settings.
+- [x] S5 Hardware check in `Video` mode (failed blue, warning violet, mosaic, shake), restore settings.
 
 ## Acceptance
 
@@ -178,6 +178,20 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   Open SUGGESTIONs (not chased): max message chars rationale, source-scan wiring tests, coordinator never
   unsubscribes sink events, WPF PNG decoder on the thread pool.
 
+- 2026-10-02 S5 DONE on hardware (Release of feature tip 1d4bf60, wallpaper-mode switched to `video` with
+  settings.conf backed up and restored byte-identical; CosmicWin back on html-mini from main). Alerts over
+  HTTP with windows minimized, screenshots taken 3 s after the 202:
+  - failed: `show` 00:54:42.153 -> `tint requested kind=failed size=3440x1440` +580 ms (reveal end) ->
+    `tint rendered` +27 ms. Inside FAILED the real video shows tinted blue by luminance (bright ring
+    segments/moon/stars blue, dark space black); the red wash is cut out exactly along the letters.
+  - warning: same timeline (+750 ms, +24 ms), violet inside WARNING, yellow wash cut out.
+  - mixed mosaic failed+warning (2x1): the failed tile tinted blue, the warning tile keeps its normal
+    letters (by design: one mask for the first tile's kind).
+  - 0 `video-tint` failure lines; done/hide followed each alert.
+  Not observable in screenshots: a one-frame gap at tint-ready (the accepted cross-show residual).
+  Product note for the maintainer: with this mostly-dark scene the tinted letters read mostly black with
+  blue/violet highlights (that is the chosen every-brightness mapping).
+
 ## Next step
 
-S5 hardware (ask the maintainer before switching wallpaper-mode to video).
+Maintainer: look at the screenshots, decide merge into main (feature-branch-chain end). (ask the maintainer before switching wallpaper-mode to video).
