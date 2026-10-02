@@ -338,6 +338,13 @@ internal sealed class RecordingWindow : IWindow
     }
 
     /// <summary>
+    /// Sets ONLY <c>WS_MAXIMIZE</c> and leaves the bounds where they are: the stale bit a maximize-box
+    /// strip can write back after racing a restore on a hung window (R3-restore-lane-lost-update-race --
+    /// the strip read the style before the restore cleared the bit, then wrote the whole style).
+    /// </summary>
+    public void SimulateStaleMaximizedBit() => Style |= 0x01000000u;
+
+    /// <summary>
     /// Clears <c>WS_CAPTION</c> and <c>WS_THICKFRAME</c> and covers <paramref name="monitor"/>,
     /// which is what Chrome and Brave measured as doing for F11 and video fullscreen. Deliberately
     /// leaves <c>WS_MAXIMIZE</c> alone: they never set it.

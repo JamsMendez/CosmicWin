@@ -64,3 +64,19 @@ Maintainer request, 2026-09-30: "podemos atacar los pendientes?".
   update-race (the documented residual: a strip racing a restore on a hung window can re-set a stale
   maximized bit; the next bounds change re-checks it), R3-independent-lane-release-unproved (no test
   proves the independent lane frees its slot after the parked call finally returns).
+
+## Advisories closed 2026-10-02 (branch test/hung-window-lane-advisories)
+
+- R3-independent-lane-release-unproved: new fact
+  `AfterTheParkedIndependentCallReturns_TheWindowsSlotIsFree_AndANewCallRuns` -- after the parked call
+  returns, a NEW independent call on the same window runs and lands. The pre-existing WorkerCount==0
+  check did not prove it (count and slot are released separately): with `_independent.Remove(key)`
+  commented out, ONLY the new fact failed; restored byte-identical.
+- R3-restore-lane-lost-update-race: no code change -- Win32 has no single-bit GWL_STYLE write and
+  queueing the restore behind a hung strip is exactly what the independent lane exists to avoid. The
+  documented self-healing is now pinned: `AStaleMaximizedBitLeftByAStripRacingARestore_IsClearedOnTheNext
+  BoundsChange` (MaximizeBlockTests; new RecordingWindow.SimulateStaleMaximizedBit sets only WS_MAXIMIZE,
+  bounds stay in the tile) -> restore called once, bit cleared, tile and tree kept. Behavior already
+  existed; mutation `if (false && maximized)` in the adapter's fallback fails it (Expected 1, Actual 0);
+  restored byte-identical.
+- Suites: Interop 554 passed / 42 skipped / 0 failed; App 1485 passed / 6 skipped / 0 failed.

@@ -594,6 +594,28 @@ public sealed class MaximizeBlockTests
         Assert.True(h.InTree(h.First));
     }
 
+    /// <summary>
+    /// R3-restore-lane-lost-update-race: the queue cannot stop a strip (ordered lane) from writing back
+    /// a stale WS_MAXIMIZE after a restore (independent lane) cleared it on a hung window -- Win32 has no
+    /// single-bit style write. The documented answer is that the NEXT bounds change re-checks the bit.
+    /// This pins that self-healing: a window left in its tile with only the stale bit set is restored
+    /// on its next bounds change and keeps its tile.
+    /// </summary>
+    [Fact]
+    public void AStaleMaximizedBitLeftByAStripRacingARestore_IsClearedOnTheNextBoundsChange()
+    {
+        using var h = new Harness();
+        Assert.Equal(h.FirstTile, h.First.Bounds);
+
+        h.First.SimulateStaleMaximizedBit();
+        h.Workspace.RaiseWindowBoundsChanged(h.First);
+
+        Assert.Equal(1, h.First.RestoreCallCount);
+        Assert.Equal(0u, h.First.Style & WindowStyleFlags.Maximized);
+        Assert.Equal(h.FirstTile, h.First.Bounds);
+        Assert.True(h.InTree(h.First));
+    }
+
     [Fact]
     public void AWindowThatMaximizesAnyway_IsRestoredThroughAUserGestureToo()
     {

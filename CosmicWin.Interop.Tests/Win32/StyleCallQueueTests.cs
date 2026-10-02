@@ -245,4 +245,37 @@ public sealed class StyleCallQueueTests
             release.Set();
         }
     }
+
+    /// <summary>
+    /// R3-independent-lane-release-unproved: once the parked independent call finally returns, its
+    /// window's slot must be FREE again -- otherwise every later restore on that window is refused
+    /// forever. A worker count back at zero does not prove it (the count and the slot are released
+    /// separately), so the proof is a new call on the same window actually running and landing.
+    /// </summary>
+    [Fact]
+    public void AfterTheParkedIndependentCallReturns_TheWindowsSlotIsFree_AndANewCallRuns()
+    {
+        var queue = new StyleCallQueue();
+        var release = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        try
+        {
+            Assert.Equal(
+                StyleWriteOutcome.TimedOut,
+                queue.RunIndependent(7, () => { started.Set(); release.Wait(); return true; }, TimeSpan.FromMilliseconds(50)));
+            Assert.True(started.Wait(Plenty));
+            Assert.Equal(StyleWriteOutcome.TimedOut, queue.RunIndependent(7, () => true, TimeSpan.FromMilliseconds(1)));
+
+            release.Set();
+            Assert.True(SpinWait.SpinUntil(() => queue.WorkerCount == 0, Plenty));
+
+            var ran = false;
+            Assert.Equal(StyleWriteOutcome.Applied, queue.RunIndependent(7, () => { ran = true; return true; }, Plenty));
+            Assert.True(ran);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
 }
