@@ -9,10 +9,11 @@ looping video wallpaper.
   movement, resizing and Windows' own virtual desktops are driven from the keyboard.
 - **Video wallpaper** — a looping MP4, picked from the tray, as the desktop wallpaper.
 
-The animated HTML scenes, the mini scene window, build alerts, the `CosmicWinAlert` CLI and the
-local HTTP API were removed from CosmicWin. That feature set is preserved on the branch
-`bk/cosmicwin-full`, and the scenes, alerts, HTTP API and mini window live on in the sibling project
-CielWin.
+> **The project was split in two.** CosmicWin keeps the tiling window manager and the video
+> wallpaper. The extras -- the animated HTML wallpaper scenes, the mini scene window, build alerts and
+> the local HTTP API -- moved to their own repository,
+> [CielWin](https://github.com/JamsMendez/CielWin). The last CosmicWin version that carried all of
+> them (plus the `CosmicWinAlert` CLI) is preserved on the branch `bk/cosmicwin-full`.
 
 ## Contents
 
