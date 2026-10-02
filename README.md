@@ -12,8 +12,7 @@ looping video wallpaper.
 > **The project was split in two.** CosmicWin keeps the tiling window manager and the video
 > wallpaper. The extras -- the animated HTML wallpaper scenes, the mini scene window, build alerts and
 > the local HTTP API -- moved to their own repository,
-> [CielWin](https://github.com/JamsMendez/CielWin). The last CosmicWin version that carried all of
-> them (plus the `CosmicWinAlert` CLI) is preserved on the branch `bk/cosmicwin-full`.
+> [CielWin](https://github.com/JamsMendez/CielWin).
 
 ## Contents
 
