@@ -93,11 +93,32 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     private static readonly TimeSpan TintFailureBackoff = TimeSpan.FromSeconds(5);
     private readonly VideoTintDriver _tint;
 
-    public MediaFoundationVideoWallpaperPlayer(TimeProvider? timeProvider = null)
+    /// <param name="timeProvider">Clock for the shake and the tint back-off.</param>
+    /// <param name="onTintDiagnostic">
+    /// Optional trace sink (called on the worker thread) for the tint pass: <c>video-tint failed ...</c>
+    /// once per back-off window, <c>video-tint retry</c>, <c>video-tint recovered</c>. HRESULT and
+    /// exception type only, never a message.
+    /// </param>
+    public MediaFoundationVideoWallpaperPlayer(TimeProvider? timeProvider = null, Action<string>? onTintDiagnostic = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _tint = new VideoTintDriver(_timeProvider, static () => new D2DVideoTintRenderer(), TintFailureBackoff);
+        _tint = new VideoTintDriver(_timeProvider, static () => new D2DVideoTintRenderer(), TintFailureBackoff, onTintDiagnostic);
+        _tint.Rendered += () => TintRendered?.Invoke();
+        _tint.Lost += () => TintLost?.Invoke();
     }
+
+    /// <summary>
+    /// Raised on the worker thread when the requested tint first actually reached the back buffer (and
+    /// again after a <see cref="TintLost"/> recovery). Not raised for a request that was cleared or
+    /// replaced meanwhile. Subscribers must be quick and must not call back into the player.
+    /// </summary>
+    public event Action? TintRendered;
+
+    /// <summary>
+    /// Raised on the worker thread when a tint that had been rendering stopped (the pass failed and
+    /// backed off); the video is untinted until <see cref="TintRendered"/> fires again.
+    /// </summary>
+    public event Action? TintLost;
 
     /// <summary>
     /// While set, the pixels covered by <paramref name="maskAlpha"/> show the video tinted by
@@ -618,13 +639,13 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
             ID3D11Texture2D backBuffer = host.GetBackBuffer();
             backBuffer.GetDesc(out D3D11_TEXTURE2D_DESC desc);
 
-            RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
             if (_tint.IsEngaged)
             {
-                TransferTinted(engine, host, backBuffer, in desc, &destRect);
+                TransferTinted(engine, host, backBuffer, desc);
             }
             else
             {
+                RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
                 engine.TransferVideoFrame(backBuffer, null, &destRect, null);
             }
 
@@ -643,27 +664,21 @@ public sealed unsafe class MediaFoundationVideoWallpaperPlayer : IVideoWallpaper
     /// the back buffer. Any failure falls back to the plain transfer for this very frame (the pass
     /// has already backed itself off), so a tint problem can never cost a frame.
     /// </summary>
-    private void TransferTinted(
-        IMFMediaEngine engine, IVideoWallpaperHost host, ID3D11Texture2D backBuffer, in D3D11_TEXTURE2D_DESC desc, RECT* destRect)
+    private void TransferTinted(IMFMediaEngine engine, IVideoWallpaperHost host, ID3D11Texture2D backBuffer, D3D11_TEXTURE2D_DESC desc)
     {
-        bool tinted = false;
-        try
-        {
-            if (_tint.TryBegin(host.Device, backBuffer, in desc, out ID3D11Texture2D? target) && target is not null)
-            {
-                engine.TransferVideoFrame(target, null, destRect, null);
-                tinted = _tint.Complete();
-            }
-        }
-        catch
-        {
-            _tint.Abort();
-        }
+        ID3D11Texture2D? target = null;
+        TintedFrameTransfer.Run(
+            tryBegin: () => _tint.TryBegin(host.Device, backBuffer, in desc, out target) && target is not null,
+            transferIntoTarget: () => TransferFrame(engine, target!, desc),
+            complete: _tint.Complete,
+            abort: _tint.Abort,
+            transferPlain: () => TransferFrame(engine, backBuffer, desc));
+    }
 
-        if (!tinted)
-        {
-            engine.TransferVideoFrame(backBuffer, null, destRect, null);
-        }
+    private static void TransferFrame(IMFMediaEngine engine, ID3D11Texture2D destination, D3D11_TEXTURE2D_DESC desc)
+    {
+        RECT destRect = new() { left = 0, top = 0, right = (int)desc.Width, bottom = (int)desc.Height };
+        engine.TransferVideoFrame(destination, null, &destRect, null);
     }
 
     private static void CleanupEngineResources(

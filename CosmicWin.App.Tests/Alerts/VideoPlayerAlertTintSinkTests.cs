@@ -41,6 +41,26 @@ public sealed class VideoPlayerAlertTintSinkTests
             "..", "..", "CosmicWin.App", "AppComposition.cs")));
 
     [Fact]
+    public void AppCompositionWiresTheTintDiagnosticsToTheDesktopTrace()
+    {
+        var source = ReadCompositionSource();
+        Assert.Contains("new MediaFoundationVideoWallpaperPlayer(onTintDiagnostic: desktopTrace.Record)", source);
+    }
+
+    [Fact]
+    public void TheSinkForwardsTheRenderedAndLostEventsSubscriptionsToThePlayer()
+    {
+        using var player = new MediaFoundationVideoWallpaperPlayer();
+        var sink = VideoPlayerAlertTintSink.For(WallpaperMode.Video, player)!;
+        Action handler = () => { };
+
+        sink.TintRendered += handler;
+        sink.TintRendered -= handler;
+        sink.TintLost += handler;
+        sink.TintLost -= handler;
+    }
+
+    [Fact]
     public void AppCompositionWiresTheSinkOnlyThroughTheModeGate()
     {
         var source = ReadCompositionSource();

@@ -45,18 +45,32 @@ internal sealed class VideoTintDriver : IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly Func<IVideoTintRenderer> _rendererFactory;
     private readonly TimeSpan _failureBackoff;
+    private readonly Action<string>? _onDiagnostic;
 
     private VideoTintRequest? _request;
 
     // Worker-thread only.
     private IVideoTintRenderer? _renderer;
     private DateTimeOffset _retryAt = DateTimeOffset.MinValue;
+    private DateTimeOffset? _lastRecreateAt;
+    private bool _inBackoff; // a failure was reported and its retry line is still pending
+    private bool _failedSinceSuccess; // "recovered" is owed on the next successful frame
+    private VideoTintRequest? _inFlight; // the request TryBegin handed to the renderer for this frame
+    private VideoTintRequest? _announced; // the request whose first rendered frame was already announced
 
-    public VideoTintDriver(TimeProvider timeProvider, Func<IVideoTintRenderer> rendererFactory, TimeSpan failureBackoff)
+    /// <param name="onDiagnostic">
+    /// Optional trace sink (worker thread). Receives one <c>video-tint failed ...</c> line per back-off
+    /// window, <c>video-tint retry</c> when the window ends and the pass is tried again, and
+    /// <c>video-tint recovered</c> on the first good frame after a failure. Lines carry the HRESULT and
+    /// exception TYPE only (never a message). A throwing sink is swallowed.
+    /// </param>
+    public VideoTintDriver(
+        TimeProvider timeProvider, Func<IVideoTintRenderer> rendererFactory, TimeSpan failureBackoff, Action<string>? onDiagnostic = null)
     {
         _timeProvider = timeProvider;
         _rendererFactory = rendererFactory;
         _failureBackoff = failureBackoff;
+        _onDiagnostic = onDiagnostic;
     }
 
     /// <summary>
@@ -64,6 +78,12 @@ internal sealed class VideoTintDriver : IDisposable
     /// must take exactly its untinted path (nothing was ever created).
     /// </summary>
     public bool IsEngaged => Volatile.Read(ref _request) is not null || _renderer is not null;
+
+    /// <summary>Raised on the worker thread when the current request's tint first reached the screen (and again after a loss).</summary>
+    public event Action? Rendered;
+
+    /// <summary>Raised on the worker thread when a tint that was rendering stopped (the pass failed and backed off).</summary>
+    public event Action? Lost;
 
     public void Set(VideoTintRequest request) => Volatile.Write(ref _request, request);
 
@@ -81,6 +101,11 @@ internal sealed class VideoTintDriver : IDisposable
         {
             DisposeRenderer();
             _retryAt = DateTimeOffset.MinValue; // a later request starts with a clean slate
+            _lastRecreateAt = null;
+            _inBackoff = false;
+            _failedSinceSuccess = false;
+            _inFlight = null;
+            _announced = null;
             return false;
         }
 
@@ -89,6 +114,13 @@ internal sealed class VideoTintDriver : IDisposable
             return false;
         }
 
+        if (_inBackoff)
+        {
+            _inBackoff = false;
+            Report("video-tint retry");
+        }
+
+        _inFlight = request;
         try
         {
             _renderer ??= _rendererFactory();
@@ -98,12 +130,14 @@ internal sealed class VideoTintDriver : IDisposable
                 return true;
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Falls through to the failure path: the frame pump must never see this.
+            FailAndBackOff(Describe(ex));
+            return false;
         }
 
-        FailAndBackOff();
+        FailAndBackOff("result=PrepareFalse");
         return false;
     }
 
@@ -121,26 +155,58 @@ internal sealed class VideoTintDriver : IDisposable
             switch (renderer.Render())
             {
                 case VideoTintRenderResult.Ok:
+                    if (_failedSinceSuccess)
+                    {
+                        _failedSinceSuccess = false;
+                        Report("video-tint recovered");
+                    }
+
+                    // Only the request still wanted counts: a Clear/Set that raced this frame must not
+                    // announce a tint nobody asked for any more.
+                    if (_inFlight is { } rendered && ReferenceEquals(rendered, Volatile.Read(ref _request))
+                        && !ReferenceEquals(_announced, rendered))
+                    {
+                        _announced = rendered;
+                        Raise(Rendered);
+                    }
+
                     return true;
                 case VideoTintRenderResult.RecreateTarget:
+                    // A device loss gets ONE immediate rebuild; losing it again inside the back-off
+                    // window means rebuilding every tick would just repeat the loss, so back off.
+                    DateTimeOffset now = _timeProvider.GetUtcNow();
+                    if (_lastRecreateAt is { } last && now - last < _failureBackoff)
+                    {
+                        FailAndBackOff("result=RecreateTarget");
+                        return false;
+                    }
+
+                    _lastRecreateAt = now;
                     DisposeRenderer();
                     return false;
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Treated as a plain failure.
+            FailAndBackOff(Describe(ex));
+            return false;
         }
 
-        FailAndBackOff();
+        FailAndBackOff("result=Failed");
         return false;
     }
 
     /// <summary>Worker thread: the tinted frame transfer itself failed; fall back and back off.</summary>
-    public void Abort() => FailAndBackOff();
+    public void Abort(Exception? error = null) =>
+        FailAndBackOff(error is null ? "result=TransferFailed" : Describe(error));
 
     /// <summary>Worker thread: drops every GPU object but keeps the request (playback stopped, the alert may still be showing).</summary>
-    public void ReleaseGpu() => DisposeRenderer();
+    public void ReleaseGpu()
+    {
+        DisposeRenderer();
+        _announced = null; // the GPU objects are gone; the next good frame announces again
+    }
 
     public void Dispose()
     {
@@ -148,10 +214,48 @@ internal sealed class VideoTintDriver : IDisposable
         DisposeRenderer();
     }
 
-    private void FailAndBackOff()
+    private void FailAndBackOff(string detail)
     {
         DisposeRenderer();
         _retryAt = _timeProvider.GetUtcNow() + _failureBackoff;
+        _failedSinceSuccess = true;
+        if (_announced is not null)
+        {
+            _announced = null; // the screen lost its tint: a later good frame announces again
+            Raise(Lost);
+        }
+
+        if (!_inBackoff)
+        {
+            _inBackoff = true;
+            Report($"video-tint failed {detail} backoff={_failureBackoff.TotalSeconds:0.##}s");
+        }
+    }
+
+    private static string Describe(Exception ex) => $"hr=0x{ex.HResult:X8} type={ex.GetType().Name}";
+
+    private static void Raise(Action? handlers)
+    {
+        try
+        {
+            handlers?.Invoke();
+        }
+        catch
+        {
+            // A broken subscriber must never reach the frame pump.
+        }
+    }
+
+    private void Report(string line)
+    {
+        try
+        {
+            _onDiagnostic?.Invoke(line);
+        }
+        catch
+        {
+            // A broken trace sink must never reach the frame pump.
+        }
     }
 
     private void DisposeRenderer()

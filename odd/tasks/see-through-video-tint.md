@@ -76,7 +76,7 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   with the kind's color (failed blue, warning violet); after C# acks, the page stops drawing the
   letter fill so the tinted video reads through. `hide`/`done`/scene reload -> ClearTint. Mosaic:
   one mask covers every tile.
-- [ ] S3b S3 review follow-ups (review-a59141cc1a4f388a, review-e3244d34e2dab4cb): WARNING
+- [x] S3b S3 review follow-ups (review-a59141cc1a4f388a, review-e3244d34e2dab4cb): WARNING
   R4-recreate-target-bypasses-backoff (a repeating RECREATE_TARGET rebuilds every tick), WARNING
   R3-transfertinted-fallback-untested, WARNING R3-tint-target-pin-blocks-resize-while-engaged, SUGGESTION
   R4-tint-failures-silent (no trace of tint failures); plus S4 review review-909e6b6f8dc7fd6e: WARNING
@@ -144,6 +144,23 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   App 1473 passed / 6 skipped / 0 failed (was 1434/6). S5 risks: toDataURL hitch at 3440x1440, halo at
   the wash cut-out edge, <=1 px mask offset at tile edges, a possible one-frame gap at tint-ready.
 
+- 2026-10-01 S3b DONE (delegated writer; 8 findings incl. two from review-7ffcd538e07b286b sent mid-task):
+  (1) a repeated RECREATE_TARGET inside the back-off window now backs off 5 s (one immediate rebuild
+  allowed); (2) TransferTinted ordering extracted to TintedFrameTransfer.Run, 5 tests; (3) no code change:
+  Win32VideoWallpaperHost never calls ResizeBuffers, it builds a new swapchain, so a pinned old buffer
+  blocks nothing and Prepare drops it next tick (covered by the existing GPU rebind test; documented in
+  D2DVideoTintRenderer remarks); (4) `video-tint failed hr=.. backoff=5s` / `retry` / `recovered` lines on
+  the desktop trace (onTintDiagnostic wired to desktopTrace.Record); (5) a mask with no active show is
+  ignored and traced (before and after decode); (6) a throwing mask export posts `mask-failed`, keeps the
+  normal letters, still ends with done; (7) tint-ready is posted only when the player raises TintRendered
+  (first successful tinted frame of the current request), and TintLost -> `tint-lost` makes the page
+  restore the letter fill (no alert with invisible letters); (8) the mask export takes tile geometry as
+  parameters (no global W/H swap). RED observed for each (or characterization noted). Known residual:
+  a TintRendered for an already-replaced request could post tint-ready for the newer show (narrow race).
+  Writer's full App run hung in the wallpaper scene node harnesses (its own overlapping runs left a stray
+  node.exe running explorer-scene.tests.js); parent killed the stray and re-ran clean: App 1483 passed /
+  6 skipped / 0 failed, node.exe 7 before and after; Interop 551/42/0; harness 32/32.
+
 ## Next step
 
-S3b (review follow-ups), then S5 hardware.
+S5 hardware (ask the maintainer before switching wallpaper-mode to video).

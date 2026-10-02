@@ -34,6 +34,20 @@ namespace CosmicWin.Interop.Win32;
 /// <see cref="VideoTintDriver"/> disposes the whole renderer as soon as the tint is cleared, so
 /// nothing pins the swapchain outside an alert. All members run on the player's worker thread.
 /// </para>
+/// <para>
+/// Resize safety (review R3-tint-target-pin-blocks-resize-while-engaged): Win32VideoWallpaperHost never
+/// calls ResizeBuffers. Its only two swapchain creations (<c>CreateSwapChainAndPresentTestPattern</c> and
+/// <c>CreateSwapChainOnExistingDevice</c>) build a brand-new composition swapchain and swap the
+/// <c>_swapChain</c>/<c>_backBuffer</c> fields, and <c>ReleaseSwapChainResources</c> just releases the
+/// host's own references. The OLD buffer pinned by this renderer therefore cannot block anything: no
+/// call needs it unpinned, and a composition swapchain is not bound to the window the way an HWND one
+/// is. The next worker tick hands <see cref="Prepare"/> the NEW <c>GetBackBuffer()</c>, which fails the
+/// <c>ReferenceEquals(_boundBackBuffer, backBuffer)</c> check and drops the old pin (proven on real
+/// hardware by <c>D2DVideoTintRendererGpuTests.ADifferentBackBuffer_IsRebound_AndTheOldOneIsReleased</c>);
+/// the worker also releases everything when playback stops (<see cref="VideoTintDriver.ReleaseGpu"/>)
+/// or the tint is cleared. If a future host ever adds ResizeBuffers it must ask the player to release
+/// first, on the worker thread, before resizing.
+/// </para>
 /// </remarks>
 internal sealed unsafe class D2DVideoTintRenderer : IVideoTintRenderer
 {

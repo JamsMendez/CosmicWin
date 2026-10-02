@@ -22,6 +22,14 @@ public sealed class AlertTintCoordinatorTests
         public int Clears;
         private readonly object _gate = new();
 
+        public event Action? TintRendered;
+
+        public event Action? TintLost;
+
+        public void RaiseRendered() => TintRendered?.Invoke();
+
+        public void RaiseLost() => TintLost?.Invoke();
+
         public void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b)
         {
             lock (_gate) Sets.Add((maskAlpha.ToArray(), width, height, r, g, b));
@@ -133,7 +141,113 @@ public sealed class AlertTintCoordinatorTests
         Assert.Equal(alphas, set.Alpha);
         Assert.Equal((2, 2), (set.Width, set.Height));
         Assert.Equal((AlertTintColors.Failed.R, AlertTintColors.Failed.G, AlertTintColors.Failed.B), (set.R, set.G, set.B));
+        Assert.Empty(rig.Posted); // requested is not rendered: the page keeps its letters
+
+        rig.Sink.RaiseRendered();
+
         Assert.Equal([AlertLayerMessages.TintReady(seq)], rig.Posted);
+    }
+
+    [Fact]
+    public void TintLostCarriesTheSeq()
+    {
+        Assert.Equal("{\"type\":\"tint-lost\",\"seq\":3}", AlertLayerMessages.TintLost(3));
+    }
+
+    [Fact]
+    public void RenderedBeforeAnyMaskWasAppliedIsIgnored()
+    {
+        var rig = new Rig();
+        rig.Coordinator.BeginShow();
+
+        rig.Sink.RaiseRendered();
+
+        Assert.Empty(rig.Posted);
+    }
+
+    [Fact]
+    public async Task RenderedWithNoActiveShowIsIgnored()
+    {
+        var rig = new Rig();
+        var seq = rig.Coordinator.BeginShow();
+        await rig.Coordinator.HandleMessageAsync(MaskJson(seq, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+        rig.Coordinator.Clear();
+
+        rig.Sink.RaiseRendered();
+
+        Assert.Empty(rig.Posted);
+    }
+
+    [Fact]
+    public async Task RenderedTwiceAnnouncesOnce()
+    {
+        var rig = new Rig();
+        var seq = rig.Coordinator.BeginShow();
+        await rig.Coordinator.HandleMessageAsync(MaskJson(seq, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+
+        rig.Sink.RaiseRendered();
+        rig.Sink.RaiseRendered();
+
+        Assert.Single(rig.Posted);
+    }
+
+    [Fact]
+    public async Task LostAfterReadyPostsTintLost_AndALaterRenderedPostsTintReadyAgain()
+    {
+        var rig = new Rig();
+        var seq = rig.Coordinator.BeginShow();
+        await rig.Coordinator.HandleMessageAsync(MaskJson(seq, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+        rig.Sink.RaiseRendered();
+
+        rig.Sink.RaiseLost();
+        rig.Sink.RaiseLost();
+        rig.Sink.RaiseRendered();
+
+        Assert.Equal(
+            [AlertLayerMessages.TintReady(seq), AlertLayerMessages.TintLost(seq), AlertLayerMessages.TintReady(seq)],
+            rig.Posted);
+    }
+
+    [Fact]
+    public async Task LostBeforeTheTintWasEverAnnouncedPostsNothing()
+    {
+        var rig = new Rig();
+        var seq = rig.Coordinator.BeginShow();
+        await rig.Coordinator.HandleMessageAsync(MaskJson(seq, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+
+        rig.Sink.RaiseLost();
+
+        Assert.Empty(rig.Posted);
+    }
+
+    [Fact]
+    public async Task ASeqZeroMaskWithNoShowActiveNeverTints()
+    {
+        var rig = new Rig();
+
+        await rig.Coordinator.HandleMessageAsync(MaskJson(0, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+        var seq = rig.Coordinator.BeginShow();
+        rig.Coordinator.Clear(); // the id is deactivated again
+        await rig.Coordinator.HandleMessageAsync(MaskJson(0, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+        await rig.Coordinator.HandleMessageAsync(MaskJson(seq, "failed", 1, 1, PngDataUrl(1, 1, [255])));
+
+        Assert.Empty(rig.Sink.Sets);
+        Assert.Empty(rig.Posted);
+        Assert.Contains(rig.Traces, line => line.Contains("no active show", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AMaskFailedMessageIsTracedAndNeverTints()
+    {
+        var rig = new Rig();
+        var seq = rig.Coordinator.BeginShow();
+
+        await rig.Coordinator.HandleMessageAsync("{\"type\":\"mask-failed\",\"seq\":" + seq + "}");
+
+        Assert.Empty(rig.Sink.Sets);
+        Assert.Empty(rig.Posted);
+        Assert.Contains(rig.Traces, line => line.Contains("mask-failed", StringComparison.Ordinal)
+            && line.Contains($"seq={seq}", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -185,6 +299,7 @@ public sealed class AlertTintCoordinatorTests
 
         await rig.Coordinator.HandleMessageAsync(json);
         await rig.Coordinator.HandleMessageAsync(json);
+        rig.Sink.RaiseRendered();
 
         Assert.Single(rig.Sink.Sets);
         Assert.Single(rig.Posted);
@@ -289,6 +404,18 @@ public sealed class AlertTintCoordinatorTests
 
     private sealed class ThrowingSink : IAlertTintSink
     {
+        public event Action? TintRendered
+        {
+            add { }
+            remove { }
+        }
+
+        public event Action? TintLost
+        {
+            add { }
+            remove { }
+        }
+
         public void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b) =>
             throw new InvalidOperationException("boom");
 

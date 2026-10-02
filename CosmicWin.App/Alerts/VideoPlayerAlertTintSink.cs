@@ -16,6 +16,18 @@ internal sealed class VideoPlayerAlertTintSink : IAlertTintSink
     public static IAlertTintSink? For(WallpaperMode mode, MediaFoundationVideoWallpaperPlayer? player) =>
         mode == WallpaperMode.Video && player is not null ? new VideoPlayerAlertTintSink(player) : null;
 
+    public event Action? TintRendered
+    {
+        add => _player.TintRendered += value;
+        remove => _player.TintRendered -= value;
+    }
+
+    public event Action? TintLost
+    {
+        add => _player.TintLost += value;
+        remove => _player.TintLost -= value;
+    }
+
     public void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b) =>
         _player.SetTint(maskAlpha, width, height, r, g, b);
 

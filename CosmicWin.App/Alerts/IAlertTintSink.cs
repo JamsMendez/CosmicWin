@@ -12,6 +12,15 @@ namespace CosmicWin.App.Alerts;
 /// </remarks>
 public interface IAlertTintSink
 {
+    /// <summary>
+    /// Raised (any thread) when the requested tint first actually reached the screen; the page must not
+    /// stop painting its letters before this. Raised again after a <see cref="TintLost"/> recovery.
+    /// </summary>
+    event Action? TintRendered;
+
+    /// <summary>Raised (any thread) when a tint that was rendering stopped (failure/back-off): letters must be painted again.</summary>
+    event Action? TintLost;
+
     void SetTint(ReadOnlyMemory<byte> maskAlpha, int width, int height, byte r, byte g, byte b);
 
     void ClearTint();

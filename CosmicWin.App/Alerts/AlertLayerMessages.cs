@@ -44,6 +44,12 @@ internal static class AlertLayerMessages
     public static string ShowTinted(AlertShowRequest request, int seq) =>
         Show(request)[..^1] + ",\"tint\":true,\"seq\":" + seq + "}";
 
-    /// <summary>The answer to a page's mask once the tint is applied: the page stops painting the letters.</summary>
+    /// <summary>
+    /// Sent once the tint is actually RENDERED on the video (not merely requested): the page stops
+    /// painting the letters.
+    /// </summary>
     public static string TintReady(int seq) => "{\"type\":\"tint-ready\",\"seq\":" + seq + "}";
+
+    /// <summary>The tint stopped rendering (failure/back-off): the page must paint its letters again.</summary>
+    public static string TintLost(int seq) => "{\"type\":\"tint-lost\",\"seq\":" + seq + "}";
 }

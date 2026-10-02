@@ -164,6 +164,8 @@ public sealed class VideoTintDriverTests
 
     private readonly ManualTimeProvider _time = new();
     private readonly List<FakeRenderer> _renderers = [];
+    private readonly List<string> _diagnostics = [];
+    private Action<string>? _diagnosticSink;
     private Func<FakeRenderer>? _customFactory;
     private int _factoryCalls;
 
@@ -174,7 +176,7 @@ public sealed class VideoTintDriverTests
             FakeRenderer r = _customFactory?.Invoke() ?? new FakeRenderer();
             _renderers.Add(r);
             return r;
-        }, Backoff);
+        }, Backoff, _diagnosticSink ?? _diagnostics.Add);
 
     private static VideoTintRequest Request(byte seed = 255) => new([seed], 1, 1, 1, 2, 3);
 
@@ -333,6 +335,273 @@ public sealed class VideoTintDriverTests
     }
 
     [Fact]
+    public void RecreateTarget_RepeatingWithinTheBackoffWindow_BacksOffInsteadOfRebuildingEveryTick()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderResult = VideoTintRenderResult.RecreateTarget };
+        Begin(d);
+        Assert.False(d.Complete()); // first loss: one immediate rebuild is allowed
+        Assert.True(Begin(d));
+        Assert.Equal(2, _factoryCalls);
+
+        Assert.False(d.Complete()); // lost again right away: same back-off as any other failure
+
+        Assert.True(_renderers[1].Disposed);
+        Assert.False(Begin(d));
+        Assert.Equal(2, _factoryCalls);
+        _time.Advance(Backoff);
+        Assert.True(Begin(d));
+        Assert.Equal(3, _factoryCalls);
+    }
+
+    [Fact]
+    public void RecreateTarget_AfterTheBackoffWindowElapsed_AllowsAnotherImmediateRebuild()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderResult = VideoTintRenderResult.RecreateTarget };
+        Begin(d);
+        Assert.False(d.Complete());
+        _time.Advance(Backoff);
+
+        Assert.True(Begin(d));
+        Assert.False(d.Complete());
+
+        Assert.True(Begin(d)); // an isolated device loss never costs the back-off
+        Assert.Equal(3, _factoryCalls);
+    }
+
+    private readonly List<string> _events = [];
+
+    private VideoTintDriver NewObservedDriver()
+    {
+        VideoTintDriver d = NewDriver();
+        d.Rendered += () => _events.Add("rendered");
+        d.Lost += () => _events.Add("lost");
+        return d;
+    }
+
+    [Fact]
+    public void Rendered_IsRaisedOnceOnTheFirstSuccessfulFrame()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+
+        Begin(d);
+        d.Complete();
+        Begin(d);
+        d.Complete();
+
+        Assert.Equal(["rendered"], _events);
+    }
+
+    [Fact]
+    public void Rendered_IsNotRaisedWhenTheFrameFails()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderResult = VideoTintRenderResult.Failed };
+
+        Begin(d);
+        d.Complete();
+
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public void Lost_IsRaisedWhenARenderingTintBacksOff_AndRenderedAgainOnRecovery()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        Begin(d);
+        d.Complete();
+        _renderers[0].RenderResult = VideoTintRenderResult.Failed;
+        Begin(d);
+        d.Complete();
+        Begin(d); // inside the window: nothing new
+        _time.Advance(Backoff);
+        Begin(d);
+        d.Complete();
+
+        Assert.Equal(["rendered", "lost", "rendered"], _events);
+    }
+
+    [Fact]
+    public void Lost_IsNotRaised_WhenTheTintNeverRendered()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { PrepareResult = false };
+
+        Begin(d);
+
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public void Lost_IsNotRaised_ForTheSingleImmediateRecreateTarget()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        Begin(d);
+        d.Complete();
+        _renderers[0].RenderResult = VideoTintRenderResult.RecreateTarget;
+        Begin(d);
+        d.Complete();
+        Begin(d);
+        d.Complete();
+
+        Assert.Equal(["rendered"], _events);
+    }
+
+    [Fact]
+    public void Rendered_IsRaisedAgainForANewRequest()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        Begin(d);
+        d.Complete();
+
+        d.Set(Request(1));
+        Begin(d);
+        d.Complete();
+
+        Assert.Equal(["rendered", "rendered"], _events);
+    }
+
+    [Fact]
+    public void Rendered_IsNotRaised_ForARequestThatWasClearedOrReplacedMeanwhile()
+    {
+        using var d = NewObservedDriver();
+        d.Set(Request());
+        Begin(d);
+        d.Clear();
+        d.Complete();
+        d.Set(Request());
+        Begin(d);
+        d.Set(Request(1)); // replaced between the transfer and the compose
+        d.Complete();
+
+        Assert.Empty(_events);
+    }
+
+    [Fact]
+    public void Events_AHandlerThatThrows_NeverEscapes()
+    {
+        using var d = NewDriver();
+        d.Rendered += () => throw new InvalidOperationException();
+        d.Set(Request());
+        Begin(d);
+
+        Assert.True(d.Complete());
+    }
+
+    [Fact]
+    public void Diagnostics_NeverReported_WhenNothingFails()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+
+        Begin(d);
+        d.Complete();
+
+        Assert.Empty(_diagnostics);
+    }
+
+    [Fact]
+    public void Diagnostics_ReportTheFirstFailureOnce_WithHResultAndExceptionTypeOnly()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderThrows = true };
+        Begin(d);
+
+        d.Complete();
+        Begin(d); // inside the window: skipped, silent
+        Begin(d);
+
+        string line = Assert.Single(_diagnostics);
+        Assert.Equal("video-tint failed hr=0x80131509 type=InvalidOperationException backoff=5s", line);
+    }
+
+    [Fact]
+    public void Diagnostics_ResultFailures_NameTheResult()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderResult = VideoTintRenderResult.Failed };
+        Begin(d);
+
+        d.Complete();
+
+        Assert.Equal("video-tint failed result=Failed backoff=5s", Assert.Single(_diagnostics));
+    }
+
+    [Fact]
+    public void Diagnostics_AbortWithAnException_ReportsIt()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        Begin(d);
+
+        d.Abort(new InvalidOperationException("secret detail"));
+
+        string line = Assert.Single(_diagnostics);
+        Assert.Equal("video-tint failed hr=0x80131509 type=InvalidOperationException backoff=5s", line);
+        Assert.DoesNotContain("secret", line);
+    }
+
+    [Fact]
+    public void Diagnostics_RetryAfterTheWindow_ThenRecovered()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        int calls = 0;
+        _customFactory = () => new FakeRenderer { PrepareResult = ++calls > 1 };
+        Assert.False(Begin(d));
+        _time.Advance(Backoff);
+
+        Assert.True(Begin(d));
+        Assert.True(d.Complete());
+        Assert.True(Begin(d));
+        Assert.True(d.Complete()); // a second success is not news
+
+        Assert.Equal(
+            ["video-tint failed result=PrepareFalse backoff=5s", "video-tint retry", "video-tint recovered"],
+            _diagnostics);
+    }
+
+    [Fact]
+    public void Diagnostics_ASecondWindowReportsAgain()
+    {
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { PrepareResult = false };
+        Begin(d);
+        _time.Advance(Backoff);
+
+        Begin(d);
+
+        Assert.Equal(
+            ["video-tint failed result=PrepareFalse backoff=5s", "video-tint retry", "video-tint failed result=PrepareFalse backoff=5s"],
+            _diagnostics);
+    }
+
+    [Fact]
+    public void Diagnostics_ASinkThatThrows_NeverEscapes()
+    {
+        _diagnosticSink = _ => throw new InvalidOperationException();
+        using var d = NewDriver();
+        d.Set(Request());
+        _customFactory = () => new FakeRenderer { RenderThrows = true };
+        Begin(d);
+
+        Assert.False(d.Complete());
+        Assert.False(Begin(d));
+    }
+
+    [Fact]
     public void Abort_DisposesTheRenderer_AndBacksOff()
     {
         using var d = NewDriver();
@@ -428,5 +697,60 @@ public sealed class MediaFoundationVideoWallpaperPlayerTintTests
         player.SetTint(new byte[] { 1 }, 1, 1, 0, 0, 0);
 
         Assert.True(player.IsTintRequestedForTests);
+    }
+}
+
+public sealed class TintedFrameTransferTests
+{
+    private readonly List<string> _calls = [];
+
+    private void Run(bool begin, bool beginThrows = false, bool transferThrows = false, bool complete = true)
+    {
+        TintedFrameTransfer.Run(
+            tryBegin: () => { _calls.Add("begin"); return beginThrows ? throw new InvalidOperationException() : begin; },
+            transferIntoTarget: () => { _calls.Add("target"); if (transferThrows) throw new InvalidOperationException(); },
+            complete: () => { _calls.Add("complete"); return complete; },
+            abort: _ => _calls.Add("abort"),
+            transferPlain: () => _calls.Add("plain"));
+    }
+
+    [Fact]
+    public void TryBeginFalse_TransfersPlainOnce()
+    {
+        Run(begin: false);
+
+        Assert.Equal(["begin", "plain"], _calls);
+    }
+
+    [Fact]
+    public void TransferIntoTargetThrowing_AbortsThenTransfersPlain()
+    {
+        Run(begin: true, transferThrows: true);
+
+        Assert.Equal(["begin", "target", "abort", "plain"], _calls);
+    }
+
+    [Fact]
+    public void TryBeginThrowing_AbortsThenTransfersPlain()
+    {
+        Run(begin: true, beginThrows: true);
+
+        Assert.Equal(["begin", "abort", "plain"], _calls);
+    }
+
+    [Fact]
+    public void CompleteFalse_TransfersPlainOnce_WithoutAborting()
+    {
+        Run(begin: true, complete: false);
+
+        Assert.Equal(["begin", "target", "complete", "plain"], _calls);
+    }
+
+    [Fact]
+    public void Success_NeverTransfersPlain()
+    {
+        Run(begin: true);
+
+        Assert.Equal(["begin", "target", "complete"], _calls);
     }
 }

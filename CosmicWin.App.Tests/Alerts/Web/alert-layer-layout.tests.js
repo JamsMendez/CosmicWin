@@ -40,7 +40,7 @@ const pageSource = fs.readFileSync(scriptPath, "utf8");
 // plain slot would keep -- drawFailureOverlay sets fillStyle several times per frame (wash, rail
 // cutout, letters, and -- before this task -- the band intersections), so a single latched slot
 // value could never have caught a color painted mid-frame and overwritten before the frame ends.
-function make2dContext() {
+function make2dContext(hooks) {
   var slots = {};
   var fillStyleHistory = [];
   return new Proxy({}, {
@@ -49,6 +49,9 @@ function make2dContext() {
         return function (text) { return { width: String(text).length * 8 }; };
       }
       if (prop === "__fillStyleHistory") return fillStyleHistory;
+      if (prop === "fillText" && hooks && hooks.onFillText) {
+        return function () { hooks.onFillText(slots.fillStyle); };
+      }
       if (prop in slots) return slots[prop];
       return function () { /* no-op: save/restore/beginPath/rect/clip/fill/drawImage/... */ };
     },
@@ -64,7 +67,7 @@ function make2dContext() {
 // production page is a preloaded singleton, but nothing here needs state to survive across cases.
 function loadPage(options) {
   options = options || {};
-  var ctx2d = make2dContext();
+  var ctx2d = make2dContext({ onFillText: options.onFillText });
   // see-through-video-tint (S4): toDataURL records the canvas size at call time so a case can prove
   // which canvas was exported and at what pixel size; createdCanvases lists every offscreen canvas.
   var toDataUrlCalls = [];
@@ -74,6 +77,7 @@ function loadPage(options) {
       width: 0, height: 0,
       getContext: function () { return ctx2d; },
       toDataURL: function (type) {
+        if (options.toDataURLThrows) throw new Error("canvas export failed");
         toDataUrlCalls.push({ type: type, width: element.width, height: element.height });
         return "data:image/png;base64,TUFTSw==";
       },
@@ -549,6 +553,97 @@ test("tint: hide and a new untinted show restore the letter fill", function () {
   page.sandbox.render(2700);
   assert.ok(paintedLetterColorSince(page, "failed", before), "untinted show paints the letters again");
   assert.strictEqual(maskMessages(page).length, 1); // only the first show's mask
+});
+
+function hostMessages(page, type) {
+  return page.postedMessages
+    .filter(function (m) { return typeof m === "string" && m.charAt(0) === "{"; })
+    .map(function (m) { return JSON.parse(m); })
+    .filter(function (m) { return m.type === type; });
+}
+
+test("tint: a throwing mask export never escapes the render loop; letters keep painting and the alert still ends", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600, toDataURLThrows: true });
+  showTinted(page, ["failed"], 1, 9);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  assert.doesNotThrow(function () { page.sandbox.render(600); }); // the export runs and throws here
+  var before = page.fillStyleHistory.length;
+  assert.doesNotThrow(function () { page.sandbox.render(700); });
+  assert.ok(paintedLetterColorSince(page, "failed", before), "normal letter fill keeps painting");
+  assert.strictEqual(maskMessages(page).length, 0);
+  var failed = hostMessages(page, "mask-failed");
+  assert.strictEqual(failed.length, 1, "exactly one mask-failed, no retry per frame");
+  assert.strictEqual(failed[0].seq, 9);
+
+  page.sendHostMessage({ type: "tint-ready", seq: 9 }); // a stray ack must not switch the fill off
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(800);
+  assert.ok(paintedLetterColorSince(page, "failed", before), "no tint without a mask");
+
+  page.sandbox.render(6000);
+  assert.ok(page.postedMessages.indexOf("done") !== -1, "the alert still ends with done");
+});
+
+test("tint: tint-lost restores the letter fill; a later tint-ready cuts it out again", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  showTinted(page, ["failed"], 1, 5);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600);
+  page.sendHostMessage({ type: "tint-ready", seq: 5 });
+  var before = page.fillStyleHistory.length;
+  page.sandbox.render(700);
+  assert.ok(!paintedLetterColorSince(page, "failed", before), "tinted: no letter fill");
+
+  page.sendHostMessage({ type: "tint-lost", seq: 4 }); // stale seq: ignored
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(750);
+  assert.ok(!paintedLetterColorSince(page, "failed", before), "a stale tint-lost changes nothing");
+
+  page.sendHostMessage({ type: "tint-lost", seq: 5 });
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(800);
+  assert.ok(paintedLetterColorSince(page, "failed", before), "letters are painted again after tint-lost");
+  assert.strictEqual(maskMessages(page).length, 1, "tint-lost does not re-export the mask");
+
+  page.sendHostMessage({ type: "tint-ready", seq: 5 });
+  before = page.fillStyleHistory.length;
+  page.sandbox.render(900);
+  assert.ok(!paintedLetterColorSince(page, "failed", before), "a recovered tint cuts the letters out again");
+});
+
+test("tint: tint-lost before any mask (or with tint off) is ignored", function () {
+  var page = loadPage({ withWebview: true, innerWidth: 800, innerHeight: 600 });
+  assert.doesNotThrow(function () { page.sendHostMessage({ type: "tint-lost", seq: 1 }); });
+});
+
+test("tint: the mask export takes its tile geometry as parameters and never touches the global tile size", function () {
+  var seen = [];
+  var page;
+  page = loadPage({
+    withWebview: true, innerWidth: 800, innerHeight: 600,
+    onFillText: function (fillStyle) {
+      if (fillStyle === "rgb(255,255,255)") seen.push([page.sandbox.W, page.sandbox.H]);
+    },
+  });
+  showTinted(page, ["failed", "failed"], 2, 3);
+  page.sandbox.render(0);
+  page.sandbox.render(200);
+  page.sandbox.render(600); // exports once, normally
+  assert.strictEqual(maskMessages(page).length, 1);
+
+  seen.length = 0;
+  page.sandbox.maskSent = false;
+  page.sandbox.W = 111; // a sentinel nobody could mistake for a tile size
+  page.sandbox.H = 222;
+  page.sandbox.exportLettersMask();
+
+  assert.ok(seen.length > 0, "the mask pass drew text");
+  seen.forEach(function (wh) { assert.deepStrictEqual(wh, [111, 222]); });
+  assert.strictEqual(page.sandbox.W, 111);
+  assert.strictEqual(page.sandbox.H, 222);
+  assert.strictEqual(maskMessages(page).length, 2);
 });
 
 // ---- Run ----------------------------------------------------------------------------------------

@@ -2386,7 +2386,7 @@ public sealed class AppComposition : IDisposable
         // thread and no wallpaper alert layer. The corner window below takes their place.
         var miniMode = settings.WallpaperMode == WallpaperMode.HtmlMini;
         Win32VideoWallpaperHost? videoWallpaperHost = miniMode ? null : new Win32VideoWallpaperHost();
-        MediaFoundationVideoWallpaperPlayer? videoWallpaperPlayer = miniMode ? null : new MediaFoundationVideoWallpaperPlayer();
+        MediaFoundationVideoWallpaperPlayer? videoWallpaperPlayer = miniMode ? null : new MediaFoundationVideoWallpaperPlayer(onTintDiagnostic: desktopTrace.Record);
         // Built here, on the owning UI STA (the controller records its thread and every later call must
         // come from it); shown later, on the pumped dispatcher, by Wire. Null in every other mode.
         var miniWindow = miniMode ? MiniSceneWindowController.CreateProduction(desktopTrace.Record) : null;

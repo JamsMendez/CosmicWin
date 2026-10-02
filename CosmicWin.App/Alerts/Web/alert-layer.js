@@ -109,7 +109,11 @@ function failureLayer(slot) {
   return entry.g;
 }
 
-function drawFailureTitle(g, frame, title) {
+// w/h: the tile size to lay the title out in; omitted, the CURRENT tile (W/H). The see-through mask
+// export passes them explicitly so it never has to swap the global tile state.
+function drawFailureTitle(g, frame, title, w, h) {
+  if (w === undefined) w = W;
+  if (h === undefined) h = H;
   // Size the word so it spans the frame, then show only two clipped fragments of it.
   g.font = "400 100px " + FAILURE_TITLE_FONT;
   var fontSize = 100 * (frame.w * 0.97) / Math.max(1, g.measureText(title).width);
@@ -121,19 +125,19 @@ function drawFailureTitle(g, frame, title) {
   // Upper fragment: vertically inverted, its letter bases touch the top frame edge.
   g.save();
   g.beginPath();
-  g.rect(frame.x, frame.y, frame.w, H * 0.23);
+  g.rect(frame.x, frame.y, frame.w, h * 0.23);
   g.clip();
   g.translate(0, frame.y - capHeight * 0.42);
   g.scale(1, -1);
-  g.fillText(title, W * 0.5, 0);
+  g.fillText(title, w * 0.5, 0);
   g.restore();
 
   // Lower fragment: upright, only the top part of the letters rises above the bottom frame edge.
   g.save();
   g.beginPath();
-  g.rect(frame.x, frame.y + frame.h - H * 0.23, frame.w, H * 0.23);
+  g.rect(frame.x, frame.y + frame.h - h * 0.23, frame.w, h * 0.23);
   g.clip();
-  g.fillText(title, W * 0.5, frame.y + frame.h + capHeight * 0.42);
+  g.fillText(title, w * 0.5, frame.y + frame.h + capHeight * 0.42);
   g.restore();
 }
 
@@ -196,12 +200,14 @@ function drawFailureModules(g, frame, counter, overlayBits) {
   }
 }
 
-// The overlay's inner frame inside the CURRENT tile (W/H), shared by the visible overlay and the
+// The overlay's inner frame inside the CURRENT tile (W/H, or the given w/h), shared by the visible overlay and the
 // see-through mask so both place the letters identically.
-function overlayFrame() {
-  var frame = { x: W * 0.038, y: H * 0.064 };
-  frame.w = W - frame.x * 2;
-  frame.h = H - frame.y * 2;
+function overlayFrame(w, h) {
+  if (w === undefined) w = W;
+  if (h === undefined) h = H;
+  var frame = { x: w * 0.038, y: h * 0.064 };
+  frame.w = w - frame.x * 2;
+  frame.h = h - frame.y * 2;
   return frame;
 }
 
@@ -527,7 +533,8 @@ function hide() {
 
 // Renders the opaque letters of every tile of tintKind into a dedicated canvas of the MAIN canvas'
 // pixel size (same layout, mirroring and mosaic tiles as the visible letters; no shadow, no alpha, no
-// pixelation) and posts it once as a PNG data URL. The host reads only its alpha channel.
+// pixelation) and posts it once as a PNG data URL. The host reads only its alpha channel. Each tile's
+// geometry is passed to the drawing helpers as parameters: the global tile W/H are never touched.
 function exportLettersMask() {
   maskSent = true;
   if (!maskCanvas) maskCanvas = document.createElement("canvas");
@@ -541,23 +548,17 @@ function exportLettersMask() {
   g.setTransform(canvasScaleX, 0, 0, canvasScaleY, 0, 0);
   var theme = FAILURE_OVERLAY_THEMES[tintKind];
   var rects = tileRects();
-  var savedW = W;
-  var savedH = H;
   for (var i = 0; i < tiles.length && i < rects.length; i++) {
     if (tiles[i] !== tintKind) continue;
-    W = rects[i].w;
-    H = rects[i].h;
     g.save();
     g.beginPath();
     g.rect(rects[i].x, rects[i].y, rects[i].w, rects[i].h);
     g.clip();
     g.translate(rects[i].x, rects[i].y);
     g.fillStyle = "rgb(255,255,255)";
-    drawFailureTitle(g, overlayFrame(), theme.title);
+    drawFailureTitle(g, overlayFrame(rects[i].w, rects[i].h), theme.title, rects[i].w, rects[i].h);
     g.restore();
   }
-  W = savedW;
-  H = savedH;
   postToHost(JSON.stringify({
     type: "mask",
     seq: tintSeq,
@@ -610,7 +611,18 @@ function render(ms) {
   }
 
   if (tintEnabled && !maskSent && kindState[tintKind].state === "shown") {
-    exportLettersMask();
+    try {
+      exportLettersMask();
+    } catch (e) {
+      // A failed export (toDataURL / offscreen canvas) must not kill the render loop: the alert keeps
+      // painting its normal letter fill, posts a mask-failed so the host can trace it, and still ends
+      // with "done". Tint is switched off for this show (no retry per frame, and a stray tint-ready
+      // can no longer stop the letter fill).
+      tintEnabled = false;
+      try {
+        postToHost(JSON.stringify({ type: "mask-failed", seq: tintSeq }));
+      } catch (ignored) { /* nothing left to do */ }
+    }
   }
 
   if (signalDoneIfElapsed(ms)) {
@@ -641,6 +653,10 @@ function handleHostMessage(event) {
   } else if (data.type === "tint-ready") {
     // Only the answer to THIS show's mask counts; anything stale or early is ignored.
     if (tintEnabled && maskSent && Number(data.seq) === tintSeq) tintActive = true;
+  } else if (data.type === "tint-lost") {
+    // The host's tint pass stopped rendering (device failure, back-off): paint the letters again so
+    // the alert never ends up with invisible letters. A later tint-ready may cut them out again.
+    if (tintEnabled && maskSent && Number(data.seq) === tintSeq) tintActive = false;
   }
 }
 
