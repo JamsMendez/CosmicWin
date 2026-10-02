@@ -95,3 +95,10 @@ Strategy: `ask-on-risk`. Forecast ~80 authored changed lines, one PR slice.
   - Verification: `dotnet build CosmicWin.sln -c Release` 0 errors (4 pre-existing warnings);
     `dotnet test CosmicWin.sln -c Release --no-build --filter "Category!=RequiresDesktop"`
     Layout 198/198, App 944/944, Interop 240 passed + 3 skipped of 243, 0 failed.
+- T2 review: assessed medium (under_budget in slice) but reviewed on request; consent granted; 1-lens
+  (reliability) native review APPROVED and acknowledged (lineage review-d31d0fd37d37605f, authority
+  burned). Advisory R3-001 (shared WaitUntil helpers could slow negative assertions) checked: the
+  whole headless suite runs in ~6 s, so no caller waits out the 1 min guard. Parent spot check:
+  headless suite 198/198, 240+3 skipped/243, 944/944 passed.
+- Next: maintainer pushes the branch / merges; land before the first `v*` tag. Open follow-ups from
+  the T1 review (SemVer tag check, persist-credentials, job timeout-minutes).
