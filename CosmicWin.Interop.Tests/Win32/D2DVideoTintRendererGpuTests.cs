@@ -162,7 +162,8 @@ public sealed unsafe class D2DVideoTintRendererGpuTests
     private static (byte R, byte G, byte B) Expected((byte B, byte G, byte R) src, (byte R, byte G, byte B) tint, double weight)
     {
         double l = 0.2126 * src.R + 0.7152 * src.G + 0.0722 * src.B;
-        double Mix(double srcChannel, byte tintChannel) => srcChannel * (1 - weight) + l * tintChannel / 255.0 * weight;
+        double lit = 0.25 * 255 + 0.75 * l; // 25% brightness floor (maintainer decision 2026-10-02)
+        double Mix(double srcChannel, byte tintChannel) => srcChannel * (1 - weight) + lit * tintChannel / 255.0 * weight;
         return ((byte)Math.Round(Mix(src.R, tint.R)), (byte)Math.Round(Mix(src.G, tint.G)), (byte)Math.Round(Mix(src.B, tint.B)));
     }
 

@@ -5,20 +5,38 @@ namespace CosmicWin.Interop.Tests.Win32;
 
 public sealed class VideoTintMatrixTests
 {
+    // Maintainer decision 2026-10-02: out = (floor + (1 - floor) * L) * tint with a 25% floor, so a
+    // dark scene still shows the tint colour inside the letters instead of plain black.
+    private const float Floor = 0.25f;
+    private const float Scale = 1f - Floor;
+
     [Fact]
-    public void Create_PlacesLumaTimesTintInEveryColourColumn_AndForcesAlphaOne()
+    public void Create_PlacesScaledLumaTimesTintInEveryColourColumn_TheFloorInTheConstantRow_AndForcesAlphaOne()
     {
         float[] m = VideoTintMatrix.Create(0.2f, 0.5f, 1.0f);
 
         float[] expected =
         [
-            0.2126f * 0.2f, 0.2126f * 0.5f, 0.2126f * 1.0f, 0f,
-            0.7152f * 0.2f, 0.7152f * 0.5f, 0.7152f * 1.0f, 0f,
-            0.0722f * 0.2f, 0.0722f * 0.5f, 0.0722f * 1.0f, 0f,
+            Scale * 0.2126f * 0.2f, Scale * 0.2126f * 0.5f, Scale * 0.2126f * 1.0f, 0f,
+            Scale * 0.7152f * 0.2f, Scale * 0.7152f * 0.5f, Scale * 0.7152f * 1.0f, 0f,
+            Scale * 0.0722f * 0.2f, Scale * 0.0722f * 0.5f, Scale * 0.0722f * 1.0f, 0f,
             0f, 0f, 0f, 0f,
-            0f, 0f, 0f, 1f,
+            Floor * 0.2f, Floor * 0.5f, Floor * 1.0f, 1f,
         ];
         Assert.Equal(expected, m);
+    }
+
+    [Fact]
+    public void Create_BlackInput_YieldsTheFloorTimesTheTint()
+    {
+        float[] m = VideoTintMatrix.Create(0.2f, 0.45f, 1f);
+        float[] tint = [0.2f, 0.45f, 1f];
+
+        // [0 0 0 1 1] * M: only the alpha row (zero) and the constant row count.
+        for (int col = 0; col < 3; col++)
+        {
+            Assert.Equal(Floor * tint[col], m[12 + col] + m[16 + col], precision: 5);
+        }
     }
 
     [Fact]
@@ -51,7 +69,7 @@ public sealed class VideoTintMatrixTests
         byte[] bytes = VideoTintMatrix.ToBytes(VideoTintMatrix.Create(1f, 1f, 1f));
 
         Assert.Equal(80, bytes.Length);
-        Assert.Equal(0.2126f, BitConverter.ToSingle(bytes, 0));
+        Assert.Equal(Scale * 0.2126f, BitConverter.ToSingle(bytes, 0));
         Assert.Equal(1f, BitConverter.ToSingle(bytes, 76));
     }
 }

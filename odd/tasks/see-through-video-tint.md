@@ -192,6 +192,14 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   Product note for the maintainer: with this mostly-dark scene the tinted letters read mostly black with
   blue/violet highlights (that is the chosen every-brightness mapping).
 
+- 2026-10-02 merged into main (ff 670fe11) and pushed by the maintainer.
+- 2026-10-02 follow-up (branch feat/tint-brightness-floor): after seeing the dark scene the maintainer chose
+  a 25% BRIGHTNESS FLOOR: out = (0.25 + 0.75 * L) * tint (VideoTintMatrix.BrightnessFloor; the constant row
+  carries 0.25 * tint, the luma rows are scaled by 0.75), so black video reads as a dark blue/violet and
+  white stays the full tint. TDD: RED 6 failing (3 matrix facts incl. the new black-input fact, 3 GPU pixel
+  facts with the floored expectation); GREEN after: Interop 555 passed / 42 skipped / 0 failed (GPU facts
+  measure real pixels).
+
 ## Next step
 
-Maintainer: look at the screenshots, decide merge into main (feature-branch-chain end). (ask the maintainer before switching wallpaper-mode to video).
+Optional hardware look at the floored tint in video mode; merge the follow-up branch. (ask the maintainer before switching wallpaper-mode to video).
