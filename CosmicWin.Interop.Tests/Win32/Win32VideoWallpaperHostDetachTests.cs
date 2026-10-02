@@ -213,6 +213,55 @@ public sealed class Win32VideoWallpaperHostDetachTests
         }
     }
 
+    /// <summary>
+    /// The real registered <c>TaskbarCreated</c> message, sent straight to the hidden receiver (never
+    /// broadcast), reaches the window procedure and re-attaches a shown host; after a removal the
+    /// same message leaves it alone. Proves the wndproc routing the RaiseTaskbarCreatedForTest seam
+    /// skips. The receiver is a hidden, never-shown popup, so no desktop session is needed.
+    /// </summary>
+    [Fact]
+    public void TaskbarCreatedMessage_SentToTheReceiver_ReattachesAShownHostButNotARemovedOne()
+    {
+        var hwnd = CreatePlainWindow();
+        try
+        {
+            var attachCalls = new List<nint>();
+            var host = new Win32VideoWallpaperHost
+            {
+                ReleaseSwapChainResourcesForTest = () => { },
+                AttachToDesktopForTest = window =>
+                {
+                    attachCalls.Add(window);
+                    return false; // Stops before D3D: no swapchain on a test window.
+                },
+            };
+            host.AdoptHostWindowForTest(hwnd);
+
+            host.TryAttach(); // Creates the real receiver (real class, real WndProc).
+            var receiver = host.TaskbarMessageHwnd;
+            Assert.NotEqual(0, receiver);
+            Assert.Equal([hwnd], attachCalls);
+
+            var taskbarCreated = RegisterWindowMessage("TaskbarCreated");
+            Assert.NotEqual(0u, taskbarCreated);
+
+            SendMessage(receiver, taskbarCreated, 0, 0);
+            Assert.Equal([hwnd, hwnd], attachCalls);
+
+            host.Detach();
+            SendMessage(receiver, taskbarCreated, 0, 0);
+            Assert.Equal([hwnd, hwnd], attachCalls);
+
+            host.ReleaseSwapChainResourcesForTest = null;
+            host.Dispose();
+            Assert.False(IsWindow(receiver));
+        }
+        finally
+        {
+            DestroyIfAlive(hwnd);
+        }
+    }
+
     /// <summary>A second Detach after a failed destroy retries it, and Dispose then leaves the window alone.</summary>
     [Fact]
     public void Detach_AfterADetachWhoseDestroyFailed_RetriesTheDestroy()
@@ -302,6 +351,12 @@ public sealed class Win32VideoWallpaperHostDetachTests
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(nint hwnd);
+
+    [DllImport("user32.dll", EntryPoint = "RegisterWindowMessageW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterWindowMessage(string message);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
