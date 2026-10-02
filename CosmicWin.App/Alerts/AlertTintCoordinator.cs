@@ -59,13 +59,17 @@ internal sealed class AlertTintCoordinator
     {
         try
         {
+            // Built under the lock, posted OUTSIDE it: this runs on the video worker thread, and a post
+            // that waits on anything needing _gate must not deadlock it (R3-post-under-lock-from-worker).
+            string message;
             lock (_gate)
             {
                 if (_activeSeq == 0 || !_applied || _ready) return;
                 _ready = true;
-                _postToPage(AlertLayerMessages.TintReady(_activeSeq));
+                message = AlertLayerMessages.TintReady(_activeSeq);
             }
 
+            _postToPage(message);
             Trace("alert-layer tint rendered");
         }
         catch (Exception ex)
@@ -78,13 +82,17 @@ internal sealed class AlertTintCoordinator
     {
         try
         {
+            // Built under the lock, posted OUTSIDE it: this runs on the video worker thread, and a post
+            // that waits on anything needing _gate must not deadlock it (R3-post-under-lock-from-worker).
+            string message;
             lock (_gate)
             {
                 if (_activeSeq == 0 || !_applied || !_ready) return;
                 _ready = false;
-                _postToPage(AlertLayerMessages.TintLost(_activeSeq));
+                message = AlertLayerMessages.TintLost(_activeSeq);
             }
 
+            _postToPage(message);
             Trace("alert-layer tint lost");
         }
         catch (Exception ex)

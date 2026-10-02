@@ -148,6 +148,35 @@ public sealed class AlertTintCoordinatorTests
         Assert.Equal([AlertLayerMessages.TintReady(seq)], rig.Posted);
     }
 
+    /// <summary>
+    /// R3-post-under-lock-from-worker: TintRendered/TintLost arrive on the video worker thread. The
+    /// page post must happen OUTSIDE the coordinator's lock, or a post that (directly or through the
+    /// dispatcher) waits on anything needing that lock -- here a Clear() from another thread --
+    /// deadlocks the video thread.
+    /// </summary>
+    [Fact]
+    public async Task RenderedPostsOutsideTheLock_SoAPostThatWaitsOnTheCoordinatorCannotDeadlock()
+    {
+        AlertTintCoordinator? coordinator = null;
+        var sink = new FakeSink();
+        var otherThreadFinished = new List<bool>();
+        coordinator = new AlertTintCoordinator(
+            sink,
+            json =>
+            {
+                if (json.Contains("tint-ready", StringComparison.Ordinal))
+                {
+                    otherThreadFinished.Add(Task.Run(() => coordinator!.Clear()).Wait(TimeSpan.FromSeconds(2)));
+                }
+            });
+        var seq = coordinator.BeginShow();
+        await coordinator.HandleMessageAsync(MaskJson(seq, "failed", 2, 2, PngDataUrl(2, 2, [255, 255, 255, 255])));
+
+        sink.RaiseRendered();
+
+        Assert.Equal([true], otherThreadFinished);
+    }
+
     [Fact]
     public void TintLostCarriesTheSeq()
     {

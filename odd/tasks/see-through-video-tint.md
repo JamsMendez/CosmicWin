@@ -161,6 +161,14 @@ real effect (parked since 2026-09-26, resumed 2026-10-01).
   node.exe running explorer-scene.tests.js); parent killed the stray and re-ran clean: App 1483 passed /
   6 skipped / 0 failed, node.exe 7 before and after; Interop 551/42/0; harness 32/32.
 
+- 2026-10-01 S3b review review-9cdfe0e80db33b47 APPROVED and acknowledged. WARNING
+  R3-post-under-lock-from-worker fixed inline (parent): OnRendered/OnLost build the message under the lock
+  and post outside it. RED: a post that waits on a Clear() from another thread timed out (deadlock);
+  GREEN after. WARNING R3-rendered-event-cross-show-race ACCEPTED as residual: the event carries no request
+  identity, so in a narrow window a stale Rendered could let the NEW show drop its letter fill up to one
+  frame before its own tint renders (a later failure still sends tint-lost). A full fix needs a request
+  token through the Interop API; revisit only if S5 shows a visible flash.
+
 ## Next step
 
 S5 hardware (ask the maintainer before switching wallpaper-mode to video).
