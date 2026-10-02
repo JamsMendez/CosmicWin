@@ -357,7 +357,7 @@ public sealed class FocusBorderWiringTests
 
             Assert.True(harness.Platform.Raise(KeyboardKey.O, isKeyDown: true, ModifierKeys.Alt));
 
-            var moved = await WaitUntil(() => harness.Border.Shown.Count > 0, TimeSpan.FromSeconds(2));
+            var moved = await WaitUntil(() => harness.Border.Shown.Count > 0, TimeSpan.FromMinutes(1)); // was 2s: hang guard sized for the 2-core GitHub Actions runner
             Assert.True(moved, "The border should follow the chord, not the reconciliation tick.");
         }
     }
@@ -1190,7 +1190,7 @@ public sealed class FocusBorderWiringTests
 
     private static async Task<bool> WaitUntil(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(1); // was 2s: hang guard sized for the 2-core GitHub Actions runner
         while (!condition() && DateTime.UtcNow < deadline)
         {
             await Task.Delay(10).ConfigureAwait(false);

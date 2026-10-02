@@ -152,7 +152,7 @@ public sealed class ArrivingWindowDesktopWiringTests
         scheduler.Fire();
 
         Assert.True(platform.Raise(KeyboardKey.D2, isKeyDown: true, ModifierKeys.Alt));
-        Assert.True(await WaitUntil(() => trace.Recorded("SwitchDesktop arg=2"), TimeSpan.FromSeconds(5)));
+        Assert.True(await WaitUntil(() => trace.Recorded("SwitchDesktop arg=2"), TimeSpan.FromMinutes(1))); // was 5s: hang guard sized for the 2-core GitHub Actions runner
         Assert.Equal(2, desktops.CurrentIndex);
 
         // Windows drags the view after the window it is about to create. No tick has run since the

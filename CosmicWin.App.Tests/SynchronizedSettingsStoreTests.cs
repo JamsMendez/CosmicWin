@@ -47,8 +47,8 @@ public sealed class SynchronizedSettingsStoreTests
         tilingThread.Start();
         start.Set();
 
-        Assert.True(focusBorderThread.Join(TimeSpan.FromSeconds(5)));
-        Assert.True(tilingThread.Join(TimeSpan.FromSeconds(5)));
+        Assert.True(focusBorderThread.Join(TimeSpan.FromMinutes(1))); // was 5s: hang guard sized for the 2-core GitHub Actions runner
+        Assert.True(tilingThread.Join(TimeSpan.FromMinutes(1))); // was 5s: hang guard sized for the 2-core GitHub Actions runner
 
         Assert.False(store.Current.FocusBorder);
         Assert.False(store.Current.Tiling);

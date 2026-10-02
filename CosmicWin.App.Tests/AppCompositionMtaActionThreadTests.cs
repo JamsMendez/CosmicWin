@@ -20,7 +20,7 @@ public sealed class AppCompositionMtaActionThreadTests
         thread.Post(() => throw new IOException(@"C:\Users\x\secret.mp4"));
         thread.Post(() => secondItemRan.Set());
 
-        Assert.True(secondItemRan.Wait(TimeSpan.FromSeconds(5)), "the second work item never ran");
+        Assert.True(secondItemRan.Wait(TimeSpan.FromMinutes(1)), "the second work item never ran"); // was 5s: hang guard sized for the 2-core GitHub Actions runner
         AssertEventually(() => Assert.Single(reported));
         Assert.Contains(nameof(IOException), reported[0]);
         Assert.DoesNotContain(@"C:\Users\x\secret.mp4", reported[0]);
@@ -42,13 +42,13 @@ public sealed class AppCompositionMtaActionThreadTests
         thread.Post(() => throw new IOException("work failed"));
         thread.Post(() => secondItemRan.Set());
 
-        Assert.True(secondItemRan.Wait(TimeSpan.FromSeconds(5)), "the second work item never ran");
+        Assert.True(secondItemRan.Wait(TimeSpan.FromMinutes(1)), "the second work item never ran"); // was 5s: hang guard sized for the 2-core GitHub Actions runner
     }
 
     /// <summary>Waits briefly for an async assertion to stop failing, instead of racing the worker thread.</summary>
     private static void AssertEventually(Action assertion)
     {
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(1); // was 5s: hang guard sized for the 2-core GitHub Actions runner
         while (true)
         {
             try

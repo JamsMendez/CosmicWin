@@ -508,7 +508,7 @@ public sealed class TilingModeTests
 
     private static async Task<bool> WaitUntil(Func<bool> condition)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(1); // was 2s: hang guard sized for the 2-core GitHub Actions runner
         while (!condition() && DateTime.UtcNow < deadline)
         {
             await Task.Delay(10);

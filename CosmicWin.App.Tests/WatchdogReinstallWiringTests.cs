@@ -123,8 +123,8 @@ public sealed class WatchdogReinstallWiringTests
     private static void ForceOneReinstall(Harness harness)
     {
         harness.Clock.Advance((long)WatchdogInterval.TotalMilliseconds + 1);
-        Assert.True(harness.Platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-        Assert.True(SpinWait.SpinUntil(() => harness.Hook().WatchdogReinstalls == 1, TimeSpan.FromSeconds(2)));
+        Assert.True(harness.Platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
+        Assert.True(SpinWait.SpinUntil(() => harness.Hook().WatchdogReinstalls == 1, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
     }
 
     [Fact]

@@ -23,11 +23,11 @@ public sealed class BoundedActivationTests
 {
     /// <summary>
     /// Generous on purpose. It bounds a delegate that returns immediately, so the only way to
-    /// exhaust it is a machine frozen for five seconds -- at which point every fact is failing.
+    /// exhaust it is a machine frozen for a full minute -- at which point every fact is failing.
     /// The timeout fact below needs no such generosity: its worker blocks forever, so no amount of
     /// scheduling luck can make that wait succeed.
     /// </summary>
-    private static readonly TimeSpan LongEnoughForAnImmediateReturn = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan LongEnoughForAnImmediateReturn = TimeSpan.FromMinutes(1); // was 5s: hang guard sized for the 2-core GitHub Actions runner
 
     [Fact]
     public void RunBounded_WhenTheWorkerOutlastsTheBudget_SaysItTimedOutRatherThanRefused()

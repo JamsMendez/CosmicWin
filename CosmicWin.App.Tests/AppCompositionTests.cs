@@ -209,7 +209,7 @@ public sealed class AppCompositionTests
 
             var recorded = await WaitUntil(
                 () => harness.FocusTrace.Entries.Any(entry => entry.Outcome == FocusTraceOutcome.Activated),
-                TimeSpan.FromSeconds(2));
+                TimeSpan.FromMinutes(1)); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
             Assert.True(recorded);
             var entry = harness.FocusTrace.Entries[^1];

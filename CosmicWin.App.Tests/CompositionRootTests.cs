@@ -46,12 +46,12 @@ public sealed class CompositionRootTests
     public async Task WiredPipeline_MoveRight_ReachesRecordingEngine_WithDirectionRight()
     {
         var (engine, dispatcher) = BuildWiredPipeline(new IntPtr(101));
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1)); // was 5s: hang guard sized for the 2-core GitHub Actions runner
         var runTask = dispatcher.RunAsync(cts.Token);
 
         Assert.True(dispatcher.Writer.TryWrite(new HotkeyAction(HotkeyActionKind.MoveRight)));
 
-        var observed = await WaitUntil(() => engine.MoveNodeCallCount > 0, TimeSpan.FromSeconds(2));
+        var observed = await WaitUntil(() => engine.MoveNodeCallCount > 0, TimeSpan.FromMinutes(1)); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
         await dispatcher.DisposeAsync();
         await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(1)));
@@ -66,12 +66,12 @@ public sealed class CompositionRootTests
     public async Task WiredPipeline_ResizeDown_ReachesRecordingEngine_WithDirectionDown()
     {
         var (engine, dispatcher) = BuildWiredPipeline(new IntPtr(202));
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1)); // was 5s: hang guard sized for the 2-core GitHub Actions runner
         var runTask = dispatcher.RunAsync(cts.Token);
 
         Assert.True(dispatcher.Writer.TryWrite(new HotkeyAction(HotkeyActionKind.ResizeDown)));
 
-        var observed = await WaitUntil(() => engine.ResizeNodeCallCount > 0, TimeSpan.FromSeconds(2));
+        var observed = await WaitUntil(() => engine.ResizeNodeCallCount > 0, TimeSpan.FromMinutes(1)); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
         await dispatcher.DisposeAsync();
         await Task.WhenAny(runTask, Task.Delay(TimeSpan.FromSeconds(1)));

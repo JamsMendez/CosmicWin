@@ -152,10 +152,10 @@ public sealed class KeyboardHookTests
         var pumps = platform.PumpCount;
         clock.Advance(1000);
 
-        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps, TimeSpan.FromSeconds(2)));
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
         Assert.Equal(1, platform.InstallCount);
         clock.Advance(4000);
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
         Assert.Equal(ApartmentState.STA, platform.ApartmentState);
         Assert.NotEqual(callerThread, platform.CallbackThreadId);
         Assert.True(channel.Reader.TryRead(out var action));
@@ -196,9 +196,9 @@ public sealed class KeyboardHookTests
         Assert.Equal(0, hook.WatchdogReinstalls);
 
         clock.Advance(5000);
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
-        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromSeconds(2)));
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
     }
 
     /// <summary>
@@ -235,8 +235,8 @@ public sealed class KeyboardHookTests
 
         hook.Start();
         clock.Advance(5000);
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
-        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromSeconds(2)));
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogReinstalls >= 1, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
         Assert.Equal(0, hook.WatchdogFoundHookGone);
     }
@@ -261,9 +261,9 @@ public sealed class KeyboardHookTests
 
         hook.Start();
         clock.Advance(5000);
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
-        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogFoundHookGone >= 1, TimeSpan.FromSeconds(2)));
+        Assert.True(SpinWait.SpinUntil(() => hook.WatchdogFoundHookGone >= 1, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
     }
 
     /// <summary>
@@ -291,7 +291,7 @@ public sealed class KeyboardHookTests
         // Waited on the LOOP rather than on a clock: several passes past the deadline have run and
         // decided to do nothing, which a timeout would only have guessed at.
         var pumps = platform.PumpCount;
-        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromSeconds(2)));
+        Assert.True(SpinWait.SpinUntil(() => platform.PumpCount > pumps + 3, TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
 
         Assert.Equal(1, platform.InstallCount);
         Assert.Equal(0, hook.WatchdogReinstalls);
@@ -319,7 +319,7 @@ public sealed class KeyboardHookTests
         hook.Start();
         clock.Advance(60_000);
 
-        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(platform.SecondInstall.Wait(TimeSpan.FromMinutes(1))); // was 2s: hang guard sized for the 2-core GitHub Actions runner
     }
 
     /// <summary>Shutting down is not a rescue: the unhook in Dispose never moves that counter.</summary>

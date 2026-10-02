@@ -10,7 +10,7 @@ namespace CosmicWin.Interop.Tests.Win32;
 /// </summary>
 public sealed class StyleCallQueueTests
 {
-    private static readonly TimeSpan Plenty = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan Plenty = TimeSpan.FromMinutes(1); // was 5s: hang guard sized for the 2-core GitHub Actions runner
 
     [Fact]
     public void ACallThatNeverAnswers_ReportsTimedOut_NotRefused()
@@ -184,7 +184,9 @@ public sealed class StyleCallQueueTests
 
             _ = queue.Run(3, () => { lock (gate) { ran.Add("newer"); } landed.Set(); return true; }, TimeSpan.FromMilliseconds(1));
 
-            Assert.True(older.Wait(Plenty)); // released by the replacement, not by its 30 s budget
+            // Released by the replacement, not by its 30 s budget. Deliberately NOT Plenty: this wait
+            // must stay well under that budget, or the budget expiring would pass it too.
+            Assert.True(older.Wait(TimeSpan.FromSeconds(5)));
             Assert.Equal(StyleWriteOutcome.TimedOut, older.Result);
 
             release.Set();
