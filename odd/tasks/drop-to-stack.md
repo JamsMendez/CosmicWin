@@ -74,4 +74,10 @@ Strategy: `ask-on-risk`. Forecast ~350 authored changed lines, one PR slice.
   `--artifacts-path` in the scratchpad): build 0 errors, 4 pre-existing warnings; headless suite
   208 + 240 (3 skipped) + 949 passed. Plain `dotnet build CosmicWin.sln -c Release` still fails
   MSB3027 only because PID 3916 locks `CosmicWin.App/bin/Release`.
+- T2 commit: `e51cea8`.
+- Review (T1+T2, base `a751ead`, committed-only): assessed medium, consent granted, one
+  reliability lens, APPROVED and acknowledged (lineage `review-b205480e48dd2533`, authority
+  burned). Two non-blocking suggestions left as follow-ups: the wrap path's zero-length
+  provisional height is unproved by a test (`LayoutTree.cs:818-824`), and the exact third
+  boundaries of the drop zones are untested (`MultiMonitorWorkspaceAdapter.cs:1740-1745`).
 - Next: T3 hardware check.
