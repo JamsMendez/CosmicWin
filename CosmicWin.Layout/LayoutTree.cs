@@ -747,6 +747,129 @@ public sealed class LayoutTree : ITilingEngine
     }
 
     /// <summary>
+    /// Moves <paramref name="moving"/> out of its slot and stacks it on <paramref name="side"/> of
+    /// <paramref name="target"/>: the target's slot splits top/bottom, half each, and the group the
+    /// node left heals exactly the way a close heals it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What dropping a tiled window on the top or bottom third of another means, chosen by the
+    /// maintainer (zones: top third above, bottom third below, the middle still a
+    /// <see cref="SwapLeaves"/>). Reported case: <c>[A] [B] [C over D]</c>, D dropped low on B,
+    /// gives <c>[A] [B over D] [C]</c> -- B's column splits, and C takes the whole height its
+    /// group no longer has to share.
+    /// </para>
+    /// <para>
+    /// Two places change size and nothing else does. The VACATED group redistributes the leaving
+    /// node's share through <see cref="RemoveChild"/> and collapses through <see cref="Prune"/> if
+    /// one child is left -- an instance method for that reason, since a collapsing ROOT needs the
+    /// tree to be re-seated. The TARGET's slot is the other: its share is halved between the two.
+    /// </para>
+    /// <para>
+    /// A target already inside a top/bottom group gets a SIBLING next to it rather than a group of
+    /// its own, so <c>V[X, T]</c> becomes <c>V[X, D, T]</c> and not <c>V[V[X, D], T]</c> -- a level
+    /// that means nothing, which both LE-2's walk and LE-5's moves would count. Anywhere else the
+    /// target is wrapped in a new vertical group that inherits its slot outright, the way
+    /// <see cref="SplitLeafInPlace"/> does it.
+    /// </para>
+    /// <para>
+    /// The target is located AFTER the detach, not before: leaving a group can collapse it, and when
+    /// that group is the target's own (reordering inside one column) the target is by then sitting
+    /// in its old parent's slot. Everything that can refuse is checked BEFORE the detach, because a
+    /// refusal after it would leave the moving window out of the layout.
+    /// </para>
+    /// </remarks>
+    public bool StackBeside(Node moving, LeafNode target, StackSide side)
+    {
+        if (ReferenceEquals(moving, target)
+            || moving.Parent is not GroupNode origin
+            || Root is null
+            || !ReferenceEquals(TopOf(moving), Root)
+            || !ReferenceEquals(TopOf(target), Root)
+            || IsWithin(target, moving))
+        {
+            return false;
+        }
+
+        int originIndex = origin.Children.IndexOf(moving);
+        if (originIndex < 0)
+        {
+            return false;
+        }
+
+        RemoveChild(origin, originIndex);
+        Prune(this, origin);
+
+        int movingIndex = side == StackSide.Above ? 0 : 1;
+        if (target.Parent is GroupNode { Axis: SplitAxis.Vertical } column)
+        {
+            // A sibling in the column the target already stands in: only its share is divided.
+            int slot = column.Children.IndexOf(target);
+            int share = column.Sizes[slot];
+            int movingShare = share / 2;
+
+            column.Sizes[slot] = share - movingShare;
+            moving.Parent = column;
+            column.Children.Insert(slot + movingIndex, moving);
+            column.Sizes.Insert(slot + movingIndex, movingShare);
+            return true;
+        }
+
+        // The length along the new axis is the target's own height. A stale or never-arranged
+        // reading only costs the first arrange a rescale -- RescaleSizes keeps the halves either way.
+        var parent = target.Parent;
+        int parentSlot = parent?.Children.IndexOf(target) ?? -1;
+        int length = Math.Max(0, target.LastGeometry.Height);
+        var stack = new GroupNode(SplitAxis.Vertical) { GroupLength = length };
+        int half = length / 2;
+
+        target.Parent = stack;
+        stack.Children.Add(target);
+        stack.Sizes.Add(length - half);
+        moving.Parent = stack;
+        stack.Children.Insert(movingIndex, moving);
+        stack.Sizes.Insert(movingIndex, half);
+
+        // The new group inherits the target's slot outright: Sizes is untouched, so no sibling moves.
+        if (parent is not null && parentSlot >= 0)
+        {
+            stack.Parent = parent;
+            parent.Children[parentSlot] = stack;
+        }
+        else
+        {
+            stack.Parent = null;
+            Root = stack;
+        }
+
+        return true;
+    }
+
+    private static Node TopOf(Node node)
+    {
+        var current = node;
+        while (current.Parent is not null)
+        {
+            current = current.Parent;
+        }
+
+        return current;
+    }
+
+    private static bool IsWithin(Node node, Node ancestor)
+    {
+        for (Node? current = node; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Translates one finished mouse edge-drag into the tree: every boundary the user actually
     /// moved transfers exactly the pixels it was dragged, so the reflow that follows lands the new
     /// proportions instead of undoing them.
