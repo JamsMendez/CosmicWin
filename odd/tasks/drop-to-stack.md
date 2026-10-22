@@ -36,7 +36,7 @@ today's swap.
 
 - [x] **T1 — layout insert-beside operation + tests.** Route: delegated writer (2+ non-trivial
   files: LayoutTree + tests). Check: RED then GREEN in `CosmicWin.Layout.Tests`.
-- [ ] **T2 — drop-zone routing in the adapter + tests + docs.** Route: same delegated writer.
+- [x] **T2 — drop-zone routing in the adapter + tests + docs.** Route: same delegated writer.
   Check: adapter tests for top/middle/bottom drops; headless suite
   `dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresDesktop"` green.
 - [ ] **T3 — hardware check.** Route: inline (drive the app). Check: the reported 4-window case
@@ -56,7 +56,7 @@ Strategy: `ask-on-risk`. Forecast ~350 authored changed lines, one PR slice.
 ## Progress
 
 - 2026-10-22: branch `feat/drop-to-stack` created from `main` a751ead.
-- T1 done (delegated writer): `LayoutTree.StackBeside(moving, target, StackSide)` + `StackSide`
+- T1 done (delegated writer), commit `419363e`: `LayoutTree.StackBeside(moving, target, StackSide)` + `StackSide`
   enum; 10 facts in `LayoutTreeStackBesideTests`. RED against a `=> false` stub: 6 failed / 4
   passed (the refusal facts). GREEN: Layout.Tests 208/208. Headless suite 208 + 240 (3 skipped) +
   944 passed. Build and test ran with `--artifacts-path` in the session scratchpad because a
@@ -64,3 +64,14 @@ Strategy: `ask-on-risk`. Forecast ~350 authored changed lines, one PR slice.
   Design: the target is re-read AFTER the detach (a collapse can move it); a target already in a
   vertical group gets a sibling (no extra nesting), otherwise it is wrapped; every refusal is
   checked before anything is detached.
+- T2 done (delegated writer): `TrySwapOnDrop` renamed `TryRearrangeOnDrop`; thirds measured on
+  the target's `LastGeometry` (same rect `LeafAt` hit-tests); traces `stacked above/below 0x..`,
+  `stack refused`, swap unchanged. 5 adapter facts (bottom/top/middle on the reported layout,
+  same-column top third, same-column bottom third). RED: 3 failed / 2 passed -- the middle-third
+  fact and the same-column top-third fact also hold under a plain swap (documented as a guard in
+  its remarks); the bottom-third-of-the-window-above fact is the discriminating one. GREEN:
+  adapter tests 34/34. README "What works" gains a Drag and drop bullet. Verification (with
+  `--artifacts-path` in the scratchpad): build 0 errors, 4 pre-existing warnings; headless suite
+  208 + 240 (3 skipped) + 949 passed. Plain `dotnet build CosmicWin.sln -c Release` still fails
+  MSB3027 only because PID 3916 locks `CosmicWin.App/bin/Release`.
+- Next: T3 hardware check.

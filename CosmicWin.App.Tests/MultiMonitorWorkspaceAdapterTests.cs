@@ -704,6 +704,179 @@ public sealed class MultiMonitorWorkspaceAdapterTests
         Assert.Equal(Rectangle.FromSize(0, 0, 960, 1080), windowA.LastSetPosition);
     }
 
+    /// <summary>
+    /// The reported case: <c>[A] [B] [C over D]</c>, and D dropped on the LOWER third of B. B's
+    /// column splits in two with D underneath, and C takes the whole height its column left.
+    /// </summary>
+    /// <remarks>
+    /// Aimed with the dropped window's centre, like the swap: D keeps its own 640x540 size (a move,
+    /// not a resize) and is dropped so that centre lands at y=870 inside B's 0..1080 tile.
+    /// </remarks>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnTheBottomThirdOfATile_StacksBelowIt()
+    {
+        var (s, a, b, c, d) = ThreeColumnsWithAStackedThird(4121);
+
+        d.SimulateExternalMove(Rectangle.FromSize(640, 600, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(3, root.Children.Count);
+        var column = Assert.IsType<GroupNode>(root.Children[1]);
+        Assert.Equal(new WindowRef(b.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(root.Children[2]).Window);
+
+        // Applied on screen too: only B's column and C's old column changed shape.
+        Assert.Equal(Rectangle.FromSize(0, 0, 640, 1080), a.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(640, 0, 640, 540), b.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(640, 540, 640, 540), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 0, 640, 1080), c.LastSetPosition);
+    }
+
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnTheTopThirdOfATile_StacksAboveIt()
+    {
+        var (s, a, b, c, d) = ThreeColumnsWithAStackedThird(4131);
+
+        // Centre at y=270, inside B's top third (0..360).
+        d.SimulateExternalMove(Rectangle.FromSize(640, 0, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var column = Assert.IsType<GroupNode>(Assert.IsType<GroupNode>(tree!.Root).Children[1]);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(b.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+
+        Assert.Equal(Rectangle.FromSize(640, 0, 640, 540), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(640, 540, 640, 540), b.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 0, 640, 1080), c.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(0, 0, 640, 1080), a.LastSetPosition);
+    }
+
+    /// <summary>
+    /// The middle third is still the swap, unchanged: same shape, same sizes, the two windows
+    /// exchange slots -- which is what keeps every drop made before this feature behaving as it did.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnTheMiddleThirdOfATile_StillSwaps()
+    {
+        var (s, _, b, c, d) = ThreeColumnsWithAStackedThird(4141);
+
+        // Centre at y=540, B's middle third (360..720).
+        d.SimulateExternalMove(Rectangle.FromSize(640, 270, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(root.Children[1]).Window);
+        var column = Assert.IsType<GroupNode>(root.Children[2]);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(b.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal([640, 640, 640], root.Sizes);
+
+        Assert.Equal(Rectangle.FromSize(640, 0, 640, 1080), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 540, 640, 540), b.LastSetPosition);
+    }
+
+    /// <summary>
+    /// Reordering inside one column: D dropped on the top third of C, the window right above it.
+    /// The column they share collapses as D leaves and is rebuilt around C, D now on top.
+    /// </summary>
+    /// <remarks>
+    /// A guard, not a discriminator: for two neighbours a swap lands on the same answer, so this was
+    /// green before stacking existed. What it pins is that the collapse-and-rebuild route still
+    /// comes out as a two-window column; the fact below is the one a swap would fail.
+    /// </remarks>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnTheTopThirdOfItsOwnColumnNeighbour_ReordersTheColumn()
+    {
+        var (s, _, _, c, d) = ThreeColumnsWithAStackedThird(4151);
+
+        // C's tile is 1280,0 640x540; its top third is y 0..180. Centre at y=90.
+        d.SimulateExternalMove(Rectangle.FromSize(1280, -180, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal([640, 640, 640], root.Sizes);
+        var column = Assert.IsType<GroupNode>(root.Children[2]);
+        Assert.Equal(2, column.Children.Count);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal(Rectangle.FromSize(1280, 0, 640, 540), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 540, 640, 540), c.LastSetPosition);
+    }
+
+    /// <summary>
+    /// D dropped on the BOTTOM third of C, the window right above it, asks to stand below C -- which
+    /// is where it already is. A swap would have put D on top; stacking leaves the order as it was.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DroppedOnTheBottomThirdOfTheWindowAboveIt_KeepsTheOrder()
+    {
+        var (s, _, _, c, d) = ThreeColumnsWithAStackedThird(4161);
+
+        // C's bottom third is y 360..540. Centre at y=450.
+        d.SimulateExternalMove(Rectangle.FromSize(1280, 180, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true);
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal([640, 640, 640], root.Sizes);
+        var column = Assert.IsType<GroupNode>(root.Children[2]);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal(Rectangle.FromSize(1280, 0, 640, 540), c.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 540, 640, 540), d.LastSetPosition);
+    }
+
+    /// <summary>
+    /// <c>[A] [B] [C over D]</c> across one 1920x1080 display. The column is built by hand from the
+    /// registered leaves rather than by admitting a fourth window, so the fact does not rest on
+    /// whichever split admission happens to choose.
+    /// </summary>
+    private static (Setup S, RecordingWindow A, RecordingWindow B, RecordingWindow C, RecordingWindow D)
+        ThreeColumnsWithAStackedThird(int firstHandle)
+    {
+        var s = OneDisplay();
+        _ = new MultiMonitorWorkspaceAdapter(s.Workspace, s.Trees, s.Registry, () => ExceptionList.Empty, () => false, () => null);
+        var windows = Enumerable.Range(firstHandle, 4)
+            .Select(handle => new RecordingWindow(new IntPtr(handle), Rectangle.FromSize(100, 100, 400, 300)))
+            .ToArray();
+        foreach (var window in windows)
+        {
+            s.Workspace.RaiseWindowAdded(window);
+        }
+
+        var leaves = windows
+            .Select(window => Assert.IsType<LeafNode>(s.Registry.TryGetLeaf(window.Handle, out var leaf) ? leaf : null))
+            .ToArray();
+
+        var root = new GroupNode(SplitAxis.Horizontal) { GroupLength = 1920 };
+        var column = new GroupNode(SplitAxis.Vertical) { GroupLength = 1080 };
+        foreach (var (parent, child, size) in new (GroupNode, Node, int)[]
+                 {
+                     (root, leaves[0], 640), (root, leaves[1], 640), (root, column, 640),
+                     (column, leaves[2], 540), (column, leaves[3], 540),
+                 })
+        {
+            child.Parent = parent;
+            parent.Children.Add(child);
+            parent.Sizes.Add(size);
+        }
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        tree!.Root = root;
+
+        // One ordinary out-of-band reflow, so every window stands on its tile before the drop.
+        s.Workspace.RaiseWindowBoundsChanged(windows[0]);
+        Assert.Equal(Rectangle.FromSize(1280, 540, 640, 540), windows[3].LastSetPosition);
+
+        return (s, windows[0], windows[1], windows[2], windows[3]);
+    }
+
     /// <summary>Two windows tiled 1/2 - 1/2 across one 1920x1080 display.</summary>
     private static (Setup S, RecordingWindow A, RecordingWindow B) SideBySide(nint handleA, nint handleB)
     {

@@ -133,9 +133,13 @@ maximize button, a double click on the title bar, and `Win+Up`.
   window behind it.
 - **Focus border** — the active window is outlined in the system accent colour, thicker than the
   one Windows draws, with corners matching its own.
-- **Windows that fight back** — a window dragged out of its slot snaps back on drop; a window that
-  resizes itself is put back; a window that refuses to be positioned is left alone rather than
-  fought.
+- **Drag and drop** — drop a tiled window onto another tile to rearrange them. Where the dropped
+  window's centre lands decides what happens: the top third of the tile stacks it above that
+  window, the bottom third stacks it below (the tile splits in half), and the middle third swaps
+  the two. The column it left closes up. Dragging a shared edge resizes both neighbours instead.
+- **Windows that fight back** — a window dropped on no tile, or back on its own, snaps back; a
+  window that resizes itself is put back; a window that refuses to be positioned is left alone
+  rather than fought.
 - **No maximizing while tiling** — a tiled window's maximize button is greyed out, which also
   disables the double click on the title bar and `Win+Up`. A window that still gets maximized is
   restored and put back in its slot.

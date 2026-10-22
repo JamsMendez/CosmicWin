@@ -1523,7 +1523,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             var resized = dropped.Width != tile.Width || dropped.Height != tile.Height;
             var outcome = resized
                 ? TreeArranger.TryApplyUserResize(dragged, dropped) ? "tree resized" : "nothing to resize on either axis"
-                : TrySwapOnDrop(display, dragged, dropped);
+                : TryRearrangeOnDrop(tree, display, dragged, dropped);
 
             // The tile it was measured AGAINST, not just the verdict. The one thing no test can
             // answer is whether a real Win32 drop lines up with the tile actually placed once the
@@ -1686,8 +1686,9 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     }
 
     /// <summary>
-    /// Exchanges the dropped window's slot with whichever tile it was dropped ONTO. Reports what
-    /// happened, for the trace.
+    /// Puts the dropped window where it was dropped ONTO another tile: stacked above that tile
+    /// (top third), stacked below it (bottom third), or exchanged with it (middle third). Reports
+    /// what happened, for the trace.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1697,25 +1698,32 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// itself, a restore, a shell nudge -- which is why nothing about those changed.
     /// </para>
     /// <para>
-    /// SWAP rather than insert-at-the-drop-edge, chosen by the maintainer. It cannot leave the tree
-    /// in a shape nobody asked for: no group is created, none is emptied, no size moves. The
-    /// tempting richer version -- splitting the target on the edge you dropped against -- needs a
-    /// prune of the group the window vacated and a new "which edge" concept, and is a separate
-    /// decision rather than a bigger version of this one.
+    /// The SWAP came first, chosen by the maintainer because it cannot leave the tree in a shape
+    /// nobody asked for: no group is created, none is emptied, no size moves. It left no way to put
+    /// a window INTO another column by mouse -- reported with <c>[A] [B] [C over D]</c>, where D
+    /// dropped low on B should give <c>[A] [B over D] [C]</c> -- so the richer version these remarks
+    /// once deferred is now here, as zones (maintainer's choice): the top and bottom thirds stack
+    /// through <see cref="LayoutTree.StackBeside"/>, which owns the prune of the vacated group, and
+    /// the middle third is the swap exactly as it was. Up/down only; left/right zones were not asked
+    /// for.
     /// </para>
     /// <para>
-    /// Aimed with the dropped window's CENTRE. The cursor is what the user actually aims with, but
-    /// reading it needs interop this does not have yet, and a swap targets a whole tile rather than
-    /// an edge of one, so the two agree for anything but a large window dropped on a small tile.
-    /// Worth revisiting if that case is ever felt.
+    /// Aimed with the dropped window's CENTRE, zone included. The cursor is what the user actually
+    /// aims with, but reading it needs interop this does not have yet. With zones the two can
+    /// disagree more often than they did for a whole-tile swap -- a tall window dropped on a short
+    /// tile puts its centre lower than the hand that let go -- so this is the first place to look if
+    /// a drop is felt to land in the wrong third.
+    /// </para>
+    /// <para>
+    /// The thirds are measured on the target's SLOT (<see cref="Node.LastGeometry"/>), the same
+    /// rectangle <see cref="TreeManager.LeafAt"/> hit-tested, so a centre that found a tile always
+    /// falls in exactly one of its thirds.
     /// </para>
     /// </remarks>
-    private string TrySwapOnDrop(IDisplay display, LeafNode dragged, Rectangle dropped)
+    private string TryRearrangeOnDrop(LayoutTree tree, IDisplay display, LeafNode dragged, Rectangle dropped)
     {
-        var target = _treeManager.LeafAt(
-            display,
-            dropped.Left + (dropped.Width / 2),
-            dropped.Top + (dropped.Height / 2));
+        var centreY = dropped.Top + (dropped.Height / 2);
+        var target = _treeManager.LeafAt(display, dropped.Left + (dropped.Width / 2), centreY);
 
         // Dropped on nothing this display holds -- most often because the drag left the monitor.
         // The window goes back to its slot, exactly as it did before any of this existed.
@@ -1727,6 +1735,20 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (ReferenceEquals(target, dragged))
         {
             return "dropped on its own tile";
+        }
+
+        var slot = target.LastGeometry;
+        var third = slot.Height / 3;
+        var depth = centreY - slot.Y;
+        StackSide? side = depth < third ? StackSide.Above
+            : depth >= slot.Height - third ? StackSide.Below
+            : null;
+
+        if (side is { } stack)
+        {
+            return tree.StackBeside(dragged, target, stack)
+                ? $"stacked {(stack == StackSide.Above ? "above" : "below")} 0x{target.Window.Handle:X}"
+                : "stack refused";
         }
 
         return LayoutTree.SwapLeaves(dragged, target)
