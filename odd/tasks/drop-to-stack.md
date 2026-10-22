@@ -80,4 +80,9 @@ Strategy: `ask-on-risk`. Forecast ~350 authored changed lines, one PR slice.
   burned). Two non-blocking suggestions left as follow-ups: the wrap path's zero-length
   provisional height is unproved by a test (`LayoutTree.cs:818-824`), and the exact third
   boundaries of the drop zones are untested (`MultiMonitorWorkspaceAdapter.cs:1740-1745`).
-- Next: T3 hardware check.
+- 2026-10-22: T3 blocked. The running CosmicWin (PID 3916) is elevated and the session was not:
+  `Stop-Process` returned Access is denied. Session paused by the maintainer; to be resumed from
+  an elevated terminal.
+- Next: T3 hardware check from an elevated session. Close the running CosmicWin, publish the
+  Release build to `run/` (`scripts/run.ps1 -Configuration Release`), then reproduce
+  `[A] [B] [C over D]` and drag D onto B's bottom, top and middle thirds.
