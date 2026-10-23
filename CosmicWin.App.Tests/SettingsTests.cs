@@ -464,6 +464,36 @@ public sealed class SettingsTests
         Assert.Equal(original, Settings.Parse(original.Serialize()));
     }
 
+    /// <summary>
+    /// A switch that agrees with the percent is not pinned in the file, so a save made for any other
+    /// reason cannot silence a later hand edit of the percent.
+    /// </summary>
+    [Theory]
+    [InlineData(false, 100)]
+    [InlineData(true, 90)]
+    public void Serialize_LeavesTheSwitchUnpinned_WhenThePercentAlreadySaysTheSame(bool enabled, int opacity)
+    {
+        var serialized = new Settings(FocusBorder: true, UnfocusedOpacity: opacity, UnfocusedTransparency: enabled).Serialize();
+
+        Assert.DoesNotMatch(@"(?m)^\s*unfocused-transparency\s*=", serialized);
+        Assert.Contains("# unfocused-transparency:", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// R3-legacy-percent-edit-silenced: a file at the 100 default, rewritten by an unrelated save
+    /// (here, tiling switched off), still turns the transparency on when the percent is lowered by hand.
+    /// </summary>
+    [Fact]
+    public void AnUnrelatedSave_DoesNotSilenceALaterHandEditOfThePercent()
+    {
+        var rewritten = (Settings.Parse("unfocused-opacity = 100") with { Tiling = false }).Serialize();
+
+        var handEdited = Settings.Parse(rewritten.Replace("unfocused-opacity = 100", "unfocused-opacity = 80"));
+
+        Assert.True(handEdited.UnfocusedTransparency);
+        Assert.Equal(80, handEdited.UnfocusedOpacity);
+    }
+
     [Fact]
     public void Serialize_IncludesTheSwitchAndComment()
     {
@@ -612,8 +642,7 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity",
-                "unfocused-transparency"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity"],
             keys);
         foreach (var legacy in new[] { "alerts", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",

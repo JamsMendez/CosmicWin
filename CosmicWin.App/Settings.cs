@@ -187,6 +187,16 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             unfocusedTransparency ?? unfocusedOpacity < 100);
     }
 
+    /// <summary>
+    /// The switch's key line, or nothing when the percent already says the same. Pinning an agreeing
+    /// switch would let any unrelated save silence a later hand edit of the percent -- the one way to
+    /// turn the transparency on before the switch existed.
+    /// </summary>
+    private string TransparencyLine =>
+        UnfocusedTransparency == (UnfocusedOpacity < 100)
+            ? string.Empty
+            : $"{UnfocusedTransparencyKey} = {(UnfocusedTransparency ? "on" : "off")}";
+
     /// <summary>The file this instance would be written as, comment and all.</summary>
     public string Serialize() =>
         $"""
@@ -215,8 +225,9 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          {UnfocusedOpacityKey} = {UnfocusedOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          # {UnfocusedTransparencyKey}: on to draw unfocused windows translucent, off to leave every
-         # window opaque. The tray toggles it; the percent above is kept either way.
-         {UnfocusedTransparencyKey} = {(UnfocusedTransparency ? "on" : "off")}
+         # window opaque. The tray toggles it; the percent above is kept either way. Left out, it
+         # follows the percent: on below 100, off at 100. Written only when it disagrees with that.
+         {TransparencyLine}
 
          """;
 
