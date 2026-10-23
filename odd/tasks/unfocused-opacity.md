@@ -63,3 +63,12 @@ one independent verifier at the feature's end, plus native review.
   -> A/C stayed 230; restart at 100 -> all 255 (layered bit kept, as designed). A clean tray exit
   was not driven on hardware (covered by `ExitingNormally_MakesEveryWindowOpaque`). Real apps
   (Terminal, Chrome/Brave) not yet looked at for flicker. `settings.conf` left at 90 for the user.
+- Independent verifier (whole document, base 6c06096): no blockers; S1-S5 met; build 0 errors,
+  suite 208 + 984 + 248 (3 skipped). Advisories kept as follow-ups:
+  A1 a window evicted by ANOTHER window's arrange (TreeArranger.Apply drops it from the registry)
+  can stay translucent after tiling off/exit -- same pre-existing gap as the maximize box;
+  A2 tray "tiling on" applies opacity with the taskbar as foreground, so every tiled window is
+  translucent until one is focused; A3 at 100 the S3 repair also sets 255 on windows that layer
+  themselves with readable attributes; A4 give-back sets 255, not an app's own original alpha;
+  A5 `_layeringIsOurs` read from the cached ExStyle (tiny race); A6 native cores, Untile,
+  !CanReposition and rehome opacity paths have no dedicated tests.
