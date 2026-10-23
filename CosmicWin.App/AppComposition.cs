@@ -974,7 +974,9 @@ public sealed class AppComposition : IDisposable
             {
                 transparency = enabled;
 
-                // Persisted first, the same order every other switch here uses.
+                // Persisted before the windows change, the order the tiling switch uses. The flag is
+                // flipped ahead of it, which holds because a failed write does not throw here:
+                // SettingsFile.Save swallows the IO and access errors a write can raise and reports them.
                 persistUnfocusedTransparency?.Invoke(enabled);
 
                 // On the thread that owns the trees, the same one the opacity is applied from.

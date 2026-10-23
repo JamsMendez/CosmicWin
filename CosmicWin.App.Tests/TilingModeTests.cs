@@ -769,7 +769,7 @@ public sealed class TilingModeTests
 
     /// <summary>Tiling off still wins: turning the transparency on then touches no window until tiling returns.</summary>
     [Fact]
-    public void TogglingTransparencyOn_WithTilingOff_TouchesNoWindow()
+    public void TogglingTransparencyOn_WithTilingOff_TouchesNoWindow_UntilTilingReturns()
     {
         var harness = Wire(unfocusedOpacity: 90, unfocusedTransparency: false);
         using (harness.Composition)
@@ -781,6 +781,31 @@ public sealed class TilingModeTests
 
             Assert.Empty(focused.OpacityRequests);
             Assert.Empty(other.OpacityRequests);
+
+            harness.Tray.ToggleTiling();
+            harness.Reconcile.Fire();
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(230, other.Opacity);
+        }
+    }
+
+    /// <summary>Turned off while tiling is off, the transparency stays off when tiling returns.</summary>
+    [Fact]
+    public void TogglingTransparencyOff_WithTilingOff_KeepsEveryWindowOpaque_WhenTilingReturns()
+    {
+        var harness = Wire(unfocusedOpacity: 90);
+        using (harness.Composition)
+        {
+            var (focused, other) = AddFocusedPair(harness, 4109);
+            harness.Tray.ToggleTiling();
+
+            harness.Tray.ToggleUnfocusedTransparency();
+            harness.Tray.ToggleTiling();
+            harness.Reconcile.Fire();
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(255, other.Opacity);
         }
     }
 }
