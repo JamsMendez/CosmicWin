@@ -39,7 +39,7 @@ today's swap.
 - [x] **T2 — drop-zone routing in the adapter + tests + docs.** Route: same delegated writer.
   Check: adapter tests for top/middle/bottom drops; headless suite
   `dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresDesktop"` green.
-- [ ] **T3 — hardware check.** Route: inline (drive the app). Check: the reported 4-window case
+- [x] **T3 — hardware check.** Route: inline (drive the app). Check: the reported 4-window case
   on the real desktop.
 
 ## Acceptance criteria
@@ -86,3 +86,16 @@ Strategy: `ask-on-risk`. Forecast ~350 authored changed lines, one PR slice.
 - Next: T3 hardware check from an elevated session. Close the running CosmicWin, publish the
   Release build to `run/` (`scripts/run.ps1 -Configuration Release`), then reproduce
   `[A] [B] [C over D]` and drag D onto B's bottom, top and middle thirds.
+- 2026-10-22: T3 done from an elevated session. Old instance stopped, Release of `507125c`
+  published to `run/` and launched (PID 6228). Four WinForms probes on a fresh desktop 4 (created
+  by `Alt+Shift+4`, closed afterwards), 3440x1440 display, measured with `GetWindowRect` after
+  synthetic title-bar drags aimed by the window centre:
+  - start `[A] [B] [C over D]`: A X=1 W=1698, B X=1693 W=852 full height, C/D X=2539 H=715 each.
+  - D on B's bottom third -> `[A] [B over D] [C]`: B Y=8 H=715, D Y=724 H=715, C full height.
+  - D back on C's bottom third -> `[A] [B] [C over D]` again (cross-column return).
+  - D on B's top third -> `[A] [D over B] [C]`.
+  - D on B's middle third -> swap: D takes B's full-height column, B takes D's slot under C.
+  - Same column, B on C's top third -> B over C, D column untouched.
+  The adapter's `drag ... -- stacked ...` trace lines did not appear: that trace is gated on the
+  `TraceMarkerPath` marker file, which is absent, so the geometry above is the evidence.
+
