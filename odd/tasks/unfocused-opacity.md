@@ -26,12 +26,12 @@ Test runner: `dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresD
 
 ## Tasks
 
-- [ ] T1 (S5) Interop: `TrySetOpacity` / `TryClearOpacity` through `StyleCallQueue`, on
+- [x] T1 (S5) Interop: `TrySetOpacity` / `TryClearOpacity` through `StyleCallQueue`, on
   `INativeWindowSource` and `IWindow`, doubles + tests. Route: inline (no writer trigger).
-- [ ] T2 (S1) `Settings.UnfocusedOpacity` parse/serialize + tests. Route: inline.
-- [ ] T3 (S2-S4) Adapter lifecycle mirroring the maximize block + focus wiring in
+- [x] T2 (S1) `Settings.UnfocusedOpacity` parse/serialize + tests. Route: inline.
+- [x] T3 (S2-S4) Adapter lifecycle mirroring the maximize block + focus wiring in
   `AppComposition.DrawFocusBorder` + startup value + tests. Route: inline.
-- [ ] T4 README + hardware check (Terminal, Chrome/Brave, Store) from an elevated session.
+- [x] T4 README + hardware check (Terminal, Chrome/Brave, Store) from an elevated session.
 
 Risk: item 1 (a style written onto other processes' windows outlives CosmicWin if it crashes) ->
 one independent verifier at the feature's end, plus native review.
@@ -48,3 +48,18 @@ one independent verifier at the feature's end, plus native review.
   hook: focus is resolved in `AppComposition.DrawFocusBorder` (chord, 400 ms tick, bounds events),
   so an opacity change after a mouse click may lag up to ~400 ms, same as the border.
   `WindowFilters` ignores `WS_EX_LAYERED`, so layering a window does not evict it.
+- T1 done, commit `e4ab3d8`. RED 5/6 against a Refused stub (dead-window fact a guard), GREEN 6/6.
+  Native core (`SetOpacityCore`/`ClearOpacityCore`) has no unit test; proved on hardware below.
+- T2 done, commit `b9abdd8`. RED 6/16, GREEN; `Serialize_WritesOnlyTheNewKeys` updated to the new key list.
+- T3 done, commit `f9f7517`. Adapter: RED 9/13 (4 guards), GREEN 13/13 + MaximizeBlockTests 35/35.
+  Wiring (`TilingModeTests`): RED 3/4, GREEN. Focus driven through the reconcile tick; opacity is
+  applied at the top of `DrawFocusBorder`, before its border-only early returns.
+  `opacityAdapter` reference because `AfterArrange` becomes a delegate before the adapter exists.
+- Headless suite: 208 + 984 + 248 (3 skipped), 0 failed.
+- T4: README "What works" bullet + Settings table row.
+- Hardware (elevated, Release, probes on a fresh desktop 4, read with GetLayeredWindowAttributes):
+  focused probe alpha 255, others 230 (90%); clicking A then B moved the 255 with focus; Alt+T off
+  -> WS_EX_LAYERED removed from all three; Alt+T on -> 230/255 again; Stop-Process -Force (crash)
+  -> A/C stayed 230; restart at 100 -> all 255 (layered bit kept, as designed). A clean tray exit
+  was not driven on hardware (covered by `ExitingNormally_MakesEveryWindowOpaque`). Real apps
+  (Terminal, Chrome/Brave) not yet looked at for flicker. `settings.conf` left at 90 for the user.
