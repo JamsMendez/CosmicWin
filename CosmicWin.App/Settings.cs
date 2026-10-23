@@ -47,7 +47,7 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap)
+    string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap, int UnfocusedOpacity = 100)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -66,6 +66,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string VideoWallpaperPathKey = "video-wallpaper-path";
 
     private const string GapKey = "gap";
+
+    private const string UnfocusedOpacityKey = "unfocused-opacity";
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
@@ -91,6 +93,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var tiling = Default.Tiling;
         var videoWallpaperPath = Default.VideoWallpaperPath;
         var gap = Default.Gap;
+        var unfocusedOpacity = Default.UnfocusedOpacity;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -140,6 +143,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 gap = gapValue;
             }
+            else if (key.Equals(UnfocusedOpacityKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadUnfocusedOpacity(value, out var opacityValue))
+            {
+                unfocusedOpacity = opacityValue;
+            }
             // alerts / alerts-enabled (the retired alert layer), http-server / http-server-port and
             // their legacy alert-http / alert-http-port names (the retired local HTTP server),
             // video-wallpaper-http and wallpaper-scene-http (its
@@ -148,7 +156,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             // exist. Deliberately no branch -- the line is skipped like any other unknown key.
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap, unfocusedOpacity);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -171,6 +179,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
 
          # {GapKey}: whole pixels of space around and between tiled windows. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+
+         # {UnfocusedOpacityKey}: percent opacity of every tiled window except the focused one.
+         # 10-100, default 100 (opaque). Set it back to 100 and restart CosmicWin to make every
+         # window it manages fully opaque again.
+         {UnfocusedOpacityKey} = {UnfocusedOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;
 
@@ -247,6 +260,23 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         }
 
         gap = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a whole percent, 10-100. Below 10 is refused: a window that faint cannot be found again
+    /// to fix the setting. Anything unreadable keeps the default, like every other key.
+    /// </summary>
+    private static bool TryReadUnfocusedOpacity(string value, out int opacity)
+    {
+        if (int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out opacity)
+            && opacity is >= 10 and <= 100)
+        {
+            return true;
+        }
+
+        opacity = 0;
         return false;
     }
 

@@ -1,4 +1,4 @@
-namespace CosmicWin.App.Tests;
+﻿namespace CosmicWin.App.Tests;
 
 /// <summary>
 /// The settings file's text format, tested as the pure function it is.
@@ -349,6 +349,74 @@ public sealed class SettingsTests
         Assert.Contains("gap = 24", serialized, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 100 -- fully opaque, nothing touched -- unless the file says otherwise: a settings file that
+    /// has never been written must not start making windows translucent.
+    /// </summary>
+    [Fact]
+    public void UnfocusedOpacityDefaultsToFullyOpaque()
+    {
+        Assert.Equal(100, Settings.Default.UnfocusedOpacity);
+        Assert.Equal(100, Settings.Parse(string.Empty).UnfocusedOpacity);
+    }
+
+    [Theory]
+    [InlineData("unfocused-opacity = 90", 90)]
+    [InlineData("unfocused-opacity=95", 95)]
+    [InlineData("  UNFOCUSED-OPACITY   =   10  ", 10)]
+    [InlineData("unfocused-opacity = 100", 100)]
+    public void UnfocusedOpacityIsRead_HoweverTheLineIsSpelled(string line, int expected)
+    {
+        Assert.Equal(expected, Settings.Parse(line).UnfocusedOpacity);
+    }
+
+    /// <summary>
+    /// Outside 10-100, or not a whole number, keeps the default. Below 10 is refused on purpose: a
+    /// window that faint cannot be found again to fix the setting.
+    /// </summary>
+    [Theory]
+    [InlineData("unfocused-opacity = 9")]
+    [InlineData("unfocused-opacity = 0")]
+    [InlineData("unfocused-opacity = 101")]
+    [InlineData("unfocused-opacity = 90%")]
+    [InlineData("unfocused-opacity = 92.5")]
+    [InlineData("unfocused-opacity =")]
+    public void AnInvalidUnfocusedOpacity_KeepsTheDefault(string line)
+    {
+        Assert.Equal(100, Settings.Parse(line).UnfocusedOpacity);
+    }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(90)]
+    [InlineData(100)]
+    public void SerializeThenParse_RoundTripsTheUnfocusedOpacity(int opacity)
+    {
+        var original = new Settings(FocusBorder: true, UnfocusedOpacity: opacity);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheUnfocusedOpacityAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, UnfocusedOpacity: 90).Serialize();
+
+        Assert.Contains("# unfocused-opacity:", serialized, StringComparison.Ordinal);
+        Assert.Contains("unfocused-opacity = 90", serialized, StringComparison.Ordinal);
+    }
+
+    /// <summary>The new key leaves every existing one exactly as it was read before it existed.</summary>
+    [Fact]
+    public void UnfocusedOpacityIsReadIndependentlyOfTheOtherSettings()
+    {
+        var settings = Settings.Parse("gap = 24\nunfocused-opacity = 5\ntiling = off");
+
+        Assert.Equal(24, settings.Gap);
+        Assert.Equal(100, settings.UnfocusedOpacity);
+        Assert.False(settings.Tiling);
+    }
+
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
     [Fact]
     public void GapIsReadIndependentlyOfTheOtherSettings()
@@ -488,7 +556,7 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity"],
             keys);
         foreach (var legacy in new[] { "alerts", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",
