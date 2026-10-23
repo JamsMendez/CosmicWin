@@ -72,3 +72,10 @@ one independent verifier at the feature's end, plus native review.
   themselves with readable attributes; A4 give-back sets 255, not an app's own original alpha;
   A5 `_layeringIsOurs` read from the cached ExStyle (tiny race); A6 native cores, Untile,
   !CanReposition and rehome opacity paths have no dedicated tests.
+- Native review (base 6c06096 committed-only, assessed high via escalated item 1; lenses risk,
+  resilience, reliability): consent granted, APPROVED and acknowledged (lineage
+  `review-938f12b1d2cf0b64`, authority burned). Non-blocking advisories: R3-partial-layering-left-
+  behind (SetOpacityCore adds WS_EX_LAYERED, then SetLayeredWindowAttributes fails -> window left
+  layered with no attributes, which Windows does not draw, and it is never given back);
+  R3-tray-toggle-all-translucent (= verifier A2); R1/R3/R4 default-100 adoption repair overwrites an
+  app's own layered alpha (= verifier A3, a product decision against S1 "nothing touched").
