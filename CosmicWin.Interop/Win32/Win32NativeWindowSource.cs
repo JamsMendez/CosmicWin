@@ -80,6 +80,18 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
     /// process. Reading is the half of that interface which works cross-process; moving is the half
     /// that does not, and this file needs only the half that does.
     /// </summary>
+    public bool TryGetCursorPosition(out ScreenPoint point)
+    {
+        if (PInvoke.GetCursorPos(out var cursor))
+        {
+            point = new ScreenPoint(cursor.X, cursor.Y);
+            return true;
+        }
+
+        point = default;
+        return false;
+    }
+
     public bool? IsOnCurrentDesktop(nint hwnd) =>
         Win32VirtualDesktopQueries.TryIsWindowOnCurrentDesktop(hwnd, out var onCurrent, out _)
             ? onCurrent

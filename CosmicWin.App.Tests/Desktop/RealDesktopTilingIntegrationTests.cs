@@ -424,6 +424,8 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public bool? IsOnCurrentDesktop(nint hwnd) => inner.IsOnCurrentDesktop(hwnd);
 
+        public bool TryGetCursorPosition(out ScreenPoint point) => inner.TryGetCursorPosition(out point);
+
         public bool SetWindowPosition(nint hwnd, Rectangle bounds) => inner.SetWindowPosition(hwnd, bounds);
 
         public IDisposable SubscribeWindowEvents(NativeWindowEventCallback callback) => inner.SubscribeWindowEvents(callback);

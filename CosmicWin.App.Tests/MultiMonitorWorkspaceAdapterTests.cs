@@ -833,6 +833,58 @@ public sealed class MultiMonitorWorkspaceAdapterTests
     }
 
     /// <summary>
+    /// The reported case: a window dragged onto the LEFTMOST column, its right edge lined up with
+    /// that column's and its left half off the screen. Its centre is off the screen too, so aiming
+    /// by the centre called it "dropped outside every tile" and sent it back. The cursor was on the
+    /// column all along, and the cursor is what the user aimed with.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_DroppedWithItsCentreOffScreen_LandsWhereTheCursorAimed()
+    {
+        var (s, a, b, c, d) = ThreeColumnsWithAStackedThird(4171);
+
+        // D keeps its 640x540 (a move); centre at x=-80, outside every tile. Cursor in A's bottom third.
+        d.SimulateExternalMove(Rectangle.FromSize(-400, 600, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true, dropPoint: new ScreenPoint(300, 900));
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(3, root.Children.Count);
+        var column = Assert.IsType<GroupNode>(root.Children[0]);
+        Assert.Equal(new WindowRef(a.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal(new WindowRef(b.Handle), Assert.IsType<LeafNode>(root.Children[1]).Window);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(root.Children[2]).Window);
+
+        Assert.Equal(Rectangle.FromSize(0, 0, 640, 540), a.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(0, 540, 640, 540), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 0, 640, 1080), c.LastSetPosition);
+    }
+
+    /// <summary>
+    /// When the two disagree, the cursor decides -- the third included. D's centre lands in B's
+    /// bottom third (a stack), the cursor in B's middle third (a swap): it is a swap.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_CursorAndCentreInDifferentThirds_TheCursorDecides()
+    {
+        var (s, _, b, c, d) = ThreeColumnsWithAStackedThird(4181);
+
+        // Centre at y=870 (B's bottom third); cursor at y=540 (B's middle third).
+        d.SimulateExternalMove(Rectangle.FromSize(640, 600, 640, 540));
+        s.Workspace.RaiseWindowBoundsChanged(d, isUserGesture: true, dropPoint: new ScreenPoint(960, 540));
+
+        s.Trees.TryGetTree(s.Primary, out var tree);
+        var root = Assert.IsType<GroupNode>(tree!.Root);
+        Assert.Equal(new WindowRef(d.Handle), Assert.IsType<LeafNode>(root.Children[1]).Window);
+        var column = Assert.IsType<GroupNode>(root.Children[2]);
+        Assert.Equal(new WindowRef(c.Handle), Assert.IsType<LeafNode>(column.Children[0]).Window);
+        Assert.Equal(new WindowRef(b.Handle), Assert.IsType<LeafNode>(column.Children[1]).Window);
+        Assert.Equal(Rectangle.FromSize(640, 0, 640, 1080), d.LastSetPosition);
+        Assert.Equal(Rectangle.FromSize(1280, 540, 640, 540), b.LastSetPosition);
+    }
+
+    /// <summary>
     /// <c>[A] [B] [C over D]</c> across one 1920x1080 display. The column is built by hand from the
     /// registered leaves rather than by admitting a fourth window, so the fact does not rest on
     /// whichever split admission happens to choose.

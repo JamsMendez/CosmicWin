@@ -211,8 +211,11 @@ public sealed class Win32Workspace : IWorkspace
                 {
                     // The ONE bounds change the user performed on purpose. Flagged as such because
                     // the drop is indistinguishable from every other move once it is a rectangle,
-                    // and only this one may be read as a request to change the layout.
-                    UpdateBounds(hwnd, isUserGesture: true);
+                    // and only this one may be read as a request to change the layout. The cursor is
+                    // read here, at the drop, because it is what the user aimed with.
+                    UpdateBounds(
+                        hwnd, isUserGesture: true,
+                        dropPoint: _nativeSource.TryGetCursorPosition(out var cursor) ? cursor : null);
                 }
 
                 break;
@@ -290,7 +293,7 @@ public sealed class Win32Workspace : IWorkspace
         }
     }
 
-    private void UpdateBounds(nint hwnd, bool isUserGesture = false)
+    private void UpdateBounds(nint hwnd, bool isUserGesture = false, ScreenPoint? dropPoint = null)
     {
         if (!_windows.TryGetValue(hwnd, out var window))
         {
@@ -311,7 +314,7 @@ public sealed class Win32Workspace : IWorkspace
 
         if (boundsChanged)
         {
-            WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture));
+            WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture, dropPoint: dropPoint));
         }
     }
 

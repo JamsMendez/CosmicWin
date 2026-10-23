@@ -1523,7 +1523,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             var resized = dropped.Width != tile.Width || dropped.Height != tile.Height;
             var outcome = resized
                 ? TreeArranger.TryApplyUserResize(dragged, dropped) ? "tree resized" : "nothing to resize on either axis"
-                : TryRearrangeOnDrop(tree, display, dragged, dropped);
+                : TryRearrangeOnDrop(tree, display, dragged, dropped, e.DropPoint);
 
             // The tile it was measured AGAINST, not just the verdict. The one thing no test can
             // answer is whether a real Win32 drop lines up with the tile actually placed once the
@@ -1708,22 +1708,24 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// for.
     /// </para>
     /// <para>
-    /// Aimed with the dropped window's CENTRE, zone included. The cursor is what the user actually
-    /// aims with, but reading it needs interop this does not have yet. With zones the two can
-    /// disagree more often than they did for a whole-tile swap -- a tall window dropped on a short
-    /// tile puts its centre lower than the hand that let go -- so this is the first place to look if
-    /// a drop is felt to land in the wrong third.
+    /// Aimed with the CURSOR at the drop, zone included, because that is what the user aims with.
+    /// It used to be the dropped window's centre, and the two disagree whenever the window is
+    /// bigger than the tile: reported with a window twice a column's width dragged onto the
+    /// leftmost column, its right edge lined up with the column's and its left half off the screen
+    /// -- its centre was off the screen too, so the drop read as "outside every tile" and the window
+    /// went back. The centre stays only as the fallback for a drop that carries no cursor.
     /// </para>
     /// <para>
     /// The thirds are measured on the target's SLOT (<see cref="Node.LastGeometry"/>), the same
-    /// rectangle <see cref="TreeManager.LeafAt"/> hit-tested, so a centre that found a tile always
+    /// rectangle <see cref="TreeManager.LeafAt"/> hit-tested, so an aim that found a tile always
     /// falls in exactly one of its thirds.
     /// </para>
     /// </remarks>
-    private string TryRearrangeOnDrop(LayoutTree tree, IDisplay display, LeafNode dragged, Rectangle dropped)
+    private string TryRearrangeOnDrop(
+        LayoutTree tree, IDisplay display, LeafNode dragged, Rectangle dropped, ScreenPoint? cursor)
     {
-        var centreY = dropped.Top + (dropped.Height / 2);
-        var target = _treeManager.LeafAt(display, dropped.Left + (dropped.Width / 2), centreY);
+        var aim = cursor ?? new ScreenPoint(dropped.Left + (dropped.Width / 2), dropped.Top + (dropped.Height / 2));
+        var target = _treeManager.LeafAt(display, aim.X, aim.Y);
 
         // Dropped on nothing this display holds -- most often because the drag left the monitor.
         // The window goes back to its slot, exactly as it did before any of this existed.
@@ -1739,7 +1741,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         var slot = target.LastGeometry;
         var third = slot.Height / 3;
-        var depth = centreY - slot.Y;
+        var depth = aim.Y - slot.Y;
         StackSide? side = depth < third ? StackSide.Above
             : depth >= slot.Height - third ? StackSide.Below
             : null;

@@ -292,6 +292,45 @@ public class Win32WorkspaceTests
         Assert.True(Assert.Single(gestures));
     }
 
+    /// <summary>
+    /// The drop carries where the cursor was when the user let go -- the point they aimed with.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_AtTheDropOfADrag_CarriesTheCursorPosition()
+    {
+        var source = new FakeNativeWindowSource { Cursor = new ScreenPoint(310, 905) };
+        source.SeedExistingWindow(new IntPtr(1), "dragged", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var drops = new List<ScreenPoint?>();
+        workspace.WindowBoundsChanged += (_, e) => drops.Add(e.DropPoint);
+        workspace.Open();
+
+        source.SimulateMoveSizeStart(new IntPtr(1));
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(-200, 600, 400, 300));
+        source.SimulateMoveSizeEnd(new IntPtr(1));
+
+        Assert.Equal(new ScreenPoint(310, 905), Assert.Single(drops));
+    }
+
+    /// <summary>
+    /// Only a drop carries one: a window moving on its own was not aimed anywhere, wherever the
+    /// cursor happens to be.
+    /// </summary>
+    [Fact]
+    public void WindowBoundsChanged_OutsideADrag_CarriesNoDropPoint()
+    {
+        var source = new FakeNativeWindowSource { Cursor = new ScreenPoint(310, 905) };
+        source.SeedExistingWindow(new IntPtr(1), "self-mover", Rectangle.FromSize(0, 0, 400, 300));
+        using var workspace = new Win32Workspace(source);
+        var drops = new List<ScreenPoint?>();
+        workspace.WindowBoundsChanged += (_, e) => drops.Add(e.DropPoint);
+        workspace.Open();
+
+        source.SimulateWindowMovedWithEvent(new IntPtr(1), Rectangle.FromSize(50, 0, 400, 300));
+
+        Assert.Null(Assert.Single(drops));
+    }
+
     /// <summary>The mirror: a window that moves on its own carries no such claim.</summary>
     [Fact]
     public void WindowBoundsChanged_OutsideADrag_IsNotFlaggedAsAUserGesture()

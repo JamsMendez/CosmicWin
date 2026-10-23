@@ -31,11 +31,14 @@ public enum WindowArrival
 
 public sealed class WindowEventArgs : EventArgs
 {
-    public WindowEventArgs(IWindow window, bool isUserGesture = false, WindowArrival arrival = WindowArrival.Created)
+    public WindowEventArgs(
+        IWindow window, bool isUserGesture = false, WindowArrival arrival = WindowArrival.Created,
+        ScreenPoint? dropPoint = null)
     {
         Window = window;
         IsUserGesture = isUserGesture;
         Arrival = arrival;
+        DropPoint = dropPoint;
     }
 
     public IWindow Window { get; }
@@ -58,6 +61,18 @@ public sealed class WindowEventArgs : EventArgs
     /// the user's intent out of a window minimising itself.
     /// </remarks>
     public bool IsUserGesture { get; }
+
+    /// <summary>
+    /// Where the mouse cursor was when the user let go, or <see langword="null"/> when the event is
+    /// not a drop or Windows would not say.
+    /// </summary>
+    /// <remarks>
+    /// The point the user actually AIMED with. The dropped window's own rectangle is a poor proxy for
+    /// it: a window wider than the tile it is dropped on puts its centre far from the hand -- dropped
+    /// on the leftmost column, a wide window's centre can sit off the screen altogether. Meaningful
+    /// only alongside <see cref="IsUserGesture"/>.
+    /// </remarks>
+    public ScreenPoint? DropPoint { get; }
 }
 
 /// <summary>

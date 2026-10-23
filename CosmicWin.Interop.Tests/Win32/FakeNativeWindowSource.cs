@@ -69,6 +69,15 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
 
     public bool? IsOnCurrentDesktop(nint hwnd) => _onCurrentDesktop.GetValueOrDefault(hwnd);
 
+    /// <summary>Where the simulated mouse cursor is; <see langword="null"/> simulates Windows refusing to say.</summary>
+    public ScreenPoint? Cursor { get; set; }
+
+    public bool TryGetCursorPosition(out ScreenPoint point)
+    {
+        point = Cursor.GetValueOrDefault();
+        return Cursor.HasValue;
+    }
+
     /// <summary>The window is cloaked but has not gone anywhere -- it is still filed under the desktop being looked at, which is what a dismissed window looks like.</summary>
     public void PlaceOnCurrentDesktop(nint hwnd) => _onCurrentDesktop[hwnd] = true;
 

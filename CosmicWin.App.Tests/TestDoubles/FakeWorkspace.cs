@@ -70,8 +70,9 @@ internal sealed class FakeWorkspace : IWorkspace
     /// workspace reports from MOVESIZEEND and the only bounds change allowed to reshape the tree.
     /// Defaults to the out-of-band case every caller before it meant.
     /// </param>
-    public void RaiseWindowBoundsChanged(IWindow window, bool isUserGesture = false) =>
-        WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture));
+    /// <param name="dropPoint">Where the cursor was at the drop, as the real workspace reads it from MOVESIZEEND.</param>
+    public void RaiseWindowBoundsChanged(IWindow window, bool isUserGesture = false, ScreenPoint? dropPoint = null) =>
+        WindowBoundsChanged?.Invoke(this, new WindowEventArgs(window, isUserGesture, dropPoint: dropPoint));
 
     /// <summary>
     /// Simulates one frame of a hand drag or resize: the window is somewhere new on screen and its

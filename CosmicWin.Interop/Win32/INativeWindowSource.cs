@@ -122,6 +122,12 @@ internal interface INativeWindowSource
     bool? IsOnCurrentDesktop(nint hwnd);
 
     /// <summary>
+    /// Reads where the mouse cursor is right now. Returns <c>false</c> (rather than throwing) when
+    /// Windows will not say -- e.g. on a secure desktop.
+    /// </summary>
+    bool TryGetCursorPosition(out ScreenPoint point);
+
+    /// <summary>
     /// Repositions/resizes the given window. Returns <c>false</c> (rather than throwing) if the
     /// native call fails — e.g. the target belongs to a higher-integrity/protected process.
     /// </summary>
