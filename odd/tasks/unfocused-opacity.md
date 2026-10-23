@@ -79,3 +79,11 @@ one independent verifier at the feature's end, plus native review.
   layered with no attributes, which Windows does not draw, and it is never given back);
   R3-tray-toggle-all-translucent (= verifier A2); R1/R3/R4 default-100 adoption repair overwrites an
   app's own layered alpha (= verifier A3, a product decision against S1 "nothing touched").
+- 2026-10-22 user: "Arregla los defectos". Fixed R3-partial-layering (`001930e`: SetOpacityCore
+  removes the WS_EX_LAYERED it added when SetLayeredWindowAttributes fails; no runnable RED -- the
+  failure cannot be forced from the doubles or on hardware) and A2/R3-tray-toggle (`6ad3824`:
+  ResumeTiling goes through ApplyUnfocusedOpacity's tiled-foreground gate; RED 1/7 then GREEN; the
+  old toggle test, which pinned the defect, now uses a tiled foreground). Suite 208 + 985 + 248
+  (3 skipped). Native review (base e851616, lenses risk + reliability): consent granted, APPROVED,
+  acknowledged. Advisories: the rollback path is untested, and its SetWindowLong result is not
+  checked. Open decision: A3 (default-100 adoption repair also resets apps' own layered alpha).
