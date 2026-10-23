@@ -233,4 +233,25 @@ public sealed class SettingsFileTests : IDisposable
 
         Assert.Empty(diagnostics);
     }
+
+    /// <summary>
+    /// A tray toggle written through the store survives a restart, and keeps the percent: the path
+    /// production takes from the click to the next start's read.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ATransparencyToggleThroughTheStore_SurvivesARestart_AndKeepsThePercent(bool enabled)
+    {
+        Directory.CreateDirectory(_directory);
+        var initial = new Settings(FocusBorder: true, UnfocusedOpacity: 70, UnfocusedTransparency: !enabled);
+        SettingsFile.Save(Path_, initial);
+        var store = new SynchronizedSettingsStore(SettingsFile.Load(Path_), s => SettingsFile.Save(Path_, s));
+
+        store.Update(s => s with { UnfocusedTransparency = enabled });
+
+        var reloaded = SettingsFile.Load(Path_);
+        Assert.Equal(enabled, reloaded.UnfocusedTransparency);
+        Assert.Equal(70, reloaded.UnfocusedOpacity);
+    }
 }

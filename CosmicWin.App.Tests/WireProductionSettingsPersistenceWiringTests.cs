@@ -89,4 +89,31 @@ public sealed class WireProductionSettingsPersistenceWiringTests
 
         Assert.Contains("settings, s => SettingsFile.Save(s, OnSettingsSaveFailed)", storeCall, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// R3-001 (unfocused-transparency tray switch): WireProduction seeds the composition from the
+    /// parsed switch and persists a tray toggle into the SAME record field. Either lambda pointing at
+    /// another field would compile and leave the switch forgetting itself on restart.
+    /// </summary>
+    [Fact]
+    public void WireProduction_SeedsAndPersistsTheUnfocusedTransparencySwitch()
+    {
+        var source = ReadAppCompositionSource();
+
+        var methodStart = source.IndexOf(
+            "public static AppComposition WireProduction(Action shutdown)", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "expected to find WireProduction's declaration in AppComposition.cs");
+        var body = source[methodStart..];
+
+        Assert.Contains("unfocusedTransparency: settings.UnfocusedTransparency,", body, StringComparison.Ordinal);
+
+        var persistStart = body.IndexOf("persistUnfocusedTransparency:", StringComparison.Ordinal);
+        Assert.True(persistStart >= 0, "expected a persistUnfocusedTransparency argument inside WireProduction");
+        var persistEnd = body.IndexOf("),", persistStart, StringComparison.Ordinal);
+        Assert.True(persistEnd > persistStart, "expected the persistUnfocusedTransparency argument to end with `),`");
+        var persist = body[persistStart..persistEnd];
+
+        Assert.Contains("settingsStore.Update(", persist, StringComparison.Ordinal);
+        Assert.Contains("s => s with { UnfocusedTransparency = enabled }", persist, StringComparison.Ordinal);
+    }
 }
