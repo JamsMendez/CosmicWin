@@ -521,17 +521,54 @@ public sealed class TilingModeTests
         var harness = Wire(unfocusedOpacity: 90);
         using (harness.Composition)
         {
-            var window = new RecordingWindow(new IntPtr(4014), Rectangle.FromSize(0, 0, 800, 600));
-            harness.Workspace.RaiseWindowAdded(window);
-            Assert.Equal(230, window.Opacity);
+            var focused = new RecordingWindow(new IntPtr(4014), Rectangle.FromSize(0, 0, 800, 600));
+            var other = new RecordingWindow(new IntPtr(4016), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(focused);
+            harness.Workspace.RaiseWindowAdded(other);
+            harness.Foreground.Handle = focused.Handle;
+            harness.Reconcile.Fire();
 
             harness.Tray.ToggleTiling();
 
-            Assert.Equal(255, window.Opacity);
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(255, other.Opacity);
 
+            // Alt+T leaves the foreground on the tiled window it was pressed in.
             harness.Tray.ToggleTiling();
 
-            Assert.Equal(230, window.Opacity);
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(230, other.Opacity);
+        }
+    }
+
+    /// <summary>
+    /// Turned back on from the TRAY, the foreground is the taskbar, not a tiled window. Then no
+    /// window is the focused one, and none is made translucent until one is -- rather than the
+    /// window the user was working in going translucent along with the rest.
+    /// </summary>
+    [Fact]
+    public void TurningTilingBackOnFromTheTray_LeavesEveryWindowOpaque_UntilATiledWindowHasFocus()
+    {
+        var harness = Wire(unfocusedOpacity: 90);
+        using (harness.Composition)
+        {
+            var focused = new RecordingWindow(new IntPtr(4017), Rectangle.FromSize(0, 0, 800, 600));
+            var other = new RecordingWindow(new IntPtr(4018), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(focused);
+            harness.Workspace.RaiseWindowAdded(other);
+            harness.Tray.ToggleTiling();
+
+            harness.Foreground.Handle = new IntPtr(0x9999);
+            harness.Tray.ToggleTiling();
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(255, other.Opacity);
+
+            harness.Foreground.Handle = focused.Handle;
+            harness.Reconcile.Fire();
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(230, other.Opacity);
         }
     }
 

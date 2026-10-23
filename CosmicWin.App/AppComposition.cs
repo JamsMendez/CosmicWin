@@ -787,8 +787,10 @@ public sealed class AppComposition : IDisposable
             // Read BEFORE the batch: restoring a maximized window activates it.
             sessionAdapter.ApplyMaximizeBlock(foreground.GetForegroundHandle());
 
-            // Given back when tiling went off, like the boxes, so taken again the same way.
-            sessionAdapter.ApplyOpacity(foreground.GetForegroundHandle());
+            // Given back when tiling went off, like the boxes, so taken again -- through the same
+            // gate as every refresh: from the tray the foreground is the taskbar, and treating that
+            // as "nothing focused" would turn the window the user was working in translucent too.
+            ApplyUnfocusedOpacity();
 
             // Then EVERY display, not only the ones that gained a window. While tiling was off the
             // user was free to drag and resize with the mouse, and switching it back on is a request
