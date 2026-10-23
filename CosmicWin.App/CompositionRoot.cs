@@ -127,7 +127,8 @@ public static class CompositionRoot
         Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
         Action<string>? setVideoWallpaperPath = null, Action? reloadGap = null,
         IDesktopTrace? desktopTrace = null,
-        Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null) =>
+        Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null,
+        Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
@@ -141,7 +142,9 @@ public static class CompositionRoot
             setTiling,
             setVideoWallpaperPath,
             removeVideoWallpaper,
-            getHasVideoWallpaper);
+            getHasVideoWallpaper,
+            getUnfocusedTransparency,
+            setUnfocusedTransparency);
 
     /// <summary>
     /// T11 (review R3-reload-gap-skipped-on-exception-failure): the exception-list

@@ -29,6 +29,15 @@ namespace CosmicWin.App;
 /// defaults to <see cref="TreeArranger.DefaultGap"/>, the value <c>TreeArranger.Gap</c> was hard-set
 /// to before this was a settings key at all.
 /// </param>
+/// <param name="UnfocusedOpacity">
+/// Percent opacity of every tiled window except the focused one while
+/// <paramref name="UnfocusedTransparency"/> is on. 10-100; at 100 the switch draws at
+/// <see cref="FallbackUnfocusedOpacity"/> instead, so turning it on always shows.
+/// </param>
+/// <param name="UnfocusedTransparency">
+/// Whether that opacity is applied at all -- the tray switch. Kept apart from the percent so
+/// turning it off does not forget the value the user chose.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -47,7 +56,8 @@ namespace CosmicWin.App;
 /// </para>
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
-    string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap, int UnfocusedOpacity = 100)
+    string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap, int UnfocusedOpacity = 100,
+    bool UnfocusedTransparency = false)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -68,6 +78,14 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string GapKey = "gap";
 
     private const string UnfocusedOpacityKey = "unfocused-opacity";
+
+    private const string UnfocusedTransparencyKey = "unfocused-transparency";
+
+    /// <summary>
+    /// The percent the transparency switch draws at while <see cref="UnfocusedOpacity"/> is still the
+    /// 100 that means "no change": a switch turned on that changes nothing reads as a broken one.
+    /// </summary>
+    public const int FallbackUnfocusedOpacity = 85;
 
     /// <summary>The value that hands the colour back to Windows, so the tray has a way home.</summary>
     private const string AccentValue = "accent";
@@ -94,6 +112,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         var videoWallpaperPath = Default.VideoWallpaperPath;
         var gap = Default.Gap;
         var unfocusedOpacity = Default.UnfocusedOpacity;
+
+        // Null until the key is read: a file written before the switch existed turned the
+        // transparency on only by lowering the percent, and must keep meaning exactly that.
+        bool? unfocusedTransparency = null;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -148,6 +170,11 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 unfocusedOpacity = opacityValue;
             }
+            else if (key.Equals(UnfocusedTransparencyKey, StringComparison.OrdinalIgnoreCase)
+                && TryReadFlag(value, out var transparencyFlag))
+            {
+                unfocusedTransparency = transparencyFlag;
+            }
             // alerts / alerts-enabled (the retired alert layer), http-server / http-server-port and
             // their legacy alert-http / alert-http-port names (the retired local HTTP server),
             // video-wallpaper-http and wallpaper-scene-http (its
@@ -156,7 +183,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             // exist. Deliberately no branch -- the line is skipped like any other unknown key.
         }
 
-        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap, unfocusedOpacity);
+        return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap, unfocusedOpacity,
+            unfocusedTransparency ?? unfocusedOpacity < 100);
     }
 
     /// <summary>The file this instance would be written as, comment and all.</summary>
@@ -180,10 +208,15 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # {GapKey}: whole pixels of space around and between tiled windows. 0-64, default {TreeArranger.DefaultGap}.
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
-         # {UnfocusedOpacityKey}: percent opacity of every tiled window except the focused one.
-         # 10-100, default 100 (off: no window is touched). If CosmicWin stops without a clean exit
-         # while windows are translucent, its next start makes them opaque again.
+         # {UnfocusedOpacityKey}: percent opacity of every tiled window except the focused one,
+         # while {UnfocusedTransparencyKey} is on. 10-100, default 100 (drawn at {FallbackUnfocusedOpacity} when the
+         # switch is on). If CosmicWin stops without a clean exit while windows are translucent, its
+         # next start makes them opaque again.
          {UnfocusedOpacityKey} = {UnfocusedOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+
+         # {UnfocusedTransparencyKey}: on to draw unfocused windows translucent, off to leave every
+         # window opaque. The tray toggles it; the percent above is kept either way.
+         {UnfocusedTransparencyKey} = {(UnfocusedTransparency ? "on" : "off")}
 
          """;
 

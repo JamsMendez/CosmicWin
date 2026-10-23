@@ -352,4 +352,32 @@ public sealed class TrayMenuControllerTests
 
         Assert.False(controller.HasVideoWallpaper);
     }
+
+    /// <summary>Unwired, nothing says windows are translucent, and a click cannot pretend it made them so.</summary>
+    [Fact]
+    public void WithNoTransparencyDelegatesWired_TheSwitchReportsOff_AndTheToggleChangesNothing()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.False(controller.IsUnfocusedTransparencyEnabled);
+        Assert.False(controller.ToggleUnfocusedTransparency());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ToggleUnfocusedTransparency_FlipsTheInjectedState_AndReturnsIt(bool initial)
+    {
+        var state = initial;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getUnfocusedTransparency: () => state, setUnfocusedTransparency: value => state = value);
+
+        var result = controller.ToggleUnfocusedTransparency();
+
+        Assert.Equal(!initial, result);
+        Assert.Equal(!initial, state);
+        Assert.Equal(!initial, controller.IsUnfocusedTransparencyEnabled);
+    }
 }

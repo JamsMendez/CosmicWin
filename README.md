@@ -134,7 +134,9 @@ maximize button, a double click on the title bar, and `Win+Up`.
 - **Focus border** — the active window is outlined in the system accent colour, thicker than the
   one Windows draws, with corners matching its own.
 - **Unfocused opacity** — optionally, every tiled window except the active one is drawn
-  translucent (`unfocused-opacity`, a percent). The active one is always opaque, and every window
+  translucent (`unfocused-opacity`, a percent). The tray item **Transparencia sin foco**
+  (`unfocused-transparency`) turns it on and off without losing the percent; turned on at the
+  default 100, it uses 85. The active one is always opaque, and every window
   gets full opacity back when it stops being tiled, when tiling is turned off, and on exit. A
   window that draws its own transparency is left alone. If CosmicWin is killed while windows are
   translucent, its next start makes them opaque again (a marker file, `opacity-in-use`, records

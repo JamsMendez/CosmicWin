@@ -1960,7 +1960,8 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// is off: nothing is written onto any window.
     /// </summary>
     /// <remarks>
-    /// Set once, before the workspace is opened, from <c>unfocused-opacity</c>.
+    /// Set before the workspace is opened, from <c>unfocused-opacity</c>, and again by the tray's
+    /// transparency switch -- on the thread that owns the trees.
     /// </remarks>
     public byte UnfocusedAlpha { get; set; } = 255;
 

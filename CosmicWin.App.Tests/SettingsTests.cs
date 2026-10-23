@@ -417,6 +417,62 @@ public sealed class SettingsTests
         Assert.False(settings.Tiling);
     }
 
+    /// <summary>
+    /// A file written before the switch existed keeps doing what it did: a percent below 100 was
+    /// the only way to turn the transparency on, so it still means on, and 100 still means off.
+    /// </summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("unfocused-opacity = 100", false)]
+    [InlineData("unfocused-opacity = 90", true)]
+    public void WithoutTheSwitch_TransparencyFollowsThePercent(string content, bool expected)
+    {
+        Assert.Equal(expected, Settings.Parse(content).UnfocusedTransparency);
+    }
+
+    [Theory]
+    [InlineData("unfocused-transparency = on\nunfocused-opacity = 100", true)]
+    [InlineData("unfocused-transparency = off\nunfocused-opacity = 90", false)]
+    [InlineData("  UNFOCUSED-TRANSPARENCY = true  ", true)]
+    public void TheSwitch_WinsOverThePercent(string content, bool expected)
+    {
+        Assert.Equal(expected, Settings.Parse(content).UnfocusedTransparency);
+    }
+
+    /// <summary>Switched off, the percent is kept, so switching back on restores the user's own value.</summary>
+    [Fact]
+    public void SwitchingOff_KeepsThePercent()
+    {
+        var settings = Settings.Parse("unfocused-transparency = off\nunfocused-opacity = 70");
+
+        Assert.Equal(70, settings.UnfocusedOpacity);
+    }
+
+    [Fact]
+    public void AnUnreadableSwitch_FallsBackToThePercent()
+    {
+        Assert.True(Settings.Parse("unfocused-transparency = perhaps\nunfocused-opacity = 90").UnfocusedTransparency);
+    }
+
+    [Theory]
+    [InlineData(true, 100)]
+    [InlineData(false, 90)]
+    public void SerializeThenParse_RoundTripsTheSwitch(bool enabled, int opacity)
+    {
+        var original = new Settings(FocusBorder: true, UnfocusedOpacity: opacity, UnfocusedTransparency: enabled);
+
+        Assert.Equal(original, Settings.Parse(original.Serialize()));
+    }
+
+    [Fact]
+    public void Serialize_IncludesTheSwitchAndComment()
+    {
+        var serialized = new Settings(FocusBorder: true, UnfocusedTransparency: true).Serialize();
+
+        Assert.Contains("# unfocused-transparency:", serialized, StringComparison.Ordinal);
+        Assert.Contains("unfocused-transparency = on", serialized, StringComparison.Ordinal);
+    }
+
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
     [Fact]
     public void GapIsReadIndependentlyOfTheOtherSettings()
@@ -556,7 +612,8 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity",
+                "unfocused-transparency"],
             keys);
         foreach (var legacy in new[] { "alerts", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",

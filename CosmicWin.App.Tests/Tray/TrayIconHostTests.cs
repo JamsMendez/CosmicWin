@@ -19,7 +19,8 @@ public sealed class TrayIconHostTests
     }
 
     /// <summary>
-    /// The mode switch first, then the border and its colour, then the video wallpaper picker and
+    /// The mode switch first, then the border and its colour, then the unfocused transparency, then
+    /// the video wallpaper picker and
     /// its remove item right after it, then the pause, then the two items
     /// that end something.
     /// </summary>
@@ -29,13 +30,14 @@ public sealed class TrayIconHostTests
     /// in its own literal would assert nothing but its own copy.
     /// </remarks>
     [Fact]
-    public void TheMenuIsOrdered_TilingThenBorderThenVideoWallpaperThenRemoveVideoThenPauseThenReloadThenExit()
+    public void TheMenuIsOrdered_TilingThenBorderThenTransparencyThenVideoWallpaperThenRemoveVideoThenPauseThenReloadThenExit()
     {
         Assert.Equal(
             [
                 TrayMenuEntry.Tiling,
                 TrayMenuEntry.FocusBorder,
                 TrayMenuEntry.BorderColor,
+                TrayMenuEntry.UnfocusedTransparency,
                 TrayMenuEntry.VideoWallpaper,
                 TrayMenuEntry.RemoveVideoWallpaper,
                 TrayMenuEntry.Pause,

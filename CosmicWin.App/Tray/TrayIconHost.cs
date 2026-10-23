@@ -69,6 +69,13 @@ public sealed class TrayIconHost : IDisposable
         colorItem.DropDownItems.Add(pickColorItem);
         colorItem.DropDownItems.Add(accentItem);
 
+        // A tick, like the border: it says what the windows look like, not what the click does.
+        var transparencyItem = new ToolStripMenuItem("Transparencia sin foco")
+        {
+            Checked = controller.IsUnfocusedTransparencyEnabled,
+        };
+        transparencyItem.Click += (_, _) => transparencyItem.Checked = controller.ToggleUnfocusedTransparency();
+
         var videoWallpaperItem = new ToolStripMenuItem("Wallpaper de video...");
         videoWallpaperItem.Click += (_, _) => PickVideoWallpaper(controller);
 
@@ -103,6 +110,7 @@ public sealed class TrayIconHost : IDisposable
             [TrayMenuEntry.Tiling] = tilingItem,
             [TrayMenuEntry.FocusBorder] = borderItem,
             [TrayMenuEntry.BorderColor] = colorItem,
+            [TrayMenuEntry.UnfocusedTransparency] = transparencyItem,
             [TrayMenuEntry.VideoWallpaper] = videoWallpaperItem,
             [TrayMenuEntry.RemoveVideoWallpaper] = removeVideoWallpaperItem,
             [TrayMenuEntry.Pause] = _pauseItem,
@@ -123,6 +131,7 @@ public sealed class TrayIconHost : IDisposable
         menu.Opening += (_, _) =>
         {
             tilingItem.Checked = controller.IsTilingEnabled;
+            transparencyItem.Checked = controller.IsUnfocusedTransparencyEnabled;
             RefreshRemoveVideoWallpaperItem(removeVideoWallpaperItem, controller);
         };
 
@@ -197,6 +206,7 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.Tiling,
         TrayMenuEntry.FocusBorder,
         TrayMenuEntry.BorderColor,
+        TrayMenuEntry.UnfocusedTransparency,
         TrayMenuEntry.VideoWallpaper,
         TrayMenuEntry.RemoveVideoWallpaper,
         TrayMenuEntry.Pause,

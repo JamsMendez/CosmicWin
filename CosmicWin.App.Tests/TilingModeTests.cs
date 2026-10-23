@@ -88,7 +88,8 @@ public sealed class TilingModeTests
 
     private static Harness Wire(
         bool tilingEnabled = true, int unfocusedOpacity = 100,
-        bool previousRunCrashed = false, Action<bool>? setOpacityMarker = null)
+        bool previousRunCrashed = false, Action<bool>? setOpacityMarker = null,
+        bool? unfocusedTransparency = null, Action<bool>? persistUnfocusedTransparency = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -126,7 +127,9 @@ public sealed class TilingModeTests
             persistTiling: persisted.Add,
             unfocusedOpacity: unfocusedOpacity,
             repairOpacityOnAdoption: previousRunCrashed,
-            setOpacityMarker: setOpacityMarker);
+            setOpacityMarker: setOpacityMarker,
+            unfocusedTransparency: unfocusedTransparency,
+            persistUnfocusedTransparency: persistUnfocusedTransparency);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -682,5 +685,102 @@ public sealed class TilingModeTests
         }
 
         return condition();
+    }
+
+    private static (RecordingWindow Focused, RecordingWindow Other) AddFocusedPair(Harness harness, int firstHandle)
+    {
+        var focused = new RecordingWindow(new IntPtr(firstHandle), Rectangle.FromSize(0, 0, 800, 600));
+        var other = new RecordingWindow(new IntPtr(firstHandle + 1), Rectangle.FromSize(0, 0, 800, 600));
+        harness.Workspace.RaiseWindowAdded(focused);
+        harness.Workspace.RaiseWindowAdded(other);
+        harness.Foreground.Handle = focused.Handle;
+        harness.Reconcile.Fire();
+        return (focused, other);
+    }
+
+    /// <summary>The transparency switch starts where the settings file left it.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheTraySwitchReportsTheStoredTransparency(bool stored)
+    {
+        var harness = Wire(unfocusedOpacity: 90, unfocusedTransparency: stored);
+        using (harness.Composition)
+        {
+            Assert.Equal(stored, harness.Tray.IsUnfocusedTransparencyEnabled);
+        }
+    }
+
+    /// <summary>Stored off, the percent is kept but no window is touched.</summary>
+    [Fact]
+    public void WithTheSwitchStoredOff_NoWindowIsTouched()
+    {
+        var harness = Wire(unfocusedOpacity: 90, unfocusedTransparency: false);
+        using (harness.Composition)
+        {
+            var (focused, other) = AddFocusedPair(harness, 4101);
+
+            Assert.Empty(focused.OpacityRequests);
+            Assert.Empty(other.OpacityRequests);
+        }
+    }
+
+    /// <summary>Off from the tray: every window opaque at once, and the choice persisted. Back on: the user's own percent.</summary>
+    [Fact]
+    public void TogglingTransparencyOff_MakesEveryWindowOpaque_AndBackOnRestoresThePercent()
+    {
+        var persisted = new List<bool>();
+        var harness = Wire(unfocusedOpacity: 90, persistUnfocusedTransparency: persisted.Add);
+        using (harness.Composition)
+        {
+            var (focused, other) = AddFocusedPair(harness, 4103);
+            Assert.Equal(230, other.Opacity);
+
+            Assert.False(harness.Tray.ToggleUnfocusedTransparency());
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(255, other.Opacity);
+
+            Assert.True(harness.Tray.ToggleUnfocusedTransparency());
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(230, other.Opacity);
+            Assert.Equal([false, true], persisted);
+        }
+    }
+
+    /// <summary>Turned on while the percent is still the 100 default, a visible fallback is used instead of a no-op.</summary>
+    [Fact]
+    public void TogglingTransparencyOn_AtFullOpacity_UsesTheFallbackPercent()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var (focused, other) = AddFocusedPair(harness, 4105);
+            Assert.False(harness.Tray.IsUnfocusedTransparencyEnabled);
+
+            harness.Tray.ToggleUnfocusedTransparency();
+
+            Assert.Equal(255, focused.Opacity);
+            // 85% of 255, rounded.
+            Assert.Equal(217, other.Opacity);
+        }
+    }
+
+    /// <summary>Tiling off still wins: turning the transparency on then touches no window until tiling returns.</summary>
+    [Fact]
+    public void TogglingTransparencyOn_WithTilingOff_TouchesNoWindow()
+    {
+        var harness = Wire(unfocusedOpacity: 90, unfocusedTransparency: false);
+        using (harness.Composition)
+        {
+            var (focused, other) = AddFocusedPair(harness, 4107);
+            harness.Tray.ToggleTiling();
+
+            harness.Tray.ToggleUnfocusedTransparency();
+
+            Assert.Empty(focused.OpacityRequests);
+            Assert.Empty(other.OpacityRequests);
+        }
     }
 }

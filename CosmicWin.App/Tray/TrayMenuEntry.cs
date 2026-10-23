@@ -23,6 +23,9 @@ public enum TrayMenuEntry
     /// <summary>Picks the colour that border is drawn in, or hands it back to Windows' accent.</summary>
     BorderColor,
 
+    /// <summary>Draws every tiled window but the focused one translucent, or leaves them all opaque.</summary>
+    UnfocusedTransparency,
+
     /// <summary>Opens a file picker for the MP4 that plays, looping, as the desktop wallpaper.</summary>
     VideoWallpaper,
 

@@ -15,7 +15,8 @@ public sealed class TrayMenuController(
     Func<uint?>? getBorderColor = null, Action<uint?>? setBorderColor = null,
     Func<bool>? getTiling = null, Action<bool>? setTiling = null,
     Action<string>? setVideoWallpaperPath = null,
-    Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null)
+    Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null,
+    Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -102,6 +103,29 @@ public sealed class TrayMenuController(
 
         var next = !IsTilingEnabled;
         setTiling(next);
+        return next;
+    }
+
+    /// <summary>
+    /// Whether every tiled window but the focused one is drawn translucent. Read through the getter,
+    /// like the tiling switch, because it is persisted and the file can be edited while the menu is shut.
+    /// </summary>
+    /// <remarks>Answers NO when no getter was wired: nothing says any window is translucent.</remarks>
+    public bool IsUnfocusedTransparencyEnabled => getUnfocusedTransparency?.Invoke() ?? false;
+
+    /// <summary>
+    /// Turns the unfocused transparency on or off, returning the new state for the tick. Unwired,
+    /// it reports the state it could not change, for the reason <see cref="ToggleTiling"/> does.
+    /// </summary>
+    public bool ToggleUnfocusedTransparency()
+    {
+        if (setUnfocusedTransparency is null)
+        {
+            return IsUnfocusedTransparencyEnabled;
+        }
+
+        var next = !IsUnfocusedTransparencyEnabled;
+        setUnfocusedTransparency(next);
         return next;
     }
 

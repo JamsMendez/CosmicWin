@@ -201,13 +201,24 @@ public sealed class AppComposition : IDisposable
         Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
         int unfocusedOpacity = 100,
         bool repairOpacityOnAdoption = false,
-        Action<bool>? setOpacityMarker = null)
+        Action<bool>? setOpacityMarker = null,
+        // The tray switch over that percent. Null -- as in every test that predates it -- means
+        // what the percent alone meant before the switch: on exactly when it is below 100.
+        bool? unfocusedTransparency = null,
+        Action<bool>? persistUnfocusedTransparency = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
         // all have to read ONE decision, and whichever of them kept its own copy would become a
         // second owner of it.
         var tiling = tilingEnabled;
+
+        // Owned here for the reason `tiling` is: the tray item and the adapter read ONE decision.
+        // The alpha it switches to is fixed for the run; only whether it is applied changes.
+        var transparency = unfocusedTransparency ?? unfocusedOpacity < 100;
+        var transparentAlpha = (byte)Math.Round(
+            Math.Clamp(unfocusedOpacity < 100 ? unfocusedOpacity : Settings.FallbackUnfocusedOpacity, 10, 100)
+            * 255 / 100.0, MidpointRounding.AwayFromZero);
 
         // Displays whose work area changed and whose layout has not been redone yet. Kept apart from
         // the refresh because the display reports a change ONCE: a change that arrives while the
@@ -631,8 +642,7 @@ public sealed class AppComposition : IDisposable
             ResolveWindowDesktop = resolveWindowDesktop,
             Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
             // Set before the workspace is opened, so the very first adoption already knows it.
-            UnfocusedAlpha = (byte)Math.Round(
-                Math.Clamp(unfocusedOpacity, 10, 100) * 255 / 100.0, MidpointRounding.AwayFromZero),
+            UnfocusedAlpha = transparency ? transparentAlpha : (byte)255,
             RepairOpacityOnAdoption = repairOpacityOnAdoption,
             OpacityInUseChanged = setOpacityMarker,
         };
@@ -958,7 +968,31 @@ public sealed class AppComposition : IDisposable
             // other recoverable per-tick failure in this file already is, instead of vanishing.
             desktopTrace: desktopTrace,
             removeVideoWallpaper: RemoveVideoWallpaper,
-            getHasVideoWallpaper: () => videoWallpaperConfigured.Value);
+            getHasVideoWallpaper: () => videoWallpaperConfigured.Value,
+            getUnfocusedTransparency: () => transparency,
+            setUnfocusedTransparency: enabled =>
+            {
+                transparency = enabled;
+
+                // Persisted first, the same order every other switch here uses.
+                persistUnfocusedTransparency?.Invoke(enabled);
+
+                // On the thread that owns the trees, the same one the opacity is applied from.
+                onOwningThread(() =>
+                {
+                    if (enabled)
+                    {
+                        sessionAdapter.UnfocusedAlpha = transparentAlpha;
+                        ApplyUnfocusedOpacity();
+                    }
+                    else
+                    {
+                        // 255 first, so nothing admitted after the release is layered again.
+                        sessionAdapter.UnfocusedAlpha = 255;
+                        sessionAdapter.ReleaseOpacity();
+                    }
+                });
+            });
         // Alt+T lands on the SAME toggle the tray item clicks, rather than on a second copy of the
         // flip. Everything that makes the switch honest -- persisting it, and putting the layout
         // back when it comes on -- lives in the setTiling closure above, and a chord reaching past
@@ -1689,6 +1723,9 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
             unfocusedOpacity: settings.UnfocusedOpacity,
+            unfocusedTransparency: settings.UnfocusedTransparency,
+            persistUnfocusedTransparency: enabled => settingsStore.Update(
+                s => s with { UnfocusedTransparency = enabled }),
             // Read once, before anything is adopted: a marker still there means the last run did
             // not exit cleanly while windows were layered.
             repairOpacityOnAdoption: OpacityMarkerFile.Exists(OpacityMarkerFile.ResolvePath()),
