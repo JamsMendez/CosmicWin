@@ -112,3 +112,7 @@ one independent verifier at the feature's end, plus native review.
   be attempted; a window already translucent that refuses a new alpha is given back before it is
   forgotten. RED 3/20 then GREEN; suite 208 + 998 + 248 (3 skipped). Still not covered: windows a
   crashed run left on desktops never visited before the next clean exit.
+- Give-back fix native review (base dc11d0a; lenses resilience, reliability): consent granted,
+  APPROVED, acknowledged. Advisories: `_opacityGiveBackFailed` is sticky for the run (a destroyed
+  window missing from the registry also sets it), so the worst case is one unneeded repair pass at
+  the next start; the registry-miss and dead-window branches have no dedicated tests.
