@@ -136,8 +136,9 @@ maximize button, a double click on the title bar, and `Win+Up`.
 - **Unfocused opacity** — optionally, every tiled window except the active one is drawn
   translucent (`unfocused-opacity`, a percent). The active one is always opaque, and every window
   gets full opacity back when it stops being tiled, when tiling is turned off, and on exit. A
-  window that draws its own transparency is left alone. If CosmicWin is killed and leaves windows
-  translucent, set the key to `100` and start it again: it makes every window it adopts opaque.
+  window that draws its own transparency is left alone. If CosmicWin is killed while windows are
+  translucent, its next start makes them opaque again (a marker file, `opacity-in-use`, records
+  that it may have windows translucent and is removed on a clean exit).
 - **Drag and drop** — drop a tiled window onto another tile to rearrange them. Where the cursor is
   when you let go decides what happens: the top third of the tile stacks it above that
   window, the bottom third stacks it below (the tile splits in half), and the middle third swaps
@@ -222,7 +223,7 @@ next start; **Reload** in the tray applies `gap` without one.
 | `gap` | `8` | Whole pixels of space around and between tiled windows (0–64). |
 | `focus-border` | `on` | Draw CosmicWin's own thicker focus border. |
 | `border-color` | `accent` | `#RRGGBB`, or `accent` to follow Windows' own accent colour. |
-| `unfocused-opacity` | `100` | Percent opacity of every tiled window except the active one (10–100). `100` is off; starting CosmicWin at `100` also makes windows a crash left translucent opaque again. |
+| `unfocused-opacity` | `100` | Percent opacity of every tiled window except the active one (10–100). `100` is off and touches no window, except to make opaque again the ones a crash left translucent. |
 | `video-wallpaper-path` | *(blank)* | Absolute path to the imported video wallpaper. Set by the tray menu, not meant to be hand-edited; blank plays no video. |
 
 ### Retired settings

@@ -199,7 +199,9 @@ public sealed class AppComposition : IDisposable
         // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
         // test that predates it -- the work area stays what it was at startup, exactly as before.
         Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
-        int unfocusedOpacity = 100)
+        int unfocusedOpacity = 100,
+        bool repairOpacityOnAdoption = false,
+        Action<bool>? setOpacityMarker = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -631,6 +633,8 @@ public sealed class AppComposition : IDisposable
             // Set before the workspace is opened, so the very first adoption already knows it.
             UnfocusedAlpha = (byte)Math.Round(
                 Math.Clamp(unfocusedOpacity, 10, 100) * 255 / 100.0, MidpointRounding.AwayFromZero),
+            RepairOpacityOnAdoption = repairOpacityOnAdoption,
+            OpacityInUseChanged = setOpacityMarker,
         };
 
         opacityAdapter = sessionAdapter;
@@ -1685,6 +1689,10 @@ public sealed class AppComposition : IDisposable
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
             unfocusedOpacity: settings.UnfocusedOpacity,
+            // Read once, before anything is adopted: a marker still there means the last run did
+            // not exit cleanly while windows were layered.
+            repairOpacityOnAdoption: OpacityMarkerFile.Exists(OpacityMarkerFile.ResolvePath()),
+            setOpacityMarker: inUse => OpacityMarkerFile.Set(OpacityMarkerFile.ResolvePath(), inUse),
             // A blank path is the tray removal's "no video": stored as null, the same value a
             // never-configured machine has, so the settings file writes an empty key.
             persistVideoWallpaperPath: path => settingsStore.Update(

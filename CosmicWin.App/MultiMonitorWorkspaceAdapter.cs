@@ -1960,12 +1960,36 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
     /// is off: nothing is written onto any window.
     /// </summary>
     /// <remarks>
-    /// Set once, before the workspace is opened, from <c>unfocused-opacity</c>. The windows
-    /// adopted at startup are the ones a crashed run may have left translucent, so at 255 each of
-    /// them is made fully opaque on adoption (see <see cref="AdmitOpacity"/>) -- the recovery the
-    /// settings file documents.
+    /// Set once, before the workspace is opened, from <c>unfocused-opacity</c>.
     /// </remarks>
     public byte UnfocusedAlpha { get; set; } = 255;
+
+    /// <summary>
+    /// The previous run ended without a clean exit while it had windows layered, so the windows
+    /// adopted now may be the ones it left translucent. At 255 each of them is made fully opaque on
+    /// adoption; below 255 they are rewritten anyway. Off, a full opacity touches no window at all.
+    /// </summary>
+    public bool RepairOpacityOnAdoption { get; set; }
+
+    /// <summary>
+    /// Told <see langword="true"/> when the first window is layered and <see langword="false"/>
+    /// when none is any more or on a clean exit -- the life of the crash marker
+    /// <see cref="RepairOpacityOnAdoption"/> is read from at the next start. Reported only on a change.
+    /// </summary>
+    public Action<bool>? OpacityInUseChanged { get; set; }
+
+    private bool? _opacityInUseReported;
+
+    private void ReportOpacityInUse(bool inUse)
+    {
+        if (_opacityInUseReported == inUse)
+        {
+            return;
+        }
+
+        _opacityInUseReported = inUse;
+        OpacityInUseChanged?.Invoke(inUse);
+    }
 
     /// <summary>The alpha last asked of each window this adapter layered (applied or timed out).</summary>
     private readonly Dictionary<nint, byte> _opacity = new();
@@ -2021,7 +2045,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         var handle = window.Handle;
         if (UnfocusedAlpha == 255)
         {
-            if (arrival == WindowArrival.Adopted && window.IsAlive)
+            if (RepairOpacityOnAdoption && arrival == WindowArrival.Adopted && window.IsAlive)
             {
                 window.TryClearOpacity();
             }
@@ -2050,11 +2074,13 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         {
             case StyleWriteOutcome.Applied:
                 _opacity[handle] = alpha;
+                ReportOpacityInUse(true);
                 return;
 
             case StyleWriteOutcome.TimedOut:
                 // Unknown, not refused: the write may land, so it is owed a give-back like one that did.
                 _opacity[handle] = alpha;
+                ReportOpacityInUse(true);
                 Trace?.Record(
                     $"opacity pending hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
                     "-- the window did not answer in time; the change may still land and is given back with the others");
@@ -2077,6 +2103,11 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (!_opacity.Remove(handle))
         {
             return;
+        }
+
+        if (_opacity.Count == 0)
+        {
+            ReportOpacityInUse(false);
         }
 
         if (known is null)
@@ -2114,6 +2145,10 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // until they are reopened.
         ReleaseMaximizeBlock();
         ReleaseOpacity();
+
+        // A clean exit: nothing of this run is left layered, and a marker an earlier crash left has
+        // had its repair, so the next start has nothing to repair.
+        ReportOpacityInUse(false);
 
         _workspace.WindowAdded -= OnWindowAdded;
         _workspace.WindowRemoved -= OnWindowRemoved;

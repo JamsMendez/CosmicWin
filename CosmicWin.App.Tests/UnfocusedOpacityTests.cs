@@ -26,7 +26,9 @@ public sealed class UnfocusedOpacityTests
 
     private sealed class Harness : IDisposable
     {
-        public Harness(byte unfocusedAlpha = Translucent, WindowArrival arrival = WindowArrival.Created)
+        public Harness(
+            byte unfocusedAlpha = Translucent, WindowArrival arrival = WindowArrival.Created,
+            bool previousRunCrashed = false)
         {
             var primary = new FakeDisplay(new IntPtr(1), Monitor, WorkArea, 1.0, true);
             Primary = primary;
@@ -37,6 +39,8 @@ public sealed class UnfocusedOpacityTests
                 Workspace, Trees, Registry, () => ExceptionList.Empty, () => !TilingOn, () => null)
             {
                 UnfocusedAlpha = unfocusedAlpha,
+                RepairOpacityOnAdoption = previousRunCrashed,
+                OpacityInUseChanged = MarkerChanges.Add,
             };
 
             First = new RecordingWindow(new IntPtr(10), Rectangle.FromSize(0, 0, 400, 300));
@@ -46,6 +50,9 @@ public sealed class UnfocusedOpacityTests
         }
 
         public bool TilingOn { get; set; } = true;
+
+        /// <summary>Every report of whether CosmicWin may have windows layered, in order.</summary>
+        public List<bool> MarkerChanges { get; } = [];
 
         public IDisplay Primary { get; }
 
@@ -151,16 +158,75 @@ public sealed class UnfocusedOpacityTests
     }
 
     /// <summary>
-    /// The user's recovery route: windows a crashed run left translucent are ADOPTED by the next
-    /// start, and at 100% each one is made fully opaque again.
+    /// The user's recovery route: the previous run crashed with windows layered, so the windows it
+    /// left translucent are ADOPTED by this start and each one is made fully opaque again.
     /// </summary>
     [Fact]
-    public void AtFullOpacity_AnAdoptedWindowIsMadeOpaque_RepairingWhatACrashLeft()
+    public void AtFullOpacity_AfterACrash_AnAdoptedWindowIsMadeOpaque()
     {
-        using var h = new Harness(unfocusedAlpha: 255, arrival: WindowArrival.Adopted);
+        using var h = new Harness(unfocusedAlpha: 255, arrival: WindowArrival.Adopted, previousRunCrashed: true);
 
         Assert.Equal([null], h.First.OpacityRequests);
         Assert.Equal([null], h.Second.OpacityRequests);
+    }
+
+    /// <summary>
+    /// After a clean exit there is nothing to repair, and 100 means what it says: no window is
+    /// touched, not even one that layers itself with an opacity of its own.
+    /// </summary>
+    [Fact]
+    public void AtFullOpacity_AfterACleanExit_AnAdoptedWindowIsNeverTouched()
+    {
+        using var h = new Harness(unfocusedAlpha: 255, arrival: WindowArrival.Adopted, previousRunCrashed: false);
+
+        Assert.Empty(h.First.OpacityRequests);
+        Assert.Empty(h.Second.OpacityRequests);
+    }
+
+    // ---- crash marker ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Reported once when the first window is layered, and once when the last one is given back:
+    /// the marker exists exactly while a crash could leave a window translucent.
+    /// </summary>
+    [Fact]
+    public void TheMarker_IsSetWhenTheFirstWindowIsLayered_AndClearedWhenTheLastIsGivenBack()
+    {
+        using var h = new Harness();
+
+        Assert.Equal([true], h.MarkerChanges);
+
+        h.Adapter.ReleaseOpacity();
+
+        Assert.Equal([true, false], h.MarkerChanges);
+    }
+
+    [Fact]
+    public void TheMarker_StaysWhileAnyLayeredWindowRemains()
+    {
+        using var h = new Harness();
+
+        h.Workspace.RaiseWindowRemoved(h.First);
+
+        Assert.Equal([true], h.MarkerChanges);
+
+        h.Workspace.RaiseWindowRemoved(h.Second);
+
+        Assert.Equal([true, false], h.MarkerChanges);
+    }
+
+    /// <summary>
+    /// A clean exit always clears it -- also when nothing was layered this run, which is how a
+    /// marker left by a crash goes away once its repair has run.
+    /// </summary>
+    [Fact]
+    public void ACleanExit_ClearsTheMarker_EvenWithNothingLayered()
+    {
+        var h = new Harness(unfocusedAlpha: 255, arrival: WindowArrival.Adopted, previousRunCrashed: true);
+
+        h.Dispose();
+
+        Assert.Equal([false], h.MarkerChanges);
     }
 
     // ---- giving it back ----------------------------------------------------------------------------

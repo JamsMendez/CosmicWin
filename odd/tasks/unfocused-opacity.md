@@ -15,8 +15,11 @@ Test runner: `dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresD
 - S2. The focused tiled window is always fully opaque; focus moving makes the old one translucent
   and the new one opaque.
 - S3. The user asked: "Si se cierra mal puede ir a ponerle 100% y cierrarlo yo se reiniciaria no?"
-  Starting CosmicWin with `unfocused-opacity = 100` makes every window it adopts fully opaque again,
-  repairing windows a crash left translucent.
+  Revised 2026-10-22 (see Log): repair runs only when the previous run ended without a clean exit
+  while CosmicWin had windows layered. A marker file in `%LOCALAPPDATA%\CosmicWin\` exists while
+  CosmicWin may have layered windows; a clean exit removes it. When it is present at startup, every
+  window CosmicWin adopts is made fully opaque (at 100) or rewritten (below 100). When it is
+  absent, `unfocused-opacity = 100` touches no window at all.
 - S4. Assumption (agreed in the reply): CosmicWin gives every window full opacity back on a clean
   exit, when tiling is turned off (tray / Alt+T), and when a window leaves the tree (closed,
   minimized/evicted, untiled, fullscreen). The keyboard pause does not, matching the maximize block.
@@ -31,6 +34,8 @@ Test runner: `dotnet test CosmicWin.sln -c Release --filter "Category!=RequiresD
 - [x] T2 (S1) `Settings.UnfocusedOpacity` parse/serialize + tests. Route: inline.
 - [x] T3 (S2-S4) Adapter lifecycle mirroring the maximize block + focus wiring in
   `AppComposition.DrawFocusBorder` + startup value + tests. Route: inline.
+- [x] T5 (S3) Crash marker: written when the first window is layered, removed on a clean exit
+  and when nothing layered remains; startup repair only when it is present. Route: inline.
 - [x] T4 README + hardware check (Terminal, Chrome/Brave, Store) from an elevated session.
 
 Risk: item 1 (a style written onto other processes' windows outlives CosmicWin if it crashes) ->
@@ -87,3 +92,13 @@ one independent verifier at the feature's end, plus native review.
   (3 skipped). Native review (base e851616, lenses risk + reliability): consent granted, APPROVED,
   acknowledged. Advisories: the rollback path is untested, and its SetWindowLong result is not
   checked. Open decision: A3 (default-100 adoption repair also resets apps' own layered alpha).
+- L-decision (2026-10-22, user, verbatim): "Que me recomiendas?" -> recommended a crash marker so
+  that 100 touches nothing unless the previous run crashed with opacity active -> "Dale asi".
+  S3 rewritten; T5 opened.
+- T5 done. Adapter: RED 4/17 then GREEN (`RepairOpacityOnAdoption`, `OpacityInUseChanged`
+  reported on change only; a clean exit always reports false). Composition: `OpacityMarkerFile`
+  (`%LOCALAPPDATA%/CosmicWin/opacity-in-use`, best-effort), RED 3/29 then GREEN. Suite 208 + 995
+  + 248 (3 skipped). settings.conf comment and README updated.
+  Hardware: probe X layering itself at alpha 200, adopted at 100 with no marker -> stayed 200;
+  at 90 -> marker created, A 255 / B,X 230; Stop-Process -Force -> marker stayed, B,X 230;
+  restart at 100 -> A,B,X 255. Left at 90 for the user.

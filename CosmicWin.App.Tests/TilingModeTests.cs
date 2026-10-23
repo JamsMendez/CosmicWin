@@ -86,7 +86,9 @@ public sealed class TilingModeTests
         MutableVirtualDesktops Desktops, FakeKeyboardHookPlatform Platform,
         LowLevelKeyboardHook Hook, List<bool> Persisted, ImmediateScheduler Reconcile);
 
-    private static Harness Wire(bool tilingEnabled = true, int unfocusedOpacity = 100)
+    private static Harness Wire(
+        bool tilingEnabled = true, int unfocusedOpacity = 100,
+        bool previousRunCrashed = false, Action<bool>? setOpacityMarker = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -122,7 +124,9 @@ public sealed class TilingModeTests
             virtualDesktops: desktops,
             tilingEnabled: tilingEnabled,
             persistTiling: persisted.Add,
-            unfocusedOpacity: unfocusedOpacity);
+            unfocusedOpacity: unfocusedOpacity,
+            repairOpacityOnAdoption: previousRunCrashed,
+            setOpacityMarker: setOpacityMarker);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -570,6 +574,54 @@ public sealed class TilingModeTests
             Assert.Equal(255, focused.Opacity);
             Assert.Equal(230, other.Opacity);
         }
+    }
+
+    /// <summary>
+    /// The crash marker was there at startup: a window adopted now may be one the crashed run left
+    /// translucent, so even at 100 it is made opaque.
+    /// </summary>
+    [Fact]
+    public void AfterACrash_AnAdoptedWindowIsMadeOpaque_EvenAtFullOpacity()
+    {
+        var harness = Wire(previousRunCrashed: true);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4019), Rectangle.FromSize(0, 0, 800, 600));
+
+            harness.Workspace.RaiseWindowAdded(window, WindowArrival.Adopted);
+
+            Assert.Equal([null], window.OpacityRequests);
+        }
+    }
+
+    [Fact]
+    public void AfterACleanExit_AnAdoptedWindowIsNotTouchedAtFullOpacity()
+    {
+        var harness = Wire(previousRunCrashed: false);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4020), Rectangle.FromSize(0, 0, 800, 600));
+
+            harness.Workspace.RaiseWindowAdded(window, WindowArrival.Adopted);
+
+            Assert.Empty(window.OpacityRequests);
+        }
+    }
+
+    /// <summary>The marker is set the moment a window is layered and cleared by a normal exit.</summary>
+    [Fact]
+    public void TheCrashMarker_IsSetWhileWindowsAreLayered_AndClearedOnExit()
+    {
+        var marker = new List<bool>();
+        var harness = Wire(unfocusedOpacity: 90, setOpacityMarker: marker.Add);
+        var window = new RecordingWindow(new IntPtr(4021), Rectangle.FromSize(0, 0, 800, 600));
+        harness.Workspace.RaiseWindowAdded(window);
+
+        Assert.Equal([true], marker);
+
+        harness.Composition.Dispose();
+
+        Assert.Equal([true, false], marker);
     }
 
     [Fact]

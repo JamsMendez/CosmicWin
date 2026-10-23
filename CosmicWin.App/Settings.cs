@@ -181,8 +181,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          {GapKey} = {Gap.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          # {UnfocusedOpacityKey}: percent opacity of every tiled window except the focused one.
-         # 10-100, default 100 (opaque). Set it back to 100 and restart CosmicWin to make every
-         # window it manages fully opaque again.
+         # 10-100, default 100 (off: no window is touched). If CosmicWin stops without a clean exit
+         # while windows are translucent, its next start makes them opaque again.
          {UnfocusedOpacityKey} = {UnfocusedOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
          """;
