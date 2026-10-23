@@ -309,7 +309,8 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
             var exStyle = ReadExStyle(handle);
             COLORREF key = default;
             var flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA;
-            if ((exStyle & LayeredBit) != 0)
+            var addedLayering = (exStyle & LayeredBit) == 0;
+            if (!addedLayering)
             {
                 // Layered already. Readable attributes mean SetLayeredWindowAttributes owns how it
                 // is drawn, and a colour key it set is kept. Unreadable ones mean it paints itself
@@ -330,7 +331,20 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
                 }
             }
 
-            return PInvoke.SetLayeredWindowAttributes(handle, key, alpha, flags);
+            if (PInvoke.SetLayeredWindowAttributes(handle, key, alpha, flags))
+            {
+                return true;
+            }
+
+            // Layered with no attributes is a window Windows does not draw at all. The bit this call
+            // added comes straight back off, so a refusal leaves the window exactly as it was --
+            // the caller records it as refused and never gives anything back.
+            if (addedLayering)
+            {
+                PInvoke.SetWindowLong(handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, unchecked((int)(ReadExStyle(handle) & ~LayeredBit)));
+            }
+
+            return false;
         }
         catch (Exception)
         {
