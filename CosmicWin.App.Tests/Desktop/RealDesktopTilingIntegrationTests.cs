@@ -440,6 +440,10 @@ public sealed class RealDesktopTilingIntegrationTests : IDisposable
 
         public bool TryClose(nint hwnd) => inner.TryClose(hwnd);
 
+        public StyleWriteOutcome TrySetOpacity(nint hwnd, byte alpha) => inner.TrySetOpacity(hwnd, alpha);
+
+        public StyleWriteOutcome TryClearOpacity(nint hwnd, bool removeLayering) => inner.TryClearOpacity(hwnd, removeLayering);
+
         public StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled) => inner.TrySetMaximizeBox(hwnd, enabled);
 
         public bool TryRestoreFromMaximized(nint hwnd) => inner.TryRestoreFromMaximized(hwnd);

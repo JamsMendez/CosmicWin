@@ -144,6 +144,12 @@ internal sealed class FakeWindow : IWindow
         return StyleWriteOutcome.Applied;
     }
 
+    public StyleWriteOutcome TrySetOpacity(byte alpha) =>
+        !IsAlive || RefuseStyleChanges ? StyleWriteOutcome.Refused : StyleWriteOutcome.Applied;
+
+    public StyleWriteOutcome TryClearOpacity() =>
+        !IsAlive || RefuseStyleChanges ? StyleWriteOutcome.Refused : StyleWriteOutcome.Applied;
+
     public bool TryRestore()
     {
         if (!IsAlive || RefuseStyleChanges)

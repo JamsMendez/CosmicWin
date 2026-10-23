@@ -1,4 +1,4 @@
-using CosmicWin.Interop;
+﻿using CosmicWin.Interop;
 using CosmicWin.Interop.Win32;
 
 namespace CosmicWin.Interop.Tests.Win32;
@@ -22,6 +22,91 @@ public class Win32WindowTests
         var bounds = Rectangle.FromSize(0, 0, 400, 300);
         native.SeedExistingWindow(new IntPtr(handle), "App", bounds, style: style);
         return (native, new Win32Window(new IntPtr(handle), "App", bounds, native, style: style));
+    }
+
+    private const uint Layered = 0x00080000u;
+
+    private static (FakeNativeWindowSource Native, Win32Window Window) WindowWithExStyle(int handle, uint exStyle)
+    {
+        var native = new FakeNativeWindowSource();
+        var bounds = Rectangle.FromSize(0, 0, 400, 300);
+        native.SeedExistingWindow(new IntPtr(handle), "App", bounds, style: SysMenuAndMinimizeBox, exStyle: exStyle);
+        return (native, new Win32Window(new IntPtr(handle), "App", bounds, native, style: SysMenuAndMinimizeBox, exStyle: exStyle));
+    }
+
+    [Fact]
+    public void TrySetOpacity_ForwardsTheAlphaToNative()
+    {
+        var (native, window) = WindowWithExStyle(40, 0u);
+
+        Assert.Equal(StyleWriteOutcome.Applied, window.TrySetOpacity(230));
+
+        Assert.Equal((new IntPtr(40), (byte)230), Assert.Single(native.OpacityCalls));
+    }
+
+    /// <summary>The layering CosmicWin added is the layering it takes back.</summary>
+    [Fact]
+    public void TryClearOpacity_OnAWindowThatWasNotLayered_RemovesTheLayering()
+    {
+        var (native, window) = WindowWithExStyle(41, 0u);
+        window.TrySetOpacity(230);
+
+        Assert.Equal(StyleWriteOutcome.Applied, window.TryClearOpacity());
+
+        Assert.Equal((new IntPtr(41), true), Assert.Single(native.ClearOpacityCalls));
+    }
+
+    /// <summary>
+    /// A window that was ALREADY layered keeps its layering: the bit is the application's, and
+    /// taking it away could break how it draws. Covers a window a crashed run left layered, too.
+    /// </summary>
+    [Fact]
+    public void TryClearOpacity_OnAWindowAlreadyLayered_KeepsTheLayering()
+    {
+        var (native, window) = WindowWithExStyle(42, Layered);
+        window.TrySetOpacity(230);
+
+        window.TryClearOpacity();
+
+        Assert.Equal((new IntPtr(42), false), Assert.Single(native.ClearOpacityCalls));
+    }
+
+    /// <summary>
+    /// What the window looked like BEFORE the first write decides, not after: once the first write
+    /// lands the window reads as layered, and a later write must not forget who added it.
+    /// </summary>
+    [Fact]
+    public void TryClearOpacity_AfterSeveralWrites_StillRemovesTheLayeringItAdded()
+    {
+        var (native, window) = WindowWithExStyle(43, 0u);
+        window.TrySetOpacity(230);
+        window.Refresh("App", Rectangle.FromSize(10, 0, 400, 300), "", "", SysMenuAndMinimizeBox, Layered, false);
+        window.TrySetOpacity(255);
+
+        window.TryClearOpacity();
+
+        Assert.Equal((new IntPtr(43), true), Assert.Single(native.ClearOpacityCalls));
+    }
+
+    [Fact]
+    public void TrySetOpacity_OnADeadWindow_IsRefusedWithoutAskingNative()
+    {
+        var (native, window) = WindowWithExStyle(44, 0u);
+        window.MarkDead();
+
+        Assert.Equal(StyleWriteOutcome.Refused, window.TrySetOpacity(230));
+        Assert.Equal(StyleWriteOutcome.Refused, window.TryClearOpacity());
+        Assert.Empty(native.OpacityCalls);
+        Assert.Empty(native.ClearOpacityCalls);
+    }
+
+    [Fact]
+    public void TrySetOpacity_WhenNativeTimesOut_ReportsTimedOut()
+    {
+        var (native, window) = WindowWithExStyle(45, 0u);
+        native.TimeOutStyleChangesFor(new IntPtr(45));
+
+        Assert.Equal(StyleWriteOutcome.TimedOut, window.TrySetOpacity(230));
     }
 
     [Fact]

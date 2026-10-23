@@ -117,3 +117,5 @@ IDCompositionTarget
 IDCompositionVisual
 ID3D11DeviceContext
 GetCursorPos
+SetLayeredWindowAttributes
+GetLayeredWindowAttributes

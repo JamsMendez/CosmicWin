@@ -158,6 +158,29 @@ internal sealed class FakeNativeWindowSource : INativeWindowSource
     /// <summary>Makes every box write for this handle report <see cref="StyleWriteOutcome.TimedOut"/> without changing the style.</summary>
     public void TimeOutStyleChangesFor(nint hwnd) => _timingOutStyleHandles.Add(hwnd);
 
+    /// <summary>Every <c>TrySetOpacity</c> call, in order.</summary>
+    public List<(nint Handle, byte Alpha)> OpacityCalls { get; } = [];
+
+    /// <summary>Every <c>TryClearOpacity</c> call, in order.</summary>
+    public List<(nint Handle, bool RemoveLayering)> ClearOpacityCalls { get; } = [];
+
+    public StyleWriteOutcome TrySetOpacity(nint hwnd, byte alpha)
+    {
+        OpacityCalls.Add((hwnd, alpha));
+        return OpacityOutcome(hwnd);
+    }
+
+    public StyleWriteOutcome TryClearOpacity(nint hwnd, bool removeLayering)
+    {
+        ClearOpacityCalls.Add((hwnd, removeLayering));
+        return OpacityOutcome(hwnd);
+    }
+
+    private StyleWriteOutcome OpacityOutcome(nint hwnd) =>
+        _timingOutStyleHandles.Contains(hwnd) ? StyleWriteOutcome.TimedOut
+        : _failingStyleHandles.Contains(hwnd) || !_windows.ContainsKey(hwnd) ? StyleWriteOutcome.Refused
+        : StyleWriteOutcome.Applied;
+
     public StyleWriteOutcome TrySetMaximizeBox(nint hwnd, bool enabled)
     {
         MaximizeBoxCalls.Add((hwnd, enabled));

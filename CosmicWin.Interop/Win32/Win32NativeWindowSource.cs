@@ -284,6 +284,106 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         }
     }
 
+    private const uint LayeredBit = 0x00080000u;
+
+    /// <summary>
+    /// Ordered lane, like the maximize box: an opacity write is "set the alpha to X", so a newer
+    /// one replacing a pending older one is exactly right.
+    /// </summary>
+    public StyleWriteOutcome TrySetOpacity(nint hwnd, byte alpha) =>
+        StyleCalls.Run(hwnd, () => SetOpacityCore(hwnd, alpha), StyleCallTimeout);
+
+    public StyleWriteOutcome TryClearOpacity(nint hwnd, bool removeLayering) =>
+        StyleCalls.Run(hwnd, () => ClearOpacityCore(hwnd, removeLayering), StyleCallTimeout);
+
+    private static bool SetOpacityCore(nint hwnd, byte alpha)
+    {
+        try
+        {
+            HWND handle = new(hwnd);
+            if (!PInvoke.IsWindow(handle))
+            {
+                return false;
+            }
+
+            var exStyle = ReadExStyle(handle);
+            COLORREF key = default;
+            var flags = LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA;
+            if ((exStyle & LayeredBit) != 0)
+            {
+                // Layered already. Readable attributes mean SetLayeredWindowAttributes owns how it
+                // is drawn, and a colour key it set is kept. Unreadable ones mean it paints itself
+                // through UpdateLayeredWindow, which a constant alpha would break: refused.
+                if (!TryReadLayeredAttributes(handle, out key, out _, out var existing))
+                {
+                    return false;
+                }
+
+                flags |= existing;
+            }
+            else
+            {
+                PInvoke.SetWindowLong(handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, unchecked((int)(exStyle | LayeredBit)));
+                if ((ReadExStyle(handle) & LayeredBit) == 0)
+                {
+                    return false;
+                }
+            }
+
+            return PInvoke.SetLayeredWindowAttributes(handle, key, alpha, flags);
+        }
+        catch (Exception)
+        {
+            // A style edit on somebody else's window is best-effort by definition.
+            return false;
+        }
+    }
+
+    private static bool ClearOpacityCore(nint hwnd, bool removeLayering)
+    {
+        try
+        {
+            HWND handle = new(hwnd);
+            if (!PInvoke.IsWindow(handle))
+            {
+                return false;
+            }
+
+            var exStyle = ReadExStyle(handle);
+            if ((exStyle & LayeredBit) == 0
+                || !TryReadLayeredAttributes(handle, out var key, out _, out var flags))
+            {
+                // Not layered, or layered by the application itself: nothing of ours to undo.
+                return true;
+            }
+
+            if (removeLayering && flags == LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA)
+            {
+                PInvoke.SetWindowLong(handle, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE, unchecked((int)(exStyle & ~LayeredBit)));
+                return (ReadExStyle(handle) & LayeredBit) == 0;
+            }
+
+            return PInvoke.SetLayeredWindowAttributes(handle, key, 255, flags | LAYERED_WINDOW_ATTRIBUTES_FLAGS.LWA_ALPHA);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadLayeredAttributes(
+        HWND handle, out COLORREF key, out byte alpha, out LAYERED_WINDOW_ATTRIBUTES_FLAGS flags)
+    {
+        COLORREF readKey = default;
+        byte readAlpha = 0;
+        LAYERED_WINDOW_ATTRIBUTES_FLAGS readFlags = 0;
+        var ok = PInvoke.GetLayeredWindowAttributes(handle, &readKey, &readAlpha, &readFlags);
+        key = readKey;
+        alpha = readAlpha;
+        flags = readFlags;
+        return ok;
+    }
+
     /// <summary>Whether the read-back style shows the requested maximize-box state.</summary>
     /// <remarks>
     /// Looks at the maximize-box bit ONLY. The app and Windows keep changing other bits of the same

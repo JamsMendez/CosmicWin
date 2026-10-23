@@ -18,10 +18,14 @@ internal sealed class Win32Window : IWindow
 
     private const uint MaximizeBoxBit = 0x00010000u;
     private const uint MaximizedBit = 0x01000000u;
+    private const uint LayeredBit = 0x00080000u;
 
     private readonly INativeWindowSource _nativeSource;
     private string _title;
     private Rectangle _bounds;
+
+    /// <summary>Whether CosmicWin added <c>WS_EX_LAYERED</c>; <see langword="null"/> until the first opacity write.</summary>
+    private bool? _layeringIsOurs;
 
     public Win32Window(
         nint handle,
@@ -128,6 +132,27 @@ internal sealed class Win32Window : IWindow
 
         return outcome;
     }
+
+    /// <summary>
+    /// Asks for the alpha, remembering on the FIRST ask whether the window was layered before
+    /// CosmicWin touched it. Read then and never again: once a write lands the window reads as
+    /// layered, and asking afterwards would credit the application with CosmicWin's own bit.
+    /// </summary>
+    public StyleWriteOutcome TrySetOpacity(byte alpha)
+    {
+        if (!IsAlive)
+        {
+            return StyleWriteOutcome.Refused;
+        }
+
+        _layeringIsOurs ??= (ExStyle & LayeredBit) == 0;
+        return _nativeSource.TrySetOpacity(Handle, alpha);
+    }
+
+    public StyleWriteOutcome TryClearOpacity() =>
+        IsAlive
+            ? _nativeSource.TryClearOpacity(Handle, removeLayering: _layeringIsOurs ?? false)
+            : StyleWriteOutcome.Refused;
 
     public bool TryRestore()
     {

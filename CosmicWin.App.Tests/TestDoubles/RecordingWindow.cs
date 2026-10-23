@@ -300,6 +300,39 @@ internal sealed class RecordingWindow : IWindow
     /// </summary>
     public bool RestoreActivates { get; set; }
 
+    /// <summary>
+    /// Every opacity request, in order: the alpha asked for, or <see langword="null"/> for a
+    /// <see cref="TryClearOpacity"/>. Recorded whether or not it succeeded.
+    /// </summary>
+    public List<byte?> OpacityRequests { get; } = [];
+
+    /// <summary>The opacity the window is drawn at: 255 until a write lands, and again after a clear.</summary>
+    public byte Opacity { get; private set; } = 255;
+
+    public StyleWriteOutcome TrySetOpacity(byte alpha)
+    {
+        OpacityRequests.Add(alpha);
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return StyleWriteOutcome.Refused;
+        }
+
+        Opacity = alpha;
+        return StyleWriteOutcome.Applied;
+    }
+
+    public StyleWriteOutcome TryClearOpacity()
+    {
+        OpacityRequests.Add(null);
+        if (!IsAlive || RefuseStyleChanges)
+        {
+            return StyleWriteOutcome.Refused;
+        }
+
+        Opacity = 255;
+        return StyleWriteOutcome.Applied;
+    }
+
     public bool TryRestore()
     {
         RestoreCallCount++;

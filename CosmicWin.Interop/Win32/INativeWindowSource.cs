@@ -195,6 +195,21 @@ internal interface INativeWindowSource
     bool TryRestoreFromMaximized(nint hwnd);
 
     /// <summary>
+    /// Layers the window (adding <c>WS_EX_LAYERED</c> if it lacks it) and sets its constant alpha.
+    /// Refuses a window that is layered but has no readable layered attributes -- one painting
+    /// itself through <c>UpdateLayeredWindow</c>, which a constant alpha would break. Bounded like
+    /// every other style write, and never throws.
+    /// </summary>
+    StyleWriteOutcome TrySetOpacity(nint hwnd, byte alpha);
+
+    /// <summary>
+    /// Puts the window's alpha back to 255 and, when <paramref name="removeLayering"/> is set and
+    /// the alpha is the only layered attribute, removes <c>WS_EX_LAYERED</c>. A window that is not
+    /// layered, or layers itself, is left alone and reported <see cref="StyleWriteOutcome.Applied"/>.
+    /// </summary>
+    StyleWriteOutcome TryClearOpacity(nint hwnd, bool removeLayering);
+
+    /// <summary>
     /// Subscribes to every top-level window being SHOWN, with NO trackability filtering. Disposing
     /// the returned handle unsubscribes.
     /// </summary>

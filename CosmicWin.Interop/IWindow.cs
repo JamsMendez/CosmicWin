@@ -143,4 +143,22 @@ public interface IWindow : IEquatable<IWindow>
     /// the window back in its tile is the caller's job, because only the caller knows the tile.
     /// </remarks>
     bool TryRestore();
+
+    /// <summary>
+    /// Draws the window at <paramref name="alpha"/> opacity (255 = opaque) by layering it, reporting
+    /// how the write ended. Never throws.
+    /// </summary>
+    /// <remarks>
+    /// A window that already layers ITSELF through <c>UpdateLayeredWindow</c> has no attributes to
+    /// set and is refused rather than broken. The window remembers whether CosmicWin added the
+    /// layering, so <see cref="TryClearOpacity"/> takes back only what was given.
+    /// </remarks>
+    StyleWriteOutcome TrySetOpacity(byte alpha);
+
+    /// <summary>
+    /// Gives the window full opacity back, removing the layering only if
+    /// <see cref="TrySetOpacity"/> added it. Never throws; a window that was never layered is
+    /// already opaque and reports <see cref="StyleWriteOutcome.Applied"/>.
+    /// </summary>
+    StyleWriteOutcome TryClearOpacity();
 }

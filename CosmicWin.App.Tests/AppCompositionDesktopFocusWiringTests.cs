@@ -79,6 +79,10 @@ public sealed class AppCompositionDesktopFocusWiringTests
 
         public bool TryRestore() => true;
 
+        public StyleWriteOutcome TrySetOpacity(byte alpha) => StyleWriteOutcome.Applied;
+
+        public StyleWriteOutcome TryClearOpacity() => StyleWriteOutcome.Applied;
+
         public bool Equals(IWindow? other) => other is not null && Handle == other.Handle;
 
         public override bool Equals(object? obj) => obj is IWindow other && Equals(other);
