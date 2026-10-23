@@ -497,7 +497,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // filed under.
         if (IsFullscreen(window, _treeManager.Displays))
         {
-            RestoreMaximizeBox(window.Handle, window);
+            GiveBackStyles(window.Handle, window);
 
             if (_fullscreen.Add(window.Handle))
             {
@@ -556,6 +556,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
 
         StripMaximizeBox(window);
+        AdmitOpacity(window, e.Arrival);
     }
 
     /// <summary>
@@ -1300,7 +1301,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
         // Looked up BEFORE the registry entry goes below. A window left floating is not ours to
         // hold a button hostage on.
-        RestoreMaximizeBox(handle);
+        GiveBackStyles(handle);
 
         if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
         {
@@ -1321,7 +1322,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         // Windows handed out next.
         _misses.Remove(handle);
         _givenUp.Remove(handle);
-        RestoreMaximizeBox(handle, e.Window);
+        GiveBackStyles(handle, e.Window);
         _minimumSize.Remove(handle);
         _maximumSize.Remove(handle);
         _clampsInsideItsTile.Remove(handle);
@@ -1425,7 +1426,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             // keeps a full tile while drawing nothing, which is what made one visible window occupy
             // only half the screen. Remove it and reflow the survivors into the space.
             _owners.Remove(handle);
-            RestoreMaximizeBox(handle, window);
+            GiveBackStyles(handle, window);
             if (WorkspaceSessionAdapter.RemoveWindow(tree, _registry, handle))
             {
                 Arrange(tree, WorkAreaResolver.Resolve(display));
@@ -1460,7 +1461,7 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
             // A window that is not being tiled for now has no business holding a disabled button;
             // it is re-stripped by the first ordinary bounds change after it is a window again.
-            RestoreMaximizeBox(handle, window);
+            GiveBackStyles(handle, window);
 
             // Once per entry rather than once per poll, like `clamps itself`: the poll re-reports the
             // same window every two seconds for as long as the video plays.
@@ -1655,13 +1656,15 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         if (!window.CanReposition)
         {
             _owners.Remove(handle);
-            RestoreMaximizeBox(handle, window);
+            GiveBackStyles(handle, window);
         }
         else
         {
             // Also what re-strips a window after fullscreen, and one whose application put its box
-            // back on its own. A no-op for a window that has no box left to take.
+            // back on its own. A no-op for a window that has no box left to take. The opacity is
+            // the same: given back at fullscreen, it is taken again here once the window leaves.
             StripMaximizeBox(window);
+            AdmitOpacity(window, WindowArrival.Created);
         }
 
         // A tiled window moving is this adapter's only evidence that the SHAPE of the display
@@ -1952,12 +1955,165 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         }
     }
 
+    /// <summary>
+    /// The alpha (0-255) every tiled window except the focused one is drawn at. 255, the default,
+    /// is off: nothing is written onto any window.
+    /// </summary>
+    /// <remarks>
+    /// Set once, before the workspace is opened, from <c>unfocused-opacity</c>. The windows
+    /// adopted at startup are the ones a crashed run may have left translucent, so at 255 each of
+    /// them is made fully opaque on adoption (see <see cref="AdmitOpacity"/>) -- the recovery the
+    /// settings file documents.
+    /// </remarks>
+    public byte UnfocusedAlpha { get; set; } = 255;
+
+    /// <summary>The alpha last asked of each window this adapter layered (applied or timed out).</summary>
+    private readonly Dictionary<nint, byte> _opacity = new();
+
+    /// <summary>Windows that refused the opacity change; never asked again until they leave the tree.</summary>
+    private readonly HashSet<nint> _opacityRefused = [];
+
+    /// <summary>
+    /// Draws the window that has focus opaque and every other tiled window at
+    /// <see cref="UnfocusedAlpha"/>. Called on every focus-border refresh, so an unchanged answer
+    /// writes nothing.
+    /// </summary>
+    public void ApplyOpacity(nint focusedHandle)
+    {
+        if (UnfocusedAlpha == 255)
+        {
+            return;
+        }
+
+        foreach (var handle in _owners.Keys.ToArray())
+        {
+            if (_fullscreen.Contains(handle)
+                || !_registry.TryGetWindow(handle, out var window) || window is not { IsAlive: true })
+            {
+                continue;
+            }
+
+            WriteOpacity(window, handle == focusedHandle ? (byte)255 : UnfocusedAlpha);
+        }
+    }
+
+    /// <summary>
+    /// Gives every window this adapter layered its full opacity back. Called when tiling is turned
+    /// off and on a clean exit, the same moments the maximize block is released.
+    /// </summary>
+    public void ReleaseOpacity()
+    {
+        foreach (var handle in _opacity.Keys.ToArray())
+        {
+            ReleaseWindowOpacity(handle);
+        }
+
+        _opacityRefused.Clear();
+    }
+
+    /// <summary>
+    /// The opacity a window starts with when it joins the tree: translucent unless it is the
+    /// focused one. At full opacity a window is left alone -- except one ADOPTED, which is made
+    /// opaque, because that is how a translucent window left behind by a crash is repaired.
+    /// </summary>
+    private void AdmitOpacity(IWindow window, WindowArrival arrival)
+    {
+        var handle = window.Handle;
+        if (UnfocusedAlpha == 255)
+        {
+            if (arrival == WindowArrival.Adopted && window.IsAlive)
+            {
+                window.TryClearOpacity();
+            }
+
+            return;
+        }
+
+        if (_opacity.ContainsKey(handle) || _opacityRefused.Contains(handle))
+        {
+            return;
+        }
+
+        WriteOpacity(window, _focusedLeaf()?.Window.Handle == handle ? (byte)255 : UnfocusedAlpha);
+    }
+
+    private void WriteOpacity(IWindow window, byte alpha)
+    {
+        var handle = window.Handle;
+        if (_opacityRefused.Contains(handle)
+            || (_opacity.TryGetValue(handle, out var current) && current == alpha))
+        {
+            return;
+        }
+
+        switch (window.TrySetOpacity(alpha))
+        {
+            case StyleWriteOutcome.Applied:
+                _opacity[handle] = alpha;
+                return;
+
+            case StyleWriteOutcome.TimedOut:
+                // Unknown, not refused: the write may land, so it is owed a give-back like one that did.
+                _opacity[handle] = alpha;
+                Trace?.Record(
+                    $"opacity pending hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                    "-- the window did not answer in time; the change may still land and is given back with the others");
+                return;
+
+            default:
+                _opacity.Remove(handle);
+                _opacityRefused.Add(handle);
+                Trace?.Record(
+                    $"opacity kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
+                    "-- the window refused the change (it may layer itself)");
+                return;
+        }
+    }
+
+    /// <summary>Gives one window full opacity back if this adapter changed it, and forgets the handle either way.</summary>
+    private void ReleaseWindowOpacity(nint handle, IWindow? known = null)
+    {
+        _opacityRefused.Remove(handle);
+        if (!_opacity.Remove(handle))
+        {
+            return;
+        }
+
+        if (known is null)
+        {
+            _registry.TryGetWindow(handle, out known);
+        }
+
+        if (known is not { IsAlive: true })
+        {
+            return;
+        }
+
+        var outcome = known.TryClearOpacity();
+        if (outcome != StyleWriteOutcome.Applied)
+        {
+            Trace?.Record(
+                $"opacity not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
+                (outcome == StyleWriteOutcome.TimedOut
+                    ? "-- the window did not answer in time; the give-back stays queued behind the pending change"
+                    : "-- the window refused the change; it stays translucent until it is reopened"));
+        }
+    }
+
+    /// <summary>Everything this adapter wrote onto a window, given back the moment it stops being tiled.</summary>
+    private void GiveBackStyles(nint handle, IWindow? known = null)
+    {
+        RestoreMaximizeBox(handle, known);
+        ReleaseWindowOpacity(handle, known);
+    }
+
     public void Dispose()
     {
         // Normal exit: nobody should be left with a disabled button on a window CosmicWin no longer
         // manages. A crash or a kill cannot run this, and those windows keep the disabled button
         // until they are reopened.
         ReleaseMaximizeBlock();
+        ReleaseOpacity();
 
         _workspace.WindowAdded -= OnWindowAdded;
         _workspace.WindowRemoved -= OnWindowRemoved;

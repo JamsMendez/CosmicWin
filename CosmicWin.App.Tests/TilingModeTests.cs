@@ -84,9 +84,9 @@ public sealed class TilingModeTests
         AppComposition Composition, TrayMenuController Tray, FakeWorkspace Workspace,
         LayoutTree Tree, TreeManager TreeManager, IDisplay Primary, MutableForeground Foreground,
         MutableVirtualDesktops Desktops, FakeKeyboardHookPlatform Platform,
-        LowLevelKeyboardHook Hook, List<bool> Persisted);
+        LowLevelKeyboardHook Hook, List<bool> Persisted, ImmediateScheduler Reconcile);
 
-    private static Harness Wire(bool tilingEnabled = true)
+    private static Harness Wire(bool tilingEnabled = true, int unfocusedOpacity = 100)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -97,6 +97,7 @@ public sealed class TilingModeTests
         var desktops = new MutableVirtualDesktops();
         var platform = new FakeKeyboardHookPlatform();
         var persisted = new List<bool>();
+        var reconcile = new ImmediateScheduler();
         TrayMenuController? tray = null;
         LowLevelKeyboardHook? hook = null;
 
@@ -104,7 +105,7 @@ public sealed class TilingModeTests
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
             disableTaskTrigger: () => { },
-            scheduleReconcile: new ImmediateScheduler().Schedule,
+            scheduleReconcile: reconcile.Schedule,
             hookFactory: writer =>
             {
                 hook = new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0);
@@ -120,12 +121,13 @@ public sealed class TilingModeTests
             importVideoWallpaper: path => path,
             virtualDesktops: desktops,
             tilingEnabled: tilingEnabled,
-            persistTiling: persisted.Add);
+            persistTiling: persisted.Add,
+            unfocusedOpacity: unfocusedOpacity);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
             composition, tray!, workspace, tree!, treeManager, primary, foreground, desktops,
-            platform, hook!, persisted);
+            platform, hook!, persisted, reconcile);
     }
 
     /// <summary>The switch starts where the settings file left it, not where the code guesses.</summary>
@@ -468,6 +470,82 @@ public sealed class TilingModeTests
 
             Assert.Equal(0u, window.Style & WindowStyleFlags.MaximizeBox);
         }
+    }
+
+    /// <summary>
+    /// <c>unfocused-opacity = 90</c>: the window holding the foreground is drawn opaque and every
+    /// other tiled window at 90% (alpha 230) -- with no focus border wired at all, because the
+    /// opacity must not depend on the border being switched on.
+    /// </summary>
+    [Fact]
+    public void WithUnfocusedOpacity_TheForegroundWindowIsOpaque_AndTheOthersTranslucent()
+    {
+        var harness = Wire(unfocusedOpacity: 90);
+        using (harness.Composition)
+        {
+            var focused = new RecordingWindow(new IntPtr(4011), Rectangle.FromSize(0, 0, 800, 600));
+            var other = new RecordingWindow(new IntPtr(4012), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(focused);
+            harness.Workspace.RaiseWindowAdded(other);
+
+            // A mouse click moves focus without any event CosmicWin hears; the reconcile tick is
+            // what notices it.
+            harness.Foreground.Handle = focused.Handle;
+            harness.Reconcile.Fire();
+
+            Assert.Equal(255, focused.Opacity);
+            Assert.Equal(230, other.Opacity);
+        }
+    }
+
+    /// <summary>At the default 100 nothing is ever written onto a window.</summary>
+    [Fact]
+    public void AtTheDefaultOpacity_NoWindowIsTouched()
+    {
+        var harness = Wire();
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4013), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            harness.Foreground.Handle = window.Handle;
+            harness.Reconcile.Fire();
+
+            Assert.Empty(window.OpacityRequests);
+        }
+    }
+
+    /// <summary>Tiling off is the layout leaving: every window is opaque again. Back on, the opacity returns.</summary>
+    [Fact]
+    public void TurningTilingOff_MakesEveryWindowOpaque_AndBackOnTranslucentAgain()
+    {
+        var harness = Wire(unfocusedOpacity: 90);
+        using (harness.Composition)
+        {
+            var window = new RecordingWindow(new IntPtr(4014), Rectangle.FromSize(0, 0, 800, 600));
+            harness.Workspace.RaiseWindowAdded(window);
+            Assert.Equal(230, window.Opacity);
+
+            harness.Tray.ToggleTiling();
+
+            Assert.Equal(255, window.Opacity);
+
+            harness.Tray.ToggleTiling();
+
+            Assert.Equal(230, window.Opacity);
+        }
+    }
+
+    [Fact]
+    public void ExitingNormally_MakesEveryWindowOpaque()
+    {
+        var harness = Wire(unfocusedOpacity: 90);
+        var window = new RecordingWindow(new IntPtr(4015), Rectangle.FromSize(0, 0, 800, 600));
+        harness.Workspace.RaiseWindowAdded(window);
+        Assert.Equal(230, window.Opacity);
+
+        harness.Composition.Dispose();
+
+        Assert.Equal(255, window.Opacity);
     }
 
     /// <summary>The same promise on the way out: a normal exit leaves no disabled button behind.</summary>

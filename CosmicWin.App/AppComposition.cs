@@ -198,7 +198,8 @@ public sealed class AppComposition : IDisposable
         // each reported ONCE. A delegate for the reason zOrder is: the only real answer is
         // Win32DisplayManager.Refresh, and the Wire tests supply their own. Unset -- as in every
         // test that predates it -- the work area stays what it was at startup, exactly as before.
-        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null)
+        Func<IReadOnlyList<IDisplay>>? refreshDisplays = null,
+        int unfocusedOpacity = 100)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -602,6 +603,11 @@ public sealed class AppComposition : IDisposable
             onOwningThread(UpdateFocusBorder);
         }
 
+        // The adapter the opacity is applied through. A separate reference, set once the adapter
+        // exists below, because the border refresh that applies it is handed out as a delegate
+        // (AfterArrange, just below) before the adapter is constructed.
+        MultiMonitorWorkspaceAdapter? opacityAdapter = null;
+
         // Built by this method's CALLER, so it cannot take the callback at construction. Its own
         // reflows are the hotplug and work-area ones -- dormant today, live the moment MM-2/MM-3
         // land, and there is no reason to leave a known-blind call site behind for them to find.
@@ -622,7 +628,12 @@ public sealed class AppComposition : IDisposable
         {
             ResolveWindowDesktop = resolveWindowDesktop,
             Trace = File.Exists(TraceMarkerPath) ? desktopTrace : null,
+            // Set before the workspace is opened, so the very first adoption already knows it.
+            UnfocusedAlpha = (byte)Math.Round(
+                Math.Clamp(unfocusedOpacity, 10, 100) * 255 / 100.0, MidpointRounding.AwayFromZero),
         };
+
+        opacityAdapter = sessionAdapter;
 
         if (virtualDesktops is { } desktopsForArrivals)
         {
@@ -776,6 +787,9 @@ public sealed class AppComposition : IDisposable
             // Read BEFORE the batch: restoring a maximized window activates it.
             sessionAdapter.ApplyMaximizeBlock(foreground.GetForegroundHandle());
 
+            // Given back when tiling went off, like the boxes, so taken again the same way.
+            sessionAdapter.ApplyOpacity(foreground.GetForegroundHandle());
+
             // Then EVERY display, not only the ones that gained a window. While tiling was off the
             // user was free to drag and resize with the mouse, and switching it back on is a request
             // to put the layout back -- which for a display where nothing opened or closed is a
@@ -876,8 +890,13 @@ public sealed class AppComposition : IDisposable
                 {
                     // The one thing turning it OFF does: the maximize buttons come back. A mode whose
                     // promise is that the layout no longer interferes cannot leave windows with a
-                    // disabled button for it. Same thread as the trees the adapter reads.
-                    onOwningThread(sessionAdapter.ReleaseMaximizeBlock);
+                    // disabled button for it. Same thread as the trees the adapter reads. The opacity
+                    // goes with it, for the same promise.
+                    onOwningThread(() =>
+                    {
+                        sessionAdapter.ReleaseMaximizeBlock();
+                        sessionAdapter.ReleaseOpacity();
+                    });
                 }
 
                 // Nothing else changes on purpose. Every window is left exactly where the layout
@@ -1009,6 +1028,23 @@ public sealed class AppComposition : IDisposable
         // changes no chord caused: a mouse click landing on another window.
         void UpdateFocusBorder() => DrawFocusBorder(live: null);
 
+        // The focused window is opaque and every other tiled one is not. Resolved from the REAL
+        // foreground, like the border: when it is not a tiled window (a dialog, the desktop, the
+        // Start menu) nothing changes, rather than every window turning translucent at once.
+        void ApplyUnfocusedOpacity()
+        {
+            if (!tiling || hook.IsPaused)
+            {
+                return;
+            }
+
+            var foregroundHandle = foreground.GetForegroundHandle();
+            if (foregroundHandle != 0 && registry.TryGetLeaf(foregroundHandle, out _))
+            {
+                opacityAdapter?.ApplyOpacity(foregroundHandle);
+            }
+        }
+
         /// <param name="live">
         /// A rectangle the framed window is passing THROUGH, mid hand-drag, when there is one.
         /// Null everywhere else, which means "read it from the window", and that is the ordinary
@@ -1017,6 +1053,10 @@ public sealed class AppComposition : IDisposable
         /// </param>
         void DrawFocusBorder(Rectangle? live)
         {
+            // First, and on its own: every early return below is about the BORDER, and the
+            // opacity must follow focus whether or not a border is drawn at all.
+            ApplyUnfocusedOpacity();
+
             if (focusBorder is null)
             {
                 return;
@@ -1642,6 +1682,7 @@ public sealed class AppComposition : IDisposable
             persistBorderColor: rgb => settingsStore.Update(s => s with { BorderColor = rgb }),
             tilingEnabled: settings.Tiling,
             persistTiling: enabled => settingsStore.Update(s => s with { Tiling = enabled }),
+            unfocusedOpacity: settings.UnfocusedOpacity,
             // A blank path is the tray removal's "no video": stored as null, the same value a
             // never-configured machine has, so the settings file writes an empty key.
             persistVideoWallpaperPath: path => settingsStore.Update(
