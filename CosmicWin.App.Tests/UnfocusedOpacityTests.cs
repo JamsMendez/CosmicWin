@@ -216,6 +216,60 @@ public sealed class UnfocusedOpacityTests
     }
 
     /// <summary>
+    /// Cleared only once the last window HAS its opacity back: killed in between, the next start
+    /// must still find the marker.
+    /// </summary>
+    [Fact]
+    public void TheMarker_IsClearedOnlyAfterTheLastGiveBack()
+    {
+        using var h = new Harness();
+        (byte First, byte Second)? atClear = null;
+        h.Adapter.OpacityInUseChanged = inUse =>
+        {
+            if (!inUse)
+            {
+                atClear = (h.First.Opacity, h.Second.Opacity);
+            }
+        };
+
+        h.Adapter.ReleaseOpacity();
+
+        Assert.Equal(((byte)255, (byte)255), atClear);
+    }
+
+    /// <summary>
+    /// A give-back that did not land leaves a window translucent, so the marker stays -- through
+    /// the release and through a clean exit -- and the next start repairs it.
+    /// </summary>
+    [Fact]
+    public void AFailedGiveBack_KeepsTheMarker_EvenThroughACleanExit()
+    {
+        var h = new Harness();
+        h.Second.RefuseStyleChanges = true;
+
+        h.Adapter.ReleaseOpacity();
+        h.Dispose();
+
+        Assert.Equal([true], h.MarkerChanges);
+    }
+
+    /// <summary>
+    /// A window already translucent that refuses a NEW alpha still carries the old one, so it is
+    /// given back before it is forgotten rather than left translucent for good.
+    /// </summary>
+    [Fact]
+    public void ARefusedRewrite_OfAWindowAlreadyTranslucent_GivesItsOpacityBack()
+    {
+        using var h = new Harness();
+        h.First.RefuseOpacityWrites = true;
+
+        h.Adapter.ApplyOpacity(h.First.Handle);
+
+        Assert.Equal(255, h.First.Opacity);
+        Assert.Null(h.First.OpacityRequests[^1]);
+    }
+
+    /// <summary>
     /// A clean exit always clears it -- also when nothing was layered this run, which is how a
     /// marker left by a crash goes away once its repair has run.
     /// </summary>

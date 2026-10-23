@@ -1980,6 +1980,12 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
 
     private bool? _opacityInUseReported;
 
+    /// <summary>
+    /// A give-back that did not land (or could not be attempted) this run: some window may still be
+    /// translucent, so the crash marker stays even through a clean exit, and the next start repairs.
+    /// </summary>
+    private bool _opacityGiveBackFailed;
+
     private void ReportOpacityInUse(bool inUse)
     {
         if (_opacityInUseReported == inUse)
@@ -2087,7 +2093,14 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
                 return;
 
             default:
-                _opacity.Remove(handle);
+                // A window already translucent that refuses a NEW alpha still wears the old one:
+                // given back before it is forgotten, or it would stay translucent for good.
+                if (_opacity.Remove(handle) && window.IsAlive
+                    && window.TryClearOpacity() != StyleWriteOutcome.Applied)
+                {
+                    _opacityGiveBackFailed = true;
+                }
+
                 _opacityRefused.Add(handle);
                 Trace?.Record(
                     $"opacity kept hwnd=0x{handle:X} class={window.ClassName} proc={window.ProcessName} " +
@@ -2105,23 +2118,26 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
             return;
         }
 
-        if (_opacity.Count == 0)
+        if (known is null && !_registry.TryGetWindow(handle, out known))
+        {
+            // Lost track of it without its window: nothing can be given back, so it may stay translucent.
+            _opacityGiveBackFailed = true;
+        }
+
+        var outcome = known is { IsAlive: true } ? known.TryClearOpacity() : StyleWriteOutcome.Applied;
+
+        // AFTER the give-back, and only if every one landed: killed before this line, the next start
+        // must still find the marker.
+        if (outcome != StyleWriteOutcome.Applied)
+        {
+            _opacityGiveBackFailed = true;
+        }
+        else if (_opacity.Count == 0 && !_opacityGiveBackFailed)
         {
             ReportOpacityInUse(false);
         }
 
-        if (known is null)
-        {
-            _registry.TryGetWindow(handle, out known);
-        }
-
-        if (known is not { IsAlive: true })
-        {
-            return;
-        }
-
-        var outcome = known.TryClearOpacity();
-        if (outcome != StyleWriteOutcome.Applied)
+        if (outcome != StyleWriteOutcome.Applied && known is not null)
         {
             Trace?.Record(
                 $"opacity not returned hwnd=0x{handle:X} class={known.ClassName} proc={known.ProcessName} " +
@@ -2147,8 +2163,11 @@ public sealed class MultiMonitorWorkspaceAdapter : IDisposable
         ReleaseOpacity();
 
         // A clean exit: nothing of this run is left layered, and a marker an earlier crash left has
-        // had its repair, so the next start has nothing to repair.
-        ReportOpacityInUse(false);
+        // had its repair, so the next start has nothing to repair -- unless a give-back failed.
+        if (!_opacityGiveBackFailed)
+        {
+            ReportOpacityInUse(false);
+        }
 
         _workspace.WindowAdded -= OnWindowAdded;
         _workspace.WindowRemoved -= OnWindowRemoved;

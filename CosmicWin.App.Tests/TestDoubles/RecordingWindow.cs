@@ -309,10 +309,16 @@ internal sealed class RecordingWindow : IWindow
     /// <summary>The opacity the window is drawn at: 255 until a write lands, and again after a clear.</summary>
     public byte Opacity { get; private set; } = 255;
 
+    /// <summary>
+    /// Refuses only <see cref="TrySetOpacity"/>, still accepting the give-back: a window that stopped
+    /// taking a new alpha, whose earlier one is still on it.
+    /// </summary>
+    public bool RefuseOpacityWrites { get; set; }
+
     public StyleWriteOutcome TrySetOpacity(byte alpha)
     {
         OpacityRequests.Add(alpha);
-        if (!IsAlive || RefuseStyleChanges)
+        if (!IsAlive || RefuseStyleChanges || RefuseOpacityWrites)
         {
             return StyleWriteOutcome.Refused;
         }

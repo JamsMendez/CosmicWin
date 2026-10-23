@@ -107,3 +107,8 @@ one independent verifier at the feature's end, plus native review.
   without checking it landed; Dispose clears it even if a give-back timed out or a crashed run's
   windows on unvisited desktops were never adopted; marker IO failures are silent; production
   wiring of the marker has no test.
+- 2026-10-22 user: "Dale" (give-back robustness). The crash marker is now cleared only AFTER the
+  last give-back lands, and kept (through a clean exit too) once any give-back failed or could not
+  be attempted; a window already translucent that refuses a new alpha is given back before it is
+  forgotten. RED 3/20 then GREEN; suite 208 + 998 + 248 (3 skipped). Still not covered: windows a
+  crashed run left on desktops never visited before the next clean exit.
