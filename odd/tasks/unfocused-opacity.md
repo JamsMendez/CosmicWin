@@ -102,3 +102,8 @@ one independent verifier at the feature's end, plus native review.
   Hardware: probe X layering itself at alpha 200, adopted at 100 with no marker -> stayed 200;
   at 90 -> marker created, A 255 / B,X 230; Stop-Process -Force -> marker stayed, B,X 230;
   restart at 100 -> A,B,X 255. Left at 90 for the user.
+- T5 native review (base 7978e71; lenses risk, resilience, reliability): consent granted,
+  APPROVED, acknowledged. Advisories: the marker is cleared BEFORE the last window's give-back and
+  without checking it landed; Dispose clears it even if a give-back timed out or a crashed run's
+  windows on unvisited desktops were never adopted; marker IO failures are silent; production
+  wiring of the marker has no test.
