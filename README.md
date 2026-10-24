@@ -9,6 +9,8 @@ looping video wallpaper.
   movement, resizing and Windows' own virtual desktops are driven from the keyboard.
 - **Video wallpaper** — a looping MP4, picked from the tray, as the desktop wallpaper.
 
+https://github.com/user-attachments/assets/e6c0a55a-725c-471b-b870-9dd6f5b01821
+
 > **The project was split in two.** CosmicWin keeps the tiling window manager and the video
 > wallpaper. The extras -- the animated HTML wallpaper scenes, the mini scene window, build alerts and
 > the local HTTP API -- moved to their own repository,
