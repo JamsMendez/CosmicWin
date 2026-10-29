@@ -22,6 +22,9 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // First, so a failure anywhere in startup leaves its stack in crash.log too.
+        Diagnostics.CrashLog.Install(Diagnostics.CrashLog.ResolveDefaultPath());
+
         base.OnStartup(e);
 
         // Single delegating call, pinned by AppEntryPointThinnessTests.
