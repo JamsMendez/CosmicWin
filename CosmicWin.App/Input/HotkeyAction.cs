@@ -7,6 +7,12 @@ public enum ModifierKeys : byte
     Alt = 1,
     Shift = 2,
     Control = 4,
+
+    /// <summary>
+    /// Either Win key. Never part of a registered chord: the table is written in Alt, and
+    /// <see cref="KeyboardEventProcessor.UseWinAsChordModifier"/> decides which of the two reads as it.
+    /// </summary>
+    Win = 8,
 }
 
 public enum KeyboardKey : byte
@@ -17,6 +23,13 @@ public enum KeyboardKey : byte
     OpenBracket = 0xDB, CloseBracket = 0xDD, F4 = 0x73,
     D1 = 0x31, D2 = 0x32, D3 = 0x33, D4 = 0x34, D5 = 0x35,
     D6 = 0x36, D7 = 0x37, D8 = 0x38, D9 = 0x39,
+    LeftWin = 0x5B, RightWin = 0x5C,
+
+    /// <summary>
+    /// A virtual-key code Windows leaves unassigned. Tapped while Win is held, it tells the shell
+    /// that Win was part of a combination, so its release does not open the Start menu.
+    /// </summary>
+    MaskKey = 0xE8,
 }
 
 public enum HotkeyActionKind : byte

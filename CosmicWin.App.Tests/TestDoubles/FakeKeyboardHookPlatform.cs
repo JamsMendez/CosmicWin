@@ -42,6 +42,12 @@ internal sealed class FakeKeyboardHookPlatform : IKeyboardHookPlatform
 
     public void PumpMessages() => Interlocked.Increment(ref _pumps);
 
+    /// <summary>How many times the processor asked for the Start-menu mask.</summary>
+    public int MaskCount => _masks;
+    private int _masks;
+
+    public void InjectMaskKey() => Interlocked.Increment(ref _masks);
+
     public void RaiseActivity() => _callback!(KeyboardKey.H, true, ModifierKeys.Alt);
 
     /// <summary>Raises the given key/modifier combination through the installed callback, for scenarios that need a chord other than the default H+Alt (: a key that is NOT a registered chord must still round-trip cleanly through the pause gate).</summary>

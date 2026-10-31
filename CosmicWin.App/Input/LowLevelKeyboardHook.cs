@@ -65,18 +65,52 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
         set => _paused = value;
     }
 
+    /// <summary>
+    /// While <c>true</c>, Win plays the part Alt plays in every chord, and Alt is left to the
+    /// applications. Written from the tray's UI thread, read on the hook's thread, like <see cref="IsPaused"/>.
+    /// </summary>
+    public bool UseWinAsChordModifier
+    {
+        get => _useWin;
+        set => _useWin = value;
+    }
+
+    private volatile bool _useWin;
+
+    /// <summary>
+    /// Taps <see cref="KeyboardKey.MaskKey"/>, so the shell does not open the Start menu for a Win
+    /// whose combination it never saw -- every key of it was swallowed here. Unset, nothing is masked.
+    /// </summary>
+    public Action? MaskWinRelease { get; init; }
+
+    /// <summary>A chord was answered while Win was its modifier, and Win has not been released since.</summary>
+    private bool _maskPending;
+
     public bool Process(
         KeyboardKey key, bool isKeyDown, ModifierKeys modifiers,
         ChannelWriter<HotkeyAction> writer)
     {
+        // Our own mask coming back through the hook: neither a chord nor something the user typed.
+        if (key == KeyboardKey.MaskKey) return false;
+
         var keyIndex = (byte)key;
         if (!isKeyDown)
         {
+            if (_maskPending && key is KeyboardKey.LeftWin or KeyboardKey.RightWin)
+            {
+                // Before the release reaches the shell, which decides on it whether to open Start.
+                _maskPending = false;
+                MaskWinRelease?.Invoke();
+            }
+
             var suppress = _acceptedKeyDown[keyIndex];
             _acceptedKeyDown[keyIndex] = false;
             return suppress;
         }
         if (_paused) return false;
+
+        var useWin = _useWin;
+        modifiers = ToChordModifiers(modifiers, useWin);
         if (!chords.TryMatch(modifiers, key, out var action))
         {
             // A chord that matches nothing vanishes without trace, which is indistinguishable from
@@ -101,6 +135,7 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             // the dead stretch this diagnosis exists to measure.
             _repeating = null;
             _repeats = 0;
+            _maskPending |= useWin;
         }
         else
         {
@@ -111,6 +146,18 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
         }
 
         return _acceptedKeyDown[keyIndex] = accepted;
+    }
+
+    /// <summary>
+    /// The held modifiers as the chord table reads them, which is always in Alt. In Win mode Win
+    /// becomes that Alt and a real Alt is dropped; otherwise Win is dropped, exactly as it was never
+    /// reported before this mode existed.
+    /// </summary>
+    private static ModifierKeys ToChordModifiers(ModifierKeys held, bool useWin)
+    {
+        var rest = held & ~(ModifierKeys.Alt | ModifierKeys.Win);
+        var chordKey = useWin ? ModifierKeys.Win : ModifierKeys.Alt;
+        return (held & chordKey) != 0 ? rest | ModifierKeys.Alt : rest;
     }
 
     /// <summary>
@@ -217,6 +264,9 @@ internal interface IKeyboardHookPlatform
     void Install(KeyboardHookCallback callback);
     bool Uninstall();
     void PumpMessages();
+
+    /// <summary>Taps <see cref="KeyboardKey.MaskKey"/> -- see <see cref="KeyboardEventProcessor.MaskWinRelease"/>.</summary>
+    void InjectMaskKey();
 }
 
 public sealed class LowLevelKeyboardHook : IDisposable
@@ -246,11 +296,7 @@ public sealed class LowLevelKeyboardHook : IDisposable
     private readonly Func<long> _clock;
     private readonly CancellationTokenSource _stop = new();
     private readonly ManualResetEventSlim _started = new();
-    private readonly KeyboardEventProcessor _processor = new(ChordTable.Default)
-    {
-        // Wired, or the diagnosis is a test that passes and an instrument that reads nothing.
-        PhysicalModifiers = WindowsKeyboardHookPlatform.PhysicalModifierSides,
-    };
+    private readonly KeyboardEventProcessor _processor;
     private Thread? _thread;
     private Exception? _startupFailure;
     private long _lastActivity;
@@ -283,6 +329,13 @@ public sealed class LowLevelKeyboardHook : IDisposable
         set => _processor.IsPaused = value;
     }
 
+    /// <summary>Pass-through onto <see cref="_processor"/>, for the reason <see cref="IsPaused"/> is one.</summary>
+    public bool UseWinAsChordModifier
+    {
+        get => _processor.UseWinAsChordModifier;
+        set => _processor.UseWinAsChordModifier = value;
+    }
+
     /// <summary>The last chord that matched nothing, so a "this key does nothing" report can be answered with what actually arrived.</summary>
     public string? LastUnmatchedChord => _processor.LastUnmatched;
 
@@ -304,6 +357,12 @@ public sealed class LowLevelKeyboardHook : IDisposable
         _watchdogInterval = watchdogInterval;
         _watchdogBackstop = watchdogBackstop ?? DefaultWatchdogBackstop;
         _clock = clock ?? (() => Environment.TickCount64);
+        _processor = new(ChordTable.Default)
+        {
+            // Wired, or the diagnosis is a test that passes and an instrument that reads nothing.
+            PhysicalModifiers = WindowsKeyboardHookPlatform.PhysicalModifierSides,
+            MaskWinRelease = platform.InjectMaskKey,
+        };
     }
 
     public void Start()
@@ -462,6 +521,23 @@ internal sealed unsafe class WindowsKeyboardHookPlatform : IKeyboardHookPlatform
         }
     }
 
+    /// <remarks>
+    /// Sent from inside the hook callback, the way AutoHotkey masks the same release: the input is
+    /// queued and reaches the shell ahead of the Win key-up this callback is still deciding on.
+    /// </remarks>
+    public void InjectMaskKey()
+    {
+        Span<INPUT> inputs = stackalloc INPUT[2];
+        for (var index = 0; index < inputs.Length; index++)
+        {
+            inputs[index].type = INPUT_TYPE.INPUT_KEYBOARD;
+            inputs[index].Anonymous.ki.wVk = (VIRTUAL_KEY)KeyboardKey.MaskKey;
+        }
+
+        inputs[1].Anonymous.ki.dwFlags = KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP;
+        PInvoke.SendInput(inputs, sizeof(INPUT));
+    }
+
     private LRESULT HookProc(int code, WPARAM wParam, LPARAM lParam)
     {
         if (code >= 0)
@@ -517,6 +593,7 @@ internal sealed unsafe class WindowsKeyboardHookPlatform : IKeyboardHookPlatform
         if (IsPressed(0x12)) result |= ModifierKeys.Alt;
         if (IsPressed(0x10)) result |= ModifierKeys.Shift;
         if (IsPressed(0x11)) result |= ModifierKeys.Control;
+        if (IsPressed(0x5B) || IsPressed(0x5C)) result |= ModifierKeys.Win;
         return result;
     }
 

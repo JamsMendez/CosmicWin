@@ -2,7 +2,9 @@
 
 public sealed class ChordTable
 {
-    private const int ModifierCount = 8;
+    // Room for the Win bit too, so a lookup that still carries it lands on an empty slot of its own
+    // key instead of overflowing into the next key's.
+    private const int ModifierCount = 16;
     private readonly HotkeyAction[] _actions = new HotkeyAction[256 * ModifierCount];
     private readonly bool[] _registered = new bool[256 * ModifierCount];
 
