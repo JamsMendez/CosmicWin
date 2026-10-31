@@ -55,6 +55,9 @@ public sealed class AppComposition : IDisposable
     private readonly IVideoWallpaperPlayer? _videoWallpaperPlayer;
     private readonly Action _disposeVideoWallpaper;
 
+    /// <summary>Gives Windows' manual lock back if this run took it; see <see cref="WorkstationLockGuard"/>.</summary>
+    private readonly Action? _releaseManualLock;
+
     /// <summary>
     /// F5 (video-wallpaper-review-followups, <c>R3-keepalive-flag-cross-thread</c>): a plain
     /// <c>bool</c> read on one thread and written on another is not guaranteed to observe the
@@ -85,7 +88,7 @@ public sealed class AppComposition : IDisposable
         IWindowShownWatcher? windowShown, FloatingDialogAdapter? dialogAdapter,
         IFocusBorder? focusBorder, IVideoWallpaperHost? videoWallpaperHost,
         IVideoWallpaperPlayer? videoWallpaperPlayer, Action disposeVideoWallpaper,
-        Action unfollowFocusedWindow)
+        Action unfollowFocusedWindow, Action? releaseManualLock = null)
     {
         _dispatcher = dispatcher;
         _hook = hook;
@@ -100,6 +103,7 @@ public sealed class AppComposition : IDisposable
         _videoWallpaperPlayer = videoWallpaperPlayer;
         _disposeVideoWallpaper = disposeVideoWallpaper;
         _unfollowFocusedWindow = unfollowFocusedWindow;
+        _releaseManualLock = releaseManualLock;
     }
 
     /// <summary>
@@ -205,7 +209,13 @@ public sealed class AppComposition : IDisposable
         // The tray switch over that percent. Null -- as in every test that predates it -- means
         // what the percent alone meant before the switch: on exactly when it is below 100.
         bool? unfocusedTransparency = null,
-        Action<bool>? persistUnfocusedTransparency = null)
+        Action<bool>? persistUnfocusedTransparency = null,
+        // Win as the chord modifier, and the lock policy that has to go with it. Unset -- as in
+        // every test that predates it -- the chords stay on Alt and no policy is ever touched.
+        bool winChordModifier = false,
+        Action<bool>? persistWinChordModifier = null,
+        Func<bool>? disableManualLock = null,
+        Func<bool>? restoreManualLock = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -256,6 +266,19 @@ public sealed class AppComposition : IDisposable
             treeManager.CurrentDesktop = () => virtualDesktops.CurrentDesktopId;
         }
         var hook = hookFactory(dispatcher.Writer);
+
+        // Settled before the first key can arrive. Stored on, the lock is taken again -- a start
+        // after a crash finds it still taken, which the guard reads as the same ownership. Stored
+        // off, a lock an unclean exit left disabled is given back. A lock that cannot be taken
+        // keeps this run on Alt without forgetting the stored choice: a Win+L that locks the
+        // session in the middle of a chord is worse than the chords the user already knows.
+        var useWin = winChordModifier && (disableManualLock?.Invoke() ?? true);
+        if (!winChordModifier)
+        {
+            restoreManualLock?.Invoke();
+        }
+
+        hook.UseWinAsChordModifier = useWin;
 
         // Which desktop the USER is on, and where it sits. Kept here rather than asked of the shell
         // on demand, because the one moment it is needed -- a window arriving -- is the one moment
@@ -969,6 +992,35 @@ public sealed class AppComposition : IDisposable
             desktopTrace: desktopTrace,
             removeVideoWallpaper: RemoveVideoWallpaper,
             getHasVideoWallpaper: () => videoWallpaperConfigured.Value,
+            getWinChordModifier: () => useWin,
+            setWinChordModifier: enabled =>
+            {
+                if (enabled == useWin)
+                {
+                    return;
+                }
+
+                if (enabled)
+                {
+                    // The lock first: the hook must not read Win while Win+L still locks.
+                    if (disableManualLock?.Invoke() == false)
+                    {
+                        return;
+                    }
+
+                    useWin = true;
+                    hook.UseWinAsChordModifier = true;
+                }
+                else
+                {
+                    // The hook first, for the mirror-image reason.
+                    useWin = false;
+                    hook.UseWinAsChordModifier = false;
+                    restoreManualLock?.Invoke();
+                }
+
+                persistWinChordModifier?.Invoke(enabled);
+            },
             getUnfocusedTransparency: () => transparency,
             setUnfocusedTransparency: enabled =>
             {
@@ -1598,6 +1650,13 @@ public sealed class AppComposition : IDisposable
         return new AppComposition(
             dispatcher, hook, workspace, sessionAdapter, tray, reconcile, windowShown, dialogAdapter,
             focusBorder, videoWallpaperHost, videoWallpaperPlayer, disposeVideoWallpaperBase,
+            releaseManualLock: () =>
+            {
+                if (useWin)
+                {
+                    restoreManualLock?.Invoke();
+                }
+            },
             unfollowFocusedWindow: () =>
             {
                 if (followFocusedWindow is not null)
@@ -1683,6 +1742,8 @@ public sealed class AppComposition : IDisposable
         var settingsStore = new SynchronizedSettingsStore(
             settings, s => SettingsFile.Save(s, OnSettingsSaveFailed));
 
+        var lockGuard = new WorkstationLockGuard(new RegistryLockPolicyStore(), WorkstationLockGuard.ResolveMarkerPath());
+
         // ONE hoisted instance for the life of the process, read once per untiled focus chord --
         // not reconstructed per chord, which would pay Win32NativeWindowSource's own construction
         // cost on every keypress for no benefit, since it carries no per-call state to keep fresh.
@@ -1728,6 +1789,10 @@ public sealed class AppComposition : IDisposable
             unfocusedTransparency: settings.UnfocusedTransparency,
             persistUnfocusedTransparency: enabled => settingsStore.Update(
                 s => s with { UnfocusedTransparency = enabled }),
+            winChordModifier: settings.WinChordModifier,
+            persistWinChordModifier: enabled => settingsStore.Update(s => s with { WinChordModifier = enabled }),
+            disableManualLock: lockGuard.TryDisable,
+            restoreManualLock: lockGuard.TryRestore,
             // Read once, before anything is adopted: a marker still there means the last run did
             // not exit cleanly while windows were layered.
             repairOpacityOnAdoption: OpacityMarkerFile.Exists(OpacityMarkerFile.ResolvePath()),
@@ -1999,6 +2064,9 @@ public sealed class AppComposition : IDisposable
         _reconcile.Dispose();
         _tray.Dispose();
         _hook.Dispose();
+
+        // After the hook is gone, so no Win chord is read once Win+L locks again.
+        _releaseManualLock?.Invoke();
 
         // The adapter first, then the source it listens to: unsubscribing before the hook is torn
         // down means no event can arrive against a half-disposed adapter.

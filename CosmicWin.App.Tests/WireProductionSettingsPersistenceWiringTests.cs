@@ -116,4 +116,28 @@ public sealed class WireProductionSettingsPersistenceWiringTests
         Assert.Contains("settingsStore.Update(", persist, StringComparison.Ordinal);
         Assert.Contains("s => s with { UnfocusedTransparency = enabled }", persist, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The Win-modifier switch: seeded from the parsed record, persisted into the same field, and
+    /// its lock policy reached through the real guard, so the tray item cannot forget itself on
+    /// restart or switch the chords without touching the lock.
+    /// </summary>
+    [Fact]
+    public void WireProduction_SeedsAndPersistsTheWinChordModifier_AndWiresTheLockGuard()
+    {
+        var source = ReadAppCompositionSource();
+
+        var methodStart = source.IndexOf(
+            "public static AppComposition WireProduction(Action shutdown)", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "expected to find WireProduction's declaration in AppComposition.cs");
+        var body = source[methodStart..];
+
+        Assert.Contains("winChordModifier: settings.WinChordModifier,", body, StringComparison.Ordinal);
+        Assert.Contains("s => s with { WinChordModifier = enabled }", body, StringComparison.Ordinal);
+        Assert.Contains("disableManualLock: lockGuard.TryDisable,", body, StringComparison.Ordinal);
+        Assert.Contains("restoreManualLock: lockGuard.TryRestore,", body, StringComparison.Ordinal);
+        Assert.Contains(
+            "new WorkstationLockGuard(new RegistryLockPolicyStore(), WorkstationLockGuard.ResolveMarkerPath())",
+            body, StringComparison.Ordinal);
+    }
 }

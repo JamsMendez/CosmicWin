@@ -17,6 +17,12 @@ public enum TrayMenuEntry
     /// </summary>
     Tiling,
 
+    /// <summary>
+    /// Holds every chord with Win instead of Alt. Turning it on asks first, because it also disables
+    /// Windows' manual lock for as long as it stays on.
+    /// </summary>
+    WinChordModifier,
+
     /// <summary>Draws CosmicWin's own thicker focus border, or leaves only the one DWM draws.</summary>
     FocusBorder,
 

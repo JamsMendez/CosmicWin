@@ -503,6 +503,37 @@ public sealed class SettingsTests
         Assert.Contains("unfocused-transparency = on", serialized, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("chord-modifier = win", true)]
+    [InlineData("chord-modifier = WIN", true)]
+    [InlineData("chord-modifier = alt", false)]
+    [InlineData("", false)]
+    public void ChordModifier_IsReadAsWinOrAlt(string content, bool expected) =>
+        Assert.Equal(expected, Settings.Parse(content).WinChordModifier);
+
+    /// <summary>An unreadable value keeps the default, and the default is Alt: the chords people already know.</summary>
+    [Fact]
+    public void AnUnreadableChordModifier_KeepsAlt_AndTheSettingsAroundIt()
+    {
+        var parsed = Settings.Parse("tiling = off\nchord-modifier = super\ngap = 4");
+
+        Assert.False(parsed.WinChordModifier);
+        Assert.False(parsed.Tiling);
+        Assert.Equal(4, parsed.Gap);
+    }
+
+    [Theory]
+    [InlineData(true, "chord-modifier = win")]
+    [InlineData(false, "chord-modifier = alt")]
+    public void ChordModifier_RoundTripsWithItsComment(bool win, string line)
+    {
+        var serialized = new Settings(FocusBorder: true, WinChordModifier: win).Serialize();
+
+        Assert.Contains("# chord-modifier:", serialized, StringComparison.Ordinal);
+        Assert.Contains(line, serialized, StringComparison.Ordinal);
+        Assert.Equal(win, Settings.Parse(serialized).WinChordModifier);
+    }
+
     /// <summary>Each setting costs only itself: an unreadable one must not take its neighbours down.</summary>
     [Fact]
     public void GapIsReadIndependentlyOfTheOtherSettings()
@@ -642,7 +673,7 @@ public sealed class SettingsTests
             .ToArray();
 
         Assert.Equal(
-            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity"],
+            ["focus-border", "border-color", "tiling", "video-wallpaper-path", "gap", "unfocused-opacity", "chord-modifier"],
             keys);
         foreach (var legacy in new[] { "alerts", "alert-http =", "alert-http-port", "video-wallpaper-http",
                      "wallpaper-scene-http", "mini-corner", "mini-position", "html-mini", "wallpaper-mode",

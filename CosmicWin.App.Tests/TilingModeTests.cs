@@ -89,7 +89,9 @@ public sealed class TilingModeTests
     private static Harness Wire(
         bool tilingEnabled = true, int unfocusedOpacity = 100,
         bool previousRunCrashed = false, Action<bool>? setOpacityMarker = null,
-        bool? unfocusedTransparency = null, Action<bool>? persistUnfocusedTransparency = null)
+        bool? unfocusedTransparency = null, Action<bool>? persistUnfocusedTransparency = null,
+        bool winChordModifier = false, Action<bool>? persistWinChordModifier = null,
+        Func<bool>? disableManualLock = null, Func<bool>? restoreManualLock = null)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -129,7 +131,11 @@ public sealed class TilingModeTests
             repairOpacityOnAdoption: previousRunCrashed,
             setOpacityMarker: setOpacityMarker,
             unfocusedTransparency: unfocusedTransparency,
-            persistUnfocusedTransparency: persistUnfocusedTransparency);
+            persistUnfocusedTransparency: persistUnfocusedTransparency,
+            winChordModifier: winChordModifier,
+            persistWinChordModifier: persistWinChordModifier,
+            disableManualLock: disableManualLock,
+            restoreManualLock: restoreManualLock);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -807,5 +813,121 @@ public sealed class TilingModeTests
             Assert.Equal(255, focused.Opacity);
             Assert.Equal(255, other.Opacity);
         }
+    }
+
+    /// <summary>Records every lock-policy call, and answers each with what it is told to.</summary>
+    private sealed class LockPolicyCalls
+    {
+        public bool DisableSucceeds { get; set; } = true;
+        public int Disables { get; private set; }
+        public int Restores { get; private set; }
+
+        public bool Disable()
+        {
+            Disables++;
+            return DisableSucceeds;
+        }
+
+        public bool Restore()
+        {
+            Restores++;
+            return true;
+        }
+    }
+
+    /// <summary>Stored on, the run starts with the lock disabled and the hook reading Win.</summary>
+    [Fact]
+    public void StoredWin_DisablesTheLockAtStartup_AndTheHookReadsWin()
+    {
+        var calls = new LockPolicyCalls();
+        var harness = Wire(winChordModifier: true, disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Hook.UseWinAsChordModifier);
+            Assert.True(harness.Tray.IsWinChordModifierEnabled);
+            Assert.Equal(1, calls.Disables);
+            Assert.Equal(0, calls.Restores);
+        }
+    }
+
+    /// <summary>A lock that cannot be disabled is not worth a Win+L that locks the session: the run stays on Alt.</summary>
+    [Fact]
+    public void StoredWin_WhoseLockCannotBeDisabled_RunsOnAlt_WithoutForgettingTheChoice()
+    {
+        var persisted = new List<bool>();
+        var calls = new LockPolicyCalls { DisableSucceeds = false };
+        var harness = Wire(
+            winChordModifier: true, persistWinChordModifier: persisted.Add,
+            disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        using (harness.Composition)
+        {
+            Assert.False(harness.Hook.UseWinAsChordModifier);
+            Assert.False(harness.Tray.IsWinChordModifierEnabled);
+            Assert.Empty(persisted);
+        }
+    }
+
+    /// <summary>Stored off, a lock an unclean exit left disabled is put back before anything else.</summary>
+    [Fact]
+    public void StoredAlt_RestoresTheLockAtStartup()
+    {
+        var calls = new LockPolicyCalls();
+        var harness = Wire(disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        using (harness.Composition)
+        {
+            Assert.False(harness.Hook.UseWinAsChordModifier);
+            Assert.Equal(1, calls.Restores);
+            Assert.Equal(0, calls.Disables);
+        }
+    }
+
+    [Fact]
+    public void TogglingWinOnAndOff_DisablesThenRestoresTheLock_AndPersistsEach()
+    {
+        var persisted = new List<bool>();
+        var calls = new LockPolicyCalls();
+        var harness = Wire(
+            persistWinChordModifier: persisted.Add, disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        using (harness.Composition)
+        {
+            Assert.True(harness.Tray.ToggleWinChordModifier());
+            Assert.True(harness.Hook.UseWinAsChordModifier);
+            Assert.Equal(1, calls.Disables);
+
+            Assert.False(harness.Tray.ToggleWinChordModifier());
+            Assert.False(harness.Hook.UseWinAsChordModifier);
+            Assert.Equal(2, calls.Restores);
+            Assert.Equal([true, false], persisted);
+        }
+    }
+
+    [Fact]
+    public void TogglingWinOn_WhenTheLockCannotBeDisabled_StaysOnAlt_AndPersistsNothing()
+    {
+        var persisted = new List<bool>();
+        var calls = new LockPolicyCalls { DisableSucceeds = false };
+        var harness = Wire(
+            persistWinChordModifier: persisted.Add, disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        using (harness.Composition)
+        {
+            Assert.False(harness.Tray.ToggleWinChordModifier());
+            Assert.False(harness.Hook.UseWinAsChordModifier);
+            Assert.Empty(persisted);
+        }
+    }
+
+    /// <summary>A clean exit gives the lock back; the next start takes it again.</summary>
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public void Exiting_RestoresTheLock_OnlyWhileWinIsTheModifier(bool win, int restoresOnExit)
+    {
+        var calls = new LockPolicyCalls();
+        var harness = Wire(winChordModifier: win, disableManualLock: calls.Disable, restoreManualLock: calls.Restore);
+        var atStartup = calls.Restores;
+
+        harness.Composition.Dispose();
+
+        Assert.Equal(restoresOnExit, calls.Restores - atStartup);
     }
 }

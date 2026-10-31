@@ -38,6 +38,11 @@ namespace CosmicWin.App;
 /// Whether that opacity is applied at all -- the tray switch. Kept apart from the percent so
 /// turning it off does not forget the value the user chose.
 /// </param>
+/// <param name="WinChordModifier">
+/// Whether Win plays the part Alt plays in every chord. Off by default: Alt is what every chord was
+/// written for. On, Windows' manual lock is disabled for as long as it stays on (see
+/// <see cref="WorkstationLockGuard"/>), which is why the tray asks before turning it on.
+/// </param>
 /// <remarks>
 /// <para>
 /// The colour is a plain <c>uint</c> rather than a WPF <c>Color</c> on purpose. This type is the
@@ -57,7 +62,7 @@ namespace CosmicWin.App;
 /// </remarks>
 public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool Tiling = true,
     string? VideoWallpaperPath = null, int Gap = TreeArranger.DefaultGap, int UnfocusedOpacity = 100,
-    bool UnfocusedTransparency = false)
+    bool UnfocusedTransparency = false, bool WinChordModifier = false)
 {
     /// <summary>
     /// What CosmicWin does when nobody has said otherwise. The border is ON: a settings file that
@@ -80,6 +85,8 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
     private const string UnfocusedOpacityKey = "unfocused-opacity";
 
     private const string UnfocusedTransparencyKey = "unfocused-transparency";
+
+    private const string ChordModifierKey = "chord-modifier";
 
     /// <summary>
     /// The percent the transparency switch draws at while <see cref="UnfocusedOpacity"/> is still the
@@ -116,6 +123,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         // Null until the key is read: a file written before the switch existed turned the
         // transparency on only by lowering the percent, and must keep meaning exactly that.
         bool? unfocusedTransparency = null;
+        var winChordModifier = Default.WinChordModifier;
 
         foreach (var rawLine in content.Split('\n'))
         {
@@ -175,6 +183,18 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
             {
                 unfocusedTransparency = transparencyFlag;
             }
+            else if (key.Equals(ChordModifierKey, StringComparison.OrdinalIgnoreCase))
+            {
+                // Two words, nothing else: a typo keeps Alt rather than guessing the lock away.
+                if (value.Equals("win", StringComparison.OrdinalIgnoreCase))
+                {
+                    winChordModifier = true;
+                }
+                else if (value.Equals("alt", StringComparison.OrdinalIgnoreCase))
+                {
+                    winChordModifier = false;
+                }
+            }
             // alerts / alerts-enabled (the retired alert layer), http-server / http-server-port and
             // their legacy alert-http / alert-http-port names (the retired local HTTP server),
             // video-wallpaper-http and wallpaper-scene-http (its
@@ -184,7 +204,7 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
         }
 
         return new Settings(focusBorder, borderColor, tiling, videoWallpaperPath, gap, unfocusedOpacity,
-            unfocusedTransparency ?? unfocusedOpacity < 100);
+            unfocusedTransparency ?? unfocusedOpacity < 100, winChordModifier);
     }
 
     /// <summary>
@@ -228,6 +248,10 @@ public sealed record Settings(bool FocusBorder, uint? BorderColor = null, bool T
          # window opaque. The tray toggles it; the percent above is kept either way. Left out, it
          # follows the percent: on below 100, off at 100. Written only when it disagrees with that.
          {TransparencyLine}
+
+         # {ChordModifierKey}: alt or win, the key every chord is held with. win also disables
+         # Windows' manual lock (Win+L) while it is on; the tray asks before turning it on.
+         {ChordModifierKey} = {(WinChordModifier ? "win" : "alt")}
 
          """;
 

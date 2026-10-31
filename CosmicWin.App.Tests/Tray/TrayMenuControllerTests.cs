@@ -364,6 +364,41 @@ public sealed class TrayMenuControllerTests
         Assert.False(controller.ToggleUnfocusedTransparency());
     }
 
+    [Fact]
+    public void WithNoWinModifierDelegatesWired_TheSwitchReportsOff_AndTheToggleChangesNothing()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.False(controller.IsWinChordModifierEnabled);
+        Assert.False(controller.ToggleWinChordModifier());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ToggleWinChordModifier_FlipsTheInjectedState_AndReturnsIt(bool initial)
+    {
+        var state = initial;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getWinChordModifier: () => state, setWinChordModifier: value => state = value);
+
+        Assert.Equal(!initial, controller.ToggleWinChordModifier());
+        Assert.Equal(!initial, state);
+    }
+
+    /// <summary>A switch-on the wiring refused (the lock policy could not be written) reports what is true: still off.</summary>
+    [Fact]
+    public void ToggleWinChordModifier_ReportsTheStateTheWiringActuallyReached()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getWinChordModifier: () => false, setWinChordModifier: _ => { });
+
+        Assert.False(controller.ToggleWinChordModifier());
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

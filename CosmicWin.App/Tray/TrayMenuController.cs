@@ -16,7 +16,8 @@ public sealed class TrayMenuController(
     Func<bool>? getTiling = null, Action<bool>? setTiling = null,
     Action<string>? setVideoWallpaperPath = null,
     Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null,
-    Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null)
+    Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null,
+    Func<bool>? getWinChordModifier = null, Action<bool>? setWinChordModifier = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -127,6 +128,21 @@ public sealed class TrayMenuController(
         var next = !IsUnfocusedTransparencyEnabled;
         setUnfocusedTransparency(next);
         return next;
+    }
+
+    /// <summary>Whether Win, rather than Alt, is the key every chord is held with.</summary>
+    /// <remarks>Answers NO when no getter was wired: Alt is what every chord was written for.</remarks>
+    public bool IsWinChordModifierEnabled => getWinChordModifier?.Invoke() ?? false;
+
+    /// <summary>
+    /// Switches the chord modifier, returning the state the wiring actually REACHED -- re-read rather
+    /// than assumed, unlike the other switches, because turning it on can be refused: when the lock
+    /// policy cannot be written, it stays off and the tick has to say so.
+    /// </summary>
+    public bool ToggleWinChordModifier()
+    {
+        setWinChordModifier?.Invoke(!IsWinChordModifierEnabled);
+        return IsWinChordModifierEnabled;
     }
 
     /// <summary>

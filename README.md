@@ -51,6 +51,8 @@ that from a normal process.
 ## Keybindings
 
 Keybindings are compile-time (`CosmicWin.App/Input/ChordTable.cs`); there is no file to remap them.
+The tables use `Alt`; with [Win as the chord key](#win-as-the-chord-key) on, read `Win` wherever
+they say `Alt`.
 
 **Focus and layout**
 
@@ -88,6 +90,25 @@ Two collisions with Windows itself are worth knowing before you file a bug:
 - **`Alt+Shift` is Windows' default language-switch hotkey.** Every move chord starts with it, so the
   input language will flip unless you set that hotkey to *Not Assigned*.
 
+### Win as the chord key
+
+The tray item **Atajos con tecla Win** (`chord-modifier = win`) moves every chord from `Alt` to
+`Win`: `Win+L` moves focus right, `Win+2` goes to desktop 2, `Win+T` toggles tiling. `Alt`
+combinations go back to your applications, and releasing `Win` after a chord does not open Start.
+Windows' own `Win` shortcuts that collide with a chord (`Win+H`, `Win+K`, `Win+1`..`Win+9`, ...) are
+taken over while it is on; the rest keep working.
+
+`Win+L` locks the session before any program sees it, so turning this on also **disables Windows'
+manual lock** (`DisableLockWorkstation` under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System`): `Win+L`, **Bloquear** in Start
+and `Ctrl+Alt+Del`, and `LockWorkStation()` stop locking. The tray asks before turning it on. The
+password after waking from sleep is a separate setting and is not touched.
+
+CosmicWin puts back the exact value that was there before (recorded in `lock-workstation-owned`
+beside `settings.conf`) when you turn the item off and when it exits. If it is killed instead, the
+lock stays disabled until CosmicWin starts again: a start with the item off gives it back, a start
+with it on keeps it. If the policy cannot be written, the chords stay on `Alt`.
+
 ## Tray menu
 
 Right-click the CosmicWin icon in the notification area.
@@ -95,6 +116,7 @@ Right-click the CosmicWin icon in the notification area.
 | Item | What it does |
 | --- | --- |
 | **Modo tiling** | Tiling on or off; the tick shows the current state. Same switch as `Alt+T`. |
+| **Atajos con tecla Win** | Hold every chord with `Win` instead of `Alt`. Asks first, because it disables Windows' manual lock while on — see [Win as the chord key](#win-as-the-chord-key). |
 | **Borde de foco** | Draw CosmicWin's own focus border, or not. |
 | **Color del borde** | **Elegir...** picks a colour; **Acento del sistema** goes back to the accent colour. |
 | **Wallpaper de video...** | Pick an MP4 to loop as the desktop wallpaper — see [Video wallpaper](#video-wallpaper). |
@@ -103,7 +125,7 @@ Right-click the CosmicWin icon in the notification area.
 | **Reload** | Re-read the window exception list and `gap` from `settings.conf`. |
 | **Salir** | Exit CosmicWin. |
 
-Tiling, the focus border and its colour are saved to `settings.conf` as you change them.
+Tiling, the chord key, the focus border and its colour are saved to `settings.conf` as you change them.
 
 ## Recommended Windows setting
 
@@ -228,6 +250,7 @@ next start; **Reload** in the tray applies `gap` without one.
 | `focus-border` | `on` | Draw CosmicWin's own thicker focus border. |
 | `border-color` | `accent` | `#RRGGBB`, or `accent` to follow Windows' own accent colour. |
 | `unfocused-opacity` | `100` | Percent opacity of every tiled window except the active one (10–100). `100` is off and touches no window, except to make opaque again the ones a crash left translucent. |
+| `chord-modifier` | `alt` | `alt` or `win`: the key every chord is held with. `win` disables Windows' manual lock while on. |
 | `video-wallpaper-path` | *(blank)* | Absolute path to the imported video wallpaper. Set by the tray menu, not meant to be hand-edited; blank plays no video. |
 
 ### Retired settings

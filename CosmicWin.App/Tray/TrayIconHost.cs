@@ -48,6 +48,13 @@ public sealed class TrayIconHost : IDisposable
         };
         tilingItem.Click += (_, _) => tilingItem.Checked = controller.ToggleTiling();
 
+        // Right under the mode switch, because it changes how that mode is driven. A tick like it.
+        var winModifierItem = new ToolStripMenuItem("Atajos con tecla Win")
+        {
+            Checked = controller.IsWinChordModifierEnabled,
+        };
+        winModifierItem.Click += (_, _) => winModifierItem.Checked = ToggleWinChordModifier(controller);
+
         // A TICK rather than a glyph, and deliberately so: a ToolStripMenuItem that carries an
         // Image renders it INSTEAD of its check mark, so a state this item exists to show would
         // have been hidden by decorating it. CheckOnClick is left off -- the controller owns the
@@ -108,6 +115,7 @@ public sealed class TrayIconHost : IDisposable
         var items = new Dictionary<TrayMenuEntry, ToolStripMenuItem>
         {
             [TrayMenuEntry.Tiling] = tilingItem,
+            [TrayMenuEntry.WinChordModifier] = winModifierItem,
             [TrayMenuEntry.FocusBorder] = borderItem,
             [TrayMenuEntry.BorderColor] = colorItem,
             [TrayMenuEntry.UnfocusedTransparency] = transparencyItem,
@@ -131,6 +139,7 @@ public sealed class TrayIconHost : IDisposable
         menu.Opening += (_, _) =>
         {
             tilingItem.Checked = controller.IsTilingEnabled;
+            winModifierItem.Checked = controller.IsWinChordModifierEnabled;
             transparencyItem.Checked = controller.IsUnfocusedTransparencyEnabled;
             RefreshRemoveVideoWallpaperItem(removeVideoWallpaperItem, controller);
         };
@@ -204,6 +213,7 @@ public sealed class TrayIconHost : IDisposable
     public static IReadOnlyList<TrayMenuEntry> MenuOrder { get; } =
     [
         TrayMenuEntry.Tiling,
+        TrayMenuEntry.WinChordModifier,
         TrayMenuEntry.FocusBorder,
         TrayMenuEntry.BorderColor,
         TrayMenuEntry.UnfocusedTransparency,
@@ -213,6 +223,46 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.Reload,
         TrayMenuEntry.Exit,
     ];
+
+    /// <summary>
+    /// Asks before switching TO Win, because that also disables Windows' manual lock; switching
+    /// back needs no question. Says so when the switch-on was refused, rather than leaving an
+    /// unticked item as the only sign.
+    /// </summary>
+    private static bool ToggleWinChordModifier(TrayMenuController controller)
+    {
+        var turningOn = !controller.IsWinChordModifierEnabled;
+        if (turningOn)
+        {
+            var answer = MessageBox.Show(
+                "Los atajos pasan de Alt a Win (Win+H/J/K/L, Win+1..9, Win+T...).\n\n" +
+                "Para que Win+L llegue a CosmicWin, Windows deja de poder bloquearse a mano mientras " +
+                "esto esté activo: Win+L, \"Bloquear\" en Inicio y en Ctrl+Alt+Supr, y LockWorkStation(). " +
+                "La contraseña al despertar de la suspensión es otra configuración y no se toca.\n\n" +
+                "CosmicWin restaura el bloqueo al desactivar esta opción y al salir.\n\n" +
+                "¿Activar los atajos con Win?",
+                "CosmicWin",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+            {
+                return false;
+            }
+        }
+
+        var enabled = controller.ToggleWinChordModifier();
+        if (turningOn && !enabled)
+        {
+            MessageBox.Show(
+                "No se pudo desactivar el bloqueo de Windows, así que los atajos siguen con Alt.",
+                "CosmicWin",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        return enabled;
+    }
 
     /// <summary>
     /// Opens Windows' own colour dialog, seeded with the colour the border is wearing right now.
