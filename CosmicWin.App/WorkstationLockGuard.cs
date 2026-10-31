@@ -110,7 +110,12 @@ public sealed class WorkstationLockGuard(ILockPolicyStore store, string markerPa
         exception is IOException or UnauthorizedAccessException or SecurityException;
 }
 
-/// <summary>The real policy value, in the current user's hive: no elevation needed.</summary>
+/// <summary>The real policy value, in the current user's hive.</summary>
+/// <remarks>
+/// Writable only elevated: the user's own token holds just ReadKey on <c>...\Policies</c>, which is
+/// what keeps an ordinary program from switching policies off. CosmicWin always runs elevated (its
+/// manifest requires it), and the elevated token is the same user, so this is the same hive.
+/// </remarks>
 public sealed class RegistryLockPolicyStore : ILockPolicyStore
 {
     private const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
