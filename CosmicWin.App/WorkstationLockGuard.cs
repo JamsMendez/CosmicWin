@@ -39,8 +39,9 @@ public interface IPolicyKey
 /// <para>
 /// <see cref="OwnedValueName"/> is what makes the policy CosmicWin's to change: a restore without it
 /// does nothing, so a policy the user set themselves stays theirs. The backup is written before the
-/// ownership value and the ownership value before the policy, so a crash at any step leaves either
-/// nothing claimed or a claim whose backup is the true previous value.
+/// ownership value and the ownership value before the policy; a restore drops the claim before the
+/// backup. A crash at any step leaves either nothing claimed or a claim whose backup is the true
+/// previous value.
 /// </para>
 /// </remarks>
 public sealed class WorkstationLockGuard(IPolicyKey key)
@@ -99,15 +100,17 @@ public sealed class WorkstationLockGuard(IPolicyKey key)
             if (key.Read(BackupValueName) is { } before)
             {
                 key.Write(PolicyValueName, before);
-                key.Delete(BackupValueName);
             }
             else
             {
                 key.Delete(PolicyValueName);
             }
 
-            // Last, so a failure above leaves the claim standing and the next start retries it.
+            // The claim goes before the backup it points at. A failure before this line leaves both,
+            // so the retry writes the same value again; after it, an orphaned backup is harmless --
+            // without a claim nothing reads it, and the next disable replaces it.
             key.Delete(OwnedValueName);
+            key.Delete(BackupValueName);
             return true;
         }
         catch (Exception exception) when (IsAccessFailure(exception))

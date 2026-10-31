@@ -115,10 +115,32 @@ public sealed class WorkstationLockGuardTests
         Assert.Empty(store.Values);
     }
 
+    /// <summary>
+    /// A restore that dies after putting the value back but before dropping its claim must keep the
+    /// backup, so the retry writes the user's own value again instead of deleting it.
+    /// </summary>
+    [Fact]
+    public void ARestoreThatFailsToDropItsClaim_KeepsTheBackup_ForTheRetry()
+    {
+        var store = new FakePolicyKey();
+        store.Values[Policy] = new PolicyValue(1, RegistryValueKind.DWord);
+        var guard = new WorkstationLockGuard(store);
+        guard.TryDisable();
+        store.FailDeleteOf = WorkstationLockGuard.OwnedValueName;
+
+        Assert.False(guard.TryRestore());
+
+        store.FailDeleteOf = null;
+        Assert.True(guard.TryRestore());
+        Assert.Equal(new PolicyValue(1, RegistryValueKind.DWord), store.Values[Policy]);
+        Assert.Single(store.Values);
+    }
+
     private sealed class FakePolicyKey : IPolicyKey
     {
         public Dictionary<string, PolicyValue> Values { get; } = [];
         public bool FailWrites { get; set; }
+        public string? FailDeleteOf { get; set; }
         public int Writes { get; private set; }
 
         public PolicyValue? Read(string name) => Values.TryGetValue(name, out var value) ? value : null;
@@ -131,6 +153,11 @@ public sealed class WorkstationLockGuardTests
 
         public void Delete(string name)
         {
+            if (name == FailDeleteOf)
+            {
+                throw new UnauthorizedAccessException();
+            }
+
             Fail();
             Values.Remove(name);
         }
