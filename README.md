@@ -96,7 +96,9 @@ The tray item **Atajos con tecla Win** (`chord-modifier = win`) moves every chor
 `Win`: `Win+L` moves focus right, `Win+2` goes to desktop 2, `Win+T` toggles tiling. `Alt`
 combinations go back to your applications, and releasing `Win` after a chord does not open Start.
 Windows' own `Win` shortcuts that collide with a chord (`Win+H`, `Win+K`, `Win+1`..`Win+9`, ...) are
-taken over while it is on; the rest keep working.
+taken over while it is on; the rest keep working, and so does every `Win+Alt` combination
+(`Win+Alt+K` mutes the microphone, `Win+Alt+1`..`Win+Alt+9` opens a jump list) — a real `Alt` held
+with `Win` is never read as a chord.
 
 `Win+L` locks the session before any program sees it, so turning this on also **disables Windows'
 manual lock** (`DisableLockWorkstation` under

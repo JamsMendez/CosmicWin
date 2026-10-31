@@ -153,11 +153,21 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
 
     /// <summary>
     /// The held modifiers as the chord table reads them, which is always in Alt. In Win mode Win
-    /// becomes that Alt and a real Alt is dropped; otherwise Win is dropped, exactly as it was never
-    /// reported before this mode existed.
+    /// becomes that Alt; otherwise Win is dropped, exactly as it was never reported before this mode
+    /// existed.
     /// </summary>
+    /// <remarks>
+    /// In Win mode a real Alt held WITH Win is returned untouched, Win bit and all, which no
+    /// registered chord carries: Win+Alt+something is Windows' own (microphone mute, jump lists, half
+    /// snaps), and dropping the Alt would have answered it with the Win chord it happens to contain.
+    /// </remarks>
     private static ModifierKeys ToChordModifiers(ModifierKeys held, bool useWin)
     {
+        if (useWin && (held & (ModifierKeys.Win | ModifierKeys.Alt)) == (ModifierKeys.Win | ModifierKeys.Alt))
+        {
+            return held;
+        }
+
         var rest = held & ~(ModifierKeys.Alt | ModifierKeys.Win);
         var chordKey = useWin ? ModifierKeys.Win : ModifierKeys.Alt;
         return (held & chordKey) != 0 ? rest | ModifierKeys.Alt : rest;

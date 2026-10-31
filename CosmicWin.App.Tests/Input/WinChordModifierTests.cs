@@ -39,6 +39,26 @@ public sealed class WinChordModifierTests
         Assert.False(channel.Reader.TryRead(out _));
     }
 
+    /// <summary>
+    /// Win+Alt+something is Windows' own (Win+Alt+K mutes the microphone, Win+Alt+1..9 opens a jump
+    /// list, Win+Alt+Up/Down snaps to a half): a real Alt beside the chord key makes it no chord at all,
+    /// rather than being dropped into the Win chord it happens to contain.
+    /// </summary>
+    [Theory]
+    [InlineData(KeyboardKey.K, ModifierKeys.Win | ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.H, ModifierKeys.Win | ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.Up, ModifierKeys.Win | ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.D2, ModifierKeys.Win | ModifierKeys.Alt)]
+    [InlineData(KeyboardKey.L, ModifierKeys.Win | ModifierKeys.Alt | ModifierKeys.Shift)]
+    public void InWinMode_WinAltCombinations_GoToWindows(KeyboardKey key, ModifierKeys modifiers)
+    {
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        var processor = new KeyboardEventProcessor(ChordTable.Default) { UseWinAsChordModifier = true };
+
+        Assert.False(processor.Process(key, true, modifiers, channel.Writer));
+        Assert.False(channel.Reader.TryRead(out _));
+    }
+
     /// <summary>Off, a held Win changes nothing: it was never reported before, and Alt still rules.</summary>
     [Fact]
     public void InAltMode_WinIsIgnored_AndAltStillMatches()
