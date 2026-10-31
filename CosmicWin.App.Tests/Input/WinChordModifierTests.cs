@@ -96,6 +96,28 @@ public sealed class WinChordModifierTests
         Assert.Equal(0, masks);
     }
 
+    /// <summary>
+    /// A Win release the hook never saw (lost, or injected away) must not leave the mask armed for the
+    /// NEXT press: that press, tapped alone, is the user asking for Start.
+    /// </summary>
+    [Fact]
+    public void InWinMode_ANewWinPress_DisarmsAMaskLeftFromAnEarlierChord()
+    {
+        var masks = 0;
+        var channel = Channel.CreateUnbounded<HotkeyAction>();
+        var processor = new KeyboardEventProcessor(ChordTable.Default)
+        {
+            UseWinAsChordModifier = true,
+            MaskWinRelease = () => masks++,
+        };
+
+        processor.Process(KeyboardKey.L, true, ModifierKeys.Win, channel.Writer);
+        processor.Process(KeyboardKey.LeftWin, true, ModifierKeys.Win, channel.Writer);
+        processor.Process(KeyboardKey.LeftWin, false, ModifierKeys.None, channel.Writer);
+
+        Assert.Equal(0, masks);
+    }
+
     [Fact]
     public void InAltMode_ReleasingWinAfterAChord_MasksNothing()
     {

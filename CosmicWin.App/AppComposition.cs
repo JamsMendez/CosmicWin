@@ -272,10 +272,31 @@ public sealed class AppComposition : IDisposable
         // off, a lock an unclean exit left disabled is given back. A lock that cannot be taken
         // keeps this run on Alt without forgetting the stored choice: a Win+L that locks the
         // session in the middle of a chord is worse than the chords the user already knows.
-        var useWin = winChordModifier && (disableManualLock?.Invoke() ?? true);
+        var useWin = winChordModifier && DisableManualLock("startup");
         if (!winChordModifier)
         {
-            restoreManualLock?.Invoke();
+            RestoreManualLock("startup");
+        }
+
+        // Both report a failure instead of swallowing it: a lock left disabled with the switch
+        // reading off is invisible from the tray, and the trace is the only place it can show.
+        bool DisableManualLock(string at)
+        {
+            if (disableManualLock?.Invoke() == false)
+            {
+                desktopTrace?.Record($"manual-lock disable-failed at={at}");
+                return false;
+            }
+
+            return true;
+        }
+
+        void RestoreManualLock(string at)
+        {
+            if (restoreManualLock?.Invoke() == false)
+            {
+                desktopTrace?.Record($"manual-lock restore-failed at={at}");
+            }
         }
 
         hook.UseWinAsChordModifier = useWin;
@@ -1003,7 +1024,7 @@ public sealed class AppComposition : IDisposable
                 if (enabled)
                 {
                     // The lock first: the hook must not read Win while Win+L still locks.
-                    if (disableManualLock?.Invoke() == false)
+                    if (!DisableManualLock("toggle"))
                     {
                         return;
                     }
@@ -1016,7 +1037,7 @@ public sealed class AppComposition : IDisposable
                     // The hook first, for the mirror-image reason.
                     useWin = false;
                     hook.UseWinAsChordModifier = false;
-                    restoreManualLock?.Invoke();
+                    RestoreManualLock("toggle");
                 }
 
                 persistWinChordModifier?.Invoke(enabled);
@@ -1654,7 +1675,7 @@ public sealed class AppComposition : IDisposable
             {
                 if (useWin)
                 {
-                    restoreManualLock?.Invoke();
+                    RestoreManualLock("exit");
                 }
             },
             unfollowFocusedWindow: () =>
@@ -2061,12 +2082,18 @@ public sealed class AppComposition : IDisposable
     public void Dispose()
     {
         // Stopped FIRST: a pass that fires mid-teardown would reconcile against a disposed workspace.
-        _reconcile.Dispose();
-        _tray.Dispose();
-        _hook.Dispose();
-
-        // After the hook is gone, so no Win chord is read once Win+L locks again.
-        _releaseManualLock?.Invoke();
+        try
+        {
+            _reconcile.Dispose();
+            _tray.Dispose();
+            _hook.Dispose();
+        }
+        finally
+        {
+            // After the hook is gone, so no Win chord is read once Win+L locks again -- and in a
+            // finally, because a teardown that threw above must not leave the lock disabled.
+            _releaseManualLock?.Invoke();
+        }
 
         // The adapter first, then the source it listens to: unsubscribing before the hook is torn
         // down means no event can arrive against a half-disposed adapter.

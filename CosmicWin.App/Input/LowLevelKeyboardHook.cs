@@ -107,6 +107,9 @@ public sealed class KeyboardEventProcessor(ChordTable chords)
             _acceptedKeyDown[keyIndex] = false;
             return suppress;
         }
+        // A fresh press starts a fresh combination. A release the hook never saw -- lost, or one of
+        // our own injected Win-ups -- must not leave the mask armed for a press tapped on its own.
+        if (key is KeyboardKey.LeftWin or KeyboardKey.RightWin) _maskPending = false;
         if (_paused) return false;
 
         var useWin = _useWin;

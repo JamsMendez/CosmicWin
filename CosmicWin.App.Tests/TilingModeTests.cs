@@ -1,4 +1,5 @@
-﻿using CosmicWin.App.Input;
+﻿using CosmicWin.App.Diagnostics;
+using CosmicWin.App.Input;
 using CosmicWin.App.Tests.TestDoubles;
 using CosmicWin.App.Tray;
 using CosmicWin.Interop;
@@ -91,7 +92,8 @@ public sealed class TilingModeTests
         bool previousRunCrashed = false, Action<bool>? setOpacityMarker = null,
         bool? unfocusedTransparency = null, Action<bool>? persistUnfocusedTransparency = null,
         bool winChordModifier = false, Action<bool>? persistWinChordModifier = null,
-        Func<bool>? disableManualLock = null, Func<bool>? restoreManualLock = null)
+        Func<bool>? disableManualLock = null, Func<bool>? restoreManualLock = null,
+        IDesktopTrace? desktopTrace = null, bool trayThrowsOnDispose = false)
     {
         var workspace = new FakeWorkspace();
         var primary = new FakeDisplay(
@@ -121,7 +123,7 @@ public sealed class TilingModeTests
             buildTray: controller =>
             {
                 tray = controller;
-                return new NullDisposable();
+                return trayThrowsOnDispose ? new ThrowingDisposable() : new NullDisposable();
             },
             importVideoWallpaper: path => path,
             virtualDesktops: desktops,
@@ -135,7 +137,8 @@ public sealed class TilingModeTests
             winChordModifier: winChordModifier,
             persistWinChordModifier: persistWinChordModifier,
             disableManualLock: disableManualLock,
-            restoreManualLock: restoreManualLock);
+            restoreManualLock: restoreManualLock,
+            desktopTrace: desktopTrace);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -819,6 +822,7 @@ public sealed class TilingModeTests
     private sealed class LockPolicyCalls
     {
         public bool DisableSucceeds { get; set; } = true;
+        public bool RestoreSucceeds { get; set; } = true;
         public int Disables { get; private set; }
         public int Restores { get; private set; }
 
@@ -831,7 +835,7 @@ public sealed class TilingModeTests
         public bool Restore()
         {
             Restores++;
-            return true;
+            return RestoreSucceeds;
         }
     }
 
@@ -929,5 +933,64 @@ public sealed class TilingModeTests
         harness.Composition.Dispose();
 
         Assert.Equal(restoresOnExit, calls.Restores - atStartup);
+    }
+
+    private sealed class RecordingDesktopTrace : IDesktopTrace
+    {
+        public List<string> Lines { get; } = [];
+
+        public void Record(string line) => Lines.Add(line);
+    }
+
+    private sealed class ThrowingDisposable : IDisposable
+    {
+        public void Dispose() => throw new InvalidOperationException("tray teardown failed");
+    }
+
+    /// <summary>A lock that could not be taken at startup leaves a line saying why the run is on Alt.</summary>
+    [Fact]
+    public void AStartupDisableFailure_IsTraced()
+    {
+        var trace = new RecordingDesktopTrace();
+        var calls = new LockPolicyCalls { DisableSucceeds = false };
+        var harness = Wire(
+            winChordModifier: true, disableManualLock: calls.Disable, restoreManualLock: calls.Restore,
+            desktopTrace: trace);
+        using (harness.Composition)
+        {
+            Assert.Contains("manual-lock disable-failed at=startup", trace.Lines);
+        }
+    }
+
+    /// <summary>A lock left disabled because its restore failed is never left without a trace, wherever the restore ran.</summary>
+    [Fact]
+    public void RestoreFailures_AreTraced_AtStartupOnToggleAndOnExit()
+    {
+        var trace = new RecordingDesktopTrace();
+        var calls = new LockPolicyCalls { RestoreSucceeds = false };
+        var harness = Wire(disableManualLock: calls.Disable, restoreManualLock: calls.Restore, desktopTrace: trace);
+
+        harness.Tray.ToggleWinChordModifier();
+        harness.Tray.ToggleWinChordModifier();
+        harness.Tray.ToggleWinChordModifier();
+        harness.Composition.Dispose();
+
+        Assert.Equal(
+            ["manual-lock restore-failed at=startup", "manual-lock restore-failed at=toggle",
+                "manual-lock restore-failed at=exit"],
+            trace.Lines.Where(line => line.StartsWith("manual-lock", StringComparison.Ordinal)));
+    }
+
+    /// <summary>A teardown step that throws before the restore must not keep the lock disabled.</summary>
+    [Fact]
+    public void Exiting_RestoresTheLock_EvenWhenAnEarlierTeardownStepThrows()
+    {
+        var calls = new LockPolicyCalls();
+        var harness = Wire(
+            winChordModifier: true, disableManualLock: calls.Disable, restoreManualLock: calls.Restore,
+            trayThrowsOnDispose: true);
+
+        Assert.Throws<InvalidOperationException>(harness.Composition.Dispose);
+        Assert.Equal(1, calls.Restores);
     }
 }
