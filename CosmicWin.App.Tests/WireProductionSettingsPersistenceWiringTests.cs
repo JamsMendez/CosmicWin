@@ -137,7 +137,7 @@ public sealed class WireProductionSettingsPersistenceWiringTests
         Assert.Contains("disableManualLock: lockGuard.TryDisable,", body, StringComparison.Ordinal);
         Assert.Contains("restoreManualLock: lockGuard.TryRestore,", body, StringComparison.Ordinal);
         Assert.Contains(
-            "new WorkstationLockGuard(new RegistryLockPolicyStore(), WorkstationLockGuard.ResolveMarkerPath())",
+            "new WorkstationLockGuard(new RegistryPolicyKey())",
             body, StringComparison.Ordinal);
     }
 }

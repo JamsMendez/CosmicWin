@@ -104,8 +104,10 @@ manual lock** (`DisableLockWorkstation` under
 and `Ctrl+Alt+Del`, and `LockWorkStation()` stop locking. The tray asks before turning it on. The
 password after waking from sleep is a separate setting and is not touched.
 
-CosmicWin puts back the exact value that was there before (recorded in `lock-workstation-owned`
-beside `settings.conf`) when you turn the item off and when it exits. If it is killed instead, the
+CosmicWin puts back the exact value that was there before when you turn the item off and when it
+exits. It records that value in the same protected key (`CosmicWinPriorDisableLockWorkstation`, with
+`CosmicWinOwnsDisableLockWorkstation` marking that the policy is its own to restore), never in a file
+an unelevated program could forge. If it is killed instead, the
 lock stays disabled until CosmicWin starts again: a start with the item off gives it back, a start
 with it on keeps it. If the policy cannot be written, the chords stay on `Alt`.
 

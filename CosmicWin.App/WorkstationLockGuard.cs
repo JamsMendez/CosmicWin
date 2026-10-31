@@ -1,17 +1,22 @@
-using System.Globalization;
 using System.IO;
 using System.Security;
 using Microsoft.Win32;
 
 namespace CosmicWin.App;
 
-/// <summary>The <c>DisableLockWorkstation</c> policy value: <see langword="null"/> when absent.</summary>
-public interface ILockPolicyStore
-{
-    int? Read();
+/// <summary>A registry value as found: its data and its kind, so it can be put back unchanged.</summary>
+public sealed record PolicyValue(object Data, RegistryValueKind Kind);
 
-    /// <summary>Writes <paramref name="value"/>, or deletes the value for <see langword="null"/>.</summary>
-    void Write(int? value);
+/// <summary>The values of the one policy key the guard works in.</summary>
+public interface IPolicyKey
+{
+    /// <summary>The value, or <see langword="null"/> when it is absent.</summary>
+    PolicyValue? Read(string name);
+
+    void Write(string name, PolicyValue value);
+
+    /// <summary>Removes the value; an absent one is not an error.</summary>
+    void Delete(string name);
 }
 
 /// <summary>
@@ -25,84 +30,89 @@ public interface ILockPolicyStore
 /// asks before turning it on. Sign-in after sleep is a separate setting and is not touched.
 /// </para>
 /// <para>
-/// A marker file beside <c>settings.conf</c> records the value from before the first disable, and
-/// its presence is what makes the value CosmicWin's to change: a restore without it does nothing,
-/// so a user who set the policy themselves keeps it. Written BEFORE the registry, so a crash between
-/// the two leaves at worst a marker holding the true previous value.
+/// The record of what was there before lives IN the policy key, beside the value it protects, and
+/// nowhere else. That key is writable only elevated. A record kept in a file the user's own
+/// unelevated programs can write would let any of them hand the elevated CosmicWin a "previous
+/// value" of 1, and have the lock switched off for them on the next restore -- exactly the change
+/// the key's permissions exist to refuse.
+/// </para>
+/// <para>
+/// <see cref="OwnedValueName"/> is what makes the policy CosmicWin's to change: a restore without it
+/// does nothing, so a policy the user set themselves stays theirs. The backup is written before the
+/// ownership value and the ownership value before the policy, so a crash at any step leaves either
+/// nothing claimed or a claim whose backup is the true previous value.
 /// </para>
 /// </remarks>
-public sealed class WorkstationLockGuard(ILockPolicyStore store, string markerPath)
+public sealed class WorkstationLockGuard(IPolicyKey key)
 {
-    /// <summary>Beside <c>settings.conf</c>, in CosmicWin's own folder.</summary>
-    public static string ResolveMarkerPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CosmicWin",
-            "lock-workstation-owned");
+    public const string PolicyValueName = "DisableLockWorkstation";
 
-    /// <summary>Disables the manual lock; <see langword="false"/> when it could not, with nothing changed.</summary>
+    /// <summary>Present exactly while CosmicWin has the policy changed.</summary>
+    public const string OwnedValueName = "CosmicWinOwnsDisableLockWorkstation";
+
+    /// <summary>The policy value from before CosmicWin changed it, kind and all; absent when there was none.</summary>
+    public const string BackupValueName = "CosmicWinPriorDisableLockWorkstation";
+
+    private static readonly PolicyValue Disabled = new(1, RegistryValueKind.DWord);
+
+    /// <summary>Disables the manual lock; <see langword="false"/> when it could not.</summary>
     public bool TryDisable()
     {
-        var createdMarker = false;
         try
         {
-            if (!File.Exists(markerPath))
+            if (key.Read(OwnedValueName) is null)
             {
-                var before = store.Read();
-                Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
-                File.WriteAllText(markerPath, before?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
-                createdMarker = true;
+                if (key.Read(PolicyValueName) is { } before)
+                {
+                    key.Write(BackupValueName, before);
+                }
+                else
+                {
+                    key.Delete(BackupValueName);
+                }
+
+                key.Write(OwnedValueName, Disabled);
             }
 
-            store.Write(1);
+            key.Write(PolicyValueName, Disabled);
             return true;
         }
         catch (Exception exception) when (IsAccessFailure(exception))
         {
-            if (createdMarker)
-            {
-                TryDeleteMarker();
-            }
-
             return false;
         }
     }
 
     /// <summary>
     /// Puts back the value from before <see cref="TryDisable"/>, if CosmicWin changed it at all.
-    /// <see langword="false"/> when the write failed; the marker then stays for the next attempt.
+    /// <see langword="false"/> when a write failed; the ownership then stays for the next attempt.
     /// </summary>
     public bool TryRestore()
     {
         try
         {
-            if (!File.Exists(markerPath))
+            if (key.Read(OwnedValueName) is null)
             {
                 return true;
             }
 
-            var text = File.ReadAllText(markerPath).Trim();
-            int? before = int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
-                ? value
-                : null;
-            store.Write(before);
-            File.Delete(markerPath);
+            if (key.Read(BackupValueName) is { } before)
+            {
+                key.Write(PolicyValueName, before);
+                key.Delete(BackupValueName);
+            }
+            else
+            {
+                key.Delete(PolicyValueName);
+            }
+
+            // Last, so a failure above leaves the claim standing and the next start retries it.
+            key.Delete(OwnedValueName);
             return true;
         }
         catch (Exception exception) when (IsAccessFailure(exception))
         {
             return false;
-        }
-    }
-
-    private void TryDeleteMarker()
-    {
-        try
-        {
-            File.Delete(markerPath);
-        }
-        catch (Exception exception) when (IsAccessFailure(exception))
-        {
         }
     }
 
@@ -110,34 +120,34 @@ public sealed class WorkstationLockGuard(ILockPolicyStore store, string markerPa
         exception is IOException or UnauthorizedAccessException or SecurityException;
 }
 
-/// <summary>The real policy value, in the current user's hive.</summary>
+/// <summary>The real policy key, in the current user's hive.</summary>
 /// <remarks>
 /// Writable only elevated: the user's own token holds just ReadKey on <c>...\Policies</c>, which is
-/// what keeps an ordinary program from switching policies off. CosmicWin always runs elevated (its
-/// manifest requires it), and the elevated token is the same user, so this is the same hive.
+/// what keeps an ordinary program from switching policies off -- and what keeps it from forging the
+/// guard's record too. CosmicWin always runs elevated (its manifest requires it), and the elevated
+/// token is the same user, so this is the same hive.
 /// </remarks>
-public sealed class RegistryLockPolicyStore : ILockPolicyStore
+public sealed class RegistryPolicyKey : IPolicyKey
 {
     private const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
 
-    private const string ValueName = "DisableLockWorkstation";
-
-    public int? Read()
+    public PolicyValue? Read(string name)
     {
         using var key = Registry.CurrentUser.OpenSubKey(KeyPath);
-        return key?.GetValue(ValueName) is int value ? value : null;
+        return key?.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is { } data
+            ? new PolicyValue(data, key.GetValueKind(name))
+            : null;
     }
 
-    public void Write(int? value)
+    public void Write(string name, PolicyValue value)
     {
         using var key = Registry.CurrentUser.CreateSubKey(KeyPath, writable: true);
-        if (value is { } number)
-        {
-            key.SetValue(ValueName, number, RegistryValueKind.DWord);
-        }
-        else
-        {
-            key.DeleteValue(ValueName, throwOnMissingValue: false);
-        }
+        key.SetValue(name, value.Data, value.Kind);
+    }
+
+    public void Delete(string name)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(KeyPath, writable: true);
+        key?.DeleteValue(name, throwOnMissingValue: false);
     }
 }

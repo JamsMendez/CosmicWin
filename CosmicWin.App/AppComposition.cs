@@ -1742,7 +1742,7 @@ public sealed class AppComposition : IDisposable
         var settingsStore = new SynchronizedSettingsStore(
             settings, s => SettingsFile.Save(s, OnSettingsSaveFailed));
 
-        var lockGuard = new WorkstationLockGuard(new RegistryLockPolicyStore(), WorkstationLockGuard.ResolveMarkerPath());
+        var lockGuard = new WorkstationLockGuard(new RegistryPolicyKey());
 
         // ONE hoisted instance for the life of the process, read once per untiled focus chord --
         // not reconstructed per chord, which would pay Win32NativeWindowSource's own construction
