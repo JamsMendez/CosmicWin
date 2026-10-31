@@ -1,4 +1,4 @@
-﻿using CosmicWin.App.Tray;
+using CosmicWin.App.Tray;
 
 namespace CosmicWin.App.Tests.Tray;
 
