@@ -200,23 +200,19 @@ public sealed class TrayIconHost : IDisposable
         item.Available = controller.HasVideoWallpaper;
 
     /// <summary>
-    /// The order the items appear in: the mode switch first, then the border and its colour, then
-    /// the video wallpaper picker, then the pause, then the two that end something.
+    /// The order the items appear in: every ticked switch first, then the items that open a picker,
+    /// then the pause, then the two that end something.
     /// </summary>
     /// <remarks>
-    /// Tiling leads because it is the biggest thing on this menu that is not an ending -- it says
-    /// whether CosmicWin is doing its job at all -- and it sits above Pausar rather than beside it
-    /// so the two "how much is this app doing" switches read from narrow to wide.
+    /// The switches lead because each one says, by its tick, what CosmicWin is doing right now, and
+    /// reading them as one block answers that at a glance. Tiling heads them because it says whether
+    /// CosmicWin is doing its job at all; the Win modifier follows because it changes how that mode
+    /// is driven; StartWithWindows closes the block because it is about the next logon, not this one.
     /// </remarks>
     /// <remarks>
-    /// VideoWallpaper sits right after BorderColor: the two are the menu's visual-customization
-    /// items, and both open a picker rather than flip a switch -- unlike Tiling/FocusBorder, which
-    /// state a mode, or Pause/Reload/Exit, which do something to the running process.
+    /// BorderColor and VideoWallpaper come next: both open a picker rather than flip a switch.
     /// RemoveVideoWallpaper follows the picker it undoes, and is only shown while a video is loaded.
-    /// </remarks>
-    /// <remarks>
-    /// StartWithWindows sits just above Pausar: it is about the process rather than the windows, like
-    /// the items below it, but it is a switch that states a mode rather than something done now.
+    /// Pause, Reload and Exit stay last, because they do something to the running process.
     /// </remarks>
     /// <remarks>
     /// The constructor ADDS its items by walking this list, which is what makes it the decision
@@ -229,11 +225,11 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.Tiling,
         TrayMenuEntry.WinChordModifier,
         TrayMenuEntry.FocusBorder,
-        TrayMenuEntry.BorderColor,
         TrayMenuEntry.UnfocusedTransparency,
+        TrayMenuEntry.StartWithWindows,
+        TrayMenuEntry.BorderColor,
         TrayMenuEntry.VideoWallpaper,
         TrayMenuEntry.RemoveVideoWallpaper,
-        TrayMenuEntry.StartWithWindows,
         TrayMenuEntry.Pause,
         TrayMenuEntry.Reload,
         TrayMenuEntry.Exit,

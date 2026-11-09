@@ -122,10 +122,11 @@ Right-click the CosmicWin icon in the notification area.
 | **Modo tiling** | Tiling on or off; the tick shows the current state. Same switch as `Alt+T`. |
 | **Atajos con tecla Win** | Hold every chord with `Win` instead of `Alt`. Asks first, because it disables Windows' manual lock while on — see [Win as the chord key](#win-as-the-chord-key). |
 | **Borde de foco** | Draw CosmicWin's own focus border, or not. |
+| **Transparencia sin foco** | Draw every tiled window but the focused one translucent, or not — see `unfocused-opacity` below. |
+| **Iniciar con Windows** | Start CosmicWin at logon, or not; the tick shows the current state — see [Start at logon](#start-at-logon). |
 | **Color del borde** | **Elegir...** picks a colour; **Acento del sistema** goes back to the accent colour. |
 | **Wallpaper de video...** | Pick an MP4 to loop as the desktop wallpaper — see [Video wallpaper](#video-wallpaper). |
 | **Quitar wallpaper de video** | Shown only while a video wallpaper is set. Stops it and brings back Windows' own wallpaper. |
-| **Iniciar con Windows** | Start CosmicWin at logon, or not; the tick shows the current state — see [Start at logon](#start-at-logon). |
 | **Pausar** / **Reanudar** | Stop, or restart, the keyboard hook: while paused no chord works and new windows are not tiled. |
 | **Reload** | Re-read the window exception list and `gap` from `settings.conf`. |
 | **Salir** | Exit CosmicWin. Start-up at logon is left as it is. |

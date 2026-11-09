@@ -19,10 +19,8 @@ public sealed class TrayIconHostTests
     }
 
     /// <summary>
-    /// The mode switch first, then the Win-modifier switch that belongs to it, then the border and its colour, then the unfocused transparency, then
-    /// the video wallpaper picker and
-    /// its remove item right after it, then the pause, then the two items
-    /// that end something.
+    /// Every ticked switch first, then the items that open a picker (the border colour, the video
+    /// wallpaper and its remove item), then the pause, then the two items that end something.
     /// </summary>
     /// <remarks>
     /// This is the REAL order, not a copy of it -- the constructor adds its items by walking this
@@ -30,18 +28,18 @@ public sealed class TrayIconHostTests
     /// in its own literal would assert nothing but its own copy.
     /// </remarks>
     [Fact]
-    public void TheMenuIsOrdered_TilingThenWinModifierThenBorderThenTransparencyThenVideoWallpaperThenRemoveVideoThenStartWithWindowsThenPauseThenReloadThenExit()
+    public void TheMenuIsOrdered_SwitchesFirst_ThenBorderColorAndVideo_ThenPauseReloadExit()
     {
         Assert.Equal(
             [
                 TrayMenuEntry.Tiling,
                 TrayMenuEntry.WinChordModifier,
                 TrayMenuEntry.FocusBorder,
-                TrayMenuEntry.BorderColor,
                 TrayMenuEntry.UnfocusedTransparency,
+                TrayMenuEntry.StartWithWindows,
+                TrayMenuEntry.BorderColor,
                 TrayMenuEntry.VideoWallpaper,
                 TrayMenuEntry.RemoveVideoWallpaper,
-                TrayMenuEntry.StartWithWindows,
                 TrayMenuEntry.Pause,
                 TrayMenuEntry.Reload,
                 TrayMenuEntry.Exit,
