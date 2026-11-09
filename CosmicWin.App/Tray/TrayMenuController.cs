@@ -151,14 +151,19 @@ public sealed class TrayMenuController(
     public bool IsStartWithWindowsEnabled => getStartWithWindows?.Invoke() ?? false;
 
     /// <summary>
-    /// Adds CosmicWin to, or takes it out of, the logon start-up, returning the state the wiring
-    /// actually REACHED -- re-read rather than assumed, as <see cref="ToggleWinChordModifier"/> does,
-    /// because the Task Scheduler can refuse the change and the tick has to say so.
+    /// Adds CosmicWin to, or takes it out of, the logon start-up, returning both the state it asked
+    /// for and the state the wiring actually REACHED -- re-read rather than assumed, as
+    /// <see cref="ToggleWinChordModifier"/> does, because the Task Scheduler can refuse the change.
     /// </summary>
-    public bool ToggleStartWithWindows()
+    /// <remarks>
+    /// Returns the wanted state too so the caller never takes a reading of its own: each read spawns
+    /// schtasks, and a second sample taken elsewhere could disagree with the one acted on here.
+    /// </remarks>
+    public StartWithWindowsToggle ToggleStartWithWindows()
     {
-        setStartWithWindows?.Invoke(!IsStartWithWindowsEnabled);
-        return IsStartWithWindowsEnabled;
+        var wanted = !IsStartWithWindowsEnabled;
+        setStartWithWindows?.Invoke(wanted);
+        return new StartWithWindowsToggle(wanted, IsStartWithWindowsEnabled);
     }
 
     /// <summary>
@@ -197,3 +202,6 @@ public sealed class TrayMenuController(
     /// <summary>Salir: invokes the injected exit trigger. Leaves the logon start-up exactly as it was.</summary>
     public void Exit() => exit();
 }
+
+/// <summary>What one click on "Iniciar con Windows" asked for, and where the start-up actually ended up.</summary>
+public readonly record struct StartWithWindowsToggle(bool Wanted, bool Reached);

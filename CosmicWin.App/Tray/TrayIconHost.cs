@@ -281,8 +281,7 @@ public sealed class TrayIconHost : IDisposable
     /// </summary>
     private static bool ToggleStartWithWindows(TrayMenuController controller)
     {
-        var wanted = !controller.IsStartWithWindowsEnabled;
-        var reached = controller.ToggleStartWithWindows();
+        var (wanted, reached) = controller.ToggleStartWithWindows();
         if (reached != wanted)
         {
             MessageBox.Show(

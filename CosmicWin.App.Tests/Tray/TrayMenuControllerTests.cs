@@ -395,7 +395,7 @@ public sealed class TrayMenuControllerTests
             () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
 
         Assert.False(controller.IsStartWithWindowsEnabled);
-        Assert.False(controller.ToggleStartWithWindows());
+        Assert.Equal(new StartWithWindowsToggle(Wanted: true, Reached: false), controller.ToggleStartWithWindows());
     }
 
     [Theory]
@@ -408,8 +408,26 @@ public sealed class TrayMenuControllerTests
             () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
             getStartWithWindows: () => state, setStartWithWindows: value => state = value);
 
-        Assert.Equal(!initial, controller.ToggleStartWithWindows());
+        Assert.Equal(new StartWithWindowsToggle(Wanted: !initial, Reached: !initial), controller.ToggleStartWithWindows());
         Assert.Equal(!initial, state);
+    }
+
+    /// <summary>
+    /// Every read is a schtasks spawn, so one click reads the state exactly twice: once to choose
+    /// the direction, once to report where it landed.
+    /// </summary>
+    [Fact]
+    public void ToggleStartWithWindows_ReadsTheStateOnceBeforeAndOnceAfterTheWrite()
+    {
+        var reads = 0;
+        var state = false;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getStartWithWindows: () => { reads++; return state; }, setStartWithWindows: value => state = value);
+
+        controller.ToggleStartWithWindows();
+
+        Assert.Equal(2, reads);
     }
 
     /// <summary>A change the Task Scheduler refused reports what is true: the state did not move.</summary>
@@ -420,7 +438,7 @@ public sealed class TrayMenuControllerTests
             () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
             getStartWithWindows: () => true, setStartWithWindows: _ => { });
 
-        Assert.True(controller.ToggleStartWithWindows());
+        Assert.Equal(new StartWithWindowsToggle(Wanted: false, Reached: true), controller.ToggleStartWithWindows());
     }
 
     /// <summary>A switch-on the wiring refused (the lock policy could not be written) reports what is true: still off.</summary>

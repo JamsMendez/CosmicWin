@@ -267,6 +267,7 @@ public sealed class TaskInstallerTests
         var ex = Assert.Throws<InvalidOperationException>(installer.Disable);
         Assert.Contains("exit code 5", ex.Message);
     }
+
     [Fact]
     public void BuildQueryXmlArgs_ReturnsExactFixedArgv()
     {

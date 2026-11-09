@@ -101,7 +101,9 @@ public sealed class TaskInstaller
     public void Uninstall() => RunUnlessTheTaskIsAlreadyGone("/Delete", BuildUninstallArgs(_taskName));
 
     /// <summary>
-    /// Whether the task is registered AND will fire at the next logon.
+    /// Whether the task is registered and not switched off as a whole -- what <see cref="Install"/>
+    /// turns on and <see cref="Disable"/> turns off. A trigger disabled on its own, by hand in Task
+    /// Scheduler, is not looked at.
     /// </summary>
     /// <remarks>
     /// Read from the task's own XML, never from <c>/Query</c>'s table text, whose column names and

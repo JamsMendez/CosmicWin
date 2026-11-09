@@ -269,7 +269,7 @@ public sealed class AppCompositionTests
         using (harness.Composition)
         {
             Assert.Equal(initial, harness.TrayController.IsStartWithWindowsEnabled);
-            Assert.Equal(!initial, harness.TrayController.ToggleStartWithWindows());
+            Assert.Equal(!initial, harness.TrayController.ToggleStartWithWindows().Reached);
         }
 
         Assert.Equal(!initial, state);
