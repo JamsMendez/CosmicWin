@@ -86,7 +86,6 @@ public sealed class UnmatchedChordWiringTests
             new FakeWorkspace(), treeManager, registry, new Foreground(),
             new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromHours(1)),
             loadExceptions: () => ExceptionList.Empty,

@@ -83,7 +83,6 @@ public sealed class WorkAreaTrackingTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, new StubForeground(), new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,

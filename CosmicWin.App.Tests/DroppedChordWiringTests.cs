@@ -89,7 +89,6 @@ public sealed class DroppedChordWiringTests
             new FakeWorkspace(), treeManager, registry, new Foreground(),
             new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             // Ignores the writer AppComposition offers (the dispatcher's own channel) in favour of
             // the test's own capacity-1 one, for the reason on Wire's own summary above.

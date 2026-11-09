@@ -111,7 +111,6 @@ public sealed class TilingModeTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: reconcile.Schedule,
             hookFactory: writer =>
             {

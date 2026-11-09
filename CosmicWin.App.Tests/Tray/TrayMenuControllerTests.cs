@@ -388,6 +388,41 @@ public sealed class TrayMenuControllerTests
         Assert.Equal(!initial, state);
     }
 
+    [Fact]
+    public void WithNoStartWithWindowsDelegatesWired_TheSwitchReportsOff_AndTheToggleChangesNothing()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { });
+
+        Assert.False(controller.IsStartWithWindowsEnabled);
+        Assert.False(controller.ToggleStartWithWindows());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ToggleStartWithWindows_FlipsTheInjectedState_AndReturnsIt(bool initial)
+    {
+        var state = initial;
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getStartWithWindows: () => state, setStartWithWindows: value => state = value);
+
+        Assert.Equal(!initial, controller.ToggleStartWithWindows());
+        Assert.Equal(!initial, state);
+    }
+
+    /// <summary>A change the Task Scheduler refused reports what is true: the state did not move.</summary>
+    [Fact]
+    public void ToggleStartWithWindows_ReportsTheStateTheWiringActuallyReached()
+    {
+        var controller = new TrayMenuController(
+            () => false, _ => { }, () => true, _ => { }, () => { }, () => { },
+            getStartWithWindows: () => true, setStartWithWindows: _ => { });
+
+        Assert.True(controller.ToggleStartWithWindows());
+    }
+
     /// <summary>A switch-on the wiring refused (the lock policy could not be written) reports what is true: still off.</summary>
     [Fact]
     public void ToggleWinChordModifier_ReportsTheStateTheWiringActuallyReached()

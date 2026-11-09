@@ -267,4 +267,75 @@ public sealed class TaskInstallerTests
         var ex = Assert.Throws<InvalidOperationException>(installer.Disable);
         Assert.Contains("exit code 5", ex.Message);
     }
+    [Fact]
+    public void BuildQueryXmlArgs_ReturnsExactFixedArgv()
+    {
+        Assert.Equal(new[] { "/Query", "/TN", "CosmicWin", "/XML" }, TaskInstaller.BuildQueryXmlArgs("CosmicWin"));
+    }
+
+    // schtasks omits <Settings><Enabled> for a task that is on -- the real output of an enabled task.
+    [Fact]
+    public void IsEnabled_RegisteredTaskWithoutAnEnabledElement_IsOn()
+    {
+        var runner = QueryReturning(0, TaskXml(settingsExtra: string.Empty));
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        Assert.True(installer.IsEnabled());
+        Assert.Equal("schtasks.exe", runner.LastFileName);
+        Assert.Equal(TaskInstaller.BuildQueryXmlArgs("CosmicWin.Test"), runner.LastArguments);
+    }
+
+    [Fact]
+    public void IsEnabled_TaskSwitchedOff_IsOff()
+    {
+        var runner = QueryReturning(0, TaskXml(settingsExtra: "<Enabled>false</Enabled>"));
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        Assert.False(installer.IsEnabled());
+    }
+
+    // The LogonTrigger's own <Enabled>true</Enabled> must not be mistaken for the task's.
+    [Fact]
+    public void IsEnabled_TaskSwitchedOff_WithAnEnabledTrigger_IsStillOff()
+    {
+        var runner = QueryReturning(0, TaskXml(settingsExtra: "<Enabled>false</Enabled>", triggerEnabled: true));
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        Assert.False(installer.IsEnabled());
+    }
+
+    [Fact]
+    public void IsEnabled_TaskNotRegistered_IsOff()
+    {
+        var runner = QueryReturning(1, string.Empty);
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        Assert.False(installer.IsEnabled());
+    }
+
+    [Fact]
+    public void IsEnabled_UnparseableOutput_IsOff()
+    {
+        var runner = QueryReturning(0, "not xml");
+        var installer = new TaskInstaller("CosmicWin.Test", @"C:\CosmicWin.exe", @"C:\Task.xml", runner);
+
+        Assert.False(installer.IsEnabled());
+    }
+
+    private static FakeProcessRunner QueryReturning(int exitCode, string stdout) =>
+        new() { ResultByVerb = new() { ["/Query"] = new ProcessRunResult(exitCode, stdout, string.Empty) } };
+
+    private static string TaskXml(string settingsExtra, bool triggerEnabled = false) =>
+        $"""
+        <?xml version="1.0" encoding="UTF-16"?>
+        <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+          <Settings>
+            <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+            {settingsExtra}
+          </Settings>
+          <Triggers>
+            <LogonTrigger>{(triggerEnabled ? "<Enabled>true</Enabled>" : string.Empty)}</LogonTrigger>
+          </Triggers>
+        </Task>
+        """;
 }

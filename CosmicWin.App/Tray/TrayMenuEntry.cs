@@ -41,12 +41,18 @@ public enum TrayMenuEntry
     /// </summary>
     RemoveVideoWallpaper,
 
+    /// <summary>
+    /// Adds CosmicWin to the logon start-up, or takes it out. The only thing that changes it:
+    /// quitting leaves it alone.
+    /// </summary>
+    StartWithWindows,
+
     /// <summary>Stops and resumes the keyboard hook, and with it every chord.</summary>
     Pause,
 
     /// <summary>Re-reads the exception list from disk.</summary>
     Reload,
 
-    /// <summary>Stops the logon trigger and takes the process down.</summary>
+    /// <summary>Takes the process down. Whether it starts again at the next logon is <see cref="StartWithWindows"/>'s call.</summary>
     Exit,
 }

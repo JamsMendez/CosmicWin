@@ -127,7 +127,6 @@ public sealed class FocusBorderWiringTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer =>
             {

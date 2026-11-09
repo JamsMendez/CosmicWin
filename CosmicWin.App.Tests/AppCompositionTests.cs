@@ -65,7 +65,8 @@ public sealed class AppCompositionTests
         new(new IntPtr(handle), Rectangle.FromSize(left, top, width, height),
             Rectangle.FromSize(left, top, width, height), 1.0, primary);
 
-    private static Harness WireHarness(Action? shutdown = null, Action? disableTaskTrigger = null)
+    private static Harness WireHarness(
+        Action? shutdown = null, Func<bool>? getStartWithWindows = null, Action<bool>? setStartWithWindows = null)
     {
         var workspace = new FakeWorkspace();
         var primary = Display(1, 0, 0, 1920, 1080, primary: true);
@@ -83,7 +84,6 @@ public sealed class AppCompositionTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: focusTrace,
-            disableTaskTrigger: disableTaskTrigger ?? (() => { }),
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer =>
             {
@@ -97,7 +97,9 @@ public sealed class AppCompositionTests
                 capturedController = controller;
                 return new DisposeCountingTray();
             },
-            importVideoWallpaper: path => path);
+            importVideoWallpaper: path => path,
+            getStartWithWindows: getStartWithWindows,
+            setStartWithWindows: setStartWithWindows);
 
         treeManager.TryGetTree(primary, out var tree);
         return new Harness(
@@ -233,33 +235,52 @@ public sealed class AppCompositionTests
 
 
     /// <summary>
-    /// TC-3-W1: Salir must stop the logon trigger from bringing CosmicWin back on the next sign-in,
-    /// and it must do so BEFORE the process is torn down -- after <c>shutdown</c> there is no
-    /// guarantee anything still runs. The order assertion is the whole point; asserting only that
-    /// both ran would pass on a composition that disables nothing until it is already exiting.
+    /// Salir only shuts the process down. It used to switch the logon task off too, which cost the
+    /// user their start-up every time they quit; the start-up is now the tray switch's alone.
     /// </summary>
     [Fact]
-    public void Wire_TrayExit_DisablesTheScheduledTaskTrigger_BeforeShuttingDown()
+    public void Wire_TrayExit_ShutsDown_AndLeavesTheStartUpAlone()
     {
-        var order = new List<string>();
+        var shutdowns = 0;
+        var startUpWrites = new List<bool>();
         var harness = WireHarness(
-            shutdown: () => order.Add("shutdown"),
-            disableTaskTrigger: () => order.Add("disable"));
+            shutdown: () => shutdowns++,
+            getStartWithWindows: () => true,
+            setStartWithWindows: startUpWrites.Add);
 
         using (harness.Composition)
         {
             harness.TrayController.Exit();
         }
 
-        Assert.Equal(new[] { "disable", "shutdown" }, order);
+        Assert.Equal(1, shutdowns);
+        Assert.Empty(startUpWrites);
     }
 
-    /// <summary>TC-3's other two menu entries must stay untouched: only Salir disables the trigger.</summary>
-    [Fact]
-    public void Wire_PauseAndReload_DoNotTouchTheScheduledTaskTrigger()
+    /// <summary>The tray switch reaches the start-up delegates the composition was wired with.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Wire_TrayStartWithWindows_FlipsTheWiredStartUp(bool initial)
     {
-        var disableCount = 0;
-        var harness = WireHarness(disableTaskTrigger: () => disableCount++);
+        var state = initial;
+        var harness = WireHarness(getStartWithWindows: () => state, setStartWithWindows: value => state = value);
+
+        using (harness.Composition)
+        {
+            Assert.Equal(initial, harness.TrayController.IsStartWithWindowsEnabled);
+            Assert.Equal(!initial, harness.TrayController.ToggleStartWithWindows());
+        }
+
+        Assert.Equal(!initial, state);
+    }
+
+    /// <summary>Pausing and reloading leave the start-up alone, as they always did.</summary>
+    [Fact]
+    public void Wire_PauseAndReload_DoNotTouchTheStartUp()
+    {
+        var startUpWrites = new List<bool>();
+        var harness = WireHarness(getStartWithWindows: () => true, setStartWithWindows: startUpWrites.Add);
 
         using (harness.Composition)
         {
@@ -268,7 +289,7 @@ public sealed class AppCompositionTests
             harness.TrayController.Reload();
         }
 
-        Assert.Equal(0, disableCount);
+        Assert.Empty(startUpWrites);
     }
 
 
@@ -360,7 +381,6 @@ public sealed class AppCompositionTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: (_, _) => new DisposeCountingTray(),
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,

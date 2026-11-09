@@ -17,7 +17,8 @@ public sealed class TrayMenuController(
     Action<string>? setVideoWallpaperPath = null,
     Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null,
     Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null,
-    Func<bool>? getWinChordModifier = null, Action<bool>? setWinChordModifier = null)
+    Func<bool>? getWinChordModifier = null, Action<bool>? setWinChordModifier = null,
+    Func<bool>? getStartWithWindows = null, Action<bool>? setStartWithWindows = null)
 {
     /// <summary>Spec TC-2: reflects the injected getter directly -- no internal state of its own.</summary>
     public bool IsPaused => getPaused();
@@ -145,6 +146,21 @@ public sealed class TrayMenuController(
         return IsWinChordModifierEnabled;
     }
 
+    /// <summary>Whether CosmicWin starts by itself at the next logon.</summary>
+    /// <remarks>Answers NO when no getter was wired: nothing says it will start.</remarks>
+    public bool IsStartWithWindowsEnabled => getStartWithWindows?.Invoke() ?? false;
+
+    /// <summary>
+    /// Adds CosmicWin to, or takes it out of, the logon start-up, returning the state the wiring
+    /// actually REACHED -- re-read rather than assumed, as <see cref="ToggleWinChordModifier"/> does,
+    /// because the Task Scheduler can refuse the change and the tick has to say so.
+    /// </summary>
+    public bool ToggleStartWithWindows()
+    {
+        setStartWithWindows?.Invoke(!IsStartWithWindowsEnabled);
+        return IsStartWithWindowsEnabled;
+    }
+
     /// <summary>
     /// Hands the raw file the user just picked to the injected import/persist delegate. Write-only
     /// -- unlike <see cref="BorderColor"/> or <see cref="IsTilingEnabled"/>, nothing in this menu
@@ -178,6 +194,6 @@ public sealed class TrayMenuController(
     /// <summary>WE-3: re-invokes the injected reload trigger.</summary>
     public void Reload() => reload();
 
-    /// <summary>Spec TC-3 (Salir): invokes the injected exit trigger.</summary>
+    /// <summary>Salir: invokes the injected exit trigger. Leaves the logon start-up exactly as it was.</summary>
     public void Exit() => exit();
 }

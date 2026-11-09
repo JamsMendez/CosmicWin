@@ -148,7 +148,6 @@ public sealed class AppComposition : IDisposable
         IForegroundWindowSource foreground,
         ExceptionListStore exceptionStore,
         IFocusTrace focusTrace,
-        Action disableTaskTrigger,
         Func<TimeSpan, Action, IDisposable> scheduleReconcile,
         Func<ChannelWriter<HotkeyAction>, LowLevelKeyboardHook> hookFactory,
         Func<ExceptionList> loadExceptions,
@@ -215,7 +214,11 @@ public sealed class AppComposition : IDisposable
         bool winChordModifier = false,
         Action<bool>? persistWinChordModifier = null,
         Func<bool>? disableManualLock = null,
-        Func<bool>? restoreManualLock = null)
+        Func<bool>? restoreManualLock = null,
+        // The logon start-up behind the tray's "Iniciar con Windows". Unwired -- as in every test
+        // that predates it -- the item reports off and changes nothing.
+        Func<bool>? getStartWithWindows = null,
+        Action<bool>? setStartWithWindows = null)
     {
         // The live answer to "is CosmicWin laying windows out", owned here for the same reason the
         // border flag below is: the tray item, the executor's chord gate and both window adapters
@@ -911,10 +914,9 @@ public sealed class AppComposition : IDisposable
             }
         }
 
-        // TC-3-W1: Salir stops the logon trigger BEFORE tearing the process down -- after shutdown
-        // there is no guarantee anything still runs. Disable, not uninstall: TC-3 says "disable the
-        // Scheduled Task trigger" where ES-4 says "remove", so quitting once must not throw the
-        // user's installation away.
+        // Salir only tears the process down. It used to switch the logon task off as well, which
+        // silently cost the user their start-up every time they quit; the tray's own
+        // "Iniciar con Windows" item is now the one place that decides it.
         var trayController = CompositionRoot.BuildTrayMenuController(
             hook, exceptionStore, loadExceptions,
             getFocusBorder: () => borderEnabled,
@@ -999,11 +1001,7 @@ public sealed class AppComposition : IDisposable
                 // elsewhere too.
                 SwitchVideoWallpaper(path);
             },
-            exit: () =>
-            {
-                disableTaskTrigger();
-                shutdown();
-            },
+            exit: shutdown,
             // On the owning thread, the same one ResumeTiling's onOwningThread(ResumeTiling) uses a
             // few lines above -- this arrives from a tray click too, and ReloadGap can rearrange
             // trees and reach the overlay through AfterArrange (T5).
@@ -1013,6 +1011,8 @@ public sealed class AppComposition : IDisposable
             desktopTrace: desktopTrace,
             removeVideoWallpaper: RemoveVideoWallpaper,
             getHasVideoWallpaper: () => videoWallpaperConfigured.Value,
+            getStartWithWindows: getStartWithWindows,
+            setStartWithWindows: setStartWithWindows,
             getWinChordModifier: () => useWin,
             setWinChordModifier: enabled =>
             {
@@ -1781,7 +1781,6 @@ public sealed class AppComposition : IDisposable
         return Wire(
             workspace, treeManager, registry, foreground, exceptionStore,
             focusTrace: new FileFocusTrace(FileFocusTrace.ResolveDefaultPath()),
-            disableTaskTrigger: DisableScheduledTaskTrigger,
             scheduleReconcile: ScheduleOnUiThread,
             hookFactory: writer => new LowLevelKeyboardHook(writer),
             loadExceptions: ExceptionListFile.Load,
@@ -1814,6 +1813,8 @@ public sealed class AppComposition : IDisposable
             persistWinChordModifier: enabled => settingsStore.Update(s => s with { WinChordModifier = enabled }),
             disableManualLock: lockGuard.TryDisable,
             restoreManualLock: lockGuard.TryRestore,
+            getStartWithWindows: IsStartWithWindowsEnabled,
+            setStartWithWindows: enabled => SetStartWithWindows(enabled, desktopTrace),
             // Read once, before anything is adopted: a marker still there means the last run did
             // not exit cleanly while windows were layered.
             repairOpacityOnAdoption: OpacityMarkerFile.Exists(OpacityMarkerFile.ResolvePath()),
@@ -1911,8 +1912,8 @@ public sealed class AppComposition : IDisposable
 
     /// <summary>
     /// The one place the real <see cref="TaskInstaller"/> is constructed, shared by <see
-    /// cref="TryHandleTaskCommand"/> and <see cref="DisableScheduledTaskTrigger"/> so the task name,
-    /// executable path and XML location cannot drift apart between the two.
+    /// cref="TryHandleTaskCommand"/> and the tray's start-up switch so the task name, executable
+    /// path and XML location cannot drift apart between them.
     /// </summary>
     private static TaskInstaller CreateInstaller(IProcessRunner? runner = null) =>
         new(
@@ -1921,21 +1922,43 @@ public sealed class AppComposition : IDisposable
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CosmicWin", "CosmicWinTask.xml"),
             runner ?? new Win32ProcessRunner());
 
-    /// <summary>
-    /// TC-3-W1's production trigger-disable. A failure here is DELIBERATELY swallowed: the user asked
-    /// to quit, and Salir's own contract -- remove the hook and exit -- must not be held hostage by
-    /// schtasks. <see cref="TaskInstaller.Disable"/> already treats an absent task as success, so
-    /// what reaches this catch is a genuine refusal (no elevation, service stopped), not routine.
-    /// </summary>
-    private static void DisableScheduledTaskTrigger()
+    /// <summary>The tray's "Iniciar con Windows" tick: the task is registered and will fire.</summary>
+    private static bool IsStartWithWindowsEnabled()
     {
         try
         {
-            CreateInstaller().Disable();
+            return CreateInstaller().IsEnabled();
         }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Declared residual: quitting still works, but the trigger may fire again next logon.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// On re-registers the task over whatever is there (<c>/Create /F</c>), which also points it at
+    /// the executable running now and switches it back on. Off only disables it, keeping the
+    /// registration. A refusal is traced and swallowed: the tray re-reads the state and tells the
+    /// user, and a menu click must never take the window manager down.
+    /// </summary>
+    private static void SetStartWithWindows(bool enabled, IDesktopTrace desktopTrace)
+    {
+        try
+        {
+            var installer = CreateInstaller();
+            if (enabled)
+            {
+                installer.Install();
+            }
+            else
+            {
+                installer.Disable();
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception
+            or IOException or UnauthorizedAccessException)
+        {
+            desktopTrace.Record($"start-with-windows-failed enabled={enabled} error={exception.GetType().Name}");
         }
     }
 

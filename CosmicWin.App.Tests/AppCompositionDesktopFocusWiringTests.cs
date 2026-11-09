@@ -197,7 +197,6 @@ public sealed class AppCompositionDesktopFocusWiringTests
             new FakeWorkspace(), treeManager, registry, foreground,
             new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(
                 writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),

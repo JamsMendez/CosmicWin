@@ -92,6 +92,15 @@ public sealed class TrayIconHost : IDisposable
         removeVideoWallpaperItem.Click += (_, _) => controller.RemoveVideoWallpaper();
         RefreshRemoveVideoWallpaperItem(removeVideoWallpaperItem, controller);
 
+        // A tick: it says whether CosmicWin will be there after the next logon. Read once here and
+        // after each click, NOT on every Opening like the switches above -- the answer comes from
+        // spawning schtasks, and a menu that waits on a process every time it opens feels broken.
+        var startWithWindowsItem = new ToolStripMenuItem("Iniciar con Windows")
+        {
+            Checked = controller.IsStartWithWindowsEnabled,
+        };
+        startWithWindowsItem.Click += (_, _) => startWithWindowsItem.Checked = ToggleStartWithWindows(controller);
+
         var reloadItem = new ToolStripMenuItem("Reload")
         {
             Image = TrayGlyphs.Render(TrayGlyphs.Refresh),
@@ -121,6 +130,7 @@ public sealed class TrayIconHost : IDisposable
             [TrayMenuEntry.UnfocusedTransparency] = transparencyItem,
             [TrayMenuEntry.VideoWallpaper] = videoWallpaperItem,
             [TrayMenuEntry.RemoveVideoWallpaper] = removeVideoWallpaperItem,
+            [TrayMenuEntry.StartWithWindows] = startWithWindowsItem,
             [TrayMenuEntry.Pause] = _pauseItem,
             [TrayMenuEntry.Reload] = reloadItem,
             [TrayMenuEntry.Exit] = exitItem,
@@ -205,6 +215,10 @@ public sealed class TrayIconHost : IDisposable
     /// RemoveVideoWallpaper follows the picker it undoes, and is only shown while a video is loaded.
     /// </remarks>
     /// <remarks>
+    /// StartWithWindows sits just above Pausar: it is about the process rather than the windows, like
+    /// the items below it, but it is a switch that states a mode rather than something done now.
+    /// </remarks>
+    /// <remarks>
     /// The constructor ADDS its items by walking this list, which is what makes it the decision
     /// rather than a description of one. Kept public so a fact can assert the real order instead of
     /// its own copy of it -- everything else in this class needs a live notification area and is
@@ -219,6 +233,7 @@ public sealed class TrayIconHost : IDisposable
         TrayMenuEntry.UnfocusedTransparency,
         TrayMenuEntry.VideoWallpaper,
         TrayMenuEntry.RemoveVideoWallpaper,
+        TrayMenuEntry.StartWithWindows,
         TrayMenuEntry.Pause,
         TrayMenuEntry.Reload,
         TrayMenuEntry.Exit,
@@ -262,6 +277,28 @@ public sealed class TrayIconHost : IDisposable
         }
 
         return enabled;
+    }
+
+    /// <summary>
+    /// Flips the logon start-up and says so when the Task Scheduler refused, rather than leaving a
+    /// tick that did not move as the only sign.
+    /// </summary>
+    private static bool ToggleStartWithWindows(TrayMenuController controller)
+    {
+        var wanted = !controller.IsStartWithWindowsEnabled;
+        var reached = controller.ToggleStartWithWindows();
+        if (reached != wanted)
+        {
+            MessageBox.Show(
+                wanted
+                    ? "No se pudo agregar CosmicWin al inicio de Windows."
+                    : "No se pudo quitar CosmicWin del inicio de Windows.",
+                "CosmicWin",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        return reached;
     }
 
     /// <summary>

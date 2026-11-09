@@ -125,9 +125,10 @@ Right-click the CosmicWin icon in the notification area.
 | **Color del borde** | **Elegir...** picks a colour; **Acento del sistema** goes back to the accent colour. |
 | **Wallpaper de video...** | Pick an MP4 to loop as the desktop wallpaper — see [Video wallpaper](#video-wallpaper). |
 | **Quitar wallpaper de video** | Shown only while a video wallpaper is set. Stops it and brings back Windows' own wallpaper. |
+| **Iniciar con Windows** | Start CosmicWin at logon, or not; the tick shows the current state — see [Start at logon](#start-at-logon). |
 | **Pausar** / **Reanudar** | Stop, or restart, the keyboard hook: while paused no chord works and new windows are not tiled. |
 | **Reload** | Re-read the window exception list and `gap` from `settings.conf`. |
-| **Salir** | Exit CosmicWin. |
+| **Salir** | Exit CosmicWin. Start-up at logon is left as it is. |
 
 Tiling, the chord key, the focus border and its colour are saved to `settings.conf` as you change them.
 
@@ -268,8 +269,11 @@ save rewrites the file with only the current keys.
 ## Start at logon
 
 CosmicWin does not install itself. Autostart is opt-in, and it is a Scheduled Task rather than a
-`Run` registry key because the app must start elevated — a `Run` entry cannot, and would hand you a
-UAC prompt at every logon.
+`Run` registry key because the app must start elevated — Windows silently skips a `Run` entry whose
+program requires elevation, so it would simply never start.
+
+The easy way is the tray item **Iniciar con Windows**: ticking it registers the task for the copy
+you are running now, unticking it switches the task off. The same can be done from a shell:
 
 ```powershell
 CosmicWin.App.exe --install-task     # register the logon task
@@ -285,9 +289,9 @@ Four things worth knowing before you rely on it:
 - **The task points at the executable you invoked**, resolved at install time. Install from the copy
   you actually run — `run\CosmicWin.App.exe` after `run.ps1`, not the build tree, which `run.ps1`
   deliberately leaves unlocked. Move or delete that copy and the task starts nothing.
-- **Quitting from the tray disables the trigger.** Exiting is read as "not right now", so the task
-  stays registered but stops firing, and the next logon is quiet. Re-run `--install-task` to turn it
-  back on; it re-registers over the existing task and re-enables the trigger.
+- **Quitting from the tray does not touch it.** **Salir** only exits; CosmicWin still starts at the
+  next logon if **Iniciar con Windows** is ticked. Unticking it keeps the task registered but stops it
+  from firing; ticking it again, or re-running `--install-task`, re-registers it over the existing one.
 - **`--uninstall-task` is idempotent.** A task that was never installed counts as success, so it is
   safe to run twice, or on a machine you are not sure about.
 - **The task XML is written to** `%LOCALAPPDATA%\CosmicWin\CosmicWinTask.xml`. It is an artefact of

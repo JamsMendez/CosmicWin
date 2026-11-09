@@ -73,7 +73,6 @@ public sealed class GapReloadTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, new Foreground(), new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: new NeverFiringReconcileScheduler().Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(
                 writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),

@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using CosmicWin.Interop;
 
 namespace CosmicWin.App.Startup;
@@ -55,11 +57,14 @@ public sealed class TaskInstaller
     public static IReadOnlyList<string> BuildQueryArgs(string taskName) =>
         new[] { "/Query", "/TN", taskName };
 
+    /// <summary>The exact, fixed argv that asks schtasks for the registered task's own XML, read by <see cref="IsEnabled"/>.</summary>
+    public static IReadOnlyList<string> BuildQueryXmlArgs(string taskName) =>
+        new[] { "/Query", "/TN", taskName, "/XML" };
+
     /// <summary>
-    /// The exact, fixed argv <c>schtasks /Change /DISABLE</c> receives (TC-3). Deliberately NOT
-    /// <see cref="BuildUninstallArgs"/>: TC-3 says "disable the Scheduled Task trigger", where ES-4
-    /// says "remove the Scheduled Task ... restoring stock behavior". Quitting from the tray must
-    /// not throw the user's installation away -- the task stays registered, only its trigger stops.
+    /// The exact, fixed argv <c>schtasks /Change /DISABLE</c> receives. Deliberately NOT
+    /// <see cref="BuildUninstallArgs"/>: turning start-up off from the tray keeps the task
+    /// registered and only stops it from firing, so turning it back on needs nothing re-typed.
     /// </summary>
     public static IReadOnlyList<string> BuildDisableArgs(string taskName) =>
         new[] { "/Change", "/TN", taskName, "/DISABLE" };
@@ -96,7 +101,39 @@ public sealed class TaskInstaller
     public void Uninstall() => RunUnlessTheTaskIsAlreadyGone("/Delete", BuildUninstallArgs(_taskName));
 
     /// <summary>
-    /// TC-3 (Salir): stops the logon trigger from firing again, without unregistering the task.
+    /// Whether the task is registered AND will fire at the next logon.
+    /// </summary>
+    /// <remarks>
+    /// Read from the task's own XML, never from <c>/Query</c>'s table text, whose column names and
+    /// "Disabled"/"Ready" words are per-language MUI resources. A task that is switched off carries
+    /// <c>&lt;Settings&gt;&lt;Enabled&gt;false&lt;/Enabled&gt;</c>; a task that is on simply omits
+    /// it, so only an explicit <c>false</c> means off. Any failure to query or parse answers NO: a
+    /// tick that promises a start-up nobody can confirm is the one this item must not show.
+    /// </remarks>
+    public bool IsEnabled()
+    {
+        var result = _runner.Run(SchTasksExe, BuildQueryXmlArgs(_taskName));
+        if (result.ExitCode != 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var document = XDocument.Parse(result.StandardOutput);
+            var settingsEnabled = document.Root?
+                .Elements().FirstOrDefault(e => e.Name.LocalName == "Settings")?
+                .Elements().FirstOrDefault(e => e.Name.LocalName == "Enabled");
+            return !string.Equals(settingsEnabled?.Value.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (XmlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Stops the logon trigger from firing again, without unregistering the task.
     /// Shares <see cref="RunUnlessTheTaskIsAlreadyGone"/> with <see cref="Uninstall"/> so the
     /// locale-independent idempotency rule established lives at ONE choke point -- a second
     /// copy is a second place for it to drift back to reading stderr text.

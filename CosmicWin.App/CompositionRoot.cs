@@ -129,7 +129,8 @@ public static class CompositionRoot
         IDesktopTrace? desktopTrace = null,
         Action? removeVideoWallpaper = null, Func<bool>? getHasVideoWallpaper = null,
         Func<bool>? getUnfocusedTransparency = null, Action<bool>? setUnfocusedTransparency = null,
-        Func<bool>? getWinChordModifier = null, Action<bool>? setWinChordModifier = null) =>
+        Func<bool>? getWinChordModifier = null, Action<bool>? setWinChordModifier = null,
+        Func<bool>? getStartWithWindows = null, Action<bool>? setStartWithWindows = null) =>
         new(
             () => hook.IsPaused,
             paused => hook.IsPaused = paused,
@@ -147,7 +148,9 @@ public static class CompositionRoot
             getUnfocusedTransparency,
             setUnfocusedTransparency,
             getWinChordModifier,
-            setWinChordModifier);
+            setWinChordModifier,
+            getStartWithWindows,
+            setStartWithWindows);
 
     /// <summary>
     /// T11 (review R3-reload-gap-skipped-on-exception-failure): the exception-list

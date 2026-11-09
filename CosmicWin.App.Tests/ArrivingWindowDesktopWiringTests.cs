@@ -136,7 +136,6 @@ public sealed class ArrivingWindowDesktopWiringTests
             workspace, treeManager, registry, new NoForeground(),
             new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer => new LowLevelKeyboardHook(writer, platform, TimeSpan.FromSeconds(5), () => 0),
             loadExceptions: () => ExceptionList.Empty,

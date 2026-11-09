@@ -103,7 +103,6 @@ public sealed class WatchdogReinstallWiringTests
             new FakeWorkspace(), treeManager, registry, new Foreground(),
             new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: scheduler.Schedule,
             hookFactory: writer => hook = new LowLevelKeyboardHook(writer, platform, WatchdogInterval, clock.Read, WatchdogInterval),
             loadExceptions: () => ExceptionList.Empty,

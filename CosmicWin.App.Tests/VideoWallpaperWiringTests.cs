@@ -44,7 +44,6 @@ public sealed class VideoWallpaperWiringTests
         var composition = AppComposition.Wire(
             workspace, treeManager, registry, foreground, new ExceptionListStore(ExceptionList.Empty),
             focusTrace: new RecordingFocusTrace(),
-            disableTaskTrigger: () => { },
             scheduleReconcile: (_, _) => new NullDisposable(),
             hookFactory: writer => new LowLevelKeyboardHook(
                 writer, new FakeKeyboardHookPlatform(), TimeSpan.FromSeconds(5), () => 0),

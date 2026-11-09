@@ -31,4 +31,35 @@ public sealed class TaskInstallerElevatedTests
             File.Delete(xmlPath);
         }
     }
+
+    /// <summary>The tray tick reads schtasks' real XML: on after install, off after disable, off once gone.</summary>
+    [RequiresElevatedFact]
+    [Trait("Category", "RequiresDesktop")]
+    public void IsEnabled_RealSchtasks_FollowsInstallDisableAndUninstall()
+    {
+        var runner = new Win32ProcessRunner();
+        var taskName = $"CosmicWin.Test.{Guid.NewGuid():N}";
+        var xmlPath = Path.Combine(Path.GetTempPath(), $"{taskName}.xml");
+        var installer = new TaskInstaller(taskName, Environment.ProcessPath!, xmlPath, runner);
+
+        try
+        {
+            installer.Install();
+            Assert.True(installer.IsEnabled());
+
+            installer.Disable();
+            Assert.False(installer.IsEnabled());
+
+            installer.Install();
+            Assert.True(installer.IsEnabled());
+
+            installer.Uninstall();
+            Assert.False(installer.IsEnabled());
+        }
+        finally
+        {
+            installer.Uninstall();
+            File.Delete(xmlPath);
+        }
+    }
 }
