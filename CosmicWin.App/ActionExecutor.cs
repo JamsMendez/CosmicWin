@@ -229,13 +229,18 @@ public sealed class ActionExecutor(
             // region with -- but the WINDOW is still a rectangle, and "make the thing in front of
             // me wider" is not a statement about a layout that is switched off.
             //
-            // Move and toggle-axis are deliberately NOT offered the same way. A move means "put
-            // this window somewhere else in the layout", and with no layout there is nowhere to put
-            // it; a window in no group has no split axis to toggle. Only resize and focus survive
-            // the loss of the tree with their meaning intact.
+            // Toggle-axis is deliberately NOT offered: a window in no group has no split axis to
+            // toggle. A move is offered, but as a snap -- see below.
             if (ResizeDirectionOf(action.Kind) is { } floating)
             {
                 ResizeFloatingWindow?.Invoke(foregroundHandle, floating);
+            }
+
+            // A MOVE has nowhere to go in a layout that is switched off, so it snaps instead, the
+            // way Windows does: a half of the work area, or a quarter of a half two windows share.
+            if (MoveDirectionOf(action.Kind) is { } snap)
+            {
+                SnapFloatingWindow?.Invoke(foregroundHandle, snap);
             }
 
             return;
@@ -301,6 +306,12 @@ public sealed class ActionExecutor(
     /// is waiting for a turn.
     /// </remarks>
     public Action<nint, Direction>? ResizeFloatingWindow { get; set; }
+
+    /// <summary>
+    /// Snaps the window in front of the user when there is no layout in force. Unset -- as in every
+    /// test and call site that predates it -- a move chord with tiling off stays the no-op it was.
+    /// </summary>
+    public Action<nint, Direction>? SnapFloatingWindow { get; set; }
 
     /// <summary>
     /// Which desktop a window is filed under, when the shell will say. Unset -- as in every test

@@ -80,8 +80,14 @@ they say `Alt`.
 | `Alt+T` | Turn tiling on or off — the same switch as the tray's **Modo tiling**, saved to `tiling` |
 
 While tiling is off, the layout is left exactly where it was: focus and resize still work on the
-windows' own rectangles, desktop chords and `Alt+Q` work as usual, and move, scope and split-axis
-chords do nothing. `Alt+T` always works, so it turns tiling back on too.
+windows' own rectangles, desktop chords and `Alt+Q` work as usual, and scope and split-axis chords
+do nothing. `Alt+T` always works, so it turns tiling back on too.
+
+The move chord snaps instead, Windows-style, keeping the tiling gap at the edges and between
+windows. `Alt+Shift+Left`/`Right` take that half of the screen at full height. `Alt+Shift+Up`/`Down`
+take the top or bottom half at full width; a second window sent to the same half splits it into
+two quarters side by side, and a third lands on the right quarter, over the window already there.
+A window you drag away, minimise or close frees its place.
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 

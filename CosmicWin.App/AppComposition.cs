@@ -760,20 +760,21 @@ public sealed class AppComposition : IDisposable
         // tiling switch off, is every window on the desktop. The arithmetic is
         // FloatingResize.Apply's; everything here is finding the three things it needs and refusing
         // the windows it must never be pointed at.
+        // The window a floating resize or snap may touch, or null. The FULL exclusion rule, user list
+        // included -- unlike the focus border, which reads only the automatic half. The difference
+        // is that these MOVE the window. The automatic half keeps the chord off shell chrome: the
+        // taskbar is the foreground window the moment it is clicked, and it is visible and unowned,
+        // so nothing else would. The user's own list is what "leave this app alone" means, and a
+        // resize or a snap is exactly the kind of touching it asks CosmicWin not to do.
+        IWindow? resolveMovableWindow(nint handle) =>
+            resolveAnyWindow(handle) is { IsAlive: true, CanReposition: true } window
+            && !WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptionStore.Current)
+                ? window
+                : null;
+
         executor.ResizeFloatingWindow = (handle, direction) =>
         {
-            if (resolveAnyWindow(handle) is not { IsAlive: true, CanReposition: true } window)
-            {
-                return;
-            }
-
-            // The FULL exclusion rule, user list included -- unlike the focus border, which reads
-            // only the automatic half. The difference is that this one MOVES the window. The
-            // automatic half keeps the chord off shell chrome: the taskbar is the foreground window
-            // the moment it is clicked, and it is visible and unowned, so nothing else would. The
-            // user's own list is what "leave this app alone" means, and a resize is exactly the
-            // kind of touching it asks CosmicWin not to do.
-            if (WindowFilters.IsExcluded(WindowDescriptorBuilder.Build(window), exceptionStore.Current))
+            if (resolveMovableWindow(handle) is not { } window)
             {
                 return;
             }
@@ -785,6 +786,20 @@ public sealed class AppComposition : IDisposable
             {
                 window.SetPosition(resized);
             }
+        };
+
+        // The move chord's answer when there is no tree to move through: a Windows-style snap. The
+        // snapper remembers which windows it put in which half, so it lives as long as this wiring.
+        var snapper = new FloatingSnapper(() => TreeArranger.Gap);
+        executor.SnapFloatingWindow = (handle, direction) =>
+        {
+            if (resolveMovableWindow(handle) is not { } window)
+            {
+                return;
+            }
+
+            var display = treeManager.ResolveDisplay(window.Bounds);
+            snapper.Snap(window, display.WorkArea, direction, resolveWindowDesktop?.Invoke(handle) ?? Guid.Empty);
         };
 
         // The focus chord's answer when there is no tree to walk -- FloatingFocus.Toward reads this

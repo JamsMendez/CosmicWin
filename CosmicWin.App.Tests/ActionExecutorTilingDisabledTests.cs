@@ -232,6 +232,45 @@ public sealed class ActionExecutorTilingDisabledTests
     }
 
     /// <summary>
+    /// With tiling off, a move chord snaps the window in front of the user -- the foreground one,
+    /// never the tree's idea of focus.
+    /// </summary>
+    [Theory]
+    [InlineData(HotkeyActionKind.MoveLeft, Direction.Left)]
+    [InlineData(HotkeyActionKind.MoveRight, Direction.Right)]
+    [InlineData(HotkeyActionKind.MoveUp, Direction.Up)]
+    [InlineData(HotkeyActionKind.MoveDown, Direction.Down)]
+    public async Task WithTilingOff_AMoveChordReachesTheFloatingSnapper(HotkeyActionKind kind, Direction expected)
+    {
+        var harness = BuildWithTilingOff();
+        harness.Foreground.Handle = harness.WindowB.Handle;
+        var snapped = new List<(nint Handle, Direction Direction)>();
+        harness.Executor.SnapFloatingWindow = (handle, direction) => snapped.Add((handle, direction));
+
+        await harness.Executor.ScheduleAsync(new HotkeyAction(kind), CancellationToken.None);
+
+        Assert.Equal([(harness.WindowB.Handle, expected)], snapped);
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.SetPositionCallCount);
+    }
+
+    /// <summary>With tiling ON the move chord belongs to the tree and is never snapped as well.</summary>
+    [Fact]
+    public async Task WithTilingOn_AMoveChordGoesToTheTree_AndNeverToTheFloatingSnapper()
+    {
+        var harness = BuildWithTilingOff();
+        harness.Executor.TilingEnabled = () => true;
+        var snapped = 0;
+        harness.Executor.SnapFloatingWindow = (_, _) => snapped++;
+
+        await harness.Executor.ScheduleAsync(
+            new HotkeyAction(HotkeyActionKind.MoveRight), CancellationToken.None);
+
+        Assert.Equal(0, snapped);
+        Assert.Equal(1, harness.WindowA.SetPositionCallCount);
+    }
+
+    /// <summary>
     /// And with no resizer wired -- every test and call site that predates this -- a resize chord
     /// with tiling off stays the no-op it was, rather than throwing on a null delegate.
     /// </summary>
