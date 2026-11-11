@@ -270,6 +270,50 @@ public sealed class ActionExecutorTilingDisabledTests
         Assert.Equal(1, harness.WindowA.SetPositionCallCount);
     }
 
+    /// <summary>With tiling off, the nudge chord moves the FOREGROUND window a step.</summary>
+    [Theory]
+    [InlineData(HotkeyActionKind.NudgeLeft, Direction.Left)]
+    [InlineData(HotkeyActionKind.NudgeRight, Direction.Right)]
+    [InlineData(HotkeyActionKind.NudgeUp, Direction.Up)]
+    [InlineData(HotkeyActionKind.NudgeDown, Direction.Down)]
+    public async Task WithTilingOff_ANudgeChordReachesTheFloatingNudger(HotkeyActionKind kind, Direction expected)
+    {
+        var harness = BuildWithTilingOff();
+        harness.Foreground.Handle = harness.WindowB.Handle;
+        var nudged = new List<(nint Handle, Direction Direction)>();
+        harness.Executor.NudgeFloatingWindow = (handle, direction) => nudged.Add((handle, direction));
+
+        await harness.Executor.ScheduleAsync(new HotkeyAction(kind), CancellationToken.None);
+
+        Assert.Equal([(harness.WindowB.Handle, expected)], nudged);
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.SetPositionCallCount);
+    }
+
+    /// <summary>
+    /// With tiling ON the layout owns every tiled window's position and would put a nudged one
+    /// straight back, so the chord does nothing -- to the nudger and to the tree alike.
+    /// </summary>
+    [Theory]
+    [InlineData(HotkeyActionKind.NudgeLeft)]
+    [InlineData(HotkeyActionKind.NudgeRight)]
+    [InlineData(HotkeyActionKind.NudgeUp)]
+    [InlineData(HotkeyActionKind.NudgeDown)]
+    public async Task WithTilingOn_ANudgeChordDoesNothing(HotkeyActionKind kind)
+    {
+        var harness = BuildWithTilingOff();
+        harness.Executor.TilingEnabled = () => true;
+        var nudged = 0;
+        harness.Executor.NudgeFloatingWindow = (_, _) => nudged++;
+
+        await harness.Executor.ScheduleAsync(new HotkeyAction(kind), CancellationToken.None);
+
+        Assert.Equal(0, nudged);
+        Assert.Equal(0, harness.WindowA.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.SetPositionCallCount);
+        Assert.Equal(0, harness.WindowB.TryActivateCallCount);
+    }
+
     /// <summary>
     /// And with no resizer wired -- every test and call site that predates this -- a resize chord
     /// with tiling off stays the no-op it was, rather than throwing on a null delegate.

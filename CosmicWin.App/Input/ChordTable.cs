@@ -56,6 +56,10 @@ public sealed class ChordTable
         table.RegisterDirections(ModifierKeys.Control | ModifierKeys.Alt,
             HotkeyActionKind.ResizeLeft, HotkeyActionKind.ResizeRight,
             HotkeyActionKind.ResizeUp, HotkeyActionKind.ResizeDown);
+        // All three modifiers: a small step of the move chord, for windows no layout is placing.
+        table.RegisterDirections(ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt,
+            HotkeyActionKind.NudgeLeft, HotkeyActionKind.NudgeRight,
+            HotkeyActionKind.NudgeUp, HotkeyActionKind.NudgeDown);
         table.Register(ModifierKeys.Alt, KeyboardKey.CloseBracket, HotkeyActionKind.FocusIn);
         table.Register(ModifierKeys.Alt, KeyboardKey.OpenBracket, HotkeyActionKind.FocusOut);
         table.Register(ModifierKeys.Alt, KeyboardKey.O, HotkeyActionKind.ToggleOrientation);

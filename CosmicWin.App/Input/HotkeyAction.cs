@@ -38,6 +38,7 @@ public enum HotkeyActionKind : byte
     MoveLeft, MoveRight, MoveUp, MoveDown, ToggleOrientation,
     ResizeLeft, ResizeRight, ResizeUp, ResizeDown,
     SwitchDesktop, MoveWindowToDesktop, CloseWindow, CloseDesktop, ToggleTiling,
+    NudgeLeft, NudgeRight, NudgeUp, NudgeDown,
 }
 
 /// <summary>

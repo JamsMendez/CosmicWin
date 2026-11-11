@@ -802,6 +802,15 @@ public sealed class AppComposition : IDisposable
             snapper.Snap(window, display.WorkArea, direction, resolveWindowDesktop?.Invoke(handle) ?? Guid.Empty);
         };
 
+        // The nudge: the same window, the same refusals, one fixed step.
+        executor.NudgeFloatingWindow = (handle, direction) =>
+        {
+            if (resolveMovableWindow(handle) is { } window)
+            {
+                window.SetPosition(FloatingNudge.Apply(window.Bounds, direction));
+            }
+        };
+
         // The focus chord's answer when there is no tree to walk -- FloatingFocus.Toward reads this
         // once per chord for its candidate list. Left unset when zOrder is null, exactly like every
         // other floating-mode delegate above: unwired, ActionExecutor's own untiled focus branch

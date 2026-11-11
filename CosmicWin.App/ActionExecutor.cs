@@ -204,6 +204,18 @@ public sealed class ActionExecutor(
             return;
         }
 
+        // The nudge is never a tree operation. With tiling on the layout owns every tiled window's
+        // position and would put a nudged one straight back, so it is answered only with tiling off.
+        if (NudgeDirectionOf(action.Kind) is { } nudge)
+        {
+            if (!TilingEnabled())
+            {
+                NudgeFloatingWindow?.Invoke(foregroundHandle, nudge);
+            }
+
+            return;
+        }
+
         // Tiling switched off in the tray. Everything BELOW this line reaches the tree, and with no
         // layout in force there is nothing for a focus walk to walk or a move to move. Everything
         // ABOVE it is deliberately answered anyway: the desktop chords are about which desktop the
@@ -314,6 +326,12 @@ public sealed class ActionExecutor(
     public Action<nint, Direction>? SnapFloatingWindow { get; set; }
 
     /// <summary>
+    /// Moves the window in front of the user one small step while tiling is off. Unset, the nudge
+    /// chord is answered and does nothing.
+    /// </summary>
+    public Action<nint, Direction>? NudgeFloatingWindow { get; set; }
+
+    /// <summary>
     /// Which desktop a window is filed under, when the shell will say. Unset -- as in every test
     /// that predates it -- the recall below trusts its own record, exactly as it did.
     /// </summary>
@@ -401,6 +419,15 @@ public sealed class ActionExecutor(
     public Action? AfterAction { get; set; }
 
     /// <summary>The direction a MOVE chord names, or <see langword="null"/> if it is not a move.</summary>
+    private static Direction? NudgeDirectionOf(HotkeyActionKind kind) => kind switch
+    {
+        HotkeyActionKind.NudgeLeft => Direction.Left,
+        HotkeyActionKind.NudgeRight => Direction.Right,
+        HotkeyActionKind.NudgeUp => Direction.Up,
+        HotkeyActionKind.NudgeDown => Direction.Down,
+        _ => null,
+    };
+
     private static Direction? MoveDirectionOf(HotkeyActionKind kind) => kind switch
     {
         HotkeyActionKind.MoveLeft => Direction.Left,

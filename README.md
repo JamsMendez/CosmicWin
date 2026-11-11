@@ -61,6 +61,7 @@ they say `Alt`.
 | `Alt` + `H`/`J`/`K`/`L` or arrows | Move focus |
 | `Alt+Shift` + direction | Move the window |
 | `Alt+Ctrl` + direction | Resize — grows toward a neighbour, shrinks when there is none |
+| `Alt+Ctrl+Shift` + direction | Nudge the window 10 px — only while tiling is off |
 | `Alt+[` / `Alt+]` | Ascend / descend scope, to move a whole group |
 | `Alt+O` | Toggle the focused group's split axis |
 | `Alt+Q` | Ask the focused window to close — it may refuse, and that is its right |
@@ -87,7 +88,9 @@ The move chord snaps instead, Windows-style, keeping the tiling gap at the edges
 windows. `Alt+Shift+Left`/`Right` take that half of the screen at full height. `Alt+Shift+Up`/`Down`
 take the top or bottom half at full width; a second window sent to the same half splits it into
 two quarters side by side, and a third lands on the right quarter, over the window already there.
-A window you drag away, minimise or close frees its place.
+A window you drag away, minimise or close frees its place. `Alt+Ctrl+Shift` + direction nudges the window
+10 px at a time, size unchanged; with tiling on it does nothing, since the layout would put the
+window straight back.
 
 Two collisions with Windows itself are worth knowing before you file a bug:
 

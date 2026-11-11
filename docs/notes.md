@@ -13,6 +13,7 @@ if the two disagree, the file wins and this table is stale.
 | `Alt` + `H`/`J`/`K`/`L` or arrows | Move focus |
 | `Alt+Shift` + direction | Move the window (or the whole group, after `Alt+[`) |
 | `Alt+Ctrl` + direction | Resize — grows toward a neighbour on that side, shrinks when there is none |
+| `Alt+Ctrl+Shift` + direction | Nudge the window 10 px (tiling off only) |
 | `Alt+[` | Ascend scope (act on the parent group) |
 | `Alt+]` | Descend scope |
 | `Alt+O` | Toggle the focused group's split axis |

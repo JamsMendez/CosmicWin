@@ -39,6 +39,14 @@ public sealed class ChordTableTests
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.Up, HotkeyActionKind.ResizeUp },
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.J, HotkeyActionKind.ResizeDown },
         { ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.Down, HotkeyActionKind.ResizeDown },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.H, HotkeyActionKind.NudgeLeft },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Left, HotkeyActionKind.NudgeLeft },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.L, HotkeyActionKind.NudgeRight },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Right, HotkeyActionKind.NudgeRight },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.K, HotkeyActionKind.NudgeUp },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Up, HotkeyActionKind.NudgeUp },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.J, HotkeyActionKind.NudgeDown },
+        { ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.Down, HotkeyActionKind.NudgeDown },
     };
 
     [Theory]
@@ -60,7 +68,7 @@ public sealed class ChordTableTests
     [InlineData(ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.Delete)]
     [InlineData(ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.O)]
     [InlineData(ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.O)]
-    [InlineData(ModifierKeys.Shift | ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.H)]
+    [InlineData(ModifierKeys.Shift | ModifierKeys.Control | ModifierKeys.Alt, KeyboardKey.O)]
     [InlineData(ModifierKeys.Alt, (KeyboardKey)0x50)]
     [InlineData(ModifierKeys.Alt, KeyboardKey.M)]
     [InlineData(ModifierKeys.Shift | ModifierKeys.Alt, KeyboardKey.M)]
