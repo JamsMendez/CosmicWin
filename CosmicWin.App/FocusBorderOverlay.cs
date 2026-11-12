@@ -73,7 +73,9 @@ public interface IFocusBorder : IDisposable
 public sealed class FocusBorderOverlay : IFocusBorder
 {
     private readonly Window _window;
+    private readonly Win32CloakWatcher? _cloakWatcher;
     private nint _handle;
+    private nint _framed;
     private bool _disposed;
 
     public FocusBorderOverlay()
@@ -108,6 +110,18 @@ public sealed class FocusBorderOverlay : IFocusBorder
         _handle = new WindowInteropHelper(_window).Handle;
         Win32OverlayWindow.MakePassive(_handle);
         Win32OverlayWindow.Hide(_handle);
+
+        // The overlay is a tool window, and the shell does not cloak tool windows on a virtual
+        // desktop switch: left alone, the border outlived the window it framed and showed on the
+        // arriving desktop until the next watch tick moved it. The shell DOES cloak the framed
+        // window, at the start of the switch, so that is the moment the border goes.
+        _cloakWatcher = Win32CloakWatcher.Watch(cloaked =>
+        {
+            if (cloaked == _framed)
+            {
+                Hide();
+            }
+        });
     }
 
     /// <summary>
@@ -132,6 +146,16 @@ public sealed class FocusBorderOverlay : IFocusBorder
         // to look it up would otherwise be tempted to scale the rectangle too.
         _ = scaling;
 
+        // Never around a window DWM is keeping off screen. Mid-switch the foreground can still
+        // name the window being left, and framing it would put back the very border the cloak
+        // just took down.
+        if (framed != 0 && Win32OverlayWindow.IsCloaked(framed))
+        {
+            Hide();
+            return;
+        }
+
+        _framed = framed;
         var frame = BorderGeometry.Around(window, thickness);
         Win32OverlayWindow.Place(_handle, framed, frame);
 
@@ -177,6 +201,7 @@ public sealed class FocusBorderOverlay : IFocusBorder
 
     public void Hide()
     {
+        _framed = 0;
         if (!_disposed && _handle != 0)
         {
             Win32OverlayWindow.Hide(_handle);
@@ -190,6 +215,7 @@ public sealed class FocusBorderOverlay : IFocusBorder
             return;
         }
 
+        _cloakWatcher?.Dispose();
         _disposed = true;
         _handle = 0;
         _window.Close();

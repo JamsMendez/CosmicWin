@@ -85,6 +85,12 @@ public static class Win32OverlayWindow
             bounds.Height,
             SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_SHOWWINDOW);
 
+    /// <summary>
+    /// Whether DWM is keeping <paramref name="hwnd"/> off screen -- true for every window on a
+    /// virtual desktop other than the one in view, and for the one being left mid-switch.
+    /// </summary>
+    public static bool IsCloaked(nint hwnd) => Win32NativeWindowSource.ReadIsCloaked(new HWND(hwnd));
+
     /// <summary>Hides the overlay without destroying it -- it is reused for the next focused window.</summary>
     public static bool Hide(nint hwnd) =>
         PInvoke.SetWindowPos(

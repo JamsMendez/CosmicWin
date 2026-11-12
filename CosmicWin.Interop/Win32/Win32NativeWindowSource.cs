@@ -687,7 +687,7 @@ internal sealed unsafe class Win32NativeWindowSource : INativeWindowSource
         return true;
     }
 
-    private static bool ReadIsCloaked(HWND hwnd)
+    internal static bool ReadIsCloaked(HWND hwnd)
     {
         int cloaked;
         var hr = PInvoke.DwmGetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_CLOAKED, &cloaked, (uint)sizeof(int));
